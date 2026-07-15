@@ -32,14 +32,7 @@ const COLORS = ["#d7263d", "#1f4fa3", "#1f8a4c", "#e0731d", "#22262b", "#7a3fa8"
 const SPEED = { carry: 1, pass: 3, shot: 6 };
 const vb = m => VIEWS[m].join(" ");
 
-const DEFAULT_TEXT = `# F1 (lefty) wheels with the puck on his stick, releases at the dot, shot
-RINK half
-PIECE F1 player 112 62 #d7263d F1 hand=L
-PIECE D1 player 128 28 #1f4fa3 D1 speed=0.9
-PIECE PK1 puck 176 42 on=F1
-PATH F1 Q 138,74 158,52 RATE 1.4 C 168,44 172,40 176,42
-PATH D1 L 152,28 STOP 1 BWD RATE 0.8 Q 140,34 134,46
-PATH PK1 STOP 0.3 SHOT L 188,41
+const DEFAULT_TEXT = `RINK full
 `;
 
 /* ---------------- text format ---------------- */
@@ -467,12 +460,15 @@ export default function DrillAnimator() {
     return () => ro.disconnect();
   }, []);
   const [mxF, myF, vwF, vhF] = VIEWS[rink];
-  const scaleN = Math.min(stageSize.w / vwF, stageSize.h / vhF);
-  const scaleR = Math.min(stageSize.w / vhF, stageSize.h / vwF);
-  const rotated = scaleR > scaleN * 1.02; // rotate 90° when it gives bigger ice
-  const fitScale = rotated ? scaleR : scaleN;
-  const canvasW = Math.max(50, (rotated ? vhF : vwF) * fitScale);
-  const canvasH = Math.max(20, (rotated ? vwF : vhF) * fitScale);
+  // Fill mode: the rink stretches to occupy the entire stage, both axes —
+  // no letterbox bands. Orientation is chosen to minimize distortion by
+  // comparing the stage aspect to the rink's aspect both ways (log scale
+  // so "2x too wide" and "2x too tall" weigh equally).
+  const sa = stageSize.w / Math.max(1, stageSize.h);
+  const rotated =
+    Math.abs(Math.log(sa / (vhF / vwF))) < Math.abs(Math.log(sa / (vwF / vhF)));
+  const canvasW = Math.max(50, stageSize.w);
+  const canvasH = Math.max(20, stageSize.h);
   // maps rink coords into the rotated viewBox: (x,y) -> (my+vh-y, x-mx)
   const sceneTransform = rotated ? `rotate(90) translate(${-mxF} ${-(myF + vhF)})` : undefined;
   const screenRot = rotated ? 90 : 0;
@@ -1288,16 +1284,18 @@ export default function DrillAnimator() {
         .hd-fab.draw-on { background:#b58900; border-color:#b58900; }
         .hd-fab.play { background:#d7263d; border-color:#d7263d; color:#fff; }
         .hd-fab small { font-size:10px; font-weight:800; letter-spacing:.05em; }
-        .hd-tl { top:calc(10px + env(safe-area-inset-top)); left:calc(10px + env(safe-area-inset-left)); }
-        .hd-tr { top:calc(10px + env(safe-area-inset-top)); right:calc(10px + env(safe-area-inset-right)); }
-        .hd-tr2 { top:calc(10px + env(safe-area-inset-top)); right:calc(64px + env(safe-area-inset-right)); }
+        /* top controls live up in the notch/status-bar band — the corners
+           beside a notch are visible screen, so only horizontal insets apply */
+        .hd-tl { top:6px; left:calc(10px + env(safe-area-inset-left)); }
+        .hd-tr { top:6px; right:calc(10px + env(safe-area-inset-right)); }
+        .hd-tr2 { top:6px; right:calc(64px + env(safe-area-inset-right)); }
         .hd-bl { bottom:calc(10px + env(safe-area-inset-bottom)); left:calc(10px + env(safe-area-inset-left)); }
         .hd-br { bottom:calc(10px + env(safe-area-inset-bottom)); right:calc(10px + env(safe-area-inset-right)); }
         /* corner menus */
         .hd-menu { position:absolute; z-index:45; background:#1a222c; border:1px solid #33404f;
           border-radius:12px; padding:10px 12px; box-shadow:0 8px 24px rgba(0,0,0,.5);
           display:flex; flex-direction:column; gap:8px; width:230px; max-height:70vh; overflow-y:auto; }
-        .hd-menu.tl { top:calc(62px + env(safe-area-inset-top)); left:calc(10px + env(safe-area-inset-left)); }
+        .hd-menu.tl { top:58px; left:calc(10px + env(safe-area-inset-left)); }
         .hd-menu.bl { bottom:calc(62px + env(safe-area-inset-bottom)); left:calc(10px + env(safe-area-inset-left)); }
         .hd-menu.br { bottom:calc(62px + env(safe-area-inset-bottom)); right:calc(10px + env(safe-area-inset-right)); }
         .hd-mh { font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:#8b99a8; }
@@ -1361,7 +1359,7 @@ export default function DrillAnimator() {
         <div className="hd-canvas" style={{ width: canvasW, height: canvasH }}>
           <svg ref={svgRef} className="hd-ice"
             viewBox={rotated ? `0 0 ${vhF} ${vwF}` : vb(rink)}
-            preserveAspectRatio="xMidYMid meet"
+            preserveAspectRatio="none"
             onPointerDown={onSvgDown} onPointerMove={onSvgMove}
             onPointerUp={onSvgUp} onPointerCancel={onSvgUp}>
             <defs>
