@@ -10,6 +10,24 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="theme-color" content="#0c1014" />
     <title>DrillBoard</title>
+    <style>
+      /* Safe-area layout fix (iPhone 15 / Dynamic Island).
+         Mirrors the intended rules in src/hockey-drill-animator.jsx;
+         can be removed once that file's update lands. */
+      .hd-root { height: 100dvh !important; }
+      .hd-stage {
+        top: env(safe-area-inset-top, 0px) !important;
+        left: env(safe-area-inset-left, 0px) !important;
+        right: env(safe-area-inset-right, 0px) !important;
+      }
+      .hd-tl, .hd-tr {
+        top: max(10px, env(safe-area-inset-top)) !important;
+      }
+      .hd-tr2 { top: max(10px, env(safe-area-inset-top)) !important; }
+      .hd-menu.tl {
+        top: calc(max(10px, env(safe-area-inset-top)) + 52px) !important;
+      }
+    </style>
   </head>
   <body style="margin: 0; background: #0c1014">
     <div id="root"></div>
