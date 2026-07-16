@@ -1213,8 +1213,14 @@ export default function DrillAnimator() {
     if (!a) return null;
     const { lx, ty } = a;
     const R = 9;
-    const sideRight = lx < 50;
-    const yShift = ty < 28 ? "-12%" : ty > 72 ? "-88%" : "-50%";
+    // the loupe floats centered ABOVE the finger so the hand never covers
+    // it; it drops below only when the touch is close enough to the top
+    // edge that it would clip, and hugs inward near the side edges
+    const LOUPE = 118, GAP = 30;
+    const fx = (lx / 100) * canvasW;
+    const fy = (ty / 100) * canvasH;
+    const below = fy < LOUPE + GAP + 6;
+    const xShift = fx < LOUPE / 2 + 8 ? "0%" : canvasW - fx < LOUPE / 2 + 8 ? "-100%" : "-50%";
     // the loupe's scene rotates the same way as the main ice, so the
     // magnified view matches what's under the finger
     const loupeXf = rotated
@@ -1223,7 +1229,7 @@ export default function DrillAnimator() {
     return (
       <div className="hd-loupe" style={{
         left: `${lx}%`, top: `${ty}%`,
-        transform: `translate(${sideRight ? "30px" : "calc(-100% - 30px)"}, ${yShift})`,
+        transform: `translate(${xShift}, ${below ? `${GAP}px` : `calc(-100% - ${GAP}px)`})`,
       }}>
         <svg viewBox={`0 0 ${2 * R} ${2 * R}`}>
           <g transform={loupeXf}>
@@ -1270,7 +1276,12 @@ export default function DrillAnimator() {
       <style>{`
         .hd-root { position:fixed; inset:0; background:#0c1014; color:#e8edf2; overflow:hidden;
           font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
-        .hd-stage { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; }
+        /* the ice starts below the Dynamic Island / status bar and ends
+           above the home-indicator band — iOS 26 standalone composites an
+           opaque system bar there that web content cannot render under */
+        .hd-stage { position:absolute; top:env(safe-area-inset-top, 0px);
+          left:env(safe-area-inset-left, 0px); right:env(safe-area-inset-right, 0px);
+          bottom:env(safe-area-inset-bottom, 0px); display:flex; align-items:center; justify-content:center; }
         .hd-canvas { position:relative; }
         .hd-canvas svg.hd-ice { width:100%; height:100%; display:block; }
         .hd-stage, .hd-canvas, .hd-canvas svg, .hd-canvas svg * { touch-action:none;
@@ -1284,18 +1295,19 @@ export default function DrillAnimator() {
         .hd-fab.draw-on { background:#b58900; border-color:#b58900; }
         .hd-fab.play { background:#d7263d; border-color:#d7263d; color:#fff; }
         .hd-fab small { font-size:10px; font-weight:800; letter-spacing:.05em; }
-        /* top controls live up in the notch/status-bar band — the corners
-           beside a notch are visible screen, so only horizontal insets apply */
-        .hd-tl { top:6px; left:calc(10px + env(safe-area-inset-left)); }
-        .hd-tr { top:6px; right:calc(10px + env(safe-area-inset-right)); }
-        .hd-tr2 { top:6px; right:calc(64px + env(safe-area-inset-right)); }
+        /* top controls clear the Dynamic Island / status bar entirely:
+           safe-area-inset-top pushes them below it in standalone mode,
+           with a 10px floor when the browser manages the status bar */
+        .hd-tl { top:max(10px, env(safe-area-inset-top)); left:calc(10px + env(safe-area-inset-left)); }
+        .hd-tr { top:max(10px, env(safe-area-inset-top)); right:calc(10px + env(safe-area-inset-right)); }
+        .hd-tr2 { top:max(10px, env(safe-area-inset-top)); right:calc(64px + env(safe-area-inset-right)); }
         .hd-bl { bottom:calc(10px + env(safe-area-inset-bottom)); left:calc(10px + env(safe-area-inset-left)); }
         .hd-br { bottom:calc(10px + env(safe-area-inset-bottom)); right:calc(10px + env(safe-area-inset-right)); }
         /* corner menus */
         .hd-menu { position:absolute; z-index:45; background:#1a222c; border:1px solid #33404f;
           border-radius:12px; padding:10px 12px; box-shadow:0 8px 24px rgba(0,0,0,.5);
           display:flex; flex-direction:column; gap:8px; width:230px; max-height:70vh; overflow-y:auto; }
-        .hd-menu.tl { top:58px; left:calc(10px + env(safe-area-inset-left)); }
+        .hd-menu.tl { top:calc(max(10px, env(safe-area-inset-top)) + 52px); left:calc(10px + env(safe-area-inset-left)); }
         .hd-menu.bl { bottom:calc(62px + env(safe-area-inset-bottom)); left:calc(10px + env(safe-area-inset-left)); }
         .hd-menu.br { bottom:calc(62px + env(safe-area-inset-bottom)); right:calc(10px + env(safe-area-inset-right)); }
         .hd-mh { font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:#8b99a8; }
