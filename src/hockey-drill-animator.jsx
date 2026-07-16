@@ -41,6 +41,10 @@ const COLORS = ["#d7263d", "#1f4fa3", "#1f8a4c", "#e0731d", "#22262b", "#7a3fa8"
 const SPEED = { carry: 1, pass: 3, shot: 6 };
 const vb = m => VIEWS[m].join(" ");
 
+const APP_VERSION = "1.6";
+// build stamp injected by vite.config.js `define`; "dev" when run standalone
+const BUILD_STAMP = typeof __BUILD_STAMP__ !== "undefined" ? __BUILD_STAMP__ : "dev";
+
 const DEFAULT_TEXT = `RINK full
 `;
 
@@ -1676,6 +1680,8 @@ export default function DrillAnimator() {
         .hd-barbtn small { font-size:10px; font-weight:800; letter-spacing:.05em; }
         .hd-barhint { flex:1; min-width:0; font-size:12px; color:#8b99a8; text-align:right;
           white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .hd-ver { flex:none; font-size:10px; color:#5b6c7d; white-space:nowrap;
+          font-variant-numeric:tabular-nums; letter-spacing:.02em; }
         /* corner menus */
         .hd-menu { position:absolute; z-index:45; background:#1a222c; border:1px solid #33404f;
           border-radius:12px; padding:10px 12px; box-shadow:0 8px 24px rgba(0,0,0,.5);
@@ -1855,6 +1861,7 @@ export default function DrillAnimator() {
         <button className={`hd-barbtn${tool === "draw" ? " draw-on" : openMenu === "tools" ? " on" : ""}`}
           onClick={() => setOpenMenu(m => (m === "tools" ? null : "tools"))}>✎</button>
         <div className="hd-barhint">{toolHint || ""}</div>
+        <div className="hd-ver">v{APP_VERSION} · {BUILD_STAMP}</div>
       </div>
 
       {/* ---------- menus ---------- */}
