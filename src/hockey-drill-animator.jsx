@@ -41,7 +41,7 @@ const COLORS = ["#d7263d", "#1f4fa3", "#1f8a4c", "#e0731d", "#22262b", "#7a3fa8"
 const SPEED = { carry: 1, pass: 3, shot: 6 };
 const vb = m => VIEWS[m].join(" ");
 
-const APP_VERSION = "1.9";
+const APP_VERSION = "2.0";
 // build stamp injected by vite.config.js `define`; "dev" when run standalone
 const BUILD_STAMP = typeof __BUILD_STAMP__ !== "undefined" ? __BUILD_STAMP__ : "dev";
 
@@ -1754,13 +1754,14 @@ export default function DrillAnimator() {
     <div className="hd-root" ref={rootRef}>
       <style>{`
         .hd-root { position:fixed; inset:0; background:#0c1014; color:#e8edf2; overflow:hidden;
+          --hd-b: var(--hd-safe-b, min(env(safe-area-inset-bottom, 0px), 34px));
           font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
         /* the ice starts below the Dynamic Island / status bar and ends
            above the home-indicator band — iOS 26 standalone composites an
            opaque system bar there that web content cannot render under */
         .hd-stage { position:absolute; top:env(safe-area-inset-top, 0px);
           left:env(safe-area-inset-left, 0px); right:env(safe-area-inset-right, 0px);
-          bottom:calc(54px + var(--hd-safe-b, min(env(safe-area-inset-bottom, 0px), 34px)));
+          bottom:calc(54px + var(--hd-b));
           display:flex; align-items:center; justify-content:center; }
         .hd-canvas { position:relative; }
         .hd-canvas svg.hd-ice { width:100%; height:100%; display:block; }
@@ -1786,9 +1787,9 @@ export default function DrillAnimator() {
         .hd-playdock .hd-grip:active { cursor:grabbing; }
         /* bottom menu bar — owns the chrome so the ice stays clear */
         .hd-bar { position:absolute; z-index:44; left:env(safe-area-inset-left, 0px);
-          right:env(safe-area-inset-right, 0px);
-          bottom:var(--hd-safe-b, min(env(safe-area-inset-bottom, 0px), 34px));
-          height:54px; display:flex; align-items:center; gap:8px; padding:0 10px;
+          right:env(safe-area-inset-right, 0px); bottom:0;
+          height:calc(54px + var(--hd-b)); padding:0 10px var(--hd-b);
+          box-sizing:border-box; display:flex; align-items:center; gap:8px;
           background:#11161c; border-top:1px solid #2a3542; }
         .hd-barbtn { width:46px; height:40px; border-radius:10px; background:#1b232c;
           border:1px solid #33404f; color:#dbe4ec; font-size:17px; display:flex;
@@ -1804,9 +1805,9 @@ export default function DrillAnimator() {
         .hd-menu { position:absolute; z-index:45; background:#1a222c; border:1px solid #33404f;
           border-radius:12px; padding:10px 12px; box-shadow:0 8px 24px rgba(0,0,0,.5);
           display:flex; flex-direction:column; gap:8px; width:230px; max-height:70vh; overflow-y:auto; }
-        .hd-menu.tl { bottom:calc(62px + var(--hd-safe-b, min(env(safe-area-inset-bottom, 0px), 34px))); left:calc(10px + env(safe-area-inset-left)); }
-        .hd-menu.bl { bottom:calc(62px + var(--hd-safe-b, min(env(safe-area-inset-bottom, 0px), 34px))); left:calc(66px + env(safe-area-inset-left)); }
-        .hd-menu.br { bottom:calc(62px + var(--hd-safe-b, min(env(safe-area-inset-bottom, 0px), 34px))); right:calc(10px + env(safe-area-inset-right)); }
+        .hd-menu.tl { bottom:calc(62px + var(--hd-b)); left:calc(10px + env(safe-area-inset-left)); }
+        .hd-menu.bl { bottom:calc(62px + var(--hd-b)); left:calc(66px + env(safe-area-inset-left)); }
+        .hd-menu.br { bottom:calc(62px + var(--hd-b)); right:calc(10px + env(safe-area-inset-right)); }
         .hd-mh { font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:#8b99a8; }
         .hd-item { display:flex; align-items:center; gap:8px; padding:9px 10px; font-size:14px;
           border:1px solid #2c3846; background:#212b36; color:#dbe4ec; border-radius:8px;
