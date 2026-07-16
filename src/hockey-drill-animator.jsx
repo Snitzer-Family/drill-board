@@ -870,6 +870,11 @@ export default function DrillAnimator() {
     setOpenMenu(null);
     const pt = svgPt(e);
     if (tool === "draw") { setPopup(null); beginDraw(e); return; }
+    if (tool === "playerpuck") {
+      addPlayerWithPuck(pt, false);
+      setTool("select");
+      return;
+    }
     if (tool !== "select") {
       const np = makePiece(tool, pt);
       setPieces(ps => [...ps, np]);
@@ -898,6 +903,15 @@ export default function DrillAnimator() {
     setPieces(ps => [...ps, np]);
     setSelectedId(np.id);
     setPopup({ type: "piece", id: np.id });
+  }
+
+  function addPlayerWithPuck(pt, showPopup) {
+    const pl = makePiece("player", pt);
+    const pk = makePiece("puck", pt);
+    pk.carrier = pl.id;
+    setPieces(ps => [...ps, pl, pk]);
+    setSelectedId(pl.id);
+    setPopup(showPopup ? { type: "piece", id: pl.id } : null);
   }
 
   function pieceDown(e, id) {
@@ -1166,6 +1180,7 @@ export default function DrillAnimator() {
       body = (
         <div className="hd-poprow">
           <button className="hd-mini" onClick={() => addPieceAt("player", popup.pt)}>⛹ Player</button>
+          <button className="hd-mini" onClick={() => addPlayerWithPuck(popup.pt, true)}>⛹● Carrier</button>
           <button className="hd-mini" onClick={() => addPieceAt("puck", popup.pt)}>● Puck</button>
           <button className="hd-mini" onClick={() => addPieceAt("cone", popup.pt)}>▲ Cone</button>
         </div>
@@ -1194,6 +1209,13 @@ export default function DrillAnimator() {
                   onClick={() => updateById(p.id, { hand: "R" })}>R</button>
                 <button className={`hd-mini${p.hand === "L" ? " on" : ""}`}
                   onClick={() => updateById(p.id, { hand: "L" })}>L</button>
+                {!pieces.some(q => q.kind === "puck" && q.carrier === p.id) && (
+                  <button className="hd-mini" onClick={() => {
+                    const pk = makePiece("puck", { x: p.x, y: p.y });
+                    pk.carrier = p.id;
+                    setPieces(ps => [...ps, pk]);
+                  }}>● Give puck</button>
+                )}
               </div>
             </>
           )}
@@ -1354,7 +1376,9 @@ export default function DrillAnimator() {
                       {incoming.recvAt === i ? "✓ Receiving here" : "Receive pass here"}
                     </button>
                     {incoming.recvAt === i && (
-                      <span style={{ fontSize: 11, color: "#8b99a8" }}>pace auto-syncs</span>
+                      <span style={{ fontSize: 11, color: "#8b99a8" }}>
+                        {pk.shotAt === i ? "one-timer — pace auto-syncs" : "pace auto-syncs"}
+                      </span>
                     )}
                   </div>
                 )}
@@ -1700,6 +1724,7 @@ export default function DrillAnimator() {
         <div className="hd-menu br">
           <div className="hd-mh">Add to the ice</div>
           <button className="hd-item" onClick={() => { setTool("player"); setOpenMenu(null); }}>⛹ Player</button>
+          <button className="hd-item" onClick={() => { setTool("playerpuck"); setOpenMenu(null); }}>⛹● Player with puck</button>
           <button className="hd-item" onClick={() => { setTool("puck"); setOpenMenu(null); }}>● Puck</button>
           <button className="hd-item" onClick={() => { setTool("cone"); setOpenMenu(null); }}>▲ Cone</button>
           <button className="hd-item" onClick={() => { resetAnim(); setPlaying(false); setPopup(null); setTool("draw"); setOpenMenu(null); }}>
