@@ -19,6 +19,10 @@ import { useState, useRef, useEffect } from "react";
    hand=L mirrors the player's stick. on=F1 puts a puck on that
    player's blade; it releases when the carrier reaches the
    puck's placed spot, then runs its own route.
+   pass=<pt>:<player>[@<pt>] hands the puck off: it launches at
+   the carrier's route point and flies to the named player. With
+   @pt the receiver's pace auto-syncs to arrive at their point
+   exactly as the puck does; without it the puck leads them.
 
    UI: the rink fills the screen. Corner controls: ☰ settings
    (text/export/load/pace), rink size, tools (+pieces / draw),
@@ -60,6 +64,7 @@ function parseDrill(text) {
         let color = kind === "cone" ? "#e0731d" : kind === "puck" ? "#14171a" : "#d7263d";
         let label = kind === "player" ? id : "";
         let speed = 1, hand = "R", carrier = null, facing = 0;
+        const transfers = [];
         rest.forEach(r => {
           if (r.startsWith("#")) color = r;
           else if (r.includes("=")) {
@@ -70,13 +75,17 @@ function parseDrill(text) {
               if (!isNaN(n) && n > 0) speed = n;
             } else if (key === "hand") hand = v.toUpperCase() === "L" ? "L" : "R";
             else if (key === "on") carrier = v;
-            else if (key === "face") {
+            else if (key === "pass") {
+              const m2 = /^(\d+):([^@\s]+)(?:@(\d+))?$/.exec(v);
+              if (m2) transfers.push({ at: parseInt(m2[1], 10) - 1, to: m2[2],
+                recvAt: m2[3] ? parseInt(m2[3], 10) - 1 : null });
+            } else if (key === "face") {
               const n = parseFloat(v);
               if (!isNaN(n)) facing = n;
             }
           } else label = r;
         });
-        const p = { id, kind, x, y, color, label, speed, hand, carrier, facing, path: [] };
+        const p = { id, kind, x, y, color, label, speed, hand, carrier, facing, transfers, path: [] };
         pieces.push(p); byId[id] = p;
       } else if (cmd === "PATH") {
         const id = tok[1];
@@ -126,8 +135,11 @@ function serializeDrill(rink, pieces) {
     const spd = p.speed && p.speed !== 1 ? ` speed=${f2(p.speed)}` : "";
     const hnd = p.kind === "player" && p.hand === "L" ? " hand=L" : "";
     const car = p.kind === "puck" && p.carrier ? ` on=${p.carrier}` : "";
+    const pas = p.kind === "puck" && p.carrier && p.transfers && p.transfers.length
+      ? p.transfers.map(t => ` pass=${t.at + 1}:${t.to}${t.recvAt != null ? "@" + (t.recvAt + 1) : ""}`).join("")
+      : "";
     const fac = p.kind === "player" && !p.path.length && p.facing ? ` face=${f1(p.facing)}` : "";
-    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${car}${fac}${spd}`);
+    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${car}${pas}${fac}${spd}`);
     if (p.path.length) out.push(`PATH ${p.id} ${p.path.map(segToStr).join(" ")}`);
   });
   return out.join("\n") + "\n";
@@ -482,39 +494,123 @@ export default function DrillAnimator() {
     const v = pace * SPEED[s.mode || "carry"] * (p.speed || 1) * (s.rate || 1);
     return v > 0 ? segLen(p.id, i) / v : 0;
   }
-  function ownPathTime(p) {
-    return p.path.reduce((t, s, i) => t + (s.stop || 0) + segMoveTime(p, s, i), 0);
-  }
-  function carrierOf(p) {
-    return p.kind === "puck" && p.carrier
-      ? pieces.find(c => c.id === p.carrier && c.kind === "player") || null
-      : null;
-  }
-
   const lenSig = pieces.reduce((a, p) => a + p.path.reduce((b, _, i) => b + segLen(p.id, i), 0), 0);
-  const relCache = useRef({ key: null, pace: 0, sig: -1, times: {} });
 
-  function releaseTime(pk, carrier) {
-    const rc = relCache.current;
-    if (rc.key !== pieces || rc.pace !== pace || rc.sig !== lenSig)
-      relCache.current = { key: pieces, pace, sig: lenSig, times: {} };
-    const cc = relCache.current;
-    if (cc.times[pk.id] != null) return cc.times[pk.id];
-    const finish = ownPathTime(carrier);
-    let rel = finish;
-    const step = Math.max(0.03, finish / 200);
-    for (let t = 0; t <= finish + 1e-6; t += step) {
-      const b = bladePos(carrier, t);
-      if (Math.hypot(b.x - pk.x, b.y - pk.y) < 3) { rel = t; break; }
+  /* ---- pass planning ----
+     Pucks can be handed between players: each transfer launches at a
+     point on the current carrier's route and flies (at PASS speed) to
+     the receiver. If the transfer names a reception point (recvAt), the
+     receiver's legs up to that point are time-warped so they arrive
+     exactly as the puck does; otherwise the puck leads the receiver to
+     wherever they will be when it lands. After the last transfer the
+     puck's own route (if any) releases by the usual proximity rule. */
+  const planCache = useRef({ key: null, pace: 0, sig: -1, warp: {}, plans: {}, rel: {} });
+
+  function effMove(p, s, i, warp) {
+    const base = segMoveTime(p, s, i);
+    const w = warp[p.id];
+    return w && i <= w.upto ? base / w.f : base;
+  }
+
+  function routeTimeW(p, warp, upto = Infinity) {
+    let t = 0;
+    for (let i = 0; i < p.path.length; i++) {
+      if (i > upto) break;
+      t += (p.path[i].stop || 0) + effMove(p, p.path[i], i, warp);
     }
-    cc.times[pk.id] = rel;
-    return rel;
+    return t;
+  }
+
+  function bladeAt(pl, e, warp) {
+    const cp = routePosAt(pl, e, warp);
+    const rad = ((cp.a || 0) * Math.PI) / 180;
+    const side = pl.hand === "L" ? -1 : 1;
+    const lx = 4.9, ly = 2.55 * side;
+    return {
+      x: clampX(cp.x + Math.cos(rad) * lx - Math.sin(rad) * ly),
+      y: clampY(cp.y + Math.sin(rad) * lx + Math.cos(rad) * ly),
+      a: 0,
+    };
+  }
+
+  function getPlan() {
+    const pc = planCache.current;
+    if (pc.key === pieces && pc.pace === pace && pc.sig === lenSig) return pc;
+    const warp = {};
+    const plans = {};
+    const rel = {};
+    pieces.forEach(pk => {
+      if (pk.kind !== "puck" || !pk.carrier) return;
+      let cur = pieces.find(q => q.id === pk.carrier && q.kind === "player");
+      if (!cur) return;
+      const vPass = () => pace * SPEED.pass * (pk.speed || 1);
+      const legs = [{ type: "ride", id: cur.id, t0: 0 }];
+      let tBase = 0;
+      (pk.transfers || []).forEach(tr => {
+        const rec = pieces.find(q => q.id === tr.to && q.kind === "player");
+        if (!rec || rec.id === cur.id || !cur.path.length) return;
+        const atIdx = Math.max(0, Math.min(tr.at, cur.path.length - 1));
+        const launchT = Math.max(tBase, routeTimeW(cur, warp, atIdx));
+        const launch = bladeAt(cur, launchT, warp);
+        let target, tArr;
+        if (tr.recvAt != null && rec.path.length) {
+          const rj = Math.max(0, Math.min(tr.recvAt, rec.path.length - 1));
+          const anchor = { x: rec.path[rj].x, y: rec.path[rj].y };
+          tArr = launchT + Math.hypot(anchor.x - launch.x, anchor.y - launch.y) / vPass();
+          if (!warp[rec.id]) {
+            let stops = 0, moving = 0;
+            for (let i = 0; i <= rj; i++) {
+              stops += rec.path[i].stop || 0;
+              moving += segMoveTime(rec, rec.path[i], i);
+            }
+            const avail = tArr - stops;
+            if (moving > 0 && avail > 0.05)
+              warp[rec.id] = { upto: rj, f: Math.min(4, Math.max(0.25, moving / avail)) };
+          }
+          target = bladeAt(rec, routeTimeW(rec, warp, rj), warp);
+          tArr = launchT + Math.hypot(target.x - launch.x, target.y - launch.y) / vPass();
+        } else {
+          tArr = launchT;
+          for (let k = 0; k < 3; k++) {
+            target = bladeAt(rec, tArr, warp);
+            tArr = launchT + Math.hypot(target.x - launch.x, target.y - launch.y) / vPass();
+          }
+          target = bladeAt(rec, tArr, warp);
+        }
+        legs.push({ type: "fly", x0: launch.x, y0: launch.y, x1: target.x, y1: target.y, t0: launchT, t1: tArr });
+        legs.push({ type: "ride", id: rec.id, t0: tArr });
+        cur = rec;
+        tBase = tArr;
+      });
+      let relT = Infinity;
+      if (pk.path.length) {
+        const finish = Math.max(tBase + 0.01, routeTimeW(cur, warp));
+        relT = finish;
+        const step = Math.max(0.03, (finish - tBase) / 200);
+        for (let t = tBase; t <= finish + 1e-6; t += step) {
+          const b = bladeAt(cur, t, warp);
+          if (Math.hypot(b.x - pk.x, b.y - pk.y) < 3) { relT = t; break; }
+        }
+      }
+      plans[pk.id] = { legs, final: cur.id };
+      rel[pk.id] = relT;
+    });
+    planCache.current = { key: pieces, pace, sig: lenSig, warp, plans, rel };
+    return planCache.current;
   }
 
   function pieceTime(p) {
-    const c = carrierOf(p);
-    if (c) return p.path.length ? releaseTime(p, c) + ownPathTime(p) : ownPathTime(c);
-    return ownPathTime(p);
+    const { warp, plans, rel } = getPlan();
+    if (p.kind === "puck") {
+      const pl = plans[p.id];
+      if (pl) {
+        if (p.path.length) return rel[p.id] + routeTimeW(p, warp);
+        const fin = pieces.find(q => q.id === pl.final);
+        const lastT = pl.legs[pl.legs.length - 1].t0;
+        return fin ? Math.max(lastT, routeTimeW(fin, warp)) : lastT;
+      }
+    }
+    return routeTimeW(p, warp);
   }
   const totalTime = Math.max(0.1, ...pieces.map(pieceTime));
   totalRef.current = totalTime;
@@ -554,27 +650,9 @@ export default function DrillAnimator() {
     };
   }, []);
 
-  function bladePos(carrier, e) {
-    const cp = displayPosAt(carrier, e);
-    const rad = ((cp.a || 0) * Math.PI) / 180;
-    const side = carrier.hand === "L" ? -1 : 1;
-    const lx = 4.9, ly = 2.55 * side;
-    return {
-      x: clampX(cp.x + Math.cos(rad) * lx - Math.sin(rad) * ly),
-      y: clampY(cp.y + Math.sin(rad) * lx + Math.cos(rad) * ly),
-      a: 0,
-    };
-  }
-
-  function displayPosAt(p, e) {
+  // position/heading along a piece's own route at elapsed e (warp-aware)
+  function routePosAt(p, e, warp) {
     const flip = s => (s.dir === "bwd" ? 180 : 0);
-    const c = carrierOf(p);
-    if (c) {
-      if (!p.path.length) return bladePos(c, Math.min(e, ownPathTime(c)));
-      const rel = releaseTime(p, c);
-      if (e < rel) return bladePos(c, e);
-      e -= rel;
-    }
     if (!p.path.length) return { x: p.x, y: p.y, a: p.facing || 0 };
     if (e <= 0) {
       const s0 = p.path[0];
@@ -586,7 +664,7 @@ export default function DrillAnimator() {
       const hold = s.stop || 0;
       if (e < hold) return { ...prev, a: segTangentAngle(prev, s, 0.02) + flip(s) };
       e -= hold;
-      const mt = segMoveTime(p, s, i);
+      const mt = effMove(p, s, i, warp);
       if (mt > 0 && e < mt) {
         const el = segRefs.current[`${p.id}/${i}`];
         try {
@@ -610,6 +688,29 @@ export default function DrillAnimator() {
     const last = p.path[p.path.length - 1];
     const lp = segEnd(p, p.path.length - 2);
     return { x: last.x, y: last.y, a: segTangentAngle(lp, last, 0.98) + flip(last) };
+  }
+
+  function displayPosAt(p, e) {
+    const { warp, plans, rel } = getPlan();
+    if (p.kind === "puck") {
+      const pl = plans[p.id];
+      if (pl) {
+        const relT = rel[p.id];
+        if (p.path.length && e >= relT) return routePosAt(p, e - relT, warp);
+        let leg = pl.legs[0];
+        for (const L of pl.legs) { if (e >= L.t0) leg = L; else break; }
+        if (leg.type === "fly" && e < leg.t1) {
+          const k = Math.max(0, Math.min(1, (e - leg.t0) / Math.max(0.001, leg.t1 - leg.t0)));
+          return { x: leg.x0 + (leg.x1 - leg.x0) * k, y: leg.y0 + (leg.y1 - leg.y0) * k, a: 0 };
+        }
+        if (leg.type === "fly") return { x: leg.x1, y: leg.y1, a: 0 };
+        const car = pieces.find(q => q.id === leg.id);
+        if (car) return bladeAt(car, Math.min(e, routeTimeW(car, warp)), warp);
+        return { x: p.x, y: p.y, a: 0 };
+      }
+      return routePosAt(p, e, warp);
+    }
+    return routePosAt(p, e, warp);
   }
 
   function displayPos(p) {
@@ -651,7 +752,7 @@ export default function DrillAnimator() {
     const id = nextId(kind);
     const colorIdx = pieces.filter(p => p.kind === "player").length % COLORS.length;
     return {
-      id, kind, x: pt.x, y: pt.y, speed: 1, hand: "R", carrier: null, facing: 0,
+      id, kind, x: pt.x, y: pt.y, speed: 1, hand: "R", carrier: null, facing: 0, transfers: [],
       color: kind === "player" ? COLORS[colorIdx] : kind === "cone" ? "#e0731d" : "#14171a",
       label: kind === "player" ? id : "", path: [],
     };
@@ -676,6 +777,26 @@ export default function DrillAnimator() {
   function deleteSeg(id, i) {
     update(p => (p.id === id ? { ...p, path: p.path.filter((_, j) => j !== i) } : p));
     setPopup(null);
+  }
+
+  /* ----- puck handoffs ----- */
+  function puckChain(pk) {
+    return [pk.carrier, ...(pk.transfers || []).map(t => t.to)].filter(Boolean);
+  }
+  function setTransfer(pkId, stage, tr) {
+    update(q => {
+      if (q.id !== pkId) return q;
+      const ts = (q.transfers || []).slice(0, stage);
+      if (tr) ts[stage] = tr;
+      return { ...q, transfers: ts };
+    });
+  }
+  function setRecvAt(pkId, toId, idx) {
+    update(q => {
+      if (q.id !== pkId) return q;
+      const ts = (q.transfers || []).map(t => (t.to === toId ? { ...t, recvAt: idx } : t));
+      return { ...q, transfers: ts };
+    });
   }
 
   function addPointAt(id, segIdx, pt) {
@@ -1174,6 +1295,46 @@ export default function DrillAnimator() {
           ) : (
             <div className="hd-poprow" style={{ color: "#8b99a8", fontSize: 12 }}>End of route</div>
           )}
+          {p.kind === "player" && (() => {
+            const pk = pieces.find(q => q.kind === "puck" && puckChain(q).includes(p.id));
+            if (!pk) return null;
+            const chain = puckChain(pk);
+            const stage = chain.indexOf(p.id);
+            const from = (pk.transfers || [])[stage];
+            const incoming = (pk.transfers || []).find(t => t.to === p.id);
+            const others = pieces.filter(q => q.kind === "player" && q.id !== p.id);
+            return (
+              <>
+                {stage >= 0 && others.length > 0 && (!from || from.at === i) && (
+                  <div className="hd-poprow">
+                    <span>Pass {pk.id} to</span>
+                    {others.map(o => (
+                      <button key={o.id}
+                        className={`hd-mini${from && from.at === i && from.to === o.id ? " on" : ""}`}
+                        onClick={() =>
+                          setTransfer(pk.id, stage,
+                            from && from.at === i && from.to === o.id
+                              ? null
+                              : { at: i, to: o.id, recvAt: null })}>
+                        {o.id}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {incoming && p.path.length > 0 && (
+                  <div className="hd-poprow">
+                    <button className={`hd-mini${incoming.recvAt === i ? " on" : ""}`}
+                      onClick={() => setRecvAt(pk.id, p.id, incoming.recvAt === i ? null : i)}>
+                      {incoming.recvAt === i ? "✓ Receiving here" : "Receive pass here"}
+                    </button>
+                    {incoming.recvAt === i && (
+                      <span style={{ fontSize: 11, color: "#8b99a8" }}>pace auto-syncs</span>
+                    )}
+                  </div>
+                )}
+              </>
+            );
+          })()}
           <div className="hd-poprow">
             <button className="hd-mini danger" onClick={() => deleteSeg(p.id, i)}>Delete point</button>
           </div>
@@ -1419,6 +1580,22 @@ export default function DrillAnimator() {
               ) : null
             )}
 
+            {editing && (() => {
+              const { plans } = getPlan();
+              return pieces
+                .filter(q => q.kind === "puck" && plans[q.id])
+                .map(q => plans[q.id].legs
+                  .filter(L => L.type === "fly")
+                  .map((L, k) => (
+                    <g key={`pf-${q.id}-${k}`} pointerEvents="none" opacity={0.6}>
+                      <line x1={L.x0} y1={L.y0} x2={L.x1} y2={L.y1}
+                        stroke="#14171a" strokeWidth={0.55} strokeDasharray="2.4 1.8" />
+                      <circle cx={L.x1} cy={L.y1} r={1.1} fill="none"
+                        stroke="#14171a" strokeWidth={0.3} />
+                    </g>
+                  )));
+            })()}
+
             {drawPreview && drawPreview.length > 1 && (
               <polyline points={drawPreview.map(q => `${q.x},${q.y}`).join(" ")}
                 fill="none" stroke="#ffd447" strokeWidth={0.6} strokeDasharray="1.4 1" opacity={0.9} />
@@ -1524,6 +1701,8 @@ export default function DrillAnimator() {
             <b> PATH</b> id segments (<b>L</b> x,y · <b>Q</b> cx,cy x,y · <b>C</b> c1x,c1y c2x,c2y x,y).
             Modifiers before a segment: <b>PASS</b>/<b>SHOT</b>, <b>BWD</b>, <b>STOP n</b>, <b>RATE n</b>.
             <code> on=F1</code> rides that player's blade until the carrier reaches the puck's spot.
+            <code> pass=2:F2@3</code> passes at the carrier's point 2 to F2, received at F2's
+            point 3 — the receiver's pace auto-syncs (omit <code>@3</code> to lead them instead).
             <code> face=45</code> sets a stationary player's heading (degrees).
           </div>
         </div>
