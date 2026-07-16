@@ -12,9 +12,11 @@
     <title>DrillBoard</title>
     <style>
       html, body { margin: 0; padding: 0; background: #0c1014; overflow: hidden; }
-      /* Safe-area layout fix (iPhone 15 / Dynamic Island).
-         Mirrors the intended rules in src/hockey-drill-animator.jsx;
-         can be removed once that file's update lands. */
+      /* Safe-area layout (iPhone / Dynamic Island / iOS 26 standalone).
+         iOS 26.x composites an opaque system band over standalone web
+         apps in the home-indicator region — content cannot render there,
+         so the ice ends above it, mirroring the island inset at the top.
+         Mirrors the intended rules in src/hockey-drill-animator.jsx. */
       .hd-root {
         /* anchor to every viewport edge — vh/dvh under-report in iOS
            standalone mode and must not be trusted for full-screen fill */
@@ -29,7 +31,7 @@
         top: env(safe-area-inset-top, 0px) !important;
         left: env(safe-area-inset-left, 0px) !important;
         right: env(safe-area-inset-right, 0px) !important;
-        bottom: 0 !important;
+        bottom: env(safe-area-inset-bottom, 0px) !important;
       }
       .hd-tl, .hd-tr, .hd-tr2 {
         top: max(10px, env(safe-area-inset-top)) !important;
@@ -39,90 +41,46 @@
       }
     </style>
     <script>
-      /* Standalone-mode height pin.
-         iOS home-screen apps sometimes size the layout viewport short of
-         the physical screen, leaving a strip below everything CSS can
-         anchor to. screen.width/height are reported in fixed portrait
-         orientation and describe the real panel, so in standalone mode we
-         pin the app root to the physical dimension directly and re-check
-         on every viewport event. Safari tabs are left alone — the browser
-         manages its own chrome there. */
+      /* On-screen diagnostics: load with ?debug in the URL */
       (function () {
+        if (!/debug/.test(location.search)) return;
         var isStandalone =
           navigator.standalone === true ||
           (window.matchMedia && matchMedia("(display-mode: standalone)").matches);
-
-        function targetHeight() {
-          var portrait = matchMedia("(orientation: portrait)").matches;
-          var phys = portrait
-            ? Math.max(screen.width, screen.height)
-            : Math.min(screen.width, screen.height);
-          var vv = window.visualViewport;
-          var cands = [
-            window.innerHeight || 0,
-            vv ? vv.height + vv.offsetTop : 0,
-            phys || 0,
-          ];
-          return Math.max.apply(null, cands);
-        }
-
-        function pin() {
-          if (!isStandalone) return;
-          var root = document.querySelector(".hd-root");
-          if (!root) { requestAnimationFrame(pin); return; }
-          var h = Math.round(targetHeight());
-          root.style.setProperty("top", "0", "important");
-          root.style.setProperty("bottom", "auto", "important");
-          root.style.setProperty("height", h + "px", "important");
-        }
-
-        ["resize", "orientationchange", "pageshow"].forEach(function (e) {
-          window.addEventListener(e, pin);
+        document.addEventListener("DOMContentLoaded", function () {
+          var d = document.createElement("div");
+          d.style.cssText =
+            "position:fixed;left:8px;top:120px;z-index:9999;" +
+            "background:rgba(0,0,0,.78);color:#7CFC00;font:11px ui-monospace,monospace;" +
+            "padding:6px 8px;border-radius:6px;pointer-events:none;white-space:pre";
+          document.body.appendChild(d);
+          var probe = document.createElement("div");
+          probe.style.cssText =
+            "position:fixed;visibility:hidden;" +
+            "padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)";
+          document.body.appendChild(probe);
+          setInterval(function () {
+            var cs = getComputedStyle(probe);
+            var vv = window.visualViewport;
+            var root = document.querySelector(".hd-root");
+            var stage = document.querySelector(".hd-stage");
+            var ice = document.querySelector(".hd-canvas");
+            var r = function (el) {
+              if (!el) return "n/a";
+              var b = el.getBoundingClientRect();
+              return Math.round(b.height) + " bot" + Math.round(b.bottom);
+            };
+            d.textContent =
+              "mode   " + (isStandalone ? "standalone" : "browser") +
+              "\ninner  " + innerWidth + "x" + innerHeight +
+              "\nvv     " + (vv ? Math.round(vv.width) + "x" + Math.round(vv.height) + " ot" + Math.round(vv.offsetTop) : "n/a") +
+              "\nscreen " + screen.width + "x" + screen.height +
+              "\nsafe   t" + cs.paddingTop + " b" + cs.paddingBottom +
+              "\nroot   " + r(root) +
+              "\nstage  " + r(stage) +
+              "\nice    " + r(ice);
+          }, 500);
         });
-        if (window.visualViewport) {
-          visualViewport.addEventListener("resize", pin);
-          visualViewport.addEventListener("scroll", pin);
-        }
-        document.addEventListener("DOMContentLoaded", pin);
-        pin();
-
-        /* On-screen diagnostics: load with ?debug in the URL */
-        if (/debug/.test(location.search)) {
-          document.addEventListener("DOMContentLoaded", function () {
-            var d = document.createElement("div");
-            d.style.cssText =
-              "position:fixed;left:8px;top:120px;z-index:9999;" +
-              "background:rgba(0,0,0,.78);color:#7CFC00;font:11px ui-monospace,monospace;" +
-              "padding:6px 8px;border-radius:6px;pointer-events:none;white-space:pre";
-            document.body.appendChild(d);
-            var probe = document.createElement("div");
-            probe.style.cssText =
-              "position:fixed;visibility:hidden;" +
-              "padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)";
-            document.body.appendChild(probe);
-            setInterval(function () {
-              var cs = getComputedStyle(probe);
-              var vv = window.visualViewport;
-              var root = document.querySelector(".hd-root");
-              var stage = document.querySelector(".hd-stage");
-              var ice = document.querySelector(".hd-canvas");
-              var r = function (el) {
-                if (!el) return "n/a";
-                var b = el.getBoundingClientRect();
-                return Math.round(b.height) + " bot" + Math.round(b.bottom);
-              };
-              d.textContent =
-                "mode   " + (isStandalone ? "standalone" : "browser") +
-                "\ninner  " + innerWidth + "x" + innerHeight +
-                "\nvv     " + (vv ? Math.round(vv.width) + "x" + Math.round(vv.height) + " ot" + Math.round(vv.offsetTop) : "n/a") +
-                "\nscreen " + screen.width + "x" + screen.height +
-                "\nsafe   t" + cs.paddingTop + " b" + cs.paddingBottom +
-                "\nroot   " + r(root) +
-                "\nstage  " + r(stage) +
-                "\nice    " + r(ice);
-            }, 500);
-          });
-        }
       })();
     </script>
   </head>
