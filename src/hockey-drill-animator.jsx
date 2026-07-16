@@ -41,7 +41,7 @@ const COLORS = ["#d7263d", "#1f4fa3", "#1f8a4c", "#e0731d", "#22262b", "#7a3fa8"
 const SPEED = { carry: 1, pass: 3, shot: 6 };
 const vb = m => VIEWS[m].join(" ");
 
-const APP_VERSION = "1.8";
+const APP_VERSION = "1.9";
 // build stamp injected by vite.config.js `define`; "dev" when run standalone
 const BUILD_STAMP = typeof __BUILD_STAMP__ !== "undefined" ? __BUILD_STAMP__ : "dev";
 
@@ -600,6 +600,44 @@ export default function DrillAnimator() {
     });
   }
   function playDragEnd() { playDrag.current = null; }
+
+  // iOS 26 standalone bug: the viewport is sized as if the status bar were
+  // opaque (screen − safeTop) but positioned as if translucent (at y=0),
+  // leaving an unrenderable dead band at the bottom exactly safeTop tall.
+  // When that signature is present, our own home-indicator inset is
+  // pointless (the viewport never reaches the indicator) — zero it and
+  // reclaim the space. Signature: standalone + translucent inset active +
+  // physical height − innerHeight ≈ safeTop.
+  useEffect(() => {
+    const standalone = navigator.standalone === true ||
+      (window.matchMedia && matchMedia("(display-mode: standalone)").matches);
+    if (!standalone) return;
+    const el = rootRef.current;
+    if (!el) return;
+    const probe = document.createElement("div");
+    probe.style.cssText =
+      "position:fixed;visibility:hidden;padding-top:env(safe-area-inset-top)";
+    document.body.appendChild(probe);
+    const apply = () => {
+      const safeTop = parseFloat(getComputedStyle(probe).paddingTop) || 0;
+      const portrait = matchMedia("(orientation: portrait)").matches;
+      const phys = portrait
+        ? Math.max(screen.width, screen.height)
+        : Math.min(screen.width, screen.height);
+      const deficit = phys - window.innerHeight - safeTop;
+      const stolen = safeTop > 20 && Math.abs(deficit) <= 4;
+      if (stolen) el.style.setProperty("--hd-safe-b", "0px");
+      else el.style.removeProperty("--hd-safe-b");
+    };
+    apply();
+    window.addEventListener("resize", apply);
+    window.addEventListener("orientationchange", apply);
+    return () => {
+      probe.remove();
+      window.removeEventListener("resize", apply);
+      window.removeEventListener("orientationchange", apply);
+    };
+  }, []);
 
   /* ----- full-screen fit: size the canvas to the rink's aspect ----- */
   useEffect(() => {
@@ -1722,7 +1760,8 @@ export default function DrillAnimator() {
            opaque system bar there that web content cannot render under */
         .hd-stage { position:absolute; top:env(safe-area-inset-top, 0px);
           left:env(safe-area-inset-left, 0px); right:env(safe-area-inset-right, 0px);
-          bottom:calc(54px + min(env(safe-area-inset-bottom, 0px), 34px)); display:flex; align-items:center; justify-content:center; }
+          bottom:calc(54px + var(--hd-safe-b, min(env(safe-area-inset-bottom, 0px), 34px)));
+          display:flex; align-items:center; justify-content:center; }
         .hd-canvas { position:relative; }
         .hd-canvas svg.hd-ice { width:100%; height:100%; display:block; }
         .hd-stage, .hd-canvas, .hd-canvas svg, .hd-canvas svg * { touch-action:none;
@@ -1747,7 +1786,8 @@ export default function DrillAnimator() {
         .hd-playdock .hd-grip:active { cursor:grabbing; }
         /* bottom menu bar — owns the chrome so the ice stays clear */
         .hd-bar { position:absolute; z-index:44; left:env(safe-area-inset-left, 0px);
-          right:env(safe-area-inset-right, 0px); bottom:min(env(safe-area-inset-bottom, 0px), 34px);
+          right:env(safe-area-inset-right, 0px);
+          bottom:var(--hd-safe-b, min(env(safe-area-inset-bottom, 0px), 34px));
           height:54px; display:flex; align-items:center; gap:8px; padding:0 10px;
           background:#11161c; border-top:1px solid #2a3542; }
         .hd-barbtn { width:46px; height:40px; border-radius:10px; background:#1b232c;
@@ -1764,9 +1804,9 @@ export default function DrillAnimator() {
         .hd-menu { position:absolute; z-index:45; background:#1a222c; border:1px solid #33404f;
           border-radius:12px; padding:10px 12px; box-shadow:0 8px 24px rgba(0,0,0,.5);
           display:flex; flex-direction:column; gap:8px; width:230px; max-height:70vh; overflow-y:auto; }
-        .hd-menu.tl { bottom:calc(62px + min(env(safe-area-inset-bottom, 0px), 34px)); left:calc(10px + env(safe-area-inset-left)); }
-        .hd-menu.bl { bottom:calc(62px + min(env(safe-area-inset-bottom, 0px), 34px)); left:calc(66px + env(safe-area-inset-left)); }
-        .hd-menu.br { bottom:calc(62px + min(env(safe-area-inset-bottom, 0px), 34px)); right:calc(10px + env(safe-area-inset-right)); }
+        .hd-menu.tl { bottom:calc(62px + var(--hd-safe-b, min(env(safe-area-inset-bottom, 0px), 34px))); left:calc(10px + env(safe-area-inset-left)); }
+        .hd-menu.bl { bottom:calc(62px + var(--hd-safe-b, min(env(safe-area-inset-bottom, 0px), 34px))); left:calc(66px + env(safe-area-inset-left)); }
+        .hd-menu.br { bottom:calc(62px + var(--hd-safe-b, min(env(safe-area-inset-bottom, 0px), 34px))); right:calc(10px + env(safe-area-inset-right)); }
         .hd-mh { font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:#8b99a8; }
         .hd-item { display:flex; align-items:center; gap:8px; padding:9px 10px; font-size:14px;
           border:1px solid #2c3846; background:#212b36; color:#dbe4ec; border-radius:8px;

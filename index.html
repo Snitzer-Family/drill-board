@@ -7,9 +7,16 @@
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
     />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <!-- opaque ("black") instead of black-translucent: iOS 26 sizes the
+         standalone viewport for an opaque bar even in translucent mode,
+         stranding a dead band at the bottom; opaque makes size and
+         position coherent so the viewport reaches the physical bottom -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
     <meta name="theme-color" content="#0c1014" />
     <title>DrillBoard</title>
+    <style>
+      html, body { margin: 0; padding: 0; background: #0c1014; overflow: hidden; }
+    </style>
   </head>
   <body style="margin: 0; background: #0c1014">
     <div id="root"></div>
