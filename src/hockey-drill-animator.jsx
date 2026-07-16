@@ -23,6 +23,8 @@ import { useState, useRef, useEffect } from "react";
    the carrier's route point and flies to the named player. With
    @pt the receiver's pace auto-syncs to arrive at their point
    exactly as the puck does; without it the puck leads them.
+   shoot=<pt> fires the puck at the nearest net when the final
+   carrier reaches that route point.
 
    UI: the rink fills the screen. Corner controls: ☰ settings
    (text/export/load/pace), rink size, tools (+pieces / draw),
@@ -63,7 +65,7 @@ function parseDrill(text) {
           throw new Error("PIECE needs: id kind x y");
         let color = kind === "cone" ? "#e0731d" : kind === "puck" ? "#14171a" : "#d7263d";
         let label = kind === "player" ? id : "";
-        let speed = 1, hand = "R", carrier = null, facing = 0;
+        let speed = 1, hand = "R", carrier = null, facing = 0, shotAt = null;
         const transfers = [];
         rest.forEach(r => {
           if (r.startsWith("#")) color = r;
@@ -79,13 +81,16 @@ function parseDrill(text) {
               const m2 = /^(\d+):([^@\s]+)(?:@(\d+))?$/.exec(v);
               if (m2) transfers.push({ at: parseInt(m2[1], 10) - 1, to: m2[2],
                 recvAt: m2[3] ? parseInt(m2[3], 10) - 1 : null });
+            } else if (key === "shoot") {
+              const n = parseInt(v, 10);
+              if (!isNaN(n)) shotAt = n - 1;
             } else if (key === "face") {
               const n = parseFloat(v);
               if (!isNaN(n)) facing = n;
             }
           } else label = r;
         });
-        const p = { id, kind, x, y, color, label, speed, hand, carrier, facing, transfers, path: [] };
+        const p = { id, kind, x, y, color, label, speed, hand, carrier, facing, transfers, shotAt, path: [] };
         pieces.push(p); byId[id] = p;
       } else if (cmd === "PATH") {
         const id = tok[1];
@@ -138,8 +143,9 @@ function serializeDrill(rink, pieces) {
     const pas = p.kind === "puck" && p.carrier && p.transfers && p.transfers.length
       ? p.transfers.map(t => ` pass=${t.at + 1}:${t.to}${t.recvAt != null ? "@" + (t.recvAt + 1) : ""}`).join("")
       : "";
+    const sht = p.kind === "puck" && p.carrier && p.shotAt != null ? ` shoot=${p.shotAt + 1}` : "";
     const fac = p.kind === "player" && !p.path.length && p.facing ? ` face=${f1(p.facing)}` : "";
-    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${car}${pas}${fac}${spd}`);
+    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${car}${pas}${sht}${fac}${spd}`);
     if (p.path.length) out.push(`PATH ${p.id} ${p.path.map(segToStr).join(" ")}`);
   });
   return out.join("\n") + "\n";
@@ -582,8 +588,19 @@ export default function DrillAnimator() {
         cur = rec;
         tBase = tArr;
       });
+      if (pk.shotAt != null && cur.path.length) {
+        const atIdx = Math.max(0, Math.min(pk.shotAt, cur.path.length - 1));
+        const launchT = Math.max(tBase, routeTimeW(cur, warp, atIdx));
+        const launch = bladeAt(cur, launchT, warp);
+        const net = launch.x < 100 ? { x: 9, y: 42.5 } : { x: 191, y: 42.5 };
+        const vShot = pace * SPEED.shot * (pk.speed || 1);
+        const tArr = launchT + Math.hypot(net.x - launch.x, net.y - launch.y) / vShot;
+        legs.push({ type: "fly", shot: true, x0: launch.x, y0: launch.y, x1: net.x, y1: net.y, t0: launchT, t1: tArr });
+        legs.push({ type: "rest", x: net.x, y: net.y, t0: tArr });
+        tBase = tArr;
+      }
       let relT = Infinity;
-      if (pk.path.length) {
+      if (pk.path.length && pk.shotAt == null) {
         const finish = Math.max(tBase + 0.01, routeTimeW(cur, warp));
         relT = finish;
         const step = Math.max(0.03, (finish - tBase) / 200);
@@ -604,7 +621,7 @@ export default function DrillAnimator() {
     if (p.kind === "puck") {
       const pl = plans[p.id];
       if (pl) {
-        if (p.path.length) return rel[p.id] + routeTimeW(p, warp);
+        if (p.path.length && p.shotAt == null) return rel[p.id] + routeTimeW(p, warp);
         const fin = pieces.find(q => q.id === pl.final);
         const lastT = pl.legs[pl.legs.length - 1].t0;
         return fin ? Math.max(lastT, routeTimeW(fin, warp)) : lastT;
@@ -704,6 +721,7 @@ export default function DrillAnimator() {
           return { x: leg.x0 + (leg.x1 - leg.x0) * k, y: leg.y0 + (leg.y1 - leg.y0) * k, a: 0 };
         }
         if (leg.type === "fly") return { x: leg.x1, y: leg.y1, a: 0 };
+        if (leg.type === "rest") return { x: leg.x, y: leg.y, a: 0 };
         const car = pieces.find(q => q.id === leg.id);
         if (car) return bladeAt(car, Math.min(e, routeTimeW(car, warp)), warp);
         return { x: p.x, y: p.y, a: 0 };
@@ -752,7 +770,7 @@ export default function DrillAnimator() {
     const id = nextId(kind);
     const colorIdx = pieces.filter(p => p.kind === "player").length % COLORS.length;
     return {
-      id, kind, x: pt.x, y: pt.y, speed: 1, hand: "R", carrier: null, facing: 0, transfers: [],
+      id, kind, x: pt.x, y: pt.y, speed: 1, hand: "R", carrier: null, facing: 0, transfers: [], shotAt: null,
       color: kind === "player" ? COLORS[colorIdx] : kind === "cone" ? "#e0731d" : "#14171a",
       label: kind === "player" ? id : "", path: [],
     };
@@ -788,7 +806,7 @@ export default function DrillAnimator() {
       if (q.id !== pkId) return q;
       const ts = (q.transfers || []).slice(0, stage);
       if (tr) ts[stage] = tr;
-      return { ...q, transfers: ts };
+      return { ...q, transfers: ts, shotAt: null };
     });
   }
   function setRecvAt(pkId, toId, idx) {
@@ -1321,6 +1339,14 @@ export default function DrillAnimator() {
                     ))}
                   </div>
                 )}
+                {stage === (pk.transfers || []).length && (
+                  <div className="hd-poprow">
+                    <button className={`hd-mini${pk.shotAt === i ? " on" : ""}`}
+                      onClick={() => updateById(pk.id, { shotAt: pk.shotAt === i ? null : i })}>
+                      {pk.shotAt === i ? "✓ Shooting at net" : "🥅 Shoot at net"}
+                    </button>
+                  </div>
+                )}
                 {incoming && p.path.length > 0 && (
                   <div className="hd-poprow">
                     <button className={`hd-mini${incoming.recvAt === i ? " on" : ""}`}
@@ -1589,7 +1615,8 @@ export default function DrillAnimator() {
                   .map((L, k) => (
                     <g key={`pf-${q.id}-${k}`} pointerEvents="none" opacity={0.6}>
                       <line x1={L.x0} y1={L.y0} x2={L.x1} y2={L.y1}
-                        stroke="#14171a" strokeWidth={0.55} strokeDasharray="2.4 1.8" />
+                        stroke="#14171a" strokeWidth={L.shot ? 1.1 : 0.55}
+                        strokeDasharray={L.shot ? undefined : "2.4 1.8"} />
                       <circle cx={L.x1} cy={L.y1} r={1.1} fill="none"
                         stroke="#14171a" strokeWidth={0.3} />
                     </g>
@@ -1703,6 +1730,7 @@ export default function DrillAnimator() {
             <code> on=F1</code> rides that player's blade until the carrier reaches the puck's spot.
             <code> pass=2:F2@3</code> passes at the carrier's point 2 to F2, received at F2's
             point 3 — the receiver's pace auto-syncs (omit <code>@3</code> to lead them instead).
+            <code> shoot=4</code> fires at the nearest net when the final carrier reaches point 4.
             <code> face=45</code> sets a stationary player's heading (degrees).
           </div>
         </div>
