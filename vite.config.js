@@ -6,4 +6,10 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   plugins: [react()],
   base: "/drill-board/",
+  define: {
+    // build stamp shown in the app's version watermark (UTC)
+    __BUILD_STAMP__: JSON.stringify(
+      new Date().toISOString().replace("T", " ").slice(5, 16) + "Z"
+    ),
+  },
 });
