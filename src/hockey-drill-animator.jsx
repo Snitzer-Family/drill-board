@@ -1640,7 +1640,7 @@ export default function DrillAnimator() {
            opaque system bar there that web content cannot render under */
         .hd-stage { position:absolute; top:env(safe-area-inset-top, 0px);
           left:env(safe-area-inset-left, 0px); right:env(safe-area-inset-right, 0px);
-          bottom:calc(54px + env(safe-area-inset-bottom, 0px)); display:flex; align-items:center; justify-content:center; }
+          bottom:calc(54px + min(env(safe-area-inset-bottom, 0px), 34px)); display:flex; align-items:center; justify-content:center; }
         .hd-canvas { position:relative; }
         .hd-canvas svg.hd-ice { width:100%; height:100%; display:block; }
         .hd-stage, .hd-canvas, .hd-canvas svg, .hd-canvas svg * { touch-action:none;
@@ -1665,7 +1665,7 @@ export default function DrillAnimator() {
         .hd-playdock .hd-grip:active { cursor:grabbing; }
         /* bottom menu bar — owns the chrome so the ice stays clear */
         .hd-bar { position:absolute; z-index:44; left:env(safe-area-inset-left, 0px);
-          right:env(safe-area-inset-right, 0px); bottom:env(safe-area-inset-bottom, 0px);
+          right:env(safe-area-inset-right, 0px); bottom:min(env(safe-area-inset-bottom, 0px), 34px);
           height:54px; display:flex; align-items:center; gap:8px; padding:0 10px;
           background:#11161c; border-top:1px solid #2a3542; }
         .hd-barbtn { width:46px; height:40px; border-radius:10px; background:#1b232c;
@@ -1680,9 +1680,9 @@ export default function DrillAnimator() {
         .hd-menu { position:absolute; z-index:45; background:#1a222c; border:1px solid #33404f;
           border-radius:12px; padding:10px 12px; box-shadow:0 8px 24px rgba(0,0,0,.5);
           display:flex; flex-direction:column; gap:8px; width:230px; max-height:70vh; overflow-y:auto; }
-        .hd-menu.tl { bottom:calc(62px + env(safe-area-inset-bottom)); left:calc(10px + env(safe-area-inset-left)); }
-        .hd-menu.bl { bottom:calc(62px + env(safe-area-inset-bottom)); left:calc(66px + env(safe-area-inset-left)); }
-        .hd-menu.br { bottom:calc(62px + env(safe-area-inset-bottom)); right:calc(10px + env(safe-area-inset-right)); }
+        .hd-menu.tl { bottom:calc(62px + min(env(safe-area-inset-bottom, 0px), 34px)); left:calc(10px + env(safe-area-inset-left)); }
+        .hd-menu.bl { bottom:calc(62px + min(env(safe-area-inset-bottom, 0px), 34px)); left:calc(66px + env(safe-area-inset-left)); }
+        .hd-menu.br { bottom:calc(62px + min(env(safe-area-inset-bottom, 0px), 34px)); right:calc(10px + env(safe-area-inset-right)); }
         .hd-mh { font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:#8b99a8; }
         .hd-item { display:flex; align-items:center; gap:8px; padding:9px 10px; font-size:14px;
           border:1px solid #2c3846; background:#212b36; color:#dbe4ec; border-radius:8px;
