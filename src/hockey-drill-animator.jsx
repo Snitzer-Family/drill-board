@@ -41,7 +41,7 @@ const COLORS = ["#d7263d", "#1f4fa3", "#1f8a4c", "#e0731d", "#22262b", "#7a3fa8"
 const SPEED = { carry: 1, pass: 3, shot: 6 };
 const vb = m => VIEWS[m].join(" ");
 
-const APP_VERSION = "1.6";
+const APP_VERSION = "1.7";
 // build stamp injected by vite.config.js `define`; "dev" when run standalone
 const BUILD_STAMP = typeof __BUILD_STAMP__ !== "undefined" ? __BUILD_STAMP__ : "dev";
 
@@ -497,6 +497,36 @@ export default function DrillAnimator() {
     setPopOff({ x: d.ox + e.clientX - d.sx, y: d.oy + e.clientY - d.sy });
   }
   function popDragEnd() { popDrag.current = null; }
+
+  // Safari (non-standalone): for a non-scrolling page the layout viewport
+  // stays at the toolbar-visible size even in full-screen mode, leaving a
+  // dead band where the toolbar was. The visual viewport tracks toolbar
+  // state live, so pin the root's height to it. Standalone home-screen
+  // mode is excluded — its layout is handled purely in CSS.
+  const rootRef = useRef(null);
+  useEffect(() => {
+    const vv = window.visualViewport;
+    const standalone = navigator.standalone === true ||
+      (window.matchMedia && matchMedia("(display-mode: standalone)").matches);
+    if (!vv || standalone) return;
+    const el = rootRef.current;
+    if (!el) return;
+    const apply = () => {
+      el.style.height = Math.round(vv.height + vv.offsetTop) + "px";
+      el.style.bottom = "auto";
+    };
+    apply();
+    vv.addEventListener("resize", apply);
+    vv.addEventListener("scroll", apply);
+    window.addEventListener("orientationchange", apply);
+    return () => {
+      vv.removeEventListener("resize", apply);
+      vv.removeEventListener("scroll", apply);
+      window.removeEventListener("orientationchange", apply);
+      el.style.height = "";
+      el.style.bottom = "";
+    };
+  }, []);
 
   /* ----- draggable play dock ----- */
   const [playPos, setPlayPos] = useState(null);
@@ -1635,7 +1665,7 @@ export default function DrillAnimator() {
       : tool !== "select" ? "Tap the ice to place" : null;
 
   return (
-    <div className="hd-root">
+    <div className="hd-root" ref={rootRef}>
       <style>{`
         .hd-root { position:fixed; inset:0; background:#0c1014; color:#e8edf2; overflow:hidden;
           font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
