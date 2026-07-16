@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useLayoutEffect } from "react";
 
 /* ============================================================
    HOCKEY DRILL ANIMATOR — v5 (full-screen ice)
@@ -25,6 +25,9 @@ import { useState, useRef, useEffect } from "react";
    exactly as the puck does; without it the puck leads them.
    shoot=<pt> fires the puck at the nearest net when the final
    carrier reaches that route point.
+   pickup=<player>@<pt> starts a loose puck: it sits (or runs
+   its own route) until that player reaches the waypoint, then
+   hops onto their blade — passes and shots can follow.
 
    UI: the rink fills the screen. Corner controls: ☰ settings
    (text/export/load/pace), rink size, tools (+pieces / draw),
@@ -65,7 +68,7 @@ function parseDrill(text) {
           throw new Error("PIECE needs: id kind x y");
         let color = kind === "cone" ? "#e0731d" : kind === "puck" ? "#14171a" : "#d7263d";
         let label = kind === "player" ? id : "";
-        let speed = 1, hand = "R", carrier = null, facing = 0, shotAt = null;
+        let speed = 1, hand = "R", carrier = null, facing = 0, shotAt = null, pickup = null;
         const transfers = [];
         rest.forEach(r => {
           if (r.startsWith("#")) color = r;
@@ -84,13 +87,16 @@ function parseDrill(text) {
             } else if (key === "shoot") {
               const n = parseInt(v, 10);
               if (!isNaN(n)) shotAt = n - 1;
+            } else if (key === "pickup") {
+              const m3 = /^([^@\s]+)@(\d+)$/.exec(v);
+              if (m3) pickup = { to: m3[1], at: parseInt(m3[2], 10) - 1 };
             } else if (key === "face") {
               const n = parseFloat(v);
               if (!isNaN(n)) facing = n;
             }
           } else label = r;
         });
-        const p = { id, kind, x, y, color, label, speed, hand, carrier, facing, transfers, shotAt, path: [] };
+        const p = { id, kind, x, y, color, label, speed, hand, carrier, facing, transfers, shotAt, pickup, path: [] };
         pieces.push(p); byId[id] = p;
       } else if (cmd === "PATH") {
         const id = tok[1];
@@ -140,12 +146,13 @@ function serializeDrill(rink, pieces) {
     const spd = p.speed && p.speed !== 1 ? ` speed=${f2(p.speed)}` : "";
     const hnd = p.kind === "player" && p.hand === "L" ? " hand=L" : "";
     const car = p.kind === "puck" && p.carrier ? ` on=${p.carrier}` : "";
-    const pas = p.kind === "puck" && p.carrier && p.transfers && p.transfers.length
+    const gp = p.kind === "puck" && !p.carrier && p.pickup ? ` pickup=${p.pickup.to}@${p.pickup.at + 1}` : "";
+    const pas = p.kind === "puck" && (p.carrier || p.pickup) && p.transfers && p.transfers.length
       ? p.transfers.map(t => ` pass=${t.at + 1}:${t.to}${t.recvAt != null ? "@" + (t.recvAt + 1) : ""}`).join("")
       : "";
-    const sht = p.kind === "puck" && p.carrier && p.shotAt != null ? ` shoot=${p.shotAt + 1}` : "";
+    const sht = p.kind === "puck" && (p.carrier || p.pickup) && p.shotAt != null ? ` shoot=${p.shotAt + 1}` : "";
     const fac = p.kind === "player" && !p.path.length && p.facing ? ` face=${f1(p.facing)}` : "";
-    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${car}${pas}${sht}${fac}${spd}`);
+    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${car}${gp}${pas}${sht}${fac}${spd}`);
     if (p.path.length) out.push(`PATH ${p.id} ${p.path.map(segToStr).join(" ")}`);
   });
   return out.join("\n") + "\n";
@@ -311,85 +318,75 @@ function fitRoute(start, raw) {
 
 /* ---------------- rink markings ---------------- */
 
-function RinkMarkings() {
+function RinkMarkings({ yFix = 1 }) {
   const dots = [];
   [[31, 20.5], [31, 64.5], [169, 20.5], [169, 64.5]].forEach(([x, y]) =>
     dots.push(
       <g key={`fo${x}-${y}`}>
-        <circle cx={x} cy={y} r={15} fill="none" stroke="#d7263d" strokeWidth={0.4} opacity={0.8} />
-        <circle cx={x} cy={y} r={1} fill="#d7263d" />
+        <ellipse cx={x} cy={y} rx={15} ry={15 * yFix} fill="none" stroke="#d7263d" strokeWidth={0.4} opacity={0.8} />
+        <ellipse cx={x} cy={y} rx={1} ry={yFix} fill="#d7263d" />
       </g>
     ));
   [[80, 20.5], [80, 64.5], [120, 20.5], [120, 64.5]].forEach(([x, y]) =>
-    dots.push(<circle key={`nz${x}-${y}`} cx={x} cy={y} r={1} fill="#d7263d" />));
+    dots.push(<ellipse key={`nz${x}-${y}`} cx={x} cy={y} rx={1} ry={yFix} fill="#d7263d" />));
+  const cr = 6 / Math.max(0.2, yFix); // crease depth corrected to stay semicircular
   return (
     <g clipPath="url(#boards)">
       <rect x={0} y={0} width={200} height={85} fill="#f5fafd" />
-      <path d="M 11 36.5 A 6 6 0 0 1 11 48.5 Z" fill="#d3e9f7" stroke="#d7263d" strokeWidth={0.3} />
-      <path d="M 189 36.5 A 6 6 0 0 0 189 48.5 Z" fill="#d3e9f7" stroke="#d7263d" strokeWidth={0.3} />
+      <path d={`M 11 36.5 A ${cr} 6 0 0 1 11 48.5 Z`} fill="#d3e9f7" stroke="#d7263d" strokeWidth={0.3} />
+      <path d={`M 189 36.5 A ${cr} 6 0 0 0 189 48.5 Z`} fill="#d3e9f7" stroke="#d7263d" strokeWidth={0.3} />
       <line x1={11} y1={0} x2={11} y2={85} stroke="#d7263d" strokeWidth={0.4} />
       <line x1={189} y1={0} x2={189} y2={85} stroke="#d7263d" strokeWidth={0.4} />
       <line x1={75} y1={0} x2={75} y2={85} stroke="#1f4fa3" strokeWidth={1} />
       <line x1={125} y1={0} x2={125} y2={85} stroke="#1f4fa3" strokeWidth={1} />
       <line x1={100} y1={0} x2={100} y2={85} stroke="#d7263d" strokeWidth={1} />
       <line x1={100} y1={0} x2={100} y2={85} stroke="#fff" strokeWidth={0.25} strokeDasharray="1.6 1.6" />
-      <circle cx={100} cy={42.5} r={15} fill="none" stroke="#1f4fa3" strokeWidth={0.4} />
-      <circle cx={100} cy={42.5} r={0.9} fill="#1f4fa3" />
+      <ellipse cx={100} cy={42.5} rx={15} ry={15 * yFix} fill="none" stroke="#1f4fa3" strokeWidth={0.4} />
+      <ellipse cx={100} cy={42.5} rx={0.9} ry={0.9 * yFix} fill="#1f4fa3" />
       {dots}
       <rect x={7} y={39.5} width={4} height={6} fill="none" stroke="#d7263d" strokeWidth={0.35} />
       <rect x={189} y={39.5} width={4} height={6} fill="none" stroke="#d7263d" strokeWidth={0.35} />
-      <rect x={0.5} y={0.5} width={199} height={84} rx={27.5} fill="none" stroke="#31404e" strokeWidth={1} />
+      <rect x={0.5} y={0.5} width={199} height={84} rx={27.5} ry={27.5 * yFix} fill="none" stroke="#31404e" strokeWidth={1} />
     </g>
   );
 }
 
 /* ---------------- piece icon ---------------- */
 
-function PieceIcon({ p, pos, onDown, selected, dim, screenRot = 0, onStickDown }) {
-  const hit = <circle cx={pos.x} cy={pos.y} r={5.5} fill="transparent" onPointerDown={onDown} style={{ cursor: "grab" }} />;
-  // grabbable stick blade (only wired for rotatable stationary players)
-  const stickHit = onStickDown && p.kind === "player" && (
-    <g transform={`translate(${pos.x} ${pos.y}) rotate(${pos.a || 0})`}>
-      <circle cx={4.7} cy={p.hand === "L" ? -2.55 : 2.55} r={2.7} fill="transparent"
-        style={{ cursor: "grab" }} onPointerDown={onStickDown} />
-    </g>
-  );
+function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStickDown }) {
+  const frame = xf || `translate(${pos.x} ${pos.y}) rotate(${pos.a || 0})`;
   let body;
   if (p.kind === "puck")
-    body = <circle cx={pos.x} cy={pos.y} r={1.5} fill="#14171a" stroke={selected ? "#ffd447" : "#fff"} strokeWidth={0.4} pointerEvents="none" />;
+    body = <circle cx={0} cy={0} r={1.5} fill="#14171a" stroke={selected ? "#ffd447" : "#fff"} strokeWidth={0.4} pointerEvents="none" />;
   else if (p.kind === "cone")
     body = (
-      <path d={`M ${pos.x} ${pos.y - 2.4} L ${pos.x + 2.2} ${pos.y + 1.8} L ${pos.x - 2.2} ${pos.y + 1.8} Z`}
+      <path d="M 0 -2.4 L 2.2 1.8 L -2.2 1.8 Z"
         fill={p.color} stroke={selected ? "#ffd447" : "#fff"} strokeWidth={0.35} strokeLinejoin="round" pointerEvents="none" />
     );
   else {
     const dark = "#1d2126";
-    const rad = ((pos.a || 0) * Math.PI) / 180;
     body = (
       <g pointerEvents="none">
-        {selected && <circle cx={pos.x} cy={pos.y} r={4.6} fill="none" stroke="#ffd447" strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
-        <g transform={`translate(${pos.x} ${pos.y}) rotate(${pos.a || 0})`}>
-          <path d="M -0.7 -1.5 L -3.1 -3.0" stroke={dark} strokeWidth={1.0} strokeLinecap="round" />
-          <path d="M -0.7 1.5 L -3.1 3.0" stroke={dark} strokeWidth={1.0} strokeLinecap="round" />
-          <path d="M -2.7 -2.75 L -3.7 -3.35" stroke="#dfe7ee" strokeWidth={0.28} strokeLinecap="round" />
-          <path d="M -2.7 2.75 L -3.7 3.35" stroke="#dfe7ee" strokeWidth={0.28} strokeLinecap="round" />
-          <path d="M 1.3 0 C 1.3 -2.2 0.6 -3.2 -0.5 -3.3 C -2.0 -3.4 -2.8 -2.2 -2.8 -1.1 L -2.8 1.1 C -2.8 2.2 -2.0 3.4 -0.5 3.3 C 0.6 3.2 1.3 2.2 1.3 0 Z"
-            fill={p.color} stroke="#fff" strokeWidth={0.32} />
-          <path d="M -1.5 -3.15 Q -0.55 0 -1.5 3.15" fill="none" stroke="#fff" strokeWidth={0.42} opacity={0.75} />
-          <g transform={p.hand === "L" ? "scale(1 -1)" : undefined}>
-            <path d="M -0.3 -2.5 C 0.7 -2.3 1.4 -1.4 1.7 -0.5" fill="none" stroke={p.color} strokeWidth={1.05} strokeLinecap="round" />
-            <path d="M -0.3 2.5 C 0.9 2.4 1.9 2.0 2.6 1.5" fill="none" stroke={p.color} strokeWidth={1.05} strokeLinecap="round" />
-            <path d="M 1.75 -0.35 L 4.35 2.75" stroke={dark} strokeWidth={0.4} strokeLinecap="round" />
-            <path d="M 4.2 2.6 L 5.6 2.45" stroke={dark} strokeWidth={0.8} strokeLinecap="round" />
-            <circle cx={1.8} cy={-0.3} r={0.75} fill={dark} />
-            <circle cx={2.7} cy={1.55} r={0.75} fill={dark} />
-          </g>
-          <circle cx={0.85} cy={0} r={1.55} fill={p.color} />
-          <circle cx={0.85} cy={0} r={1.55} fill="#000" opacity={0.45} />
-          <path d="M 0.1 -1.0 Q 0.9 -1.5 1.7 -1.0" fill="none" stroke="#fff" strokeWidth={0.22} opacity={0.35} />
+        {selected && <circle cx={0} cy={0} r={4.6} fill="none" stroke="#ffd447" strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
+        <path d="M -0.7 -1.5 L -3.1 -3.0" stroke={dark} strokeWidth={1.0} strokeLinecap="round" />
+        <path d="M -0.7 1.5 L -3.1 3.0" stroke={dark} strokeWidth={1.0} strokeLinecap="round" />
+        <path d="M -2.7 -2.75 L -3.7 -3.35" stroke="#dfe7ee" strokeWidth={0.28} strokeLinecap="round" />
+        <path d="M -2.7 2.75 L -3.7 3.35" stroke="#dfe7ee" strokeWidth={0.28} strokeLinecap="round" />
+        <path d="M 1.3 0 C 1.3 -2.2 0.6 -3.2 -0.5 -3.3 C -2.0 -3.4 -2.8 -2.2 -2.8 -1.1 L -2.8 1.1 C -2.8 2.2 -2.0 3.4 -0.5 3.3 C 0.6 3.2 1.3 2.2 1.3 0 Z"
+          fill={p.color} stroke="#fff" strokeWidth={0.32} />
+        <path d="M -1.5 -3.15 Q -0.55 0 -1.5 3.15" fill="none" stroke="#fff" strokeWidth={0.42} opacity={0.75} />
+        <g transform={p.hand === "L" ? "scale(1 -1)" : undefined}>
+          <path d="M -0.3 -2.5 C 0.7 -2.3 1.4 -1.4 1.7 -0.5" fill="none" stroke={p.color} strokeWidth={1.05} strokeLinecap="round" />
+          <path d="M -0.3 2.5 C 0.9 2.4 1.9 2.0 2.6 1.5" fill="none" stroke={p.color} strokeWidth={1.05} strokeLinecap="round" />
+          <path d="M 1.75 -0.35 L 4.35 2.75" stroke={dark} strokeWidth={0.4} strokeLinecap="round" />
+          <path d="M 4.2 2.6 L 5.6 2.45" stroke={dark} strokeWidth={0.8} strokeLinecap="round" />
+          <circle cx={1.8} cy={-0.3} r={0.75} fill={dark} />
+          <circle cx={2.7} cy={1.55} r={0.75} fill={dark} />
         </g>
-        <text x={pos.x - 1.7 * Math.cos(rad)} y={pos.y - 1.7 * Math.sin(rad) + 0.92}
-          transform={screenRot ? `rotate(${-screenRot} ${pos.x - 1.7 * Math.cos(rad)} ${pos.y - 1.7 * Math.sin(rad)})` : undefined}
+        <circle cx={0.85} cy={0} r={1.55} fill={p.color} />
+        <circle cx={0.85} cy={0} r={1.55} fill="#000" opacity={0.45} />
+        <path d="M 0.1 -1.0 Q 0.9 -1.5 1.7 -1.0" fill="none" stroke="#fff" strokeWidth={0.22} opacity={0.35} />
+        <text x={-1.7} y={0.92} transform={`rotate(${-thDeg} -1.7 0)`}
           textAnchor="middle" fontSize={2.5} fontWeight={800} fill="#fff"
           style={{ userSelect: "none", fontFamily: "system-ui, sans-serif",
             paintOrder: "stroke", stroke: "rgba(0,0,0,0.55)", strokeWidth: 0.3 }}>
@@ -398,7 +395,16 @@ function PieceIcon({ p, pos, onDown, selected, dim, screenRot = 0, onStickDown }
       </g>
     );
   }
-  return <g opacity={dim ? 0.92 : 1}>{body}{hit}{stickHit}</g>;
+  return (
+    <g opacity={dim ? 0.92 : 1} transform={frame}>
+      {body}
+      <circle cx={0} cy={0} r={5.5} fill="transparent" onPointerDown={onDown} style={{ cursor: "grab" }} />
+      {onStickDown && p.kind === "player" && (
+        <circle cx={4.7} cy={p.hand === "L" ? -2.55 : 2.55} r={2.7} fill="transparent"
+          style={{ cursor: "grab" }} onPointerDown={onStickDown} />
+      )}
+    </g>
+  );
 }
 
 /* ---------------- stepper ---------------- */
@@ -453,6 +459,28 @@ export default function DrillAnimator() {
   useEffect(() => { setPopOff({ x: 0, y: 0 }); },
     [popup?.type, popup?.id, popup?.seg, popup?.pt?.x, popup?.pt?.y]);
 
+  // keep popouts fully inside the ice box: after every render, measure the
+  // card against its container and pull it back in with a corrective margin
+  // (margins compose with the anchor transform without fighting it)
+  const popRef = useRef(null);
+  useLayoutEffect(() => {
+    const el = popRef.current;
+    const box = el && el.parentElement;
+    if (!el || !box) return;
+    el.style.marginLeft = "0px";
+    el.style.marginTop = "0px";
+    const r = el.getBoundingClientRect();
+    const b = box.getBoundingClientRect();
+    const M = 4;
+    let dx = 0, dy = 0;
+    if (r.left < b.left + M) dx = b.left + M - r.left;
+    else if (r.right > b.right - M) dx = b.right - M - r.right;
+    if (r.top < b.top + M) dy = b.top + M - r.top;
+    else if (r.bottom > b.bottom - M) dy = b.bottom - M - r.bottom;
+    if (dx) el.style.marginLeft = dx + "px";
+    if (dy) el.style.marginTop = dy + "px";
+  });
+
   function popDragStart(e) {
     e.stopPropagation();
     e.preventDefault();
@@ -465,6 +493,31 @@ export default function DrillAnimator() {
     setPopOff({ x: d.ox + e.clientX - d.sx, y: d.oy + e.clientY - d.sy });
   }
   function popDragEnd() { popDrag.current = null; }
+
+  /* ----- draggable play dock ----- */
+  const [playPos, setPlayPos] = useState(null);
+  const playRef = useRef(null);
+  const playDrag = useRef(null);
+  function playDragStart(e) {
+    e.stopPropagation();
+    e.preventDefault();
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    const root = playRef.current && playRef.current.parentElement;
+    if (!root) return;
+    const rr = root.getBoundingClientRect();
+    const r = playRef.current.getBoundingClientRect();
+    playDrag.current = { sx: e.clientX, sy: e.clientY, x: r.left - rr.left, y: r.top - rr.top,
+      w: r.width, h: r.height, rw: rr.width, rh: rr.height };
+  }
+  function playDragMove(e) {
+    const d = playDrag.current;
+    if (!d) return;
+    setPlayPos({
+      x: Math.max(4, Math.min(d.rw - d.w - 4, d.x + e.clientX - d.sx)),
+      y: Math.max(4, Math.min(d.rh - d.h - 4, d.y + e.clientY - d.sy)),
+    });
+  }
+  function playDragEnd() { playDrag.current = null; }
 
   /* ----- full-screen fit: size the canvas to the rink's aspect ----- */
   useEffect(() => {
@@ -490,6 +543,43 @@ export default function DrillAnimator() {
   // maps rink coords into the rotated viewBox: (x,y) -> (my+vh-y, x-mx)
   const sceneTransform = rotated ? `rotate(90) translate(${-mxF} ${-(myF + vhF)})` : undefined;
   const screenRot = rotated ? 90 : 0;
+  // roundness correction: the fill-mode stretch scales the two rink axes
+  // differently; circles are drawn as ellipses with ry scaled by yFix so
+  // they render perfectly round on screen after the stretch
+  const yFix = (() => {
+    const sx = rotated ? canvasH / vwF : canvasW / vwF;
+    const sy = rotated ? canvasW / vhF : canvasH / vhF;
+    return sy > 0 ? Math.max(0.2, Math.min(5, sx / sy)) : 1;
+  })();
+  // screen-true icon frames: the fill-mode stretch (and scene rotation)
+  // squish icons and shear them at diagonal headings. Each icon is drawn
+  // inside a matrix that cancels the local stretch and re-applies its
+  // heading as a pure screen rotation at a uniform scale (geometric mean
+  // of the two axis scales, so sizes stay consistent in any orientation).
+  const iconGeom = (() => {
+    const Sx = Math.max(1e-6, rotated ? canvasH / vwF : canvasW / vwF);
+    const Sy = Math.max(1e-6, rotated ? canvasW / vhF : canvasH / vhF);
+    return { Sx, Sy, k: Math.sqrt(Sx * Sy) };
+  })();
+  function iconXf(pos) {
+    const { Sx, Sy, k } = iconGeom;
+    const a = ((pos.a || 0) * Math.PI) / 180;
+    const c = Math.cos(a), s = Math.sin(a);
+    const th = rotated ? Math.atan2(Sx * c, -Sy * s) : Math.atan2(Sy * s, Sx * c);
+    const ct = Math.cos(th), st = Math.sin(th);
+    let m00, m01, m10, m11;
+    if (rotated) {
+      m00 = (k * st) / Sx; m01 = (k * ct) / Sx;
+      m10 = (-k * ct) / Sy; m11 = (k * st) / Sy;
+    } else {
+      m00 = (k * ct) / Sx; m01 = (-k * st) / Sx;
+      m10 = (k * st) / Sy; m11 = (k * ct) / Sy;
+    }
+    return {
+      t: `translate(${pos.x} ${pos.y}) matrix(${m00} ${m10} ${m01} ${m11} 0 0)`,
+      th: (th * 180) / Math.PI,
+    };
+  }
 
   /* ----- timing ----- */
   function segLen(id, i) {
@@ -546,12 +636,25 @@ export default function DrillAnimator() {
     const plans = {};
     const rel = {};
     pieces.forEach(pk => {
-      if (pk.kind !== "puck" || !pk.carrier) return;
-      let cur = pieces.find(q => q.id === pk.carrier && q.kind === "player");
-      if (!cur) return;
+      if (pk.kind !== "puck") return;
       const vPass = () => pace * SPEED.pass * (pk.speed || 1);
-      const legs = [{ type: "ride", id: cur.id, t0: 0 }];
+      const legs = [];
+      let cur = null;
       let tBase = 0;
+      if (pk.carrier) {
+        cur = pieces.find(q => q.id === pk.carrier && q.kind === "player");
+        if (!cur) return;
+        legs.push({ type: "ride", id: cur.id, t0: 0 });
+      } else if (pk.pickup) {
+        const pl = pieces.find(q => q.id === pk.pickup.to && q.kind === "player");
+        if (!pl || !pl.path.length) return;
+        const atIdx = Math.max(0, Math.min(pk.pickup.at, pl.path.length - 1));
+        const tPick = routeTimeW(pl, warp, atIdx);
+        legs.push({ type: "free", t0: 0 });
+        legs.push({ type: "ride", id: pl.id, t0: tPick });
+        cur = pl;
+        tBase = tPick;
+      } else return;
       (pk.transfers || []).forEach(tr => {
         const rec = pieces.find(q => q.id === tr.to && q.kind === "player");
         if (!rec || rec.id === cur.id || !cur.path.length) return;
@@ -600,7 +703,7 @@ export default function DrillAnimator() {
         tBase = tArr;
       }
       let relT = Infinity;
-      if (pk.path.length && pk.shotAt == null) {
+      if (pk.path.length && pk.shotAt == null && !pk.pickup) {
         const finish = Math.max(tBase + 0.01, routeTimeW(cur, warp));
         relT = finish;
         const step = Math.max(0.03, (finish - tBase) / 200);
@@ -621,7 +724,7 @@ export default function DrillAnimator() {
     if (p.kind === "puck") {
       const pl = plans[p.id];
       if (pl) {
-        if (p.path.length && p.shotAt == null) return rel[p.id] + routeTimeW(p, warp);
+        if (p.path.length && p.shotAt == null && !p.pickup) return rel[p.id] + routeTimeW(p, warp);
         const fin = pieces.find(q => q.id === pl.final);
         const lastT = pl.legs[pl.legs.length - 1].t0;
         return fin ? Math.max(lastT, routeTimeW(fin, warp)) : lastT;
@@ -720,6 +823,7 @@ export default function DrillAnimator() {
           const k = Math.max(0, Math.min(1, (e - leg.t0) / Math.max(0.001, leg.t1 - leg.t0)));
           return { x: leg.x0 + (leg.x1 - leg.x0) * k, y: leg.y0 + (leg.y1 - leg.y0) * k, a: 0 };
         }
+        if (leg.type === "free") return routePosAt(p, e, warp);
         if (leg.type === "fly") return { x: leg.x1, y: leg.y1, a: 0 };
         if (leg.type === "rest") return { x: leg.x, y: leg.y, a: 0 };
         const car = pieces.find(q => q.id === leg.id);
@@ -770,7 +874,7 @@ export default function DrillAnimator() {
     const id = nextId(kind);
     const colorIdx = pieces.filter(p => p.kind === "player").length % COLORS.length;
     return {
-      id, kind, x: pt.x, y: pt.y, speed: 1, hand: "R", carrier: null, facing: 0, transfers: [], shotAt: null,
+      id, kind, x: pt.x, y: pt.y, speed: 1, hand: "R", carrier: null, facing: 0, transfers: [], shotAt: null, pickup: null,
       color: kind === "player" ? COLORS[colorIdx] : kind === "cone" ? "#e0731d" : "#14171a",
       label: kind === "player" ? id : "", path: [],
     };
@@ -799,7 +903,8 @@ export default function DrillAnimator() {
 
   /* ----- puck handoffs ----- */
   function puckChain(pk) {
-    return [pk.carrier, ...(pk.transfers || []).map(t => t.to)].filter(Boolean);
+    const head = pk.carrier || (pk.pickup && pk.pickup.to) || null;
+    return [head, ...(pk.transfers || []).map(t => t.to)].filter(Boolean);
   }
   function setTransfer(pkId, stage, tr) {
     update(q => {
@@ -809,10 +914,10 @@ export default function DrillAnimator() {
       return { ...q, transfers: ts, shotAt: null };
     });
   }
-  function setRecvAt(pkId, toId, idx) {
+  function setRecvAt(pkId, trIdx, idx) {
     update(q => {
       if (q.id !== pkId) return q;
-      const ts = (q.transfers || []).map(t => (t.to === toId ? { ...t, recvAt: idx } : t));
+      const ts = (q.transfers || []).map((t, k) => (k === trIdx ? { ...t, recvAt: idx } : t));
       return { ...q, transfers: ts };
     });
   }
@@ -995,6 +1100,12 @@ export default function DrillAnimator() {
       d.last = pt;
       update(p => {
         if (p.id !== d.id) return p;
+        if (d.line == null) {
+          // dragging the piece itself moves only the route's start point —
+          // the piece is waypoint zero; the rest of the route stays anchored
+          return { ...p, x: clampX(p.x + dx), y: clampY(p.y + dy) };
+        }
+        // dragging a route line slides the whole piece + route together
         const mv = s => {
           const s2 = { ...s, x: clampX(s.x + dx), y: clampY(s.y + dy) };
           if (s.type === "Q") { s2.cx = clampX(s.cx + dx); s2.cy = clampY(s.cy + dy); }
@@ -1336,12 +1447,46 @@ export default function DrillAnimator() {
             <div className="hd-poprow" style={{ color: "#8b99a8", fontSize: 12 }}>End of route</div>
           )}
           {p.kind === "player" && (() => {
+            const free = pieces.filter(q => q.kind === "puck" && !q.carrier);
+            if (!free.length) return null;
+            return (
+              <div className="hd-poprow">
+                <span>Get puck</span>
+                {free.map(q => {
+                  const on = q.pickup && q.pickup.to === p.id && q.pickup.at === i;
+                  const same = q.pickup && q.pickup.to === p.id;
+                  return (
+                    <button key={q.id} className={`hd-mini${on ? " on" : ""}`}
+                      onClick={() => updateById(q.id, on
+                        ? { pickup: null, transfers: [], shotAt: null }
+                        : { pickup: { to: p.id, at: i },
+                            ...(same ? {} : { transfers: [], shotAt: null }) })}>
+                      {q.id}
+                    </button>
+                  );
+                })}
+              </div>
+            );
+          })()}
+          {p.kind === "player" && (() => {
             const pk = pieces.find(q => q.kind === "puck" && puckChain(q).includes(p.id));
             if (!pk) return null;
             const chain = puckChain(pk);
-            const stage = chain.indexOf(p.id);
-            const from = (pk.transfers || [])[stage];
-            const incoming = (pk.transfers || []).find(t => t.to === p.id);
+            const ts = pk.transfers || [];
+            // resolve which POSSESSION this point belongs to: a player can
+            // hold the puck several times in one chain (give-and-go), so
+            // prefer an exact match on an existing pass at this point, else
+            // the latest possession whose window can contain this point
+            let stage = -1;
+            for (let s = 0; s < chain.length; s++) {
+              if (chain[s] !== p.id) continue;
+              const out = ts[s];
+              if (out && out.at === i) { stage = s; break; }
+              if (!out || i <= out.at) stage = s;
+            }
+            if (stage < 0) return null;
+            const from = ts[stage];
+            const incoming = stage >= 1 ? ts[stage - 1] : null;
             const others = pieces.filter(q => q.kind === "player" && q.id !== p.id);
             return (
               <>
@@ -1372,7 +1517,7 @@ export default function DrillAnimator() {
                 {incoming && p.path.length > 0 && (
                   <div className="hd-poprow">
                     <button className={`hd-mini${incoming.recvAt === i ? " on" : ""}`}
-                      onClick={() => setRecvAt(pk.id, p.id, incoming.recvAt === i ? null : i)}>
+                      onClick={() => setRecvAt(pk.id, stage - 1, incoming.recvAt === i ? null : i)}>
                       {incoming.recvAt === i ? "✓ Receiving here" : "Receive pass here"}
                     </button>
                     {incoming.recvAt === i && (
@@ -1402,7 +1547,7 @@ export default function DrillAnimator() {
       ...(up ? { bottom: `${100 - a.ty + 4}%` } : { top: `${a.ty + 4}%` }),
     };
     return (
-      <div className={`hd-pop${up ? " up" : ""}`} style={style}
+      <div className={`hd-pop${up ? " up" : ""}`} style={style} ref={popRef}
         onPointerDown={e => e.stopPropagation()}>
         <div className="hd-pophead"
           onPointerDown={popDragStart} onPointerMove={popDragMove}
@@ -1464,10 +1609,13 @@ export default function DrillAnimator() {
           )}
           {selected && renderHandles(selected)}
           {selected && renderRotateHandle(selected)}
-          {pieces.map(p => (
-            <PieceIcon key={`lp${p.id}`} p={p} pos={displayPos(p)} selected={p.id === selectedId}
-              dim={animT > 0} screenRot={screenRot} onDown={() => {}} />
-          ))}
+          {pieces.map(p => {
+            const dp = displayPos(p);
+            return (
+              <PieceIcon key={`lp${p.id}`} p={p} pos={dp} thDeg={(dp.a || 0) + screenRot}
+                selected={p.id === selectedId} dim={animT > 0} onDown={() => {}} />
+            );
+          })}
           <circle cx={loupe.x} cy={loupe.y} r={1.1} fill="none" stroke="#d7263d" strokeWidth={0.25} />
           <line x1={loupe.x - 2} y1={loupe.y} x2={loupe.x + 2} y2={loupe.y} stroke="#d7263d" strokeWidth={0.18} />
           <line x1={loupe.x} y1={loupe.y - 2} x2={loupe.x} y2={loupe.y + 2} stroke="#d7263d" strokeWidth={0.18} />
@@ -1492,7 +1640,7 @@ export default function DrillAnimator() {
            opaque system bar there that web content cannot render under */
         .hd-stage { position:absolute; top:env(safe-area-inset-top, 0px);
           left:env(safe-area-inset-left, 0px); right:env(safe-area-inset-right, 0px);
-          bottom:env(safe-area-inset-bottom, 0px); display:flex; align-items:center; justify-content:center; }
+          bottom:calc(54px + env(safe-area-inset-bottom, 0px)); display:flex; align-items:center; justify-content:center; }
         .hd-canvas { position:relative; }
         .hd-canvas svg.hd-ice { width:100%; height:100%; display:block; }
         .hd-stage, .hd-canvas, .hd-canvas svg, .hd-canvas svg * { touch-action:none;
@@ -1506,20 +1654,34 @@ export default function DrillAnimator() {
         .hd-fab.draw-on { background:#b58900; border-color:#b58900; }
         .hd-fab.play { background:#d7263d; border-color:#d7263d; color:#fff; }
         .hd-fab small { font-size:10px; font-weight:800; letter-spacing:.05em; }
-        /* top controls clear the Dynamic Island / status bar entirely:
-           safe-area-inset-top pushes them below it in standalone mode,
-           with a 10px floor when the browser manages the status bar */
-        .hd-tl { top:max(10px, env(safe-area-inset-top)); left:calc(10px + env(safe-area-inset-left)); }
-        .hd-tr { top:max(10px, env(safe-area-inset-top)); right:calc(10px + env(safe-area-inset-right)); }
-        .hd-tr2 { top:max(10px, env(safe-area-inset-top)); right:calc(64px + env(safe-area-inset-right)); }
-        .hd-bl { bottom:calc(10px + env(safe-area-inset-bottom)); left:calc(10px + env(safe-area-inset-left)); }
-        .hd-br { bottom:calc(10px + env(safe-area-inset-bottom)); right:calc(10px + env(safe-area-inset-right)); }
+        .hd-fab.small { position:static; width:38px; height:38px; box-shadow:none; font-size:16px; }
+        /* draggable play dock — floats over the ice, movable by its grip */
+        .hd-playdock { position:absolute; z-index:46; top:max(10px, env(safe-area-inset-top));
+          left:50%; transform:translateX(-50%);
+          display:flex; align-items:center; gap:6px; padding:4px 6px 4px 8px;
+          background:rgba(23,29,37,.9); border:1px solid #33404f; border-radius:999px;
+          box-shadow:0 4px 14px rgba(0,0,0,.45); backdrop-filter:blur(4px); touch-action:none; }
+        .hd-playdock .hd-grip { cursor:grab; padding:6px 4px; font-size:15px; }
+        .hd-playdock .hd-grip:active { cursor:grabbing; }
+        /* bottom menu bar — owns the chrome so the ice stays clear */
+        .hd-bar { position:absolute; z-index:44; left:env(safe-area-inset-left, 0px);
+          right:env(safe-area-inset-right, 0px); bottom:env(safe-area-inset-bottom, 0px);
+          height:54px; display:flex; align-items:center; gap:8px; padding:0 10px;
+          background:#11161c; border-top:1px solid #2a3542; }
+        .hd-barbtn { width:46px; height:40px; border-radius:10px; background:#1b232c;
+          border:1px solid #33404f; color:#dbe4ec; font-size:17px; display:flex;
+          align-items:center; justify-content:center; cursor:pointer; flex:none; }
+        .hd-barbtn.on { background:#1f4fa3; border-color:#1f4fa3; }
+        .hd-barbtn.draw-on { background:#b58900; border-color:#b58900; }
+        .hd-barbtn small { font-size:10px; font-weight:800; letter-spacing:.05em; }
+        .hd-barhint { flex:1; min-width:0; font-size:12px; color:#8b99a8; text-align:right;
+          white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
         /* corner menus */
         .hd-menu { position:absolute; z-index:45; background:#1a222c; border:1px solid #33404f;
           border-radius:12px; padding:10px 12px; box-shadow:0 8px 24px rgba(0,0,0,.5);
           display:flex; flex-direction:column; gap:8px; width:230px; max-height:70vh; overflow-y:auto; }
-        .hd-menu.tl { top:calc(max(10px, env(safe-area-inset-top)) + 52px); left:calc(10px + env(safe-area-inset-left)); }
-        .hd-menu.bl { bottom:calc(62px + env(safe-area-inset-bottom)); left:calc(10px + env(safe-area-inset-left)); }
+        .hd-menu.tl { bottom:calc(62px + env(safe-area-inset-bottom)); left:calc(10px + env(safe-area-inset-left)); }
+        .hd-menu.bl { bottom:calc(62px + env(safe-area-inset-bottom)); left:calc(66px + env(safe-area-inset-left)); }
         .hd-menu.br { bottom:calc(62px + env(safe-area-inset-bottom)); right:calc(10px + env(safe-area-inset-right)); }
         .hd-mh { font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:#8b99a8; }
         .hd-item { display:flex; align-items:center; gap:8px; padding:9px 10px; font-size:14px;
@@ -1528,11 +1690,7 @@ export default function DrillAnimator() {
         .hd-item.on { background:#1f4fa3; border-color:#1f4fa3; color:#fff; }
         .hd-note { font-size:11.5px; color:#7d8b99; line-height:1.5; }
         .hd-note code { color:#a8c3da; }
-        /* hint pill */
-        .hd-pill { position:absolute; z-index:35; left:50%; transform:translateX(-50%);
-          bottom:calc(14px + env(safe-area-inset-bottom)); background:rgba(23,29,37,.9);
-          border:1px solid #33404f; color:#dbe4ec; font-size:12.5px; padding:8px 14px;
-          border-radius:999px; pointer-events:none; white-space:nowrap; }
+        /* hint text lives in the bottom bar */
         /* text sheet */
         .hd-sheet { position:absolute; inset:0; z-index:50; background:rgba(10,13,17,.96);
           display:flex; flex-direction:column; gap:10px; padding:16px;
@@ -1554,7 +1712,8 @@ export default function DrillAnimator() {
         input[type=range] { accent-color:#d7263d; height:30px; }
         .hd-pop { position:absolute; z-index:20; width:220px; background:#1a222c; border:1px solid #33404f;
           border-radius:12px; padding:10px 12px; box-shadow:0 8px 24px rgba(0,0,0,.5);
-          display:flex; flex-direction:column; gap:8px; }
+          display:flex; flex-direction:column; gap:8px;
+          max-height:calc(100% - 8px); overflow-y:auto; overscroll-behavior:contain; }
         .hd-pophead { display:flex; align-items:center; gap:6px; font-size:12px; font-weight:700;
           letter-spacing:.06em; text-transform:uppercase; color:#aab7c4;
           cursor:grab; touch-action:none; user-select:none; -webkit-user-select:none;
@@ -1586,7 +1745,7 @@ export default function DrillAnimator() {
             onPointerDown={onSvgDown} onPointerMove={onSvgMove}
             onPointerUp={onSvgUp} onPointerCancel={onSvgUp}>
             <defs>
-              <clipPath id="boards"><rect x={0.5} y={0.5} width={199} height={84} rx={27.5} /></clipPath>
+              <clipPath id="boards"><rect x={0.5} y={0.5} width={199} height={84} rx={27.5} ry={27.5 * yFix} /></clipPath>
               {pieces.map(p => (
                 <marker key={p.id} id={`arr-${p.id}`} viewBox="0 0 10 10" refX="8" refY="5"
                   markerWidth="5" markerHeight="5" orient="auto-start-reverse">
@@ -1596,7 +1755,7 @@ export default function DrillAnimator() {
             </defs>
 
             <g ref={sceneRef} transform={sceneTransform}>
-            <RinkMarkings />
+            <RinkMarkings yFix={yFix} />
 
             {pieces.map(p => {
               let prev = { x: p.x, y: p.y };
@@ -1655,12 +1814,17 @@ export default function DrillAnimator() {
             {pieces.map(p => <g key={`h-${p.id}`}>{renderHandles(p)}</g>)}
             {selected && renderRotateHandle(selected)}
 
-            {pieces.map(p => (
-              <PieceIcon key={p.id} p={p} pos={displayPos(p)} selected={p.id === selectedId}
-                dim={animT > 0} screenRot={screenRot} onDown={e => pieceDown(e, p.id)}
-                onStickDown={editing && tool !== "draw" && p.kind === "player" && !p.path.length
-                  ? e => stickDown(e, p) : undefined} />
-            ))}
+            {pieces.map(p => {
+              const dp = displayPos(p);
+              const fx = iconXf(dp);
+              return (
+                <PieceIcon key={p.id} p={p} pos={dp} xf={fx.t} thDeg={fx.th}
+                  selected={p.id === selectedId}
+                  dim={animT > 0} onDown={e => pieceDown(e, p.id)}
+                  onStickDown={editing && tool !== "draw" && p.kind === "player" && !p.path.length
+                    ? e => stickDown(e, p) : undefined} />
+              );
+            })}
             </g>
           </svg>
           {renderPopout()}
@@ -1668,25 +1832,30 @@ export default function DrillAnimator() {
         </div>
       </div>
 
-      {/* ---------- floating controls ---------- */}
-      <button className={`hd-fab hd-tl${openMenu === "settings" ? " on" : ""}`}
-        onClick={() => setOpenMenu(m => (m === "settings" ? null : "settings"))}>☰</button>
+      {/* ---------- draggable play dock ---------- */}
+      <div className="hd-playdock" ref={playRef}
+        style={playPos ? { left: playPos.x, top: playPos.y, transform: "none" } : undefined}>
+        <span className="hd-grip" onPointerDown={playDragStart} onPointerMove={playDragMove}
+          onPointerUp={playDragEnd} onPointerCancel={playDragEnd}>⠿</span>
+        <button className="hd-fab small play"
+          onClick={() => { if (animT >= 1) resetAnim(); setPopup(null); setOpenMenu(null); setPlaying(p => !p); }}>
+          {playing ? "❚❚" : "▶"}
+        </button>
+        <button className="hd-fab small" onClick={() => { setPlaying(false); resetAnim(); }}>⟲</button>
+      </div>
 
-      <button className="hd-fab hd-tr play"
-        onClick={() => { if (animT >= 1) resetAnim(); setPopup(null); setOpenMenu(null); setPlaying(p => !p); }}>
-        {playing ? "❚❚" : "▶"}
-      </button>
-      <button className="hd-fab hd-tr2" onClick={() => { setPlaying(false); resetAnim(); }}>⟲</button>
-
-      <button className={`hd-fab hd-bl${openMenu === "rinkmenu" ? " on" : ""}`}
-        onClick={() => setOpenMenu(m => (m === "rinkmenu" ? null : "rinkmenu"))}>
-        <small>{rink === "full" ? "FULL" : rink === "half" ? "½" : "¼"}</small>
-      </button>
-
-      <button className={`hd-fab hd-br${tool === "draw" ? " draw-on" : openMenu === "tools" ? " on" : ""}`}
-        onClick={() => setOpenMenu(m => (m === "tools" ? null : "tools"))}>✎</button>
-
-      {toolHint && <div className="hd-pill">{toolHint}</div>}
+      {/* ---------- bottom menu bar ---------- */}
+      <div className="hd-bar">
+        <button className={`hd-barbtn${openMenu === "settings" ? " on" : ""}`}
+          onClick={() => setOpenMenu(m => (m === "settings" ? null : "settings"))}>☰</button>
+        <button className={`hd-barbtn${openMenu === "rinkmenu" ? " on" : ""}`}
+          onClick={() => setOpenMenu(m => (m === "rinkmenu" ? null : "rinkmenu"))}>
+          <small>{rink === "full" ? "FULL" : rink === "half" ? "½" : "¼"}</small>
+        </button>
+        <button className={`hd-barbtn${tool === "draw" ? " draw-on" : openMenu === "tools" ? " on" : ""}`}
+          onClick={() => setOpenMenu(m => (m === "tools" ? null : "tools"))}>✎</button>
+        <div className="hd-barhint">{toolHint || ""}</div>
+      </div>
 
       {/* ---------- menus ---------- */}
       {openMenu === "settings" && (
@@ -1756,6 +1925,7 @@ export default function DrillAnimator() {
             <code> pass=2:F2@3</code> passes at the carrier's point 2 to F2, received at F2's
             point 3 — the receiver's pace auto-syncs (omit <code>@3</code> to lead them instead).
             <code> shoot=4</code> fires at the nearest net when the final carrier reaches point 4.
+            <code> pickup=F2@3</code> — a loose puck hops onto F2's blade at their point 3.
             <code> face=45</code> sets a stationary player's heading (degrees).
           </div>
         </div>
