@@ -41,9 +41,56 @@ const COLORS = ["#d7263d", "#1f4fa3", "#1f8a4c", "#e0731d", "#22262b", "#7a3fa8"
 const SPEED = { carry: 1, pass: 3, shot: 6 };
 const vb = m => VIEWS[m].join(" ");
 
-const APP_VERSION = "1.7";
+const APP_VERSION = "1.8";
 // build stamp injected by vite.config.js `define`; "dev" when run standalone
 const BUILD_STAMP = typeof __BUILD_STAMP__ !== "undefined" ? __BUILD_STAMP__ : "dev";
+
+/* ---------------- diagnostics overlay (toggled from ☰ menu) ---------------- */
+
+function DiagPanel() {
+  const probeRef = useRef(null);
+  const [txt, setTxt] = useState("");
+  useEffect(() => {
+    const tick = () => {
+      const cs = probeRef.current ? getComputedStyle(probeRef.current) : null;
+      const vv = window.visualViewport;
+      const g = sel => {
+        const el = document.querySelector(sel);
+        if (!el) return "n/a";
+        const b = el.getBoundingClientRect();
+        return `${Math.round(b.height)} bot${Math.round(b.bottom)}`;
+      };
+      const standalone = navigator.standalone === true ||
+        (window.matchMedia && matchMedia("(display-mode: standalone)").matches);
+      setTxt(
+        `v${APP_VERSION} · ${BUILD_STAMP}\n` +
+        `mode   ${standalone ? "standalone" : "browser"}\n` +
+        `inner  ${window.innerWidth}x${window.innerHeight}\n` +
+        `vv     ${vv ? Math.round(vv.width) + "x" + Math.round(vv.height) + " ot" + Math.round(vv.offsetTop) : "n/a"}\n` +
+        `screen ${screen.width}x${screen.height}\n` +
+        `safe   t${cs ? cs.paddingTop : "?"} b${cs ? cs.paddingBottom : "?"}\n` +
+        `root   ${g(".hd-root")}\n` +
+        `stage  ${g(".hd-stage")}\n` +
+        `ice    ${g(".hd-canvas")}`
+      );
+    };
+    tick();
+    const id = setInterval(tick, 500);
+    return () => clearInterval(id);
+  }, []);
+  return (
+    <>
+      <div ref={probeRef} style={{ position: "fixed", visibility: "hidden",
+        paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }} />
+      <div style={{ position: "fixed", left: 8, top: 120, zIndex: 9999,
+        background: "rgba(0,0,0,.78)", color: "#7CFC00",
+        font: "11px ui-monospace, monospace", padding: "6px 8px",
+        borderRadius: 6, pointerEvents: "none", whiteSpace: "pre" }}>
+        {txt}
+      </div>
+    </>
+  );
+}
 
 const DEFAULT_TEXT = `RINK full
 `;
@@ -530,6 +577,7 @@ export default function DrillAnimator() {
 
   /* ----- draggable play dock ----- */
   const [playPos, setPlayPos] = useState(null);
+  const [showDiag, setShowDiag] = useState(false);
   const playRef = useRef(null);
   const playDrag = useRef(null);
   function playDragStart(e) {
@@ -1901,6 +1949,10 @@ export default function DrillAnimator() {
           <button className="hd-item" onClick={openText}>⌨ Text editor</button>
           <button className="hd-item" onClick={() => { exportTxt(); setOpenMenu(null); }}>⇩ Export .txt</button>
           <button className="hd-item" onClick={() => fileRef.current?.click()}>⇧ Load .txt</button>
+          <button className={`hd-item${showDiag ? " on" : ""}`}
+            onClick={() => { setShowDiag(s => !s); setOpenMenu(null); }}>
+            ◫ Diagnostics {showDiag ? "(on)" : ""}
+          </button>
           <div className="hd-mh" style={{ marginTop: 4 }}>Pace</div>
           <div style={{ fontSize: 12, color: "#8b99a8" }}>
             {pace} ft/s · run {totalTime.toFixed(1)}s
@@ -1969,6 +2021,7 @@ export default function DrillAnimator() {
       )}
 
       <input ref={fileRef} type="file" accept=".txt,text/plain" style={{ display: "none" }} onChange={importTxt} />
+      {showDiag && <DiagPanel />}
     </div>
   );
 }
