@@ -155,26 +155,50 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
     }
     return routeTimeW(p, warp);
   }
-  // position/heading along a piece's own route at elapsed e (warp-aware)
+  // trapezoidal (constant-accel) time→distance easing within a leg. a/b are the
+  // fraction of the leg spent ramping up / down; they preserve the leg's total
+  // duration (so routeTimeW / pass sync are untouched) while shaping velocity.
+  // Returns eased arc fraction s and normalized speed v (0 at rest, 1 cruising).
+  const RAMP = 0.4;
+  function easeLeg(u, a, b) {
+    if (a <= 0 && b <= 0) return { s: u, v: 1 };
+    const vmax = 1 / (1 - (a + b) / 2);
+    if (a > 0 && u < a) return { s: (vmax * u * u) / (2 * a), v: u / a };
+    if (b > 0 && u > 1 - b) {
+      const w = u - (1 - b);
+      return { s: vmax * (1 - b - a / 2 + w - (w * w) / (2 * b)), v: (b - w) / b };
+    }
+    return { s: vmax * (u - a / 2), v: 1 };
+  }
+
+  // position/heading along a piece's own route at elapsed e (warp-aware).
+  // Also returns v (normalized speed) and dist (feet travelled) for stride FX.
   function routePosAt(p, e, warp) {
     const flip = s => (s.dir === "bwd" ? 180 : 0);
-    if (!p.path.length) return { x: p.x, y: p.y, a: p.facing || 0 };
+    if (!p.path.length) return { x: p.x, y: p.y, a: p.facing || 0, v: 0, dist: 0 };
     if (e <= 0) {
       const s0 = p.path[0];
-      return { x: p.x, y: p.y, a: segTangentAngle({ x: p.x, y: p.y }, s0, 0.02) + flip(s0) };
+      return { x: p.x, y: p.y, a: segTangentAngle({ x: p.x, y: p.y }, s0, 0.02) + flip(s0), v: 0, dist: 0 };
     }
     let prev = { x: p.x, y: p.y };
+    let dist = 0;
     for (let i = 0; i < p.path.length; i++) {
       const s = p.path[i];
       const hold = s.stop || 0;
-      if (e < hold) return { ...prev, a: segTangentAngle(prev, s, 0.02) + flip(s) };
+      if (e < hold) return { ...prev, a: segTangentAngle(prev, s, 0.02) + flip(s), v: 0, dist };
       e -= hold;
       const mt = effMove(p, s, i, warp);
+      const el = segRefs.current[`${p.id}/${i}`];
+      let L = 0; try { L = el ? el.getTotalLength() : 0; } catch { L = 0; }
       if (mt > 0 && e < mt) {
-        const el = segRefs.current[`${p.id}/${i}`];
         try {
-          const L = el.getTotalLength();
-          const l = L * (e / mt);
+          // ramp up only when leaving a genuine rest (route start / after a
+          // stop), ramp down only when arriving at one (route end / a stop)
+          const entryRest = i === 0 || (p.path[i].stop || 0) > 0;
+          const nxt = p.path[i + 1];
+          const exitRest = i === p.path.length - 1 || (nxt && (nxt.stop || 0) > 0);
+          const { s: sf, v } = easeLeg(e / mt, entryRest ? RAMP : 0, exitRest ? RAMP : 0);
+          const l = L * sf;
           const pt = el.getPointAtLength(l);
           const q = el.getPointAtLength(Math.min(L, l + 0.6));
           let a;
@@ -184,15 +208,16 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
           } else {
             a = (Math.atan2(q.y - pt.y, q.x - pt.x) * 180) / Math.PI;
           }
-          return { x: pt.x, y: pt.y, a: a + flip(s) };
-        } catch { return { ...prev, a: 0 }; }
+          return { x: pt.x, y: pt.y, a: a + flip(s), v, dist: dist + l };
+        } catch { return { ...prev, a: 0, v: 0, dist }; }
       }
       e -= mt;
+      dist += L;
       prev = { x: s.x, y: s.y };
     }
     const last = p.path[p.path.length - 1];
     const lp = segEnd(p, p.path.length - 2);
-    return { x: last.x, y: last.y, a: segTangentAngle(lp, last, 0.98) + flip(last) };
+    return { x: last.x, y: last.y, a: segTangentAngle(lp, last, 0.98) + flip(last), v: 0, dist };
   }
 
   function displayPosAt(p, e) {

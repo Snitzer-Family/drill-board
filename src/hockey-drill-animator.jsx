@@ -314,8 +314,24 @@ export default function DrillAnimator() {
   }, []);
 
 
+  // skater stride: a lateral weight-shift sway (+ slight edge lean) phased by
+  // distance travelled, scaled by speed so it settles into stops. Display-only
+  // — never fed back into timing or the puck's blade position.
+  const STRIDE_LAMBDA = 11; // ft per full left-right stride cycle
+  const STRIDE_AMP = 0.75;  // ft of lateral sway at full glide
+  const STRIDE_LEAN = 5;    // deg of body lean into each push
   function displayPos(p) {
-    return displayPosAt(p, animT <= 0 ? 0 : animT * totalTime);
+    const dp = displayPosAt(p, animT <= 0 ? 0 : animT * totalTime);
+    if (p.kind !== "player" || !(dp.v > 0.02)) return dp;
+    const phase = (2 * Math.PI * (dp.dist || 0)) / STRIDE_LAMBDA;
+    const sway = Math.sin(phase) * STRIDE_AMP * dp.v;
+    const perp = (((dp.a || 0) + 90) * Math.PI) / 180;
+    return {
+      ...dp,
+      x: clampX(dp.x + Math.cos(perp) * sway),
+      y: clampY(dp.y + Math.sin(perp) * sway),
+      a: (dp.a || 0) + STRIDE_LEAN * Math.cos(phase) * dp.v,
+    };
   }
 
   /* ----- coords ----- */
