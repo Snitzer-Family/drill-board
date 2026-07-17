@@ -85,6 +85,20 @@ export const STYLES = `
         .hd-btn { padding:9px 16px; font-size:13.5px; font-weight:600; border:1px solid #2c3846;
           background:#1b232c; color:#e8edf2; border-radius:8px; cursor:pointer; min-height:40px; }
         .hd-btn.primary { background:#d7263d; border-color:#d7263d; }
+        /* presentation steps editor */
+        .hd-steplist { flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:7px; }
+        .hd-steprow { display:flex; align-items:center; gap:8px; }
+        .hd-steptime { flex:none; width:42px; font-size:11px; color:#7d8b99;
+          font-variant-numeric:tabular-nums; text-align:right; }
+        /* presentation caption — floats above the bottom bar during a hold */
+        .hd-preso { position:absolute; z-index:47; left:50%; transform:translateX(-50%);
+          bottom:calc(64px + var(--hd-b)); max-width:min(560px, 92vw);
+          display:flex; align-items:center; gap:12px; padding:11px 14px;
+          background:rgba(17,22,28,.94); border:1px solid #3a4756; border-radius:12px;
+          box-shadow:0 6px 22px rgba(0,0,0,.5); backdrop-filter:blur(5px); }
+        .hd-preso-text { font-size:15px; font-weight:600; color:#eef4fa; line-height:1.3; }
+        .hd-preso-btn { flex:none; padding:7px 12px; font-size:12.5px; font-weight:700;
+          background:#1f4fa3; border:1px solid #1f4fa3; color:#fff; border-radius:8px; cursor:pointer; }
         /* shared bits */
         .hd-swatch { width:24px; height:24px; border-radius:50%; border:2px solid transparent; cursor:pointer; }
         .hd-swatch.on { border-color:#ffd447; }

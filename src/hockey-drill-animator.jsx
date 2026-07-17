@@ -64,6 +64,11 @@ export default function DrillAnimator() {
   const [pace, setPace] = useState(15);
   // routes shown during playback: "player" (routes only), "hide", "all" (+puck/shots)
   const [playRoutes, setPlayRoutes] = useState("player");
+  // presentation mode: pause at each described step so viewers can read along
+  const [presentation, setPresentation] = useState(false);
+  const [presoDelay, setPresoDelay] = useState(2.5);   // seconds held at each step
+  const [stepNotes, setStepNotes] = useState({});      // key -> hand-edited text
+  const [holdStep, setHoldStep] = useState(null);      // step currently being read
   const [drawPreview, setDrawPreview] = useState(null);
   const [loupe, setLoupe] = useState(null);
   const [popOff, setPopOff] = useState({ x: 0, y: 0 });
@@ -79,6 +84,11 @@ export default function DrillAnimator() {
   const fileRef = useRef(null);
   const animRef = useRef(0);
   const totalRef = useRef(1);
+  const holdRef = useRef(0);        // seconds remaining in the current step hold
+  const nextStepRef = useRef(0);    // index of the next step to pause at
+  const stepsRef = useRef([]);      // presentation steps, mirrored for the raf loop
+  const presoDelayRef = useRef(2.5);
+  const presoRef = useRef(false);
   const popDrag = useRef(null);
   const lastLineTap = useRef(null);
   const lastIceTap = useRef(null); // double-click/tap on empty ice → add menu
@@ -287,14 +297,76 @@ export default function DrillAnimator() {
   const totalTime = Math.max(0.1, ...pieces.map(pieceTime));
   totalRef.current = totalTime;
 
+  // Auto-describe the play's major beats (puck events) as timed steps; the
+  // text is editable and stored per-step in stepNotes.
+  function buildSteps() {
+    const { plans } = getPlan();
+    const nameOf = id => { const q = pieces.find(x => x.id === id); return (q && q.label) || id; };
+    const evs = [];
+    pieces.forEach(pk => {
+      if (pk.kind !== "puck") return;
+      const plan = plans[pk.id];
+      if (!plan) return;
+      plan.legs.forEach((leg, i) => {
+        if (leg.type === "ride" && leg.catch) {
+          const prev = plan.legs[i - 1];
+          const who = nameOf(leg.id);
+          if (prev && prev.type === "free") evs.push({ t: leg.t0, key: `${pk.id}:pickup:${i}`, auto: `${who} picks up the puck` });
+          else if (prev && (prev.type === "rest" || prev.type === "skid")) evs.push({ t: leg.t0, key: `${pk.id}:collect:${i}`, auto: `${who} collects the rebound` });
+          // a normal pass reception (prev is a pass fly) is covered by its pass step
+        } else if (leg.type === "fly") {
+          if (leg.shot) evs.push({ t: leg.t0, key: `${pk.id}:shot:${i}`, auto: `${nameOf(leg.by)} shoots on net` });
+          else {
+            const next = plan.legs[i + 1];
+            const to = next && next.id ? ` to ${nameOf(next.id)}` : "";
+            evs.push({ t: leg.t0, key: `${pk.id}:pass:${i}`, auto: `${nameOf(leg.by)} passes${to}` });
+          }
+        }
+      });
+    });
+    evs.sort((a, b) => a.t - b.t);
+    const steps = [{ t: 0, key: "start", auto: "The play begins" }, ...evs];
+    return steps.map(s => ({ ...s, text: stepNotes[s.key] != null ? stepNotes[s.key] : s.auto }));
+  }
+  const presoSteps = (presentation || openMenu === "steps") ? buildSteps() : [];
+  stepsRef.current = presoSteps;
+  presoDelayRef.current = presoDelay;
+  presoRef.current = presentation;
+
   useEffect(() => {
     if (!playing) return;
     let raf, last = performance.now();
+    // skip steps already behind the current position when (re)starting
+    const nowT = animRef.current * Math.max(0.1, totalRef.current);
+    nextStepRef.current = stepsRef.current.filter(s => s.t < nowT - 1e-3).length;
+    holdRef.current = 0;
     const step = now => {
       const dt = (now - last) / 1000;
       last = now;
-      let t = animRef.current + dt / Math.max(0.1, totalRef.current);
-      if (t >= 1) { animRef.current = 1; setAnimT(1); setPlaying(false); return; }
+      const T = Math.max(0.1, totalRef.current);
+      if (holdRef.current > 0) {                       // paused, reading a step
+        holdRef.current -= dt;
+        if (holdRef.current <= 0) { holdRef.current = 0; setHoldStep(null); }
+        raf = requestAnimationFrame(step);
+        return;
+      }
+      let t = animRef.current + dt / T;
+      const steps = presoRef.current ? stepsRef.current : null;
+      if (steps && nextStepRef.current < steps.length) {
+        const st = steps[nextStepRef.current];
+        const stF = Math.min(1, st.t / T);
+        if (t >= stF) {                                // reached a step → hold here
+          animRef.current = stF; setAnimT(stF);
+          nextStepRef.current += 1;
+          if (presoDelayRef.current > 0) {
+            holdRef.current = presoDelayRef.current;
+            setHoldStep(st);
+            raf = requestAnimationFrame(step);
+            return;
+          }
+        }
+      }
+      if (t >= 1) { animRef.current = 1; setAnimT(1); setPlaying(false); setHoldStep(null); return; }
       animRef.current = t;
       setAnimT(t);
       raf = requestAnimationFrame(step);
@@ -303,7 +375,8 @@ export default function DrillAnimator() {
     return () => cancelAnimationFrame(raf);
   }, [playing]); // eslint-disable-line
 
-  function resetAnim() { animRef.current = 0; setAnimT(0); }
+  function resetAnim() { animRef.current = 0; setAnimT(0); holdRef.current = 0; nextStepRef.current = 0; setHoldStep(null); }
+  function skipHold() { holdRef.current = 0; setHoldStep(null); }
 
   // one re-render after mount so hidden path lengths are measured
   const [, bumpTick] = useState(0);
@@ -1226,7 +1299,7 @@ export default function DrillAnimator() {
       ? (selected ? `Drawing ${selected.id}'s route — drag across the ice` : "Drag on the ice — creates a player")
       : tool !== "select" ? "Tap the ice to place" : null;
 
-  const togglePlay = () => { if (animT >= 1) resetAnim(); setPopup(null); setOpenMenu(null); setPlaying(p => !p); };
+  const togglePlay = () => { if (animT >= 1) resetAnim(); setPopup(null); setOpenMenu(null); setHoldStep(null); holdRef.current = 0; setPlaying(p => !p); };
   const resetPlay = () => { setPlaying(false); resetAnim(); };
 
   // during playback the "Routes on play" setting controls what stays visible;
@@ -1341,6 +1414,14 @@ export default function DrillAnimator() {
         </div>
       </div>
 
+      {/* ---------- presentation caption ---------- */}
+      {presentation && holdStep && (
+        <div className="hd-preso">
+          <div className="hd-preso-text">{holdStep.text}</div>
+          <button className="hd-preso-btn" onClick={skipHold}>Continue ▶</button>
+        </div>
+      )}
+
       {/* ---------- draggable play dock (mobile) ---------- */}
       <div className="hd-playdock" ref={playRef}
         style={playPos ? { left: playPos.x, top: playPos.y, transform: "none" } : undefined}>
@@ -1391,6 +1472,17 @@ export default function DrillAnimator() {
               <button key={v} className={`hd-mini${playRoutes === v ? " on" : ""}`}
                 onClick={() => setPlayRoutes(v)}>{lab}</button>
             ))}
+          </div>
+          <div className="hd-mh" style={{ marginTop: 4 }}>Presentation</div>
+          <div className="hd-poprow">
+            <button className={`hd-mini${presentation ? " on" : ""}`}
+              onClick={() => setPresentation(v => !v)}>{presentation ? "✓ On" : "Off"}</button>
+            <span>Pause</span>
+            <Stepper value={presoDelay} onChange={setPresoDelay} step={0.5} min={0} />
+          </div>
+          <div className="hd-poprow">
+            <button className="hd-mini" onClick={() => setOpenMenu("steps")}>✎ Edit steps</button>
+            <span style={{ fontSize: 11, color: "#8b99a8" }}>play pauses at each described beat</span>
           </div>
           <div className="hd-mh" style={{ marginTop: 4 }}>Pace</div>
           <div style={{ fontSize: 12, color: "#8b99a8" }}>
@@ -1455,6 +1547,36 @@ export default function DrillAnimator() {
             <code> shoot=4</code> fires at the nearest net when the final carrier reaches point 4.
             <code> pickup=F2@3</code> — a loose puck hops onto F2's blade at their point 3.
             <code> face=45</code> sets a stationary player's heading (degrees).
+          </div>
+        </div>
+      )}
+
+      {openMenu === "steps" && (
+        <div className="hd-sheet">
+          <div className="hd-mh">Presentation steps</div>
+          <div className="hd-steplist">
+            {presoSteps.length === 0 ? (
+              <div className="hd-note">No described beats yet — add pucks, passes, or shots.</div>
+            ) : presoSteps.map(s => (
+              <div key={s.key} className="hd-steprow">
+                <span className="hd-steptime">{s.t.toFixed(1)}s</span>
+                <input className="hd-input" style={{ flex: 1, minWidth: 0 }} value={s.text}
+                  onChange={e => setStepNotes(n => ({ ...n, [s.key]: e.target.value }))} />
+                {stepNotes[s.key] != null && (
+                  <button className="hd-mini" title="reset to auto"
+                    onClick={() => setStepNotes(n => { const m = { ...n }; delete m[s.key]; return m; })}>↺</button>
+                )}
+              </div>
+            ))}
+          </div>
+          <div className="hd-row">
+            <button className="hd-btn primary" onClick={() => setOpenMenu(null)}>Done</button>
+            <button className={`hd-btn${presentation ? " primary" : ""}`}
+              onClick={() => setPresentation(v => !v)}>{presentation ? "Presentation on" : "Turn on"}</button>
+          </div>
+          <div className="hd-note">
+            Text is auto-generated from the play — edit any beat; ↺ resets it to auto.
+            In Presentation mode, play pauses {presoDelay}s at each step (Continue to skip ahead).
           </div>
         </div>
       )}
