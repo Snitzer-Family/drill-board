@@ -62,6 +62,8 @@ export default function DrillAnimator() {
   const [playing, setPlaying] = useState(false);
   const [animT, setAnimT] = useState(0);
   const [pace, setPace] = useState(15);
+  // routes shown during playback: "player" (routes only), "hide", "all" (+puck/shots)
+  const [playRoutes, setPlayRoutes] = useState("player");
   const [drawPreview, setDrawPreview] = useState(null);
   const [loupe, setLoupe] = useState(null);
   const [popOff, setPopOff] = useState({ x: 0, y: 0 });
@@ -1227,6 +1229,11 @@ export default function DrillAnimator() {
   const togglePlay = () => { if (animT >= 1) resetAnim(); setPopup(null); setOpenMenu(null); setPlaying(p => !p); };
   const resetPlay = () => { setPlaying(false); resetAnim(); };
 
+  // during playback the "Routes on play" setting controls what stays visible;
+  // while editing everything shows regardless
+  const showRoutes = editing || playRoutes !== "hide";      // player route lines + stops
+  const showPuckPaths = editing || playRoutes === "all";    // planned pass / shot lines
+
   return (
     <div className="hd-root" ref={rootRef}>
       <style>{STYLES}</style>
@@ -1262,19 +1269,22 @@ export default function DrillAnimator() {
                 const style = segStroke(p, s, isLast);
                 return (
                   <g key={`${p.id}/${i}`}>
+                    {/* invisible ref path is always present — timing measures it */}
                     <path d={d} fill="none" stroke="none"
                       ref={el => { if (el) segRefs.current[`${p.id}/${i}`] = el; }} />
-                    {p.kind === "player" && s.dir === "bwd"
+                    {showRoutes && (p.kind === "player" && s.dir === "bwd"
                       ? <polyline points={zigzagPoints(from, s)} {...style} strokeLinejoin="round" pointerEvents="none" />
-                      : <path d={d} {...style} pointerEvents="none" />}
-                    <path d={d} fill="none" stroke="transparent" strokeWidth={4}
-                      onPointerDown={e => lineDown(e, p.id, i)} style={{ cursor: "pointer" }} />
+                      : <path d={d} {...style} pointerEvents="none" />)}
+                    {showRoutes && (
+                      <path d={d} fill="none" stroke="transparent" strokeWidth={4}
+                        onPointerDown={e => lineDown(e, p.id, i)} style={{ cursor: "pointer" }} />
+                    )}
                   </g>
                 );
               });
             })}
 
-            {pieces.map(p => <g key={`s-${p.id}`}>{renderStops(p)}</g>)}
+            {showRoutes && pieces.map(p => <g key={`s-${p.id}`}>{renderStops(p)}</g>)}
 
             {editing && pieces.map(p =>
               p.kind === "puck" && p.carrier && p.path.length > 0 ? (
@@ -1284,7 +1294,7 @@ export default function DrillAnimator() {
               ) : null
             )}
 
-            {editing && (() => {
+            {showPuckPaths && (() => {
               const { plans } = getPlan();
               return pieces
                 .filter(q => q.kind === "puck" && plans[q.id])
@@ -1375,6 +1385,13 @@ export default function DrillAnimator() {
             onClick={() => { setShowDiag(s => !s); setOpenMenu(null); }}>
             ◫ Diagnostics {showDiag ? "(on)" : ""}
           </button>
+          <div className="hd-mh" style={{ marginTop: 4 }}>Routes on play</div>
+          <div className="hd-poprow">
+            {[["player", "Routes"], ["hide", "Hide"], ["all", "All +puck"]].map(([v, lab]) => (
+              <button key={v} className={`hd-mini${playRoutes === v ? " on" : ""}`}
+                onClick={() => setPlayRoutes(v)}>{lab}</button>
+            ))}
+          </div>
           <div className="hd-mh" style={{ marginTop: 4 }}>Pace</div>
           <div style={{ fontSize: 12, color: "#8b99a8" }}>
             {pace} ft/s · run {totalTime.toFixed(1)}s
