@@ -1383,6 +1383,13 @@ export default function DrillAnimator() {
           <button className="hd-item" onClick={openText}>⌨ Text editor</button>
           <button className="hd-item" onClick={() => { exportTxt(); setOpenMenu(null); }}>⇩ Export .txt</button>
           <button className="hd-item" onClick={() => fileRef.current?.click()}>⇧ Load .txt</button>
+          <button className="hd-item danger"
+            onClick={() => {
+              if (!pieces.length || window.confirm("Clear all pieces from the board?")) {
+                setPlaying(false); resetAnim();
+                setPieces([]); setSelectedId(null); setPopup(null); setOpenMenu(null);
+              }
+            }}>🗑 Clear all</button>
           <button className={`hd-item${showDiag ? " on" : ""}`}
             onClick={() => { setShowDiag(s => !s); setOpenMenu(null); }}>
             ◫ Diagnostics {showDiag ? "(on)" : ""}

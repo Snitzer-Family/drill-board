@@ -61,6 +61,7 @@ export const STYLES = `
           border:1px solid #2c3846; background:#212b36; color:#dbe4ec; border-radius:8px;
           cursor:pointer; text-align:left; }
         .hd-item.on { background:#1f4fa3; border-color:#1f4fa3; color:#fff; }
+        .hd-item.danger { color:#ff8d9c; border-color:#4a2a30; }
         .hd-note { font-size:11.5px; color:#7d8b99; line-height:1.5; }
         .hd-note code { color:#a8c3da; }
         /* hint text lives in the bottom bar */
