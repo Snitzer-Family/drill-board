@@ -811,6 +811,84 @@ export default function DrillAnimator() {
         ))}
       </div>
     );
+    // pass/shoot/collect controls for player p at possession point i. Used at
+    // route points (point popup) and, with i=0, in a stationary player's popup
+    // (a route-less carrier releases immediately, so its "point" is just 0).
+    const chainControls = (p, i) => {
+      const pk = pieces.find(q => q.kind === "puck" && puckChain(q).includes(p.id));
+      if (!pk) return null;
+      const chain = puckChain(pk);
+      const ts = pk.transfers || [];
+      // resolve which POSSESSION this point belongs to: a player can hold the
+      // puck several times in one chain (give-and-go), so prefer an exact match
+      // on an existing action here, else the latest window that can contain it
+      let stage = -1;
+      for (let s = 0; s < chain.length; s++) {
+        if (chain[s] !== p.id) continue;
+        const out = ts[s];
+        if (out && out.at === i) { stage = s; break; }
+        if (!out || i <= out.at) stage = s;
+      }
+      if (stage < 0) return null;
+      const from = ts[stage];
+      const incoming = stage >= 1 ? ts[stage - 1] : null;
+      const others = pieces.filter(q => q.kind === "player" && q.id !== p.id);
+      const canAct = !from || from.at === i;              // release point (or unset)
+      const isPass = t => from && from.kind !== "shot" && from.at === i && from.to === t;
+      const isShot = t => from && from.kind === "shot" && from.at === i && from.to === t;
+      return (
+        <>
+          {canAct && others.length > 0 && (
+            <div className="hd-poprow">
+              <span>Pass {pk.id} to</span>
+              {others.map(o => (
+                <button key={o.id} className={`hd-mini${isPass(o.id) ? " on" : ""}`}
+                  onClick={() => setTransfer(pk.id, stage,
+                    isPass(o.id) ? null : { at: i, to: o.id, recvAt: null, kind: "pass" })}>
+                  {o.id}
+                </button>
+              ))}
+            </div>
+          )}
+          {canAct && others.length > 0 && (
+            <div className="hd-poprow">
+              <span>Shoot, rebound to</span>
+              {others.map(o => (
+                <button key={o.id} className={`hd-mini${isShot(o.id) ? " on" : ""}`}
+                  onClick={() => setTransfer(pk.id, stage,
+                    isShot(o.id) ? null : { at: i, to: o.id, recvAt: null, kind: "shot" })}>
+                  {o.id}
+                </button>
+              ))}
+            </div>
+          )}
+          {stage === (pk.transfers || []).length && (
+            <div className="hd-poprow">
+              <button className={`hd-mini${pk.shotAt === i ? " on" : ""}`}
+                onClick={() => updateById(pk.id, pk.shotAt === i ? { shotAt: null } : { shotAt: i })}>
+                {pk.shotAt === i ? "✓ Shooting at net" : "🥅 Shoot at net"}
+              </button>
+            </div>
+          )}
+          {(pk.shotAt === i || (from && from.kind === "shot" && from.at === i)) && netRow(pk)}
+          {incoming && p.path.length > 0 && (
+            <div className="hd-poprow">
+              <button className={`hd-mini${incoming.recvAt === i ? " on" : ""}`}
+                onClick={() => setRecvAt(pk.id, stage - 1, incoming.recvAt === i ? null : i)}>
+                {incoming.kind === "shot"
+                  ? (incoming.recvAt === i ? "✓ Collecting rebound here" : "Collect rebound here")
+                  : (incoming.recvAt === i ? "✓ Receiving here" : "Receive pass here")}
+              </button>
+              {incoming.recvAt === i && incoming.kind !== "shot" && (
+                <span style={{ fontSize: 11, color: "#8b99a8" }}>
+                  {pk.shotAt === i ? "one-timer — pace auto-syncs" : "pace auto-syncs"}
+                </span>
+              )}
+            </div>
+          )}
+        </>
+      );
+    };
     let anchorPt, body, title;
     if (popup.type === "add") {
       if (!popup.pt) return null;
@@ -885,6 +963,9 @@ export default function DrillAnimator() {
                   </div>
                 );
               })()}
+              {/* a route-less carrier has no waypoints, so host its chain
+                  (pass / shoot / rebound) here on the player itself */}
+              {p.path.length === 0 && chainControls(p, 0)}
             </>
           )}
           {p.kind === "puck" && pieces.some(q => q.kind === "player") && (
@@ -905,23 +986,16 @@ export default function DrillAnimator() {
                 </div>
               )}
               {(() => {
-                // a stationary shooter/picker has no route points, so the
-                // point popups can't host its shot — offer it here instead
+                // a route-less carrier hosts its chain on the player popup, so
+                // point the user there rather than duplicating it here
                 const head = p.carrier || (p.pickup && p.pickup.to);
                 const hp = head && pieces.find(q => q.id === head && q.kind === "player");
                 if (!hp || hp.path.length) return null;
                 return (
-                  <>
-                    <div className="hd-poprow">
-                      <button className={`hd-mini${p.shotAt != null ? " on" : ""}`}
-                        onClick={() => updateById(p.id, p.shotAt != null
-                          ? { shotAt: null }
-                          : { shotAt: 0 })}>
-                        {p.shotAt != null ? "✓ Shoots at net" : "🥅 Shoot at net"}
-                      </button>
-                    </div>
-                    {p.shotAt != null && netRow(p)}
-                  </>
+                  <div className="hd-poprow" style={{ fontSize: 11.5, color: "#8b99a8" }}>
+                    {hp.id} has no route — set its pass / shoot / rebound from the
+                    {hp.id} player popup.
+                  </div>
                 );
               })()}
             </>
@@ -1045,82 +1119,7 @@ export default function DrillAnimator() {
               </div>
             );
           })()}
-          {p.kind === "player" && (() => {
-            const pk = pieces.find(q => q.kind === "puck" && puckChain(q).includes(p.id));
-            if (!pk) return null;
-            const chain = puckChain(pk);
-            const ts = pk.transfers || [];
-            // resolve which POSSESSION this point belongs to: a player can
-            // hold the puck several times in one chain (give-and-go), so
-            // prefer an exact match on an existing pass at this point, else
-            // the latest possession whose window can contain this point
-            let stage = -1;
-            for (let s = 0; s < chain.length; s++) {
-              if (chain[s] !== p.id) continue;
-              const out = ts[s];
-              if (out && out.at === i) { stage = s; break; }
-              if (!out || i <= out.at) stage = s;
-            }
-            if (stage < 0) return null;
-            const from = ts[stage];
-            const incoming = stage >= 1 ? ts[stage - 1] : null;
-            const others = pieces.filter(q => q.kind === "player" && q.id !== p.id);
-            const canAct = !from || from.at === i;            // release point (or unset)
-            const isPass = t => from && from.kind !== "shot" && from.at === i && from.to === t;
-            const isShot = t => from && from.kind === "shot" && from.at === i && from.to === t;
-            return (
-              <>
-                {canAct && others.length > 0 && (
-                  <div className="hd-poprow">
-                    <span>Pass {pk.id} to</span>
-                    {others.map(o => (
-                      <button key={o.id} className={`hd-mini${isPass(o.id) ? " on" : ""}`}
-                        onClick={() => setTransfer(pk.id, stage,
-                          isPass(o.id) ? null : { at: i, to: o.id, recvAt: null, kind: "pass" })}>
-                        {o.id}
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {canAct && others.length > 0 && (
-                  <div className="hd-poprow">
-                    <span>Shoot, rebound to</span>
-                    {others.map(o => (
-                      <button key={o.id} className={`hd-mini${isShot(o.id) ? " on" : ""}`}
-                        onClick={() => setTransfer(pk.id, stage,
-                          isShot(o.id) ? null : { at: i, to: o.id, recvAt: null, kind: "shot" })}>
-                        {o.id}
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {stage === (pk.transfers || []).length && (
-                  <div className="hd-poprow">
-                    <button className={`hd-mini${pk.shotAt === i ? " on" : ""}`}
-                      onClick={() => updateById(pk.id, pk.shotAt === i ? { shotAt: null } : { shotAt: i })}>
-                      {pk.shotAt === i ? "✓ Shooting at net" : "🥅 Shoot at net"}
-                    </button>
-                  </div>
-                )}
-                {(pk.shotAt === i || (from && from.kind === "shot" && from.at === i)) && netRow(pk)}
-                {incoming && p.path.length > 0 && (
-                  <div className="hd-poprow">
-                    <button className={`hd-mini${incoming.recvAt === i ? " on" : ""}`}
-                      onClick={() => setRecvAt(pk.id, stage - 1, incoming.recvAt === i ? null : i)}>
-                      {incoming.kind === "shot"
-                        ? (incoming.recvAt === i ? "✓ Collecting rebound here" : "Collect rebound here")
-                        : (incoming.recvAt === i ? "✓ Receiving here" : "Receive pass here")}
-                    </button>
-                    {incoming.recvAt === i && incoming.kind !== "shot" && (
-                      <span style={{ fontSize: 11, color: "#8b99a8" }}>
-                        {pk.shotAt === i ? "one-timer — pace auto-syncs" : "pace auto-syncs"}
-                      </span>
-                    )}
-                  </div>
-                )}
-              </>
-            );
-          })()}
+          {p.kind === "player" && chainControls(p, i)}
           <div className="hd-poprow">
             <button className="hd-mini danger" onClick={() => deleteSeg(p.id, i)}>Delete point</button>
           </div>

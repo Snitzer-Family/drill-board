@@ -142,9 +142,10 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
           tBase = tGather;
           return;
         }
-        if (!cur.path.length) return;                    // a pass needs a launch point
-        const atIdx = Math.max(0, Math.min(tr.at, cur.path.length - 1));
-        const launchT = Math.max(tBase, routeTimeW(cur, warp, atIdx));
+        // a route-less carrier releases as soon as they have the puck (tBase)
+        const launchT = cur.path.length
+          ? Math.max(tBase, routeTimeW(cur, warp, Math.max(0, Math.min(tr.at, cur.path.length - 1))))
+          : tBase;
         const launch = bladeAt(cur, launchT, warp);
         let target, tArr;
         if (tr.recvAt != null && rec.path.length) {
