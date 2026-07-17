@@ -280,7 +280,7 @@ export default function DrillAnimator() {
 
   /* ----- timing & pass planning (see timing.js) ----- */
   const planCache = useRef({ key: null, pace: 0, sig: -1, warp: {}, plans: {}, rel: {} });
-  const { getPlan, pieceTime, displayPosAt, shotSwing } = createTiming({ pieces, pace, segRefs, planCache });
+  const { getPlan, pieceTime, displayPosAt, stickSwing } = createTiming({ pieces, pace, segRefs, planCache });
 
   const totalTime = Math.max(0.1, ...pieces.map(pieceTime));
   totalRef.current = totalTime;
@@ -335,7 +335,7 @@ export default function DrillAnimator() {
   const HARD_AT = 2.0;      // ×base pace: full-out aggressive stride
   const PLANT_DEG = 55;     // deg the body pivots sideways in a hockey stop
   function displaySwing(p) {
-    return p.kind === "player" && animT > 0 ? shotSwing(p.id, animT * totalTime) : 0;
+    return p.kind === "player" && animT > 0 ? stickSwing(p.id, animT * totalTime) : 0;
   }
   function displayPos(p) {
     const dp = displayPosAt(p, animT <= 0 ? 0 : animT * totalTime);
@@ -1220,6 +1220,9 @@ export default function DrillAnimator() {
       ? (selected ? `Drawing ${selected.id}'s route — drag across the ice` : "Drag on the ice — creates a player")
       : tool !== "select" ? "Tap the ice to place" : null;
 
+  const togglePlay = () => { if (animT >= 1) resetAnim(); setPopup(null); setOpenMenu(null); setPlaying(p => !p); };
+  const resetPlay = () => { setPlaying(false); resetAnim(); };
+
   return (
     <div className="hd-root" ref={rootRef}>
       <style>{STYLES}</style>
@@ -1324,16 +1327,13 @@ export default function DrillAnimator() {
         </div>
       </div>
 
-      {/* ---------- draggable play dock ---------- */}
+      {/* ---------- draggable play dock (mobile) ---------- */}
       <div className="hd-playdock" ref={playRef}
         style={playPos ? { left: playPos.x, top: playPos.y, transform: "none" } : undefined}>
         <span className="hd-grip" onPointerDown={playDragStart} onPointerMove={playDragMove}
           onPointerUp={playDragEnd} onPointerCancel={playDragEnd}>⠿</span>
-        <button className="hd-fab small play"
-          onClick={() => { if (animT >= 1) resetAnim(); setPopup(null); setOpenMenu(null); setPlaying(p => !p); }}>
-          {playing ? "❚❚" : "▶"}
-        </button>
-        <button className="hd-fab small" onClick={() => { setPlaying(false); resetAnim(); }}>⟲</button>
+        <button className="hd-fab small play" onClick={togglePlay}>{playing ? "❚❚" : "▶"}</button>
+        <button className="hd-fab small" onClick={resetPlay}>⟲</button>
       </div>
 
       {/* ---------- bottom menu bar ---------- */}
@@ -1346,6 +1346,9 @@ export default function DrillAnimator() {
         </button>
         <button className={`hd-barbtn${tool === "draw" ? " draw-on" : openMenu === "tools" ? " on" : ""}`}
           onClick={() => setOpenMenu(m => (m === "tools" ? null : "tools"))}>✎</button>
+        {/* play controls live in the bar on desktop (hidden on mobile via CSS) */}
+        <button className="hd-barbtn hd-barplay play" onClick={togglePlay}>{playing ? "❚❚" : "▶"}</button>
+        <button className="hd-barbtn hd-barplay" onClick={resetPlay}>⟲</button>
         <div className="hd-barhint">{toolHint || ""}</div>
         <div className="hd-ver">v{APP_VERSION} · {BUILD_STAMP}</div>
       </div>

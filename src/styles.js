@@ -25,6 +25,8 @@ export const STYLES = `
         .hd-fab.play { background:#d7263d; border-color:#d7263d; color:#fff; }
         .hd-fab small { font-size:10px; font-weight:800; letter-spacing:.05em; }
         .hd-fab.small { position:static; width:38px; height:38px; box-shadow:none; font-size:16px; }
+        /* the mobile play/pause is enlarged for an easy thumb target */
+        .hd-playdock .hd-fab.play { width:54px; height:54px; font-size:22px; }
         /* draggable play dock — floats over the ice, movable by its grip */
         .hd-playdock { position:absolute; z-index:46; top:max(10px, env(safe-area-inset-top));
           left:50%; transform:translateX(-50%);
@@ -45,6 +47,13 @@ export const STYLES = `
         .hd-barbtn.on { background:#1f4fa3; border-color:#1f4fa3; }
         .hd-barbtn.draw-on { background:#b58900; border-color:#b58900; }
         .hd-barbtn small { font-size:10px; font-weight:800; letter-spacing:.05em; }
+        /* play controls in the bar: desktop only (mobile uses the float dock) */
+        .hd-barplay { display:none; }
+        .hd-barplay.play { background:#d7263d; border-color:#d7263d; color:#fff; }
+        @media (pointer: fine) and (min-width: 760px) {
+          .hd-playdock { display:none; }
+          .hd-barplay { display:flex; }
+        }
         .hd-barhint { flex:1; min-width:0; font-size:12px; color:#8b99a8; text-align:right;
           white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
         .hd-ver { flex:none; font-size:10px; color:#5b6c7d; white-space:nowrap;

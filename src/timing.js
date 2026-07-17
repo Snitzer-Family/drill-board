@@ -80,7 +80,7 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
           tPick = routeTimeW(pk, warp);
         }
         legs.push({ type: "free", t0: 0 });
-        legs.push({ type: "ride", id: pl.id, t0: tPick });
+        legs.push({ type: "ride", id: pl.id, t0: tPick, catch: true });
         cur = pl;
         tBase = tPick;
       } else return;
@@ -137,7 +137,7 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
           }
           doShot(tr.at, aim);                            // carom rolls to the collector
           const tGather = gi >= 0 ? Math.max(tBase, routeTimeW(rec, warp, gi)) : tBase;
-          legs.push({ type: "ride", id: rec.id, t0: tGather });
+          legs.push({ type: "ride", id: rec.id, t0: tGather, catch: true });
           cur = rec;
           tBase = tGather;
           return;
@@ -172,8 +172,8 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
           }
           target = bladeAt(rec, tArr, warp);
         }
-        legs.push({ type: "fly", x0: launch.x, y0: launch.y, x1: target.x, y1: target.y, t0: launchT, t1: tArr });
-        legs.push({ type: "ride", id: rec.id, t0: tArr });
+        legs.push({ type: "fly", by: cur.id, x0: launch.x, y0: launch.y, x1: target.x, y1: target.y, t0: launchT, t1: tArr });
+        legs.push({ type: "ride", id: rec.id, t0: tArr, catch: true });
         cur = rec;
         tBase = tArr;
       });
@@ -310,23 +310,40 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
     return routePosAt(p, e, warp);
   }
 
-  // stick-swing angle (deg) for a player at elapsed e: 0 except in the brief
-  // window around one of their shot releases — winds back, then snaps through.
-  function shotSwing(id, e) {
+  // stick-motion angle (deg) for a player at elapsed e: 0 except in the brief
+  // window of one of their stick events —
+  //   shot:  hard wind-back then snap through the puck
+  //   pass:  the same, smaller and quicker
+  //   catch: reach out to meet the puck, then cushion back to neutral
+  function stickSwing(id, e) {
     const { plans } = getPlan();
-    const WU = 0.16, FT = 0.3, MAX = 34;
+    let ang = 0, best = Infinity; // pick the most-centered event when several overlap
     for (const pid in plans) {
       for (const leg of plans[pid].legs) {
-        if (!leg.shot || leg.by !== id) continue;
-        const tau = e - leg.t0;
-        if (tau < -WU || tau > FT) continue;
-        return tau < 0
-          ? -MAX * (tau + WU) / WU                          // wind back to -MAX at release
-          : -MAX * Math.cos((Math.PI * tau) / FT) * (1 - tau / FT); // snap through, settle
+        if (leg.type === "fly" && leg.by === id) {
+          const shot = !!leg.shot;
+          const WU = shot ? 0.16 : 0.11, FT = shot ? 0.3 : 0.2, MAX = shot ? 34 : 20;
+          const tau = e - leg.t0;
+          if (tau < -WU || tau > FT || Math.abs(tau) >= best) continue;
+          best = Math.abs(tau);
+          ang = tau < 0
+            ? -MAX * (tau + WU) / WU                            // wind back to -MAX at release
+            : -MAX * Math.cos((Math.PI * tau) / FT) * (1 - tau / FT); // snap through, settle
+        }
+        if (leg.catch && leg.id === id) {
+          const IN = 0.12, OUT = 0.24, MAX = 15;
+          const tau = e - leg.t0;
+          // slight bias so a shot/pass release outranks a catch at the same moment
+          if (tau < -IN || tau > OUT || Math.abs(tau) + 0.05 >= best) continue;
+          best = Math.abs(tau) + 0.05;
+          ang = tau < 0
+            ? MAX * (1 + tau / IN)                              // reach out to meet the puck
+            : MAX * (1 - tau / OUT);                            // cushion back to neutral
+        }
       }
     }
-    return 0;
+    return ang;
   }
 
-  return { getPlan, pieceTime, displayPosAt, shotSwing };
+  return { getPlan, pieceTime, displayPosAt, stickSwing };
 }
