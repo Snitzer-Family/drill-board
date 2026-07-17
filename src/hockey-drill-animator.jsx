@@ -485,20 +485,25 @@ export default function DrillAnimator() {
     };
   }
 
-  // goalie plays the top of the crease, centered on the puck's angle (defaults
-  // to facing center ice when there's no puck to track)
+  // goalie plays an arc across the top of the crease, centered on the puck's
+  // angle. Clamped to the net's front hemisphere so it slides along the front
+  // and hugs the posts but never drifts behind / inside the net.
   function goaliePos(net) {
+    const f = ((net.facing || 0) * Math.PI) / 180;    // net mouth opens this way
     const pucks = pieces.filter(q => q.kind === "puck");
-    let aim = { x: 100, y: 42.5 }, best = Infinity;
+    let aim = { x: net.x + Math.cos(f) * 10, y: net.y + Math.sin(f) * 10 }, best = Infinity;
     pucks.forEach(pk => {
       const dp = displayPos(pk);
       const d = Math.hypot(dp.x - net.x, dp.y - net.y);
       if (d < best) { best = d; aim = dp; }
     });
-    let dx = aim.x - net.x, dy = aim.y - net.y;
-    const m = Math.hypot(dx, dy) || 1;
-    dx /= m; dy /= m;
-    return { x: net.x + dx * 2.5, y: net.y + dy * 2.5, a: (Math.atan2(dy, dx) * 180) / Math.PI };
+    let rel = Math.atan2(aim.y - net.y, aim.x - net.x) - f;
+    rel = Math.atan2(Math.sin(rel), Math.cos(rel));    // normalize to −π..π
+    const MAXREL = (70 * Math.PI) / 180;               // stay across the front only
+    rel = Math.max(-MAXREL, Math.min(MAXREL, rel));
+    const R = 2.8;                                      // top-of-crease depth
+    const a = f + rel;
+    return { x: net.x + Math.cos(a) * R, y: net.y + Math.sin(a) * R, a: (a * 180) / Math.PI };
   }
 
   /* ----- coords ----- */
