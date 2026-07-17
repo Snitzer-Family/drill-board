@@ -96,7 +96,7 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
   return (
     <g opacity={dim ? 0.92 : 1} transform={frame}>
       {body}
-      <circle cx={0} cy={0} r={6.8} fill="transparent" onPointerDown={onDown} style={{ cursor: "grab" }} />
+      <circle cx={0} cy={0} r={p.kind === "puck" ? 3.4 : 6.8} fill="transparent" onPointerDown={onDown} style={{ cursor: "grab" }} />
       {onStickDown && p.kind === "player" && (
         <circle cx={4.7} cy={p.hand === "L" ? -2.55 : 2.55} r={3.3} fill="transparent"
           style={{ cursor: "grab" }} onPointerDown={onStickDown} />

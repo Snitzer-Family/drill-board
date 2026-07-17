@@ -799,13 +799,23 @@ export default function DrillAnimator() {
                   onClick={() => updateById(p.id, { hand: "R" })}>R</button>
                 <button className={`hd-mini${p.hand === "L" ? " on" : ""}`}
                   onClick={() => updateById(p.id, { hand: "L" })}>L</button>
-                {!pieces.some(q => q.kind === "puck" && q.carrier === p.id) && (
-                  <button className="hd-mini" onClick={() => {
-                    const pk = makePiece("puck", { x: p.x, y: p.y });
-                    pk.carrier = p.id;
-                    setPieces(ps => [...ps, pk]);
-                  }}>● Give puck</button>
-                )}
+                {(() => {
+                  // a carried puck now sits under the player, so surface a
+                  // direct route to its popup here instead of tapping the blade
+                  const carried = pieces.find(q => q.kind === "puck" && q.carrier === p.id);
+                  return carried ? (
+                    <button className="hd-mini" onClick={() => {
+                      setSelectedId(carried.id);
+                      setPopup({ type: "piece", id: carried.id });
+                    }}>● Edit puck</button>
+                  ) : (
+                    <button className="hd-mini" onClick={() => {
+                      const pk = makePiece("puck", { x: p.x, y: p.y });
+                      pk.carrier = p.id;
+                      setPieces(ps => [...ps, pk]);
+                    }}>● Give puck</button>
+                  );
+                })()}
               </div>
             </>
           )}
@@ -1189,9 +1199,12 @@ export default function DrillAnimator() {
             )}
 
             {pieces.map(p => <g key={`h-${p.id}`}>{renderHandles(p)}</g>)}
-            {selected && renderRotateHandle(selected)}
 
-            {pieces.map(p => {
+            {/* players paint above pucks so a carried puck can't steal the
+               player's body / stick-rotate grab; rotate ring is drawn last */}
+            {[...pieces]
+              .sort((a, b) => (a.kind === "player" ? 1 : 0) - (b.kind === "player" ? 1 : 0))
+              .map(p => {
               const dp = displayPos(p);
               const fx = iconXf(dp);
               return (
@@ -1202,6 +1215,7 @@ export default function DrillAnimator() {
                     ? e => stickDown(e, p) : undefined} />
               );
             })}
+            {selected && renderRotateHandle(selected)}
             </g>
           </svg>
           {renderPopout()}

@@ -6,7 +6,7 @@ export const COLORS = ["#d7263d", "#1f4fa3", "#1f8a4c", "#e0731d", "#22262b", "#
 export const SPEED = { carry: 1, pass: 3, shot: 6 };
 export const vb = m => VIEWS[m].join(" ");
 
-export const APP_VERSION = "2.5";
+export const APP_VERSION = "2.6";
 // visual size of players/pucks/cones relative to true rink-feet scale
 export const ICON_SCALE = 0.8;
 // build stamp injected by vite.config.js `define`; "dev" when run standalone
