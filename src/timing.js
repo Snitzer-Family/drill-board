@@ -70,9 +70,15 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
         legs.push({ type: "ride", id: cur.id, t0: 0 });
       } else if (pk.pickup) {
         const pl = pieces.find(q => q.id === pk.pickup.to && q.kind === "player");
-        if (!pl || !pl.path.length) return;
-        const atIdx = Math.max(0, Math.min(pk.pickup.at, pl.path.length - 1));
-        const tPick = routeTimeW(pl, warp, atIdx);
+        if (!pl) return;
+        let tPick = 0;
+        if (pl.path.length) {
+          const atIdx = Math.max(0, Math.min(pk.pickup.at, pl.path.length - 1));
+          tPick = routeTimeW(pl, warp, atIdx);
+        } else if (pk.path.length) {
+          // stationary picker: gather the loose puck when its own route delivers it
+          tPick = routeTimeW(pk, warp);
+        }
         legs.push({ type: "free", t0: 0 });
         legs.push({ type: "ride", id: pl.id, t0: tPick });
         cur = pl;
@@ -114,9 +120,13 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
         cur = rec;
         tBase = tArr;
       });
-      if (pk.shotAt != null && cur.path.length) {
-        const atIdx = Math.max(0, Math.min(pk.shotAt, cur.path.length - 1));
-        const launchT = Math.max(tBase, routeTimeW(cur, warp, atIdx));
+      // fire the current carrier's shot at shootIdx; the puck flies to the net,
+      // caroms off it and glides to rest in the slot. Returns the rest point.
+      // Path-less (stationary) shooters release immediately at tBase.
+      const doShot = shootIdx => {
+        const launchT = cur.path.length
+          ? Math.max(tBase, routeTimeW(cur, warp, Math.max(0, Math.min(shootIdx, cur.path.length - 1))))
+          : tBase;
         const launch = bladeAt(cur, launchT, warp);
         const net = launch.x < 100 ? { x: 15, y: 42.5 } : { x: 185, y: 42.5 };
         const vShot = pace * SPEED.shot * (pk.speed || 1);
@@ -124,7 +134,6 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
         const mag = Math.hypot(inx, iny) || 1;
         const tArr = launchT + mag / vShot;
         legs.push({ type: "fly", shot: true, x0: launch.x, y0: launch.y, x1: net.x, y1: net.y, t0: launchT, t1: tArr });
-        // rebound: puck caroms back off the net and glides to rest in the slot
         let bx = -inx / mag, by = (iny / mag) * 0.5;
         const bmag = Math.hypot(bx, by) || 1;
         const BOUNCE = 8;
@@ -133,6 +142,28 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
         legs.push({ type: "skid", x0: net.x, y0: net.y, x1: restPt.x, y1: restPt.y, t0: tArr, t1: tArr + tGlide });
         legs.push({ type: "rest", x: restPt.x, y: restPt.y, t0: tArr + tGlide });
         tBase = tArr + tGlide;
+        return restPt;
+      };
+      if (pk.shotAt != null && cur) {
+        doShot(pk.shotAt);
+        // rebound put-back: another player collects the loose rebound and, if
+        // reshoot is set, fires it again. The rest leg above holds the puck in
+        // the slot until the collector reaches it, then they take possession.
+        if (pk.rebound) {
+          const rc = pieces.find(q => q.id === pk.rebound.to && q.kind === "player");
+          if (rc) {
+            let tGather = tBase; // = the rebound's rest time
+            if (rc.path.length) {
+              const gi = pk.rebound.at == null ? rc.path.length - 1
+                : Math.max(0, Math.min(pk.rebound.at, rc.path.length - 1));
+              tGather = Math.max(tBase, routeTimeW(rc, warp, gi));
+            }
+            legs.push({ type: "ride", id: rc.id, t0: tGather });
+            cur = rc;
+            tBase = tGather;
+            if (pk.reshoot != null) doShot(pk.reshoot);
+          }
+        }
       }
       let relT = Infinity;
       if (pk.path.length && pk.shotAt == null && !pk.pickup) {

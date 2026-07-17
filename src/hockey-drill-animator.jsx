@@ -31,10 +31,17 @@ import { STYLES } from "./styles.js";
    @pt the receiver's pace auto-syncs to arrive at their point
    exactly as the puck does; without it the puck leads them.
    shoot=<pt> fires the puck at the nearest net when the final
-   carrier reaches that route point.
+   carrier reaches that route point; it caroms off and glides to
+   rest in the slot.
    pickup=<player>@<pt> starts a loose puck: it sits (or runs
    its own route) until that player reaches the waypoint, then
-   hops onto their blade — passes and shots can follow.
+   hops onto their blade — passes and shots can follow. A player
+   with no route picks up when the loose puck's own path reaches
+   them (or at once), so a parked player can gather a rebound.
+   rebound=<player>[@<pt>] sends a shot's carom to that player;
+   they gather it (at route point pt, else where their route
+   ends / where they stand). reshoot=<pt> makes that collector
+   fire a put-back at the net.
 
    UI: the rink fills the screen. Corner controls: ☰ settings
    (text/export/load/pace), rink size, tools (+pieces / draw),
@@ -373,7 +380,7 @@ export default function DrillAnimator() {
     const id = nextId(kind);
     const colorIdx = pieces.filter(p => p.kind === "player").length % COLORS.length;
     return {
-      id, kind, x: pt.x, y: pt.y, speed: 1, hand: "R", carrier: null, facing: 0, transfers: [], shotAt: null, pickup: null,
+      id, kind, x: pt.x, y: pt.y, speed: 1, hand: "R", carrier: null, facing: 0, transfers: [], shotAt: null, pickup: null, rebound: null, reshoot: null,
       color: kind === "player" ? COLORS[colorIdx] : kind === "cone" ? "#e0731d" : "#14171a",
       label: kind === "player" ? id : "", path: [],
     };
@@ -782,6 +789,25 @@ export default function DrillAnimator() {
     const p = pieces.find(q => q.id === popup.id);
     if (!p && popup.type !== "add") return null;
 
+    // rebound target picker: after a shot, which player collects the carom
+    const reboundRow = (pk, shooterId) => {
+      const catchers = pieces.filter(q => q.kind === "player" && q.id !== shooterId);
+      if (!catchers.length) return null;
+      return (
+        <div className="hd-poprow">
+          <span>Rebound to</span>
+          {catchers.map(o => (
+            <button key={o.id} className={`hd-mini${pk.rebound && pk.rebound.to === o.id ? " on" : ""}`}
+              onClick={() => updateById(pk.id, pk.rebound && pk.rebound.to === o.id
+                ? { rebound: null, reshoot: null }
+                : { rebound: { to: o.id, at: null }, reshoot: null })}>
+              {o.id}
+            </button>
+          ))}
+        </div>
+      );
+    };
+
     let anchorPt, body, title;
     if (popup.type === "add") {
       if (!popup.pt) return null;
@@ -837,6 +863,25 @@ export default function DrillAnimator() {
                   );
                 })()}
               </div>
+              {(() => {
+                // assign a loose puck for this player to gather — works for a
+                // stationary player (e.g. parked by the net for a rebound) too
+                const loose = pieces.filter(q => q.kind === "puck" && !q.carrier
+                  && !(q.pickup && q.pickup.to === p.id));
+                if (!loose.length) return null;
+                return (
+                  <div className="hd-poprow">
+                    <span>Pick up</span>
+                    {loose.map(q => (
+                      <button key={q.id} className="hd-mini"
+                        onClick={() => updateById(q.id, { carrier: null,
+                          pickup: { to: p.id, at: Math.max(0, p.path.length - 1) } })}>
+                        {q.id}
+                      </button>
+                    ))}
+                  </div>
+                );
+              })()}
             </>
           )}
           {p.kind === "puck" && pieces.some(q => q.kind === "player") && (
@@ -856,6 +901,26 @@ export default function DrillAnimator() {
                   spot (dashed ring), then runs its own route.
                 </div>
               )}
+              {(() => {
+                // a stationary shooter/picker has no route points, so the
+                // point popups can't host its shot — offer it here instead
+                const head = p.carrier || (p.pickup && p.pickup.to);
+                const hp = head && pieces.find(q => q.id === head && q.kind === "player");
+                if (!hp || hp.path.length) return null;
+                return (
+                  <>
+                    <div className="hd-poprow">
+                      <button className={`hd-mini${p.shotAt != null ? " on" : ""}`}
+                        onClick={() => updateById(p.id, p.shotAt != null
+                          ? { shotAt: null, rebound: null, reshoot: null }
+                          : { shotAt: 0 })}>
+                        {p.shotAt != null ? "✓ Shoots at net" : "🥅 Shoot at net"}
+                      </button>
+                    </div>
+                    {p.shotAt != null && reboundRow(p, hp.id)}
+                  </>
+                );
+              })()}
             </>
           )}
           {p.kind !== "cone" && (
@@ -1018,11 +1083,14 @@ export default function DrillAnimator() {
                 {stage === (pk.transfers || []).length && (
                   <div className="hd-poprow">
                     <button className={`hd-mini${pk.shotAt === i ? " on" : ""}`}
-                      onClick={() => updateById(pk.id, { shotAt: pk.shotAt === i ? null : i })}>
+                      onClick={() => updateById(pk.id, pk.shotAt === i
+                        ? { shotAt: null, rebound: null, reshoot: null }
+                        : { shotAt: i })}>
                       {pk.shotAt === i ? "✓ Shooting at net" : "🥅 Shoot at net"}
                     </button>
                   </div>
                 )}
+                {pk.shotAt === i && reboundRow(pk, p.id)}
                 {incoming && p.path.length > 0 && (
                   <div className="hd-poprow">
                     <button className={`hd-mini${incoming.recvAt === i ? " on" : ""}`}
@@ -1036,6 +1104,29 @@ export default function DrillAnimator() {
                     )}
                   </div>
                 )}
+              </>
+            );
+          })()}
+          {p.kind === "player" && (() => {
+            // this player is the designated collector of some shot's rebound —
+            // let them gather it here and (optionally) fire a put-back shot
+            const rpk = pieces.find(q => q.kind === "puck" && q.shotAt != null
+              && q.rebound && q.rebound.to === p.id);
+            if (!rpk) return null;
+            return (
+              <>
+                <div className="hd-poprow">
+                  <button className={`hd-mini${rpk.rebound.at === i ? " on" : ""}`}
+                    onClick={() => updateById(rpk.id, { rebound: { ...rpk.rebound, at: rpk.rebound.at === i ? null : i } })}>
+                    {rpk.rebound.at === i ? "✓ Collect rebound here" : "Collect rebound here"}
+                  </button>
+                </div>
+                <div className="hd-poprow">
+                  <button className={`hd-mini${rpk.reshoot === i ? " on" : ""}`}
+                    onClick={() => updateById(rpk.id, { reshoot: rpk.reshoot === i ? null : i })}>
+                    {rpk.reshoot === i ? "✓ Put-back shot" : "🥅 Put-back shot"}
+                  </button>
+                </div>
               </>
             );
           })()}
