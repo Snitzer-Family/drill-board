@@ -325,27 +325,27 @@ export default function DrillAnimator() {
   // skater stride: a lateral weight-shift sway (+ slight edge lean) phased by
   // distance travelled, scaled by speed so it settles into stops. Display-only
   // — never fed back into timing or the puck's blade position.
-  // stride vs glide keyed to ABSOLUTE speed (relative to the player's nominal
-  // cruise): fast → wide, leaning, aggressive strides; slow / coasting into a
-  // stop → a quiet glide; speed picking back up → striding again.
+  // stride vs glide keyed to the skater's speed multiple r = speed ÷ base pace
+  // (so the piece Speed setting and RATE legs actually drive it): r≤1 glides,
+  // r≈1.5 is a normal stride, r≈2 is a hard, wide, aggressive stride. The
+  // side-to-side sway eases off faster than the lean as the skater slows.
   const STRIDE_LAMBDA = 11; // ft per full left-right stride cycle
-  const STRIDE_AMP = 0.55;  // ft of lateral sway at a full aggressive stride
-  const STRIDE_LEAN = 4.5;  // deg of body lean into a hard stride
-  const GLIDE_LO = 0.45;    // ×nominal speed below which the skater just glides
-  const GLIDE_HI = 1.0;     // ×nominal speed at which the stride is full-out
+  const STRIDE_AMP = 0.6;   // ft of lateral sway at a full aggressive (2×) stride
+  const STRIDE_LEAN = 4.5;  // deg of body lean at a full aggressive stride
+  const GLIDE_AT = 1.0;     // ×base pace: at/below this the skater just glides
+  const HARD_AT = 2.0;      // ×base pace: full-out aggressive stride
   const PLANT_DEG = 55;     // deg the body pivots sideways in a hockey stop
   function displaySwing(p) {
     return p.kind === "player" && animT > 0 ? shotSwing(p.id, animT * totalTime) : 0;
   }
   function displayPos(p) {
     const dp = displayPosAt(p, animT <= 0 ? 0 : animT * totalTime);
-    if (p.kind !== "player" || !(dp.spd > 0.05)) return dp;
-    const r = dp.spd / Math.max(1, pace * (p.speed || 1)); // speed vs nominal cruise
-    const g = Math.max(0, Math.min(1, (r - GLIDE_LO) / (GLIDE_HI - GLIDE_LO)));
-    const strength = g * g * (3 - 2 * g);                  // 0 glide → 1 full stride
-    const extra = Math.max(0, Math.min(0.45, r - GLIDE_HI)); // faster still → more aggressive
+    if (p.kind !== "player" || !(dp.smul > 0.02)) return dp;
+    const r = dp.smul;                                    // effective speed multiple
+    const g = Math.max(0, Math.min(1, (r - GLIDE_AT) / (HARD_AT - GLIDE_AT)));
+    const strength = g * g * (3 - 2 * g);                 // 0 glide → 1 aggressive
     const phase = (2 * Math.PI * (dp.dist || 0)) / STRIDE_LAMBDA;
-    const sway = Math.sin(phase) * STRIDE_AMP * (strength + extra);
+    const sway = Math.sin(phase) * STRIDE_AMP * strength;
     const perp = (((dp.a || 0) + 90) * Math.PI) / 180;
     // hockey stop: as speed bleeds off, plant the body sideways so the finish
     // reads like a bite, not a coast
@@ -354,7 +354,7 @@ export default function DrillAnimator() {
       ...dp,
       x: clampX(dp.x + Math.cos(perp) * sway),
       y: clampY(dp.y + Math.sin(perp) * sway),
-      a: (dp.a || 0) + STRIDE_LEAN * (strength + extra) * Math.cos(phase) + plant,
+      a: (dp.a || 0) + STRIDE_LEAN * strength * Math.cos(phase) + plant,
     };
   }
 
