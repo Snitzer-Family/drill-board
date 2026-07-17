@@ -325,27 +325,36 @@ export default function DrillAnimator() {
   // skater stride: a lateral weight-shift sway (+ slight edge lean) phased by
   // distance travelled, scaled by speed so it settles into stops. Display-only
   // — never fed back into timing or the puck's blade position.
+  // stride vs glide keyed to ABSOLUTE speed (relative to the player's nominal
+  // cruise): fast → wide, leaning, aggressive strides; slow / coasting into a
+  // stop → a quiet glide; speed picking back up → striding again.
   const STRIDE_LAMBDA = 11; // ft per full left-right stride cycle
-  const STRIDE_AMP = 0.32;  // ft of lateral sway at full glide
-  const STRIDE_LEAN = 2.5;  // deg of body lean into each push
+  const STRIDE_AMP = 0.55;  // ft of lateral sway at a full aggressive stride
+  const STRIDE_LEAN = 4.5;  // deg of body lean into a hard stride
+  const GLIDE_LO = 0.45;    // ×nominal speed below which the skater just glides
+  const GLIDE_HI = 1.0;     // ×nominal speed at which the stride is full-out
   const PLANT_DEG = 55;     // deg the body pivots sideways in a hockey stop
   function displaySwing(p) {
     return p.kind === "player" && animT > 0 ? shotSwing(p.id, animT * totalTime) : 0;
   }
   function displayPos(p) {
     const dp = displayPosAt(p, animT <= 0 ? 0 : animT * totalTime);
-    if (p.kind !== "player" || !(dp.v > 0.02)) return dp;
+    if (p.kind !== "player" || !(dp.spd > 0.05)) return dp;
+    const r = dp.spd / Math.max(1, pace * (p.speed || 1)); // speed vs nominal cruise
+    const g = Math.max(0, Math.min(1, (r - GLIDE_LO) / (GLIDE_HI - GLIDE_LO)));
+    const strength = g * g * (3 - 2 * g);                  // 0 glide → 1 full stride
+    const extra = Math.max(0, Math.min(0.45, r - GLIDE_HI)); // faster still → more aggressive
     const phase = (2 * Math.PI * (dp.dist || 0)) / STRIDE_LAMBDA;
-    const sway = Math.sin(phase) * STRIDE_AMP * dp.v;
+    const sway = Math.sin(phase) * STRIDE_AMP * (strength + extra);
     const perp = (((dp.a || 0) + 90) * Math.PI) / 180;
-    // hockey stop: as speed bleeds off, plant the body sideways (toward the
-    // last stride edge) so the finish reads like a bite, not a coast
+    // hockey stop: as speed bleeds off, plant the body sideways so the finish
+    // reads like a bite, not a coast
     const plant = dp.braking ? PLANT_DEG * (1 - dp.v) * (Math.sin(phase) >= 0 ? 1 : -1) : 0;
     return {
       ...dp,
       x: clampX(dp.x + Math.cos(perp) * sway),
       y: clampY(dp.y + Math.sin(perp) * sway),
-      a: (dp.a || 0) + STRIDE_LEAN * Math.cos(phase) * dp.v + plant,
+      a: (dp.a || 0) + STRIDE_LEAN * (strength + extra) * Math.cos(phase) + plant,
     };
   }
 

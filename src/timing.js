@@ -216,15 +216,17 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
   // Returns eased arc fraction s and normalized speed v (0 at rest, 1 cruising).
   const RAMP_UP = 0.15;   // explosive push-off — short accel ramp
   const RAMP_DOWN = 0.12; // hockey stop — carry speed then bite the ice hard
+  // returns eased arc fraction s, normalized speed v (0 rest, 1 cruise), and
+  // the raw derivative d = ds/du (= actual speed factor, peaks at vmax mid-leg)
   function easeLeg(u, a, b) {
-    if (a <= 0 && b <= 0) return { s: u, v: 1 };
+    if (a <= 0 && b <= 0) return { s: u, v: 1, d: 1 };
     const vmax = 1 / (1 - (a + b) / 2);
-    if (a > 0 && u < a) return { s: (vmax * u * u) / (2 * a), v: u / a };
+    if (a > 0 && u < a) return { s: (vmax * u * u) / (2 * a), v: u / a, d: vmax * (u / a) };
     if (b > 0 && u > 1 - b) {
       const w = u - (1 - b);
-      return { s: vmax * (1 - b - a / 2 + w - (w * w) / (2 * b)), v: (b - w) / b };
+      return { s: vmax * (1 - b - a / 2 + w - (w * w) / (2 * b)), v: (b - w) / b, d: vmax * (b - w) / b };
     }
-    return { s: vmax * (u - a / 2), v: 1 };
+    return { s: vmax * (u - a / 2), v: 1, d: vmax };
   }
 
   // position/heading along a piece's own route at elapsed e (warp-aware).
@@ -253,8 +255,9 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
           const entryRest = i === 0 || (p.path[i].stop || 0) > 0;
           const nxt = p.path[i + 1];
           const exitRest = i === p.path.length - 1 || (nxt && (nxt.stop || 0) > 0);
-          const { s: sf, v } = easeLeg(e / mt, entryRest ? RAMP_UP : 0, exitRest ? RAMP_DOWN : 0);
+          const { s: sf, v, d } = easeLeg(e / mt, entryRest ? RAMP_UP : 0, exitRest ? RAMP_DOWN : 0);
           const braking = exitRest && e / mt > 1 - RAMP_DOWN;
+          const spd = mt > 0 ? (L * d) / mt : 0; // absolute ft/s along the leg
           const l = L * sf;
           const pt = el.getPointAtLength(l);
           const q = el.getPointAtLength(Math.min(L, l + 0.6));
@@ -265,7 +268,7 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
           } else {
             a = (Math.atan2(q.y - pt.y, q.x - pt.x) * 180) / Math.PI;
           }
-          return { x: pt.x, y: pt.y, a: a + flip(s), v, dist: dist + l, braking };
+          return { x: pt.x, y: pt.y, a: a + flip(s), v, spd, dist: dist + l, braking };
         } catch { return { ...prev, a: 0, v: 0, dist }; }
       }
       e -= mt;
