@@ -327,15 +327,16 @@ export default function DrillAnimator() {
       });
     });
     // player movement beats: named waypoints (and each route's finish), named
-    // by the waypoint's own name, else the ice area it lands in, else "point N"
+    // by the waypoint's own name, else the ice area it lands in, else "point N".
+    // The caption fires at the START of the leg (arrival at the previous point,
+    // or t=0) so it reads before the player actually skates there.
     pieces.forEach(p => {
       if (p.kind !== "player" || !p.path.length) return;
       p.path.forEach((s, i) => {
         const isLast = i === p.path.length - 1;
         if (!s.name && !isLast) return;
         const where = s.name || zoneAt(s.x, s.y) || `point ${i + 1}`;
-        const verb = s.name ? "skates to" : "finishes at";
-        evs.push({ t: waypointTime(p, i), key: `${p.id}:move:${i}`, auto: `${nameOf(p.id)} ${verb} ${where}` });
+        evs.push({ t: waypointTime(p, i - 1), key: `${p.id}:move:${i}`, auto: `${nameOf(p.id)} skates to ${where}` });
       });
     });
     evs.sort((a, b) => a.t - b.t);
