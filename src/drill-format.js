@@ -26,7 +26,7 @@ export function parseDrill(text) {
         let color = kind === "cone" ? "#e0731d" : kind === "puck" ? "#14171a" : "#d7263d";
         let label = kind === "player" ? id : "";
         let speed = 1, hand = "R", carrier = null, facing = 0, shotAt = null, pickup = null;
-        let rebound = null, reshoot = null;
+        let rebound = null, reshoot = null, net = null;
         const transfers = [];
         rest.forEach(r => {
           if (r.startsWith("#")) color = r;
@@ -54,13 +54,16 @@ export function parseDrill(text) {
             } else if (key === "reshoot") {
               const n = parseInt(v, 10);
               if (!isNaN(n)) reshoot = n - 1;
+            } else if (key === "net") {
+              const w = v.toLowerCase();
+              if (w === "left" || w === "right") net = w;
             } else if (key === "face") {
               const n = parseFloat(v);
               if (!isNaN(n)) facing = n;
             }
           } else label = r;
         });
-        const p = { id, kind, x, y, color, label, speed, hand, carrier, facing, transfers, shotAt, pickup, rebound, reshoot, path: [] };
+        const p = { id, kind, x, y, color, label, speed, hand, carrier, facing, transfers, shotAt, pickup, rebound, reshoot, net, path: [] };
         pieces.push(p); byId[id] = p;
       } else if (cmd === "PATH") {
         const id = tok[1];
@@ -118,8 +121,9 @@ export function serializeDrill(rink, pieces) {
     const reb = p.kind === "puck" && p.shotAt != null && p.rebound
       ? ` rebound=${p.rebound.to}${p.rebound.at != null ? "@" + (p.rebound.at + 1) : ""}` : "";
     const rsh = p.kind === "puck" && p.shotAt != null && p.rebound && p.reshoot != null ? ` reshoot=${p.reshoot + 1}` : "";
+    const nt = p.kind === "puck" && p.shotAt != null && (p.net === "left" || p.net === "right") ? ` net=${p.net}` : "";
     const fac = p.kind === "player" && !p.path.length && p.facing ? ` face=${f1(p.facing)}` : "";
-    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${car}${gp}${pas}${sht}${reb}${rsh}${fac}${spd}`);
+    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${car}${gp}${pas}${sht}${reb}${rsh}${nt}${fac}${spd}`);
     if (p.path.length) out.push(`PATH ${p.id} ${p.path.map(segToStr).join(" ")}`);
   });
   return out.join("\n") + "\n";

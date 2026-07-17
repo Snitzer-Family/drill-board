@@ -128,12 +128,15 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
           ? Math.max(tBase, routeTimeW(cur, warp, Math.max(0, Math.min(shootIdx, cur.path.length - 1))))
           : tBase;
         const launch = bladeAt(cur, launchT, warp);
-        const net = launch.x < 100 ? { x: 15, y: 42.5 } : { x: 185, y: 42.5 };
+        const NETS = { left: { x: 15, y: 42.5 }, right: { x: 185, y: 42.5 } };
+        const net = pk.net === "left" || pk.net === "right"
+          ? NETS[pk.net]                                     // forced target net
+          : launch.x < 100 ? NETS.left : NETS.right;          // else nearest
         const vShot = pace * SPEED.shot * (pk.speed || 1);
         const inx = net.x - launch.x, iny = net.y - launch.y;
         const mag = Math.hypot(inx, iny) || 1;
         const tArr = launchT + mag / vShot;
-        legs.push({ type: "fly", shot: true, x0: launch.x, y0: launch.y, x1: net.x, y1: net.y, t0: launchT, t1: tArr });
+        legs.push({ type: "fly", shot: true, by: cur.id, x0: launch.x, y0: launch.y, x1: net.x, y1: net.y, t0: launchT, t1: tArr });
         // rebound: roll toward the collector's gather spot when one is set,
         // otherwise carom off the net into the slot (reflected, damped)
         let restPt;
@@ -304,5 +307,23 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
     return routePosAt(p, e, warp);
   }
 
-  return { getPlan, pieceTime, displayPosAt };
+  // stick-swing angle (deg) for a player at elapsed e: 0 except in the brief
+  // window around one of their shot releases — winds back, then snaps through.
+  function shotSwing(id, e) {
+    const { plans } = getPlan();
+    const WU = 0.16, FT = 0.3, MAX = 34;
+    for (const pid in plans) {
+      for (const leg of plans[pid].legs) {
+        if (!leg.shot || leg.by !== id) continue;
+        const tau = e - leg.t0;
+        if (tau < -WU || tau > FT) continue;
+        return tau < 0
+          ? -MAX * (tau + WU) / WU                          // wind back to -MAX at release
+          : -MAX * Math.cos((Math.PI * tau) / FT) * (1 - tau / FT); // snap through, settle
+      }
+    }
+    return 0;
+  }
+
+  return { getPlan, pieceTime, displayPosAt, shotSwing };
 }

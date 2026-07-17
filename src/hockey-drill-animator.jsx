@@ -32,7 +32,8 @@ import { STYLES } from "./styles.js";
    exactly as the puck does; without it the puck leads them.
    shoot=<pt> fires the puck at the nearest net when the final
    carrier reaches that route point; it caroms off and glides to
-   rest in the slot.
+   rest in the slot. net=left|right forces which net (else the
+   nearest is chosen).
    pickup=<player>@<pt> starts a loose puck: it sits (or runs
    its own route) until that player reaches the waypoint, then
    hops onto their blade — passes and shots can follow. A player
@@ -280,7 +281,7 @@ export default function DrillAnimator() {
 
   /* ----- timing & pass planning (see timing.js) ----- */
   const planCache = useRef({ key: null, pace: 0, sig: -1, warp: {}, plans: {}, rel: {} });
-  const { getPlan, pieceTime, displayPosAt } = createTiming({ pieces, pace, segRefs, planCache });
+  const { getPlan, pieceTime, displayPosAt, shotSwing } = createTiming({ pieces, pace, segRefs, planCache });
 
   const totalTime = Math.max(0.1, ...pieces.map(pieceTime));
   totalRef.current = totalTime;
@@ -328,6 +329,9 @@ export default function DrillAnimator() {
   const STRIDE_AMP = 0.32;  // ft of lateral sway at full glide
   const STRIDE_LEAN = 2.5;  // deg of body lean into each push
   const PLANT_DEG = 55;     // deg the body pivots sideways in a hockey stop
+  function displaySwing(p) {
+    return p.kind === "player" && animT > 0 ? shotSwing(p.id, animT * totalTime) : 0;
+  }
   function displayPos(p) {
     const dp = displayPosAt(p, animT <= 0 ? 0 : animT * totalTime);
     if (p.kind !== "player" || !(dp.v > 0.02)) return dp;
@@ -380,7 +384,7 @@ export default function DrillAnimator() {
     const id = nextId(kind);
     const colorIdx = pieces.filter(p => p.kind === "player").length % COLORS.length;
     return {
-      id, kind, x: pt.x, y: pt.y, speed: 1, hand: "R", carrier: null, facing: 0, transfers: [], shotAt: null, pickup: null, rebound: null, reshoot: null,
+      id, kind, x: pt.x, y: pt.y, speed: 1, hand: "R", carrier: null, facing: 0, transfers: [], shotAt: null, pickup: null, rebound: null, reshoot: null, net: null,
       color: kind === "player" ? COLORS[colorIdx] : kind === "cone" ? "#e0731d" : "#14171a",
       label: kind === "player" ? id : "", path: [],
     };
@@ -789,6 +793,16 @@ export default function DrillAnimator() {
     const p = pieces.find(q => q.id === popup.id);
     if (!p && popup.type !== "add") return null;
 
+    // which net a shot aims at (default: nearest to the shooter)
+    const netRow = pk => (
+      <div className="hd-poprow">
+        <span>Net</span>
+        {[["auto", "Nearest"], ["left", "◄ Left"], ["right", "Right ►"]].map(([v, lab]) => (
+          <button key={v} className={`hd-mini${(pk.net || "auto") === v ? " on" : ""}`}
+            onClick={() => updateById(pk.id, { net: v === "auto" ? null : v })}>{lab}</button>
+        ))}
+      </div>
+    );
     // rebound target picker: after a shot, which player collects the carom
     const reboundRow = (pk, shooterId) => {
       const catchers = pieces.filter(q => q.kind === "player" && q.id !== shooterId);
@@ -917,6 +931,7 @@ export default function DrillAnimator() {
                         {p.shotAt != null ? "✓ Shoots at net" : "🥅 Shoot at net"}
                       </button>
                     </div>
+                    {p.shotAt != null && netRow(p)}
                     {p.shotAt != null && reboundRow(p, hp.id)}
                   </>
                 );
@@ -1090,6 +1105,7 @@ export default function DrillAnimator() {
                     </button>
                   </div>
                 )}
+                {pk.shotAt === i && netRow(pk)}
                 {pk.shotAt === i && reboundRow(pk, p.id)}
                 {incoming && p.path.length > 0 && (
                   <div className="hd-poprow">
@@ -1213,7 +1229,7 @@ export default function DrillAnimator() {
             const dp = displayPos(p);
             return (
               <PieceIcon key={`lp${p.id}`} p={p} pos={dp} thDeg={(dp.a || 0) + screenRot}
-                selected={p.id === selectedId} dim={animT > 0} onDown={() => {}} />
+                selected={p.id === selectedId} dim={animT > 0} onDown={() => {}} swing={displaySwing(p)} />
             );
           })}
           <circle cx={loupe.x} cy={loupe.y} r={1.1} fill="none" stroke="#d7263d" strokeWidth={0.25} />
@@ -1320,7 +1336,7 @@ export default function DrillAnimator() {
               const fx = iconXf(dp);
               return (
                 <PieceIcon key={p.id} p={p} pos={dp} xf={fx.t} thDeg={fx.th}
-                  selected={p.id === selectedId}
+                  selected={p.id === selectedId} swing={displaySwing(p)}
                   dim={animT > 0} onDown={e => pieceDown(e, p.id)}
                   onStickDown={editing && tool !== "draw" && p.kind === "player" && !p.path.length
                     ? e => stickDown(e, p) : undefined} />
