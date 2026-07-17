@@ -143,24 +143,35 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
           return;
         }
         // a route-less carrier releases as soon as they have the puck (tBase)
-        const launchT = cur.path.length
+        const launchMin = cur.path.length
           ? Math.max(tBase, routeTimeW(cur, warp, Math.max(0, Math.min(tr.at, cur.path.length - 1))))
           : tBase;
-        const launch = bladeAt(cur, launchT, warp);
+        let launchT = launchMin;
+        let launch = bladeAt(cur, launchT, warp);
         let target, tArr;
         if (tr.recvAt != null && rec.path.length) {
           const rj = Math.max(0, Math.min(tr.recvAt, rec.path.length - 1));
           const anchor = { x: rec.path[rj].x, y: rec.path[rj].y };
+          // the receiver's natural (unwarped) time + stops/moving to reach recvAt
+          let stops = 0, moving = 0;
+          for (let i = 0; i <= rj; i++) {
+            stops += rec.path[i].stop || 0;
+            moving += segMoveTime(rec, rec.path[i], i);
+          }
+          const tRecvNat = stops + moving;
+          // hold the pass until the receiver has run into range so they arrive at
+          // natural pace — never fire early and blast them through the whole route
+          for (let k = 0; k < 3; k++) {
+            const flight = Math.hypot(anchor.x - launch.x, anchor.y - launch.y) / vPass();
+            launchT = Math.max(launchMin, tRecvNat - flight);
+            launch = bladeAt(cur, launchT, warp);
+          }
           tArr = launchT + Math.hypot(anchor.x - launch.x, anchor.y - launch.y) / vPass();
+          // warp only to SLOW an early receiver; never speed them up (f ≤ 1)
           if (!warp[rec.id]) {
-            let stops = 0, moving = 0;
-            for (let i = 0; i <= rj; i++) {
-              stops += rec.path[i].stop || 0;
-              moving += segMoveTime(rec, rec.path[i], i);
-            }
             const avail = tArr - stops;
             if (moving > 0 && avail > 0.05)
-              warp[rec.id] = { upto: rj, f: Math.min(4, Math.max(0.25, moving / avail)) };
+              warp[rec.id] = { upto: rj, f: Math.min(1, Math.max(0.25, moving / avail)) };
           }
           target = bladeAt(rec, routeTimeW(rec, warp, rj), warp);
           tArr = launchT + Math.hypot(target.x - launch.x, target.y - launch.y) / vPass();

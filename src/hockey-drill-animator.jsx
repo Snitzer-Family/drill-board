@@ -963,9 +963,13 @@ export default function DrillAnimator() {
                   </div>
                 );
               })()}
-              {/* a route-less carrier has no waypoints, so host its chain
-                  (pass / shoot / rebound) here on the player itself */}
-              {p.path.length === 0 && chainControls(p, 0)}
+              {/* host the chain (pass / shoot / rebound) on the player itself
+                  for a route-less player, and for any puck head so the option
+                  stays put here even after a route is added (head holds from pt 0) */}
+              {(p.path.length === 0
+                || pieces.some(q => q.kind === "puck"
+                  && (q.carrier === p.id || (q.pickup && q.pickup.to === p.id))))
+                && chainControls(p, 0)}
             </>
           )}
           {p.kind === "puck" && pieces.some(q => q.kind === "player") && (
