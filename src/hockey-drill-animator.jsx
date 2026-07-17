@@ -70,6 +70,7 @@ export default function DrillAnimator() {
   const [presoDelay, setPresoDelay] = useState(2.5);   // seconds held at each step
   const [stepNotes, setStepNotes] = useState({});      // key -> hand-edited text
   const [holdStep, setHoldStep] = useState(null);      // step currently being read
+  const [minorDesc, setMinorDesc] = useState(false);   // describe zones skated through
   const [showZones, setShowZones] = useState(false);   // named ice-area overlay
   const [drawPreview, setDrawPreview] = useState(null);
   const [loupe, setLoupe] = useState(null);
@@ -299,6 +300,32 @@ export default function DrillAnimator() {
   const totalTime = Math.max(0.1, ...pieces.map(pieceTime));
   totalRef.current = totalTime;
 
+  // natural phrase for an area name mid-sentence ("Dot lane" -> "the dot lane")
+  const areaPhrase = z => {
+    const l = z.toLowerCase();
+    return l.startsWith("the ") || l.startsWith("behind") ? l : "the " + l;
+  };
+  const joinAreas = a => a.length <= 1 ? (a[0] || "")
+    : a.length === 2 ? `${a[0]} and ${a[1]}`
+    : `${a.slice(0, -1).join(", ")}, and ${a[a.length - 1]}`;
+  // distinct ice areas a leg threads through, excluding its start and end zones
+  function legZones(p, i) {
+    const el = segRefs.current[`${p.id}/${i}`];
+    if (!el) return [];
+    let L = 0; try { L = el.getTotalLength(); } catch { return []; }
+    if (!L) return [];
+    const start = i === 0 ? { x: p.x, y: p.y } : { x: p.path[i - 1].x, y: p.path[i - 1].y };
+    const seen = new Set([zoneAt(start.x, start.y), zoneAt(p.path[i].x, p.path[i].y)]);
+    const out = [];
+    const steps = Math.max(4, Math.ceil(L / 4));
+    for (let k = 0; k <= steps; k++) {
+      let pt; try { pt = el.getPointAtLength((L * k) / steps); } catch { continue; }
+      const z = zoneAt(pt.x, pt.y);
+      if (z && !seen.has(z)) { seen.add(z); out.push(z); }
+    }
+    return out;
+  }
+
   // Auto-describe the play's major beats (puck events) as timed steps; the
   // text is editable and stored per-step in stepNotes.
   function buildSteps() {
@@ -326,17 +353,22 @@ export default function DrillAnimator() {
         }
       });
     });
-    // player movement beats: named waypoints (and each route's finish), named
-    // by the waypoint's own name, else the ice area it lands in, else "point N".
-    // The caption fires at the START of the leg (arrival at the previous point,
-    // or t=0) so it reads before the player actually skates there.
+    // player movement beats: named waypoints and each route's finish, named by
+    // the waypoint's own name, else the ice area it lands in, else "point N".
+    // With minor descriptions on, every leg that threads a distinct area gets a
+    // beat too, worded "…skates through the dot lane to the slot". Each caption
+    // fires at the START of the leg (arrival at the previous point, or t=0) so
+    // it reads before the player actually skates there.
     pieces.forEach(p => {
       if (p.kind !== "player" || !p.path.length) return;
       p.path.forEach((s, i) => {
         const isLast = i === p.path.length - 1;
-        if (!s.name && !isLast) return;
-        const where = s.name || zoneAt(s.x, s.y) || `point ${i + 1}`;
-        evs.push({ t: waypointTime(p, i - 1), key: `${p.id}:move:${i}`, auto: `${nameOf(p.id)} skates to ${where}` });
+        const through = minorDesc ? legZones(p, i) : [];
+        if (!s.name && !isLast && through.length === 0) return;
+        const zn = zoneAt(s.x, s.y);
+        const where = s.name ? s.name : zn ? areaPhrase(zn) : `point ${i + 1}`;
+        const via = through.length ? ` through ${joinAreas(through.map(areaPhrase))}` : "";
+        evs.push({ t: waypointTime(p, i - 1), key: `${p.id}:move:${i}`, auto: `${nameOf(p.id)} skates${via} to ${where}` });
       });
     });
     evs.sort((a, b) => a.t - b.t);
@@ -1566,6 +1598,11 @@ export default function DrillAnimator() {
               onClick={() => setPresentation(v => !v)}>{presentation ? "✓ On" : "Off"}</button>
             <span>Pause</span>
             <Stepper value={presoDelay} onChange={setPresoDelay} step={0.5} min={0} />
+          </div>
+          <div className="hd-poprow">
+            <button className={`hd-mini${minorDesc ? " on" : ""}`}
+              onClick={() => setMinorDesc(v => !v)}>{minorDesc ? "✓ Minor steps" : "Minor steps"}</button>
+            <span style={{ fontSize: 11, color: "#8b99a8" }}>describe areas skated through</span>
           </div>
           <div className="hd-poprow">
             <button className="hd-mini" onClick={() => setOpenMenu("steps")}>✎ Edit steps</button>

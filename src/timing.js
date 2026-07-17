@@ -243,12 +243,34 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
       if (bx == null) return;                              // route doesn't end in an o-zone
       const into = endX < 75 ? -1 : 1;
       const inZone = x => (into < 0 ? x < bx : x > bx);
+      if (inZone(p.x) && inZone(p.path[0].x)) return;      // already starts in the zone
       let seg = -1;
       for (let i = 0; i < p.path.length; i++) if (inZone(p.path[i].x)) { seg = i; break; }
       if (seg < 0) return;
-      const tCross = routeTimeW(p, warp, seg - 1);         // arrival at last neutral wp
+      // locate where segment `seg` actually crosses the blue line (mid-segment)
+      const el = segRefs.current[`${p.id}/${seg}`];
+      let L = 0; try { L = el ? el.getTotalLength() : 0; } catch { L = 0; }
+      if (!el || !L) return;
+      let fCross = 0, cx = p.path[seg].x, cy = p.path[seg].y;
+      let prevX = seg === 0 ? p.x : p.path[seg - 1].x, prevL = 0;
+      const steps = Math.max(6, Math.ceil(L / 2));
+      for (let k = 1; k <= steps; k++) {
+        const l = (L * k) / steps;
+        let pt; try { pt = el.getPointAtLength(l); } catch { break; }
+        const crossed = into < 0 ? prevX >= bx && pt.x < bx : prevX <= bx && pt.x > bx;
+        if (crossed) {
+          const f = (bx - prevX) / ((pt.x - prevX) || 1);
+          const lc = prevL + (l - prevL) * f;
+          fCross = Math.max(0, Math.min(1, lc / L));
+          try { const c = el.getPointAtLength(lc); cx = c.x; cy = c.y; } catch { /* keep endpoint */ }
+          break;
+        }
+        prevX = pt.x; prevL = l;
+      }
+      // when the player naturally reaches the blue line, then the puck's entry
+      const tCross = routeTimeW(p, warp, seg - 1) + effMove(p, p.path[seg], seg, warp) * fCross;
       const tPuck = puckEnter(bx, into);
-      if (isFinite(tPuck) && tPuck - tCross > 0.05) holds[p.id] = { seg, dur: tPuck - tCross };
+      if (isFinite(tPuck) && tPuck - tCross > 0.05) holds[p.id] = { seg, fCross, cx, cy, dur: tPuck - tCross };
     });
     currentHolds = holds;
     planCache.current.holds = holds;
@@ -296,39 +318,74 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
       const s0 = p.path[0];
       return { x: p.x, y: p.y, a: segTangentAngle({ x: p.x, y: p.y }, s0, 0.02) + flip(s0), v: 0, dist: 0 };
     }
+    // position + heading at arc-length `arc` along segment element el
+    const atArc = (el, L, arc, s) => {
+      const pt = el.getPointAtLength(arc);
+      const q = el.getPointAtLength(Math.min(L, arc + 0.6));
+      let a;
+      if (Math.hypot(q.x - pt.x, q.y - pt.y) < 0.05) {
+        const b = el.getPointAtLength(Math.max(0, arc - 0.6));
+        a = (Math.atan2(pt.y - b.y, pt.x - b.x) * 180) / Math.PI;
+      } else {
+        a = (Math.atan2(q.y - pt.y, q.x - pt.x) * 180) / Math.PI;
+      }
+      return { x: pt.x, y: pt.y, a: a + flip(s) };
+    };
     let prev = { x: p.x, y: p.y };
     let dist = 0;
     for (let i = 0; i < p.path.length; i++) {
       const s = p.path[i];
-      const hold = (s.stop || 0) + holdAt(p, i);
-      if (e < hold) return { ...prev, a: segTangentAngle(prev, s, 0.02) + flip(s), v: 0, dist };
-      e -= hold;
+      const stop = s.stop || 0;
+      if (e < stop) return { ...prev, a: segTangentAngle(prev, s, 0.02) + flip(s), v: 0, dist };
+      e -= stop;
       const mt = effMove(p, s, i, warp);
       const el = segRefs.current[`${p.id}/${i}`];
       let L = 0; try { L = el ? el.getTotalLength() : 0; } catch { L = 0; }
+      const nxt = p.path[i + 1];
+      const entryRest = i === 0 || stop > 0;
+      const exitRest = i === p.path.length - 1 || (nxt && (nxt.stop || 0) > 0);
+      const zh = currentHolds[p.id];
+      const zHold = zh && zh.seg === i && mt > 0 && L > 0 ? zh : null;
+
+      if (zHold) {
+        // blue-line delay: skate to the crossing, drift laterally while waiting
+        // for the puck, then explode into the zone
+        const tBefore = mt * zHold.fCross, tAfter = mt * (1 - zHold.fCross);
+        try {
+          if (e < tBefore) {
+            const { s: sf, v } = easeLeg(tBefore > 0 ? e / tBefore : 1, entryRest ? RAMP_UP : 0, RAMP_DOWN);
+            const arc = zHold.fCross * L * sf;
+            const smul = tBefore > 0 ? ((zHold.fCross * L / tBefore) / pace) * v : 0;
+            return { ...atArc(el, L, arc, s), v, smul, dist: dist + arc, braking: e / tBefore > 1 - RAMP_DOWN };
+          }
+          e -= tBefore;
+          if (e < zHold.dur) {
+            const frac = e / zHold.dur;
+            const dir = zHold.cy <= 42.5 ? 1 : -1;                  // drift toward center ice and back
+            const dy = Math.sin(Math.PI * frac) * Math.min(11, zHold.dur * 6) * dir;
+            const a = Math.cos(Math.PI * frac) * dir >= 0 ? 90 : -90;
+            return { x: zHold.cx, y: clampY(zHold.cy + dy), a, v: 0, dist: dist + zHold.fCross * L };
+          }
+          e -= zHold.dur;
+          if (e < tAfter) {
+            const { s: sf, v } = easeLeg(tAfter > 0 ? e / tAfter : 1, RAMP_UP, exitRest ? RAMP_DOWN : 0);
+            const arc = zHold.fCross * L + (1 - zHold.fCross) * L * sf;
+            const smul = tAfter > 0 ? (((1 - zHold.fCross) * L / tAfter) / pace) * v : 0;
+            return { ...atArc(el, L, arc, s), v, smul, dist: dist + arc, braking: exitRest && e / tAfter > 1 - RAMP_DOWN };
+          }
+          e -= tAfter;
+        } catch { return { ...prev, a: 0, v: 0, dist }; }
+        dist += L;
+        prev = { x: s.x, y: s.y };
+        continue;
+      }
+
       if (mt > 0 && e < mt) {
         try {
-          // ramp up only when leaving a genuine rest (route start / after a
-          // stop), ramp down only when arriving at one (route end / a stop)
-          const entryRest = i === 0 || (p.path[i].stop || 0) > 0 || holdAt(p, i) > 0;
-          const nxt = p.path[i + 1];
-          const exitRest = i === p.path.length - 1 || (nxt && (nxt.stop || 0) > 0) || holdAt(p, i + 1) > 0;
           const { s: sf, v } = easeLeg(e / mt, entryRest ? RAMP_UP : 0, exitRest ? RAMP_DOWN : 0);
           const braking = exitRest && e / mt > 1 - RAMP_DOWN;
-          // speed multiple vs base pace: pieceSpeed×rate at cruise, easing to 0
-          // in the ramps (so slow legs / decel glide, fast legs stride)
           const smul = mt > 0 ? ((L / mt) / pace) * v : 0;
-          const l = L * sf;
-          const pt = el.getPointAtLength(l);
-          const q = el.getPointAtLength(Math.min(L, l + 0.6));
-          let a;
-          if (Math.hypot(q.x - pt.x, q.y - pt.y) < 0.05) {
-            const b = el.getPointAtLength(Math.max(0, l - 0.6));
-            a = (Math.atan2(pt.y - b.y, pt.x - b.x) * 180) / Math.PI;
-          } else {
-            a = (Math.atan2(q.y - pt.y, q.x - pt.x) * 180) / Math.PI;
-          }
-          return { x: pt.x, y: pt.y, a: a + flip(s), v, smul, dist: dist + l, braking };
+          return { ...atArc(el, L, L * sf, s), v, smul, dist: dist + L * sf, braking };
         } catch { return { ...prev, a: 0, v: 0, dist }; }
       }
       e -= mt;
