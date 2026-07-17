@@ -357,5 +357,8 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
     return ang;
   }
 
-  return { getPlan, pieceTime, displayPosAt, stickSwing };
+  // warped arrival time at a player's waypoint index (for movement captions)
+  function waypointTime(p, i) { const { warp } = getPlan(); return routeTimeW(p, warp, i); }
+
+  return { getPlan, pieceTime, displayPosAt, stickSwing, waypointTime };
 }

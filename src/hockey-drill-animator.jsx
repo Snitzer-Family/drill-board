@@ -3,6 +3,7 @@ import { VIEWS, COLORS, vb, APP_VERSION, ICON_SCALE, BUILD_STAMP, DEFAULT_TEXT }
 import { parseDrill, serializeDrill } from "./drill-format.js";
 import { clampX, clampY, segEnd, segD, nearestT, splitSeg, zigzagPoints, convertSeg, fitRoute } from "./geometry.js";
 import { RinkMarkings } from "./rink.jsx";
+import { ZONES, zoneAt } from "./zones.js";
 import { PieceIcon, Stepper, DiagPanel } from "./icons.jsx";
 import { createTiming } from "./timing.js";
 import { STYLES } from "./styles.js";
@@ -69,6 +70,7 @@ export default function DrillAnimator() {
   const [presoDelay, setPresoDelay] = useState(2.5);   // seconds held at each step
   const [stepNotes, setStepNotes] = useState({});      // key -> hand-edited text
   const [holdStep, setHoldStep] = useState(null);      // step currently being read
+  const [showZones, setShowZones] = useState(false);   // named ice-area overlay
   const [drawPreview, setDrawPreview] = useState(null);
   const [loupe, setLoupe] = useState(null);
   const [popOff, setPopOff] = useState({ x: 0, y: 0 });
@@ -292,7 +294,7 @@ export default function DrillAnimator() {
 
   /* ----- timing & pass planning (see timing.js) ----- */
   const planCache = useRef({ key: null, pace: 0, sig: -1, warp: {}, plans: {}, rel: {} });
-  const { getPlan, pieceTime, displayPosAt, stickSwing } = createTiming({ pieces, pace, segRefs, planCache });
+  const { getPlan, pieceTime, displayPosAt, stickSwing, waypointTime } = createTiming({ pieces, pace, segRefs, planCache });
 
   const totalTime = Math.max(0.1, ...pieces.map(pieceTime));
   totalRef.current = totalTime;
@@ -322,6 +324,18 @@ export default function DrillAnimator() {
             evs.push({ t: leg.t0, key: `${pk.id}:pass:${i}`, auto: `${nameOf(leg.by)} passes${to}` });
           }
         }
+      });
+    });
+    // player movement beats: named waypoints (and each route's finish), named
+    // by the waypoint's own name, else the ice area it lands in, else "point N"
+    pieces.forEach(p => {
+      if (p.kind !== "player" || !p.path.length) return;
+      p.path.forEach((s, i) => {
+        const isLast = i === p.path.length - 1;
+        if (!s.name && !isLast) return;
+        const where = s.name || zoneAt(s.x, s.y) || `point ${i + 1}`;
+        const verb = s.name ? "skates to" : "finishes at";
+        evs.push({ t: waypointTime(p, i), key: `${p.id}:move:${i}`, auto: `${nameOf(p.id)} ${verb} ${where}` });
       });
     });
     evs.sort((a, b) => a.t - b.t);
@@ -1163,6 +1177,12 @@ export default function DrillAnimator() {
       title = `Point ${i + 1} of ${p.path.length}`;
       body = (
         <>
+          <div className="hd-poprow">
+            <span>Name</span>
+            <input className="hd-input" style={{ flex: 1, minWidth: 90 }}
+              value={s.name || ""} placeholder={zoneAt(s.x, s.y) || "waypoint name"}
+              onChange={e => updateSeg(p.id, i, { name: e.target.value || undefined })} />
+          </div>
           {next ? (
             <>
               <div className="hd-poprow">
@@ -1361,6 +1381,30 @@ export default function DrillAnimator() {
             <g ref={sceneRef} transform={sceneTransform}>
             <RinkMarkings yFix={yFix} />
 
+            {showZones && (
+              <g pointerEvents="none">
+                {ZONES.map((z, i) => (
+                  <rect key={`zr${i}`} x={z.x} y={z.y} width={z.w} height={z.h}
+                    rx={2} ry={2 * yFix} fill="rgba(31,79,163,0.05)" stroke="#3f74c8"
+                    strokeWidth={0.3} strokeDasharray="1.6 1.2" opacity={0.75} />
+                ))}
+                {ZONES.map((z, i) => {
+                  if (!z.label) return null;
+                  const xf = iconXf({ x: z.label.x, y: z.label.y, a: 0 });
+                  return (
+                    <g key={`zl${i}`} transform={xf.t}>
+                      <text transform={`rotate(${-xf.th})`} textAnchor="middle" dominantBaseline="middle"
+                        fontSize={2.7} fontWeight={700} fill="#8fb4e8"
+                        style={{ userSelect: "none", fontFamily: "system-ui, sans-serif",
+                          paintOrder: "stroke", stroke: "rgba(8,12,18,0.7)", strokeWidth: 0.6 }}>
+                        {z.name}
+                      </text>
+                    </g>
+                  );
+                })}
+              </g>
+            )}
+
             {pieces.map(p => {
               let prev = { x: p.x, y: p.y };
               return p.path.map((s, i) => {
@@ -1491,6 +1535,10 @@ export default function DrillAnimator() {
                 setPieces([]); setSelectedId(null); setPopup(null); setOpenMenu(null);
               }
             }}>🗑 Clear all</button>
+          <button className={`hd-item${showZones ? " on" : ""}`}
+            onClick={() => setShowZones(s => !s)}>
+            ▦ Ice zones {showZones ? "(on)" : ""}
+          </button>
           <button className={`hd-item${showDiag ? " on" : ""}`}
             onClick={() => { setShowDiag(s => !s); setOpenMenu(null); }}>
             ◫ Diagnostics {showDiag ? "(on)" : ""}
@@ -1569,7 +1617,8 @@ export default function DrillAnimator() {
             Feet: x 0–200, y 0–85. <b>RINK</b> full|half|quarter ·
             <b> PIECE</b> id player|puck|cone x y [#color] [label] [speed=1.2] [hand=L] [on=F1] ·
             <b> PATH</b> id segments (<b>L</b> x,y · <b>Q</b> cx,cy x,y · <b>C</b> c1x,c1y c2x,c2y x,y).
-            Modifiers before a segment: <b>PASS</b>/<b>SHOT</b>, <b>BWD</b>, <b>STOP n</b>, <b>RATE n</b>.
+            Modifiers before a segment: <b>PASS</b>/<b>SHOT</b>, <b>BWD</b>, <b>STOP n</b>, <b>RATE n</b>,
+            <b> NAME word</b> (names that waypoint for presentation text; underscores show as spaces).
             <code> on=F1</code> rides that player's blade until the carrier reaches the puck's spot.
             <code> pass=2:F2@3</code> passes at the carrier's point 2 to F2, received at F2's
             point 3 — the receiver's pace auto-syncs (omit <code>@3</code> to lead them instead).

@@ -69,11 +69,11 @@ export function parseDrill(text) {
         const id = tok[1];
         const p = byId[id];
         if (!p) throw new Error(`PATH for unknown piece "${id}"`);
-        let j = 2, mode = "carry", dir = "fwd", stop = 0, rate = 1;
+        let j = 2, mode = "carry", dir = "fwd", stop = 0, rate = 1, name = null;
         const num = () => { const v = parseFloat(tok[j++]); if (isNaN(v)) throw new Error("bad number in PATH"); return v; };
         const push = seg => {
-          p.path.push({ ...seg, mode, dir, stop, rate });
-          mode = "carry"; dir = "fwd"; stop = 0; rate = 1;
+          p.path.push({ ...seg, mode, dir, stop, rate, ...(name ? { name } : {}) });
+          mode = "carry"; dir = "fwd"; stop = 0; rate = 1; name = null;
         };
         while (j < tok.length) {
           const t = tok[j++].toUpperCase();
@@ -81,6 +81,7 @@ export function parseDrill(text) {
           if (t === "FWD" || t === "BWD") { dir = t.toLowerCase(); continue; }
           if (t === "STOP") { stop = num(); continue; }
           if (t === "RATE") { rate = Math.max(0.1, num()); continue; }
+          if (t === "NAME") { name = (tok[j++] || "").replace(/_/g, " ").trim() || null; continue; }
           if (t === "L") push({ type: "L", x: num(), y: num() });
           else if (t === "Q") push({ type: "Q", cx: num(), cy: num(), x: num(), y: num() });
           else if (t === "C") push({ type: "C", c1x: num(), c1y: num(), c2x: num(), c2y: num(), x: num(), y: num() });
@@ -97,6 +98,7 @@ const f2 = n => (Math.round(n * 100) / 100).toString();
 
 function segToStr(s) {
   let pre = "";
+  if (s.name) pre += `NAME ${String(s.name).trim().replace(/\s+/g, "_")} `;
   if (s.stop > 0) pre += `STOP ${f1(s.stop)} `;
   if (s.rate && s.rate !== 1) pre += `RATE ${f2(s.rate)} `;
   if (s.dir === "bwd") pre += "BWD ";
