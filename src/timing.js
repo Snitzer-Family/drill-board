@@ -159,7 +159,8 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
   // fraction of the leg spent ramping up / down; they preserve the leg's total
   // duration (so routeTimeW / pass sync are untouched) while shaping velocity.
   // Returns eased arc fraction s and normalized speed v (0 at rest, 1 cruising).
-  const RAMP = 0.4;
+  const RAMP_UP = 0.15;   // explosive push-off — short accel ramp
+  const RAMP_DOWN = 0.35; // softer glide into a stop
   function easeLeg(u, a, b) {
     if (a <= 0 && b <= 0) return { s: u, v: 1 };
     const vmax = 1 / (1 - (a + b) / 2);
@@ -197,7 +198,7 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
           const entryRest = i === 0 || (p.path[i].stop || 0) > 0;
           const nxt = p.path[i + 1];
           const exitRest = i === p.path.length - 1 || (nxt && (nxt.stop || 0) > 0);
-          const { s: sf, v } = easeLeg(e / mt, entryRest ? RAMP : 0, exitRest ? RAMP : 0);
+          const { s: sf, v } = easeLeg(e / mt, entryRest ? RAMP_UP : 0, exitRest ? RAMP_DOWN : 0);
           const l = L * sf;
           const pt = el.getPointAtLength(l);
           const q = el.getPointAtLength(Math.min(L, l + 0.6));
