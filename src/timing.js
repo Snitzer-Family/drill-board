@@ -359,19 +359,22 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
             return { ...atArc(el, L, arc, s), v, smul, dist: dist + arc, braking: e / tBefore > 1 - RAMP_DOWN };
           }
           e -= tBefore;
+          const dir = zHold.cy <= 42.5 ? 1 : -1;                   // one-way, toward center ice
+          const DRIFT_RATE = 3, DRIFT_MAX = 10;
+          const dyEnd = Math.min(DRIFT_MAX, DRIFT_RATE * zHold.dur);
           if (e < zHold.dur) {
-            const frac = e / zHold.dur;
-            const dir = zHold.cy <= 42.5 ? 1 : -1;                  // drift toward center ice and back
-            const dy = Math.sin(Math.PI * frac) * Math.min(11, zHold.dur * 6) * dir;
-            const a = Math.cos(Math.PI * frac) * dir >= 0 ? 90 : -90;
-            return { x: zHold.cx, y: clampY(zHold.cy + dy), a, v: 0, dist: dist + zHold.fCross * L };
+            // hold on the line, slowly gliding toward the middle
+            const dy = Math.min(DRIFT_MAX, DRIFT_RATE * e) * dir;
+            return { x: zHold.cx, y: clampY(zHold.cy + dy), a: dir > 0 ? 90 : -90, v: 0, dist: dist + zHold.fCross * L };
           }
           e -= zHold.dur;
           if (e < tAfter) {
             const { s: sf, v } = easeLeg(tAfter > 0 ? e / tAfter : 1, RAMP_UP, exitRest ? RAMP_DOWN : 0);
             const arc = zHold.fCross * L + (1 - zHold.fCross) * L * sf;
             const smul = tAfter > 0 ? (((1 - zHold.fCross) * L / tAfter) / pace) * v : 0;
-            return { ...atArc(el, L, arc, s), v, smul, dist: dist + arc, braking: exitRest && e / tAfter > 1 - RAMP_DOWN };
+            const off = dyEnd * (1 - sf) * dir;                    // cut in and rejoin the route
+            const pos = atArc(el, L, arc, s);
+            return { ...pos, y: clampY(pos.y + off), v, smul, dist: dist + arc, braking: exitRest && e / tAfter > 1 - RAMP_DOWN };
           }
           e -= tAfter;
         } catch { return { ...prev, a: 0, v: 0, dist }; }
