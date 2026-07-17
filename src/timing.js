@@ -31,11 +31,17 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
     return w && i <= w.upto ? base / w.f : base;
   }
 
+  // blue-line entry delay: playerId -> { seg, dur } holds a "hold=line" player
+  // at the start of segment `seg` (their last neutral waypoint) for `dur`
+  // seconds, until the puck first crosses into the zone they're entering.
+  let currentHolds = {};
+  const holdAt = (p, i) => { const h = currentHolds[p.id]; return h && h.seg === i ? h.dur : 0; };
+
   function routeTimeW(p, warp, upto = Infinity) {
     let t = 0;
     for (let i = 0; i < p.path.length; i++) {
       if (i > upto) break;
-      t += (p.path[i].stop || 0) + effMove(p, p.path[i], i, warp);
+      t += (p.path[i].stop || 0) + holdAt(p, i) + effMove(p, p.path[i], i, warp);
     }
     return t;
   }
@@ -54,7 +60,7 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
 
   function getPlan() {
     const pc = planCache.current;
-    if (pc.key === pieces && pc.pace === pace && pc.sig === lenSig) return pc;
+    if (pc.key === pieces && pc.pace === pace && pc.sig === lenSig) { currentHolds = pc.holds || {}; return pc; }
     const warp = {};
     const plans = {};
     const rel = {};
@@ -203,7 +209,49 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
       plans[pk.id] = { legs, final: cur.id };
       rel[pk.id] = relT;
     });
-    planCache.current = { key: pieces, pace, sig: lenSig, warp, plans, rel };
+    planCache.current = { key: pieces, pace, sig: lenSig, warp, plans, rel, holds: {} };
+    currentHolds = {};
+
+    // blue-line entry holds: a "hold=line" player waits at their last neutral
+    // waypoint until the puck first crosses into the zone they are entering.
+    // Computed after the plan (and with holds still empty) so the puck's own
+    // timing — sampled below via displayPosAt — is unaffected.
+    // how long anything is still in motion — carried pucks ride a player, so
+    // bound the sampling by the players' route times, not just the puck legs
+    let horizon = 1;
+    pieces.forEach(q => { if (q.path && q.path.length) horizon = Math.max(horizon, routeTimeW(q, warp)); });
+    Object.values(plans).forEach(pl => pl.legs.forEach(l => { horizon = Math.max(horizon, l.t1 || l.t0); }));
+    horizon += 1;
+    const puckEnter = (bx, into) => {
+      let best = Infinity;
+      pieces.forEach(pk => {
+        if (pk.kind !== "puck" || !plans[pk.id]) return;
+        let wasIn = null;
+        for (let e = 0; e <= horizon; e += 0.1) {
+          const isIn = (into < 0 ? displayPosAt(pk, e).x < bx : displayPosAt(pk, e).x > bx);
+          if (wasIn === false && isIn) { best = Math.min(best, e); break; }
+          wasIn = isIn;
+        }
+      });
+      return best;
+    };
+    const holds = {};
+    pieces.forEach(p => {
+      if (p.kind !== "player" || !p.holdLine || !p.path.length) return;
+      const endX = p.path[p.path.length - 1].x;
+      const bx = endX < 75 ? 75 : endX > 125 ? 125 : null; // the zone's blue line
+      if (bx == null) return;                              // route doesn't end in an o-zone
+      const into = endX < 75 ? -1 : 1;
+      const inZone = x => (into < 0 ? x < bx : x > bx);
+      let seg = -1;
+      for (let i = 0; i < p.path.length; i++) if (inZone(p.path[i].x)) { seg = i; break; }
+      if (seg < 0) return;
+      const tCross = routeTimeW(p, warp, seg - 1);         // arrival at last neutral wp
+      const tPuck = puckEnter(bx, into);
+      if (isFinite(tPuck) && tPuck - tCross > 0.05) holds[p.id] = { seg, dur: tPuck - tCross };
+    });
+    currentHolds = holds;
+    planCache.current.holds = holds;
     return planCache.current;
   }
 
@@ -252,7 +300,7 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
     let dist = 0;
     for (let i = 0; i < p.path.length; i++) {
       const s = p.path[i];
-      const hold = s.stop || 0;
+      const hold = (s.stop || 0) + holdAt(p, i);
       if (e < hold) return { ...prev, a: segTangentAngle(prev, s, 0.02) + flip(s), v: 0, dist };
       e -= hold;
       const mt = effMove(p, s, i, warp);
@@ -262,9 +310,9 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
         try {
           // ramp up only when leaving a genuine rest (route start / after a
           // stop), ramp down only when arriving at one (route end / a stop)
-          const entryRest = i === 0 || (p.path[i].stop || 0) > 0;
+          const entryRest = i === 0 || (p.path[i].stop || 0) > 0 || holdAt(p, i) > 0;
           const nxt = p.path[i + 1];
-          const exitRest = i === p.path.length - 1 || (nxt && (nxt.stop || 0) > 0);
+          const exitRest = i === p.path.length - 1 || (nxt && (nxt.stop || 0) > 0) || holdAt(p, i + 1) > 0;
           const { s: sf, v } = easeLeg(e / mt, entryRest ? RAMP_UP : 0, exitRest ? RAMP_DOWN : 0);
           const braking = exitRest && e / mt > 1 - RAMP_DOWN;
           // speed multiple vs base pace: pieceSpeed×rate at cruise, easing to 0

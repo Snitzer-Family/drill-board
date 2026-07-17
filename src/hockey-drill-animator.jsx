@@ -482,7 +482,7 @@ export default function DrillAnimator() {
     const id = nextId(kind);
     const colorIdx = pieces.filter(p => p.kind === "player").length % COLORS.length;
     return {
-      id, kind, x: pt.x, y: pt.y, speed: kind === "player" ? 1.5 : 1, hand: "R", carrier: null, facing: 0, transfers: [], shotAt: null, pickup: null, net: null,
+      id, kind, x: pt.x, y: pt.y, speed: kind === "player" ? 1.5 : 1, hand: "R", carrier: null, facing: 0, transfers: [], shotAt: null, pickup: null, net: null, holdLine: false,
       color: kind === "player" ? COLORS[colorIdx] : kind === "cone" ? "#e0731d" : "#14171a",
       label: kind === "player" ? id : "", path: [],
     };
@@ -1081,6 +1081,15 @@ export default function DrillAnimator() {
                   </div>
                 );
               })()}
+              {p.path.length > 0 && (
+                <div className="hd-poprow">
+                  <button className={`hd-mini${p.holdLine ? " on" : ""}`}
+                    onClick={() => updateById(p.id, { holdLine: !p.holdLine })}>
+                    {p.holdLine ? "✓ Hold at blue line" : "Hold at blue line"}
+                  </button>
+                  <span style={{ fontSize: 11, color: "#8b99a8" }}>waits for the puck to enter the zone</span>
+                </div>
+              )}
               {/* host the chain (pass / shoot / rebound) on the player itself
                   for a route-less player, and for any puck head so the option
                   stays put after a route is added — i=-1 releases from the
@@ -1627,6 +1636,7 @@ export default function DrillAnimator() {
             <code> shoot=4</code> fires at the nearest net when the final carrier reaches point 4.
             <code> pickup=F2@3</code> — a loose puck hops onto F2's blade at their point 3.
             <code> face=45</code> sets a stationary player's heading (degrees).
+            <code> hold=line</code> makes a player wait at the blue line until the puck enters the zone.
           </div>
         </div>
       )}

@@ -26,7 +26,7 @@ export function parseDrill(text) {
         let color = kind === "cone" ? "#e0731d" : kind === "puck" ? "#14171a" : "#d7263d";
         let label = kind === "player" ? id : "";
         let speed = 1, hand = "R", carrier = null, facing = 0, shotAt = null, pickup = null;
-        let net = null;
+        let net = null, holdLine = false;
         const transfers = [];
         rest.forEach(r => {
           if (r.startsWith("#")) color = r;
@@ -57,13 +57,15 @@ export function parseDrill(text) {
             } else if (key === "net") {
               const w = v.toLowerCase();
               if (w === "left" || w === "right") net = w;
+            } else if (key === "hold") {
+              if (v.toLowerCase() === "line") holdLine = true;
             } else if (key === "face") {
               const n = parseFloat(v);
               if (!isNaN(n)) facing = n;
             }
           } else label = r;
         });
-        const p = { id, kind, x, y, color, label, speed, hand, carrier, facing, transfers, shotAt, pickup, net, path: [] };
+        const p = { id, kind, x, y, color, label, speed, hand, carrier, facing, transfers, shotAt, pickup, net, holdLine, path: [] };
         pieces.push(p); byId[id] = p;
       } else if (cmd === "PATH") {
         const id = tok[1];
@@ -125,7 +127,8 @@ export function serializeDrill(rink, pieces) {
     const hasShot = p.kind === "puck" && (p.shotAt != null || (p.transfers || []).some(t => t.kind === "shot"));
     const nt = hasShot && (p.net === "left" || p.net === "right") ? ` net=${p.net}` : "";
     const fac = p.kind === "player" && !p.path.length && p.facing ? ` face=${f1(p.facing)}` : "";
-    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${car}${gp}${pas}${sht}${nt}${fac}${spd}`);
+    const hld = p.kind === "player" && p.holdLine ? " hold=line" : "";
+    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${car}${gp}${pas}${sht}${nt}${hld}${fac}${spd}`);
     if (p.path.length) out.push(`PATH ${p.id} ${p.path.map(segToStr).join(" ")}`);
   });
   return out.join("\n") + "\n";
