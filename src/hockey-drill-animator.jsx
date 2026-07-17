@@ -871,7 +871,7 @@ export default function DrillAnimator() {
             </div>
           )}
           {(pk.shotAt === i || (from && from.kind === "shot" && from.at === i)) && netRow(pk)}
-          {incoming && p.path.length > 0 && (
+          {incoming && (
             <div className="hd-poprow">
               <button className={`hd-mini${incoming.recvAt === i ? " on" : ""}`}
                 onClick={() => setRecvAt(pk.id, stage - 1, incoming.recvAt === i ? null : i)}>
@@ -879,7 +879,7 @@ export default function DrillAnimator() {
                   ? (incoming.recvAt === i ? "✓ Collecting rebound here" : "Collect rebound here")
                   : (incoming.recvAt === i ? "✓ Receiving here" : "Receive pass here")}
               </button>
-              {incoming.recvAt === i && incoming.kind !== "shot" && (
+              {incoming.recvAt === i && incoming.kind !== "shot" && p.path.length > 0 && (
                 <span style={{ fontSize: 11, color: "#8b99a8" }}>
                   {pk.shotAt === i ? "one-timer — pace auto-syncs" : "pace auto-syncs"}
                 </span>
