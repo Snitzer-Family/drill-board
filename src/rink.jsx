@@ -4,7 +4,7 @@
 
 export function RinkMarkings({ yFix = 1 }) {
   const dots = [];
-  [[42, 20.5], [42, 64.5], [158, 20.5], [158, 64.5]].forEach(([x, y]) =>
+  [[45, 20.5], [45, 64.5], [155, 20.5], [155, 64.5]].forEach(([x, y]) =>
     dots.push(
       <g key={`fo${x}-${y}`}>
         <ellipse cx={x} cy={y} rx={15} ry={15 * yFix} fill="none" stroke="#d7263d" strokeWidth={0.4} opacity={0.8} />
