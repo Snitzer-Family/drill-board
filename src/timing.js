@@ -123,7 +123,7 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
       // fire the current carrier's shot at shootIdx; the puck flies to the net,
       // caroms off it and glides to rest in the slot. Returns the rest point.
       // Path-less (stationary) shooters release immediately at tBase.
-      const doShot = shootIdx => {
+      const doShot = (shootIdx, aimPt) => {
         const launchT = cur.path.length
           ? Math.max(tBase, routeTimeW(cur, warp, Math.max(0, Math.min(shootIdx, cur.path.length - 1))))
           : tBase;
@@ -134,35 +134,47 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
         const mag = Math.hypot(inx, iny) || 1;
         const tArr = launchT + mag / vShot;
         legs.push({ type: "fly", shot: true, x0: launch.x, y0: launch.y, x1: net.x, y1: net.y, t0: launchT, t1: tArr });
-        let bx = -inx / mag, by = (iny / mag) * 0.5;
-        const bmag = Math.hypot(bx, by) || 1;
-        const BOUNCE = 8;
-        const restPt = { x: clampX(net.x + (bx / bmag) * BOUNCE), y: clampY(net.y + (by / bmag) * BOUNCE) };
-        const tGlide = Math.max(0.35, BOUNCE / Math.max(1e-3, pace * SPEED.pass * 0.8));
+        // rebound: roll toward the collector's gather spot when one is set,
+        // otherwise carom off the net into the slot (reflected, damped)
+        let restPt;
+        if (aimPt) {
+          restPt = { x: clampX(aimPt.x), y: clampY(aimPt.y) };
+        } else {
+          const bx = -inx / mag, by = (iny / mag) * 0.5;
+          const bmag = Math.hypot(bx, by) || 1;
+          const BOUNCE = 8;
+          restPt = { x: clampX(net.x + (bx / bmag) * BOUNCE), y: clampY(net.y + (by / bmag) * BOUNCE) };
+        }
+        const dGlide = Math.hypot(restPt.x - net.x, restPt.y - net.y);
+        const tGlide = Math.max(0.35, dGlide / Math.max(1e-3, pace * SPEED.pass * 0.8));
         legs.push({ type: "skid", x0: net.x, y0: net.y, x1: restPt.x, y1: restPt.y, t0: tArr, t1: tArr + tGlide });
         legs.push({ type: "rest", x: restPt.x, y: restPt.y, t0: tArr + tGlide });
         tBase = tArr + tGlide;
         return restPt;
       };
       if (pk.shotAt != null && cur) {
-        doShot(pk.shotAt);
         // rebound put-back: another player collects the loose rebound and, if
-        // reshoot is set, fires it again. The rest leg above holds the puck in
-        // the slot until the collector reaches it, then they take possession.
-        if (pk.rebound) {
-          const rc = pieces.find(q => q.id === pk.rebound.to && q.kind === "player");
-          if (rc) {
-            let tGather = tBase; // = the rebound's rest time
-            if (rc.path.length) {
-              const gi = pk.rebound.at == null ? rc.path.length - 1
-                : Math.max(0, Math.min(pk.rebound.at, rc.path.length - 1));
-              tGather = Math.max(tBase, routeTimeW(rc, warp, gi));
-            }
-            legs.push({ type: "ride", id: rc.id, t0: tGather });
-            cur = rc;
-            tBase = tGather;
-            if (pk.reshoot != null) doShot(pk.reshoot);
+        // reshoot is set, fires it again. Aim the carom at that collector's
+        // gather spot so it rolls to where they'll be, then hold it there
+        // until they arrive and take possession.
+        const rc = pk.rebound && pieces.find(q => q.id === pk.rebound.to && q.kind === "player");
+        let gi = -1, aim = null;
+        if (rc) {
+          if (rc.path.length) {
+            gi = pk.rebound.at == null ? rc.path.length - 1
+              : Math.max(0, Math.min(pk.rebound.at, rc.path.length - 1));
+            aim = { x: rc.path[gi].x, y: rc.path[gi].y };
+          } else {
+            aim = { x: rc.x, y: rc.y };
           }
+        }
+        doShot(pk.shotAt, aim);
+        if (rc) {
+          const tGather = gi >= 0 ? Math.max(tBase, routeTimeW(rc, warp, gi)) : tBase;
+          legs.push({ type: "ride", id: rc.id, t0: tGather });
+          cur = rc;
+          tBase = tGather;
+          if (pk.reshoot != null) doShot(pk.reshoot);
         }
       }
       let relT = Infinity;
