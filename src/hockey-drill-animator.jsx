@@ -315,7 +315,9 @@ export default function DrillAnimator() {
     let L = 0; try { L = el.getTotalLength(); } catch { return []; }
     if (!L) return [];
     const start = i === 0 ? { x: p.x, y: p.y } : { x: p.path[i - 1].x, y: p.path[i - 1].y };
-    const seen = new Set([zoneAt(start.x, start.y), zoneAt(p.path[i].x, p.path[i].y)]);
+    // "The point" is only meaningful as a destination (shoot/pass/hold there),
+    // never as a space skated through — exclude it from the traversed list
+    const seen = new Set([zoneAt(start.x, start.y), zoneAt(p.path[i].x, p.path[i].y), "The point"]);
     const out = [];
     const steps = Math.max(4, Math.ceil(L / 4));
     for (let k = 0; k <= steps; k++) {
