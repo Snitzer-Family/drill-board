@@ -6,12 +6,17 @@ export const COLORS = ["#d7263d", "#1f4fa3", "#1f8a4c", "#e0731d", "#22262b", "#
 export const SPEED = { carry: 1, pass: 7, shot: 10 };
 export const vb = m => VIEWS[m].join(" ");
 
-export const APP_VERSION = "2.34";
+export const APP_VERSION = "2.35";
 // visual size of players/pucks/cones relative to true rink-feet scale
 export const ICON_SCALE = 0.8;
 // build stamp injected by vite.config.js `define`; "dev" when run standalone
 export const BUILD_STAMP = typeof __BUILD_STAMP__ !== "undefined" ? __BUILD_STAMP__ : "dev";
 
+// odds a shot on a goalie is stopped (else it beats the goalie for a goal)
+export const SAVE_PROB = 0.5;
+
 export const DEFAULT_TEXT = `RINK full
+PIECE N1 net 17 42.5
+PIECE N2 net 183 42.5 face=180
 `;
 

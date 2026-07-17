@@ -72,6 +72,7 @@ export default function DrillAnimator() {
   const [holdStep, setHoldStep] = useState(null);      // step currently being read
   const [minorDesc, setMinorDesc] = useState(false);   // describe zones skated through
   const [showZones, setShowZones] = useState(false);   // named ice-area overlay
+  const [playSeed, setPlaySeed] = useState(0);         // bumps each play → new save/goal rolls
   const [drawPreview, setDrawPreview] = useState(null);
   const [loupe, setLoupe] = useState(null);
   const [popOff, setPopOff] = useState({ x: 0, y: 0 });
@@ -295,7 +296,7 @@ export default function DrillAnimator() {
 
   /* ----- timing & pass planning (see timing.js) ----- */
   const planCache = useRef({ key: null, pace: 0, sig: -1, warp: {}, plans: {}, rel: {} });
-  const { getPlan, pieceTime, displayPosAt, stickSwing, waypointTime } = createTiming({ pieces, pace, segRefs, planCache });
+  const { getPlan, pieceTime, displayPosAt, stickSwing, waypointTime } = createTiming({ pieces, pace, segRefs, planCache, seed: playSeed });
 
   const totalTime = Math.max(0.1, ...pieces.map(pieceTime));
   totalRef.current = totalTime;
@@ -346,7 +347,10 @@ export default function DrillAnimator() {
           else if (prev && (prev.type === "rest" || prev.type === "skid")) evs.push({ t: leg.t0, key: `${pk.id}:collect:${i}`, auto: `${who} collects the rebound` });
           // a normal pass reception (prev is a pass fly) is covered by its pass step
         } else if (leg.type === "fly") {
-          if (leg.shot) evs.push({ t: leg.t0, key: `${pk.id}:shot:${i}`, auto: `${nameOf(leg.by)} shoots on net` });
+          if (leg.shot) {
+            const out = leg.goal ? " — scores!" : leg.save ? " — save!" : "";
+            evs.push({ t: leg.t0, key: `${pk.id}:shot:${i}`, auto: `${nameOf(leg.by)} shoots on net${out}` });
+          }
           else {
             const next = plan.legs[i + 1];
             const to = next && next.id ? ` to ${nameOf(next.id)}` : "";
@@ -481,6 +485,22 @@ export default function DrillAnimator() {
     };
   }
 
+  // goalie plays the top of the crease, centered on the puck's angle (defaults
+  // to facing center ice when there's no puck to track)
+  function goaliePos(net) {
+    const pucks = pieces.filter(q => q.kind === "puck");
+    let aim = { x: 100, y: 42.5 }, best = Infinity;
+    pucks.forEach(pk => {
+      const dp = displayPos(pk);
+      const d = Math.hypot(dp.x - net.x, dp.y - net.y);
+      if (d < best) { best = d; aim = dp; }
+    });
+    let dx = aim.x - net.x, dy = aim.y - net.y;
+    const m = Math.hypot(dx, dy) || 1;
+    dx /= m; dy /= m;
+    return { x: net.x + dx * 2.5, y: net.y + dy * 2.5, a: (Math.atan2(dy, dx) * 180) / Math.PI };
+  }
+
   /* ----- coords ----- */
   function svgPt(evt) {
     const svg = svgRef.current;
@@ -506,7 +526,7 @@ export default function DrillAnimator() {
     });
 
   function nextId(kind) {
-    const prefix = kind === "player" ? "P" : kind === "puck" ? "PK" : "C";
+    const prefix = kind === "player" ? "P" : kind === "puck" ? "PK" : kind === "net" ? "N" : "C";
     let n = 1;
     while (pieces.some(p => p.id === prefix + n)) n++;
     return prefix + n;
@@ -516,8 +536,9 @@ export default function DrillAnimator() {
     const id = nextId(kind);
     const colorIdx = pieces.filter(p => p.kind === "player").length % COLORS.length;
     return {
-      id, kind, x: pt.x, y: pt.y, speed: kind === "player" ? 1.5 : 1, hand: "R", carrier: null, facing: 0, transfers: [], shotAt: null, pickup: null, net: null, holdLine: false,
-      color: kind === "player" ? COLORS[colorIdx] : kind === "cone" ? "#e0731d" : "#14171a",
+      id, kind, x: pt.x, y: pt.y, speed: kind === "player" ? 1.5 : 1, hand: "R", carrier: null,
+      facing: kind === "net" && pt.x >= 100 ? 180 : 0, transfers: [], shotAt: null, pickup: null, net: null, holdLine: false, goalie: false,
+      color: kind === "player" ? COLORS[colorIdx] : kind === "cone" ? "#e0731d" : kind === "net" ? "#c81e33" : "#14171a",
       label: kind === "player" ? id : "", path: [],
     };
   }
@@ -880,7 +901,7 @@ export default function DrillAnimator() {
   // rotation ring + knob for a selected stationary player (touch-friendly);
   // the knob sits at the current facing angle, radius 7 ft
   function renderRotateHandle(p) {
-    if (!editing || tool === "draw" || p.kind !== "player" || p.path.length) return null;
+    if (!editing || tool === "draw" || (p.kind !== "player" && p.kind !== "net") || p.path.length) return null;
     const a = ((p.facing || 0) * Math.PI) / 180;
     const R = 7;
     const kx = p.x + Math.cos(a) * R, ky = p.y + Math.sin(a) * R;
@@ -926,15 +947,20 @@ export default function DrillAnimator() {
     if (!p && popup.type !== "add") return null;
 
     // which net a shot aims at (default: nearest to the shooter)
-    const netRow = pk => (
-      <div className="hd-poprow">
-        <span>Net</span>
-        {[["auto", "Nearest"], ["left", "◄ Left"], ["right", "Right ►"]].map(([v, lab]) => (
-          <button key={v} className={`hd-mini${(pk.net || "auto") === v ? " on" : ""}`}
-            onClick={() => updateById(pk.id, { net: v === "auto" ? null : v })}>{lab}</button>
-        ))}
-      </div>
-    );
+    const netRow = pk => {
+      const nets = pieces.filter(q => q.kind === "net");
+      return (
+        <div className="hd-poprow">
+          <span>At net</span>
+          <button className={`hd-mini${!pk.net ? " on" : ""}`}
+            onClick={() => updateById(pk.id, { net: null })}>Nearest</button>
+          {nets.map(n => (
+            <button key={n.id} className={`hd-mini${pk.net === n.id ? " on" : ""}`}
+              onClick={() => updateById(pk.id, { net: pk.net === n.id ? null : n.id })}>{n.id}</button>
+          ))}
+        </div>
+      );
+    };
     // pass/shoot/collect controls for player p at possession point i. Used at
     // route points (point popup) and, with i=0, in a stationary player's popup
     // (a route-less carrier releases immediately, so its "point" is just 0).
@@ -1052,13 +1078,24 @@ export default function DrillAnimator() {
           <button className="hd-mini" onClick={() => addPlayerWithPuck(popup.pt, true)}>⛹● Carrier</button>
           <button className="hd-mini" onClick={() => addPieceAt("puck", popup.pt)}>● Puck</button>
           <button className="hd-mini" onClick={() => addPieceAt("cone", popup.pt)}>▲ Cone</button>
+          <button className="hd-mini" onClick={() => addPieceAt("net", popup.pt)}>🥅 Net</button>
         </div>
       );
     } else if (popup.type === "piece") {
       anchorPt = { x: p.x, y: p.y };
-      title = p.kind === "player" ? `Player ${p.id}` : p.kind === "puck" ? `Puck ${p.id}` : `Cone ${p.id}`;
+      title = p.kind === "player" ? `Player ${p.id}` : p.kind === "puck" ? `Puck ${p.id}`
+        : p.kind === "net" ? `Net ${p.id}` : `Cone ${p.id}`;
       body = (
         <>
+          {p.kind === "net" && (
+            <div className="hd-poprow">
+              <button className={`hd-mini${p.goalie ? " on" : ""}`}
+                onClick={() => updateById(p.id, { goalie: !p.goalie })}>
+                {p.goalie ? "✓ Goalie in net" : "🥅 Goalie in net"}
+              </button>
+              <span style={{ fontSize: 11, color: "#8b99a8" }}>drag to move · ring to rotate</span>
+            </div>
+          )}
           {p.kind === "player" && (
             <>
               <div className="hd-poprow">
@@ -1392,7 +1429,7 @@ export default function DrillAnimator() {
       ? (selected ? `Drawing ${selected.id}'s route — drag across the ice` : "Drag on the ice — creates a player")
       : tool !== "select" ? "Tap the ice to place" : null;
 
-  const togglePlay = () => { if (animT >= 1) resetAnim(); setPopup(null); setOpenMenu(null); setHoldStep(null); holdRef.current = 0; setPlaying(p => !p); };
+  const togglePlay = () => { if (animT >= 1) resetAnim(); if (!playing && animT === 0) setPlaySeed(s => s + 1); setPopup(null); setOpenMenu(null); setHoldStep(null); holdRef.current = 0; setPlaying(p => !p); };
   const resetPlay = () => { setPlaying(false); resetAnim(); };
 
   // during playback the "Routes on play" setting controls what stays visible;
@@ -1448,6 +1485,21 @@ export default function DrillAnimator() {
                 })}
               </g>
             )}
+
+            {/* goalies track the puck in front of their net (below the action) */}
+            {pieces.filter(q => q.kind === "net" && q.goalie).map(net => {
+              const gp = goaliePos(net);
+              const fx = iconXf(gp);
+              const col = net.color || "#c81e33";
+              return (
+                <g key={`goalie-${net.id}`} transform={fx.t} pointerEvents="none">
+                  <ellipse cx={0} cy={0} rx={1.7} ry={2.7} fill="#eef2f6" stroke="#2a2f36" strokeWidth={0.35} />
+                  <rect x={-0.6} y={-2.9} width={1.5} height={1} rx={0.3} fill="#2a2f36" />
+                  <rect x={-0.6} y={1.9} width={1.5} height={1} rx={0.3} fill="#2a2f36" />
+                  <circle cx={0.7} cy={0} r={0.95} fill={col} stroke="#2a2f36" strokeWidth={0.3} />
+                </g>
+              );
+            })}
 
             {pieces.map(p => {
               let prev = { x: p.x, y: p.y };
@@ -1508,10 +1560,13 @@ export default function DrillAnimator() {
 
             {pieces.map(p => <g key={`h-${p.id}`}>{renderHandles(p)}</g>)}
 
-            {/* players paint above pucks so a carried puck can't steal the
-               player's body / stick-rotate grab; rotate ring is drawn last */}
+            {/* nets sit on the ice (bottom); players paint above pucks so a
+               carried puck can't steal the grab; rotate ring is drawn last */}
             {[...pieces]
-              .sort((a, b) => (a.kind === "player" ? 1 : 0) - (b.kind === "player" ? 1 : 0))
+              .sort((a, b) => {
+                const rank = k => (k === "net" ? 0 : k === "player" ? 2 : 1);
+                return rank(a.kind) - rank(b.kind);
+              })
               .map(p => {
               const dp = displayPos(p);
               const fx = iconXf(dp);
@@ -1642,6 +1697,7 @@ export default function DrillAnimator() {
           <button className="hd-item" onClick={() => { setTool("playerpuck"); setOpenMenu(null); }}>⛹● Player with puck</button>
           <button className="hd-item" onClick={() => { setTool("puck"); setOpenMenu(null); }}>● Puck</button>
           <button className="hd-item" onClick={() => { setTool("cone"); setOpenMenu(null); }}>▲ Cone</button>
+          <button className="hd-item" onClick={() => { setTool("net"); setOpenMenu(null); }}>🥅 Net</button>
           <button className="hd-item" onClick={() => { resetAnim(); setPlaying(false); setPopup(null); setTool("draw"); setOpenMenu(null); }}>
             ✎ Draw a route
           </button>
@@ -1664,7 +1720,9 @@ export default function DrillAnimator() {
           </div>
           <div className="hd-note">
             Feet: x 0–200, y 0–85. <b>RINK</b> full|half|quarter ·
-            <b> PIECE</b> id player|puck|cone x y [#color] [label] [speed=1.2] [hand=L] [on=F1] ·
+            <b> PIECE</b> id player|puck|cone|net x y [#color] [label] [speed=1.2] [hand=L] [on=F1]
+            (a <b>net</b> takes <code>face=deg</code> and <code>goalie</code>; a goalie tracks the puck and
+            randomly saves or lets in each shot) ·
             <b> PATH</b> id segments (<b>L</b> x,y · <b>Q</b> cx,cy x,y · <b>C</b> c1x,c1y c2x,c2y x,y).
             Modifiers before a segment: <b>PASS</b>/<b>SHOT</b>, <b>BWD</b>, <b>STOP n</b>, <b>RATE n</b>,
             <b> NAME word</b> (names that waypoint for presentation text; underscores show as spaces).
@@ -1672,7 +1730,7 @@ export default function DrillAnimator() {
             <code> pass=2:F2@3</code> passes at the carrier's point 2 to F2, received at F2's
             point 3 — the receiver's pace auto-syncs (omit <code>@3</code> to lead them instead).
             Point <b>0</b> is the starting spot (release before skating to point 1).
-            <code> shoot=4</code> fires at the nearest net when the final carrier reaches point 4.
+            <code> shoot=4</code> fires at point 4 (targets the nearest net, or <code>net=N2</code> for a specific one).
             <code> pickup=F2@3</code> — a loose puck hops onto F2's blade at their point 3.
             <code> face=45</code> sets a stationary player's heading (degrees).
             <code> hold=line</code> makes a player wait at the blue line until the puck enters the zone.

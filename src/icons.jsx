@@ -56,7 +56,20 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
   let body;
   if (p.kind === "puck")
     body = <circle cx={0} cy={0} r={1.5} fill="#14171a" stroke={selected ? "#ffd447" : "#fff"} strokeWidth={0.4} pointerEvents="none" />;
-  else if (p.kind === "cone")
+  else if (p.kind === "net") {
+    // top-down goal: mouth opens toward local +x, frame behind toward -x (units
+    // are icon-scaled, so ~±3.75 ≈ a 6 ft goal mouth)
+    const red = p.color || "#c81e33";
+    body = (
+      <g pointerEvents="none">
+        {selected && <rect x={-5.4} y={-4.6} width={6.2} height={9.2} rx={1} fill="none" stroke="#ffd447" strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
+        <path d="M 0 -3.75 L -4.6 -3 L -4.6 3 L 0 3.75 Z" fill="rgba(210,225,240,0.16)" stroke={red} strokeWidth={0.5} strokeLinejoin="round" />
+        <path d="M 0 -3.75 L -4.6 3 M 0 3.75 L -4.6 -3 M 0 -1.3 L -4.6 -1 M 0 1.3 L -4.6 1" stroke={red} strokeWidth={0.18} opacity={0.5} />
+        <circle cx={0} cy={-3.75} r={0.7} fill={red} />
+        <circle cx={0} cy={3.75} r={0.7} fill={red} />
+      </g>
+    );
+  } else if (p.kind === "cone")
     body = (
       <path d="M 0 -2.4 L 2.2 1.8 L -2.2 1.8 Z"
         fill={p.color} stroke={selected ? "#ffd447" : "#fff"} strokeWidth={0.35} strokeLinejoin="round" pointerEvents="none" />
@@ -92,7 +105,9 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
   return (
     <g opacity={dim ? 0.92 : 1} transform={frame}>
       {body}
-      <circle cx={0} cy={0} r={p.kind === "puck" ? 3.4 : 6.8} fill="transparent" onPointerDown={onDown} style={{ cursor: "grab" }} />
+      {p.kind === "net"
+        ? <rect x={-5} y={-4.2} width={5.5} height={8.4} fill="transparent" onPointerDown={onDown} style={{ cursor: "grab" }} />
+        : <circle cx={0} cy={0} r={p.kind === "puck" ? 3.4 : 6.8} fill="transparent" onPointerDown={onDown} style={{ cursor: "grab" }} />}
       {onStickDown && p.kind === "player" && (
         <circle cx={4.7} cy={p.hand === "L" ? -2.55 : 2.55} r={3.3} fill="transparent"
           style={{ cursor: "grab" }} onPointerDown={onStickDown} />

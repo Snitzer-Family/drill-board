@@ -1,10 +1,16 @@
 // Timing & pass-planning engine: leg times, receiver warps, transfer chains,
 // shots, releases, and warp-aware positions. Pure functions over the pieces
 // array; the React component passes its refs in each render.
-import { SPEED, ICON_SCALE } from "./constants.js";
+import { SPEED, ICON_SCALE, SAVE_PROB } from "./constants.js";
 import { clampX, clampY, segEnd, segTangentAngle } from "./geometry.js";
 
-export function createTiming({ pieces, pace, segRefs, planCache }) {
+const GOALIE_DEPTH = 2.5; // how far out front of the net the goalie plays
+
+export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
+  // deterministic per-shot randomness — stable within a playback, varies as the
+  // play seed changes so replays can produce different saves/goals
+  const hashStr = s => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return h; };
+  const rand = salt => { const x = Math.sin((seed + 1) * 99991 + hashStr(salt) * 131) * 43758.5453; return x - Math.floor(x); };
   /* ----- timing ----- */
   function segLen(id, i) {
     const el = segRefs.current[`${id}/${i}`];
@@ -60,7 +66,7 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
 
   function getPlan() {
     const pc = planCache.current;
-    if (pc.key === pieces && pc.pace === pace && pc.sig === lenSig) { currentHolds = pc.holds || {}; return pc; }
+    if (pc.key === pieces && pc.pace === pace && pc.sig === lenSig && pc.seed === seed) { currentHolds = pc.holds || {}; return pc; }
     const warp = {};
     const plans = {};
     const rel = {};
@@ -98,29 +104,56 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
           ? Math.max(tBase, routeTimeW(cur, warp, Math.min(shootIdx, cur.path.length - 1)))
           : tBase;
         const launch = bladeAt(cur, launchT, warp);
-        const NETS = { left: { x: 15, y: 42.5 }, right: { x: 185, y: 42.5 } };
-        const net = pk.net === "left" || pk.net === "right"
-          ? NETS[pk.net]                                     // forced target net
-          : launch.x < 100 ? NETS.left : NETS.right;          // else nearest
+        // target the nearest net piece (respecting a forced side), else default
+        const nets = pieces.filter(q => q.kind === "net");
+        let net, netPiece = null;
+        if (nets.length) {
+          netPiece = pk.net && nets.find(n => n.id === pk.net);   // a specific net by id
+          if (!netPiece) {
+            let cands = pk.net === "left" ? nets.filter(n => n.x < 100)
+              : pk.net === "right" ? nets.filter(n => n.x >= 100) : nets;  // legacy side / nearest
+            if (!cands.length) cands = nets;
+            netPiece = cands.reduce((a, b) =>
+              Math.hypot(b.x - launch.x, b.y - launch.y) < Math.hypot(a.x - launch.x, a.y - launch.y) ? b : a);
+          }
+          net = { x: netPiece.x, y: netPiece.y };
+        } else {
+          net = pk.net === "left" ? { x: 15, y: 42.5 } : pk.net === "right" ? { x: 185, y: 42.5 }
+            : launch.x < 100 ? { x: 15, y: 42.5 } : { x: 185, y: 42.5 };
+        }
         const vShot = pace * SPEED.shot * (pk.speed || 1);
         const inx = net.x - launch.x, iny = net.y - launch.y;
         const mag = Math.hypot(inx, iny) || 1;
-        const tArr = launchT + mag / vShot;
-        legs.push({ type: "fly", shot: true, by: cur.id, x0: launch.x, y0: launch.y, x1: net.x, y1: net.y, t0: launchT, t1: tArr });
-        // rebound: roll toward the collector's gather spot when one is set,
-        // otherwise carom off the net into the slot (reflected, damped)
+        const ux = inx / mag, uy = iny / mag;                 // unit vector toward the net
+        const goalie = !!(netPiece && netPiece.goalie);
+        const isGoal = goalie ? rand(`${pk.id}:${legs.length}`) >= SAVE_PROB : false;
+
+        if (goalie && isGoal) {                               // beats the goalie — into the net
+          const endPt = { x: clampX(net.x + ux * 2), y: clampY(net.y + uy * 2) };
+          const tArr = launchT + Math.hypot(endPt.x - launch.x, endPt.y - launch.y) / vShot;
+          legs.push({ type: "fly", shot: true, goal: true, by: cur.id, x0: launch.x, y0: launch.y, x1: endPt.x, y1: endPt.y, t0: launchT, t1: tArr });
+          legs.push({ type: "rest", x: endPt.x, y: endPt.y, t0: tArr });
+          tBase = tArr;
+          return endPt;
+        }
+
+        // save (stopped at the goalie) or no-goalie (caroms off the net)
+        const hit = goalie ? { x: net.x - ux * GOALIE_DEPTH, y: net.y - uy * GOALIE_DEPTH } : net;
+        const tArr = launchT + Math.hypot(hit.x - launch.x, hit.y - launch.y) / vShot;
+        legs.push({ type: "fly", shot: true, save: goalie, by: cur.id, x0: launch.x, y0: launch.y, x1: hit.x, y1: hit.y, t0: launchT, t1: tArr });
+        // rebound: to the collector's gather spot, else a damped carom into the slot
         let restPt;
         if (aimPt) {
           restPt = { x: clampX(aimPt.x), y: clampY(aimPt.y) };
         } else {
-          const bx = -inx / mag, by = (iny / mag) * 0.5;
+          const bx = -ux, by = uy * 0.5;
           const bmag = Math.hypot(bx, by) || 1;
-          const BOUNCE = 8;
-          restPt = { x: clampX(net.x + (bx / bmag) * BOUNCE), y: clampY(net.y + (by / bmag) * BOUNCE) };
+          const BOUNCE = goalie ? 5 : 8;
+          restPt = { x: clampX(hit.x + (bx / bmag) * BOUNCE), y: clampY(hit.y + (by / bmag) * BOUNCE) };
         }
-        const dGlide = Math.hypot(restPt.x - net.x, restPt.y - net.y);
+        const dGlide = Math.hypot(restPt.x - hit.x, restPt.y - hit.y);
         const tGlide = Math.max(0.35, dGlide / Math.max(1e-3, pace * 3.2)); // loose-puck roll
-        legs.push({ type: "skid", x0: net.x, y0: net.y, x1: restPt.x, y1: restPt.y, t0: tArr, t1: tArr + tGlide });
+        legs.push({ type: "skid", x0: hit.x, y0: hit.y, x1: restPt.x, y1: restPt.y, t0: tArr, t1: tArr + tGlide });
         legs.push({ type: "rest", x: restPt.x, y: restPt.y, t0: tArr + tGlide });
         tBase = tArr + tGlide;
         return restPt;
@@ -209,7 +242,7 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
       plans[pk.id] = { legs, final: cur.id };
       rel[pk.id] = relT;
     });
-    planCache.current = { key: pieces, pace, sig: lenSig, warp, plans, rel, holds: {} };
+    planCache.current = { key: pieces, pace, sig: lenSig, seed, warp, plans, rel, holds: {} };
     currentHolds = {};
 
     // blue-line entry holds: a "hold=line" player waits at their last neutral
