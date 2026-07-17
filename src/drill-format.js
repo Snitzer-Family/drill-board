@@ -26,7 +26,7 @@ export function parseDrill(text) {
         let color = kind === "cone" ? "#e0731d" : kind === "puck" ? "#14171a" : "#d7263d";
         let label = kind === "player" ? id : "";
         let speed = 1, hand = "R", carrier = null, facing = 0, shotAt = null, pickup = null;
-        let rebound = null, reshoot = null, net = null;
+        let net = null;
         const transfers = [];
         rest.forEach(r => {
           if (r.startsWith("#")) color = r;
@@ -41,19 +41,19 @@ export function parseDrill(text) {
             else if (key === "pass") {
               const m2 = /^(\d+):([^@\s]+)(?:@(\d+))?$/.exec(v);
               if (m2) transfers.push({ at: parseInt(m2[1], 10) - 1, to: m2[2],
-                recvAt: m2[3] ? parseInt(m2[3], 10) - 1 : null });
+                recvAt: m2[3] ? parseInt(m2[3], 10) - 1 : null, kind: "pass" });
+            } else if (key === "rebound") {
+              // shot whose carom is collected by a player: shoot at <pt>, they
+              // gather at their @<pt> (else route end / where they stand)
+              const m4 = /^(\d+):([^@\s]+)(?:@(\d+))?$/.exec(v);
+              if (m4) transfers.push({ at: parseInt(m4[1], 10) - 1, to: m4[2],
+                recvAt: m4[3] ? parseInt(m4[3], 10) - 1 : null, kind: "shot" });
             } else if (key === "shoot") {
               const n = parseInt(v, 10);
               if (!isNaN(n)) shotAt = n - 1;
             } else if (key === "pickup") {
               const m3 = /^([^@\s]+)@(\d+)$/.exec(v);
               if (m3) pickup = { to: m3[1], at: parseInt(m3[2], 10) - 1 };
-            } else if (key === "rebound") {
-              const m4 = /^([^@\s]+)(?:@(\d+))?$/.exec(v);
-              if (m4) rebound = { to: m4[1], at: m4[2] ? parseInt(m4[2], 10) - 1 : null };
-            } else if (key === "reshoot") {
-              const n = parseInt(v, 10);
-              if (!isNaN(n)) reshoot = n - 1;
             } else if (key === "net") {
               const w = v.toLowerCase();
               if (w === "left" || w === "right") net = w;
@@ -63,7 +63,7 @@ export function parseDrill(text) {
             }
           } else label = r;
         });
-        const p = { id, kind, x, y, color, label, speed, hand, carrier, facing, transfers, shotAt, pickup, rebound, reshoot, net, path: [] };
+        const p = { id, kind, x, y, color, label, speed, hand, carrier, facing, transfers, shotAt, pickup, net, path: [] };
         pieces.push(p); byId[id] = p;
       } else if (cmd === "PATH") {
         const id = tok[1];
@@ -114,16 +114,16 @@ export function serializeDrill(rink, pieces) {
     const hnd = p.kind === "player" && p.hand === "L" ? " hand=L" : "";
     const car = p.kind === "puck" && p.carrier ? ` on=${p.carrier}` : "";
     const gp = p.kind === "puck" && !p.carrier && p.pickup ? ` pickup=${p.pickup.to}@${p.pickup.at + 1}` : "";
+    // chain transfers in order: pass= for passes, rebound= for shot handoffs
     const pas = p.kind === "puck" && (p.carrier || p.pickup) && p.transfers && p.transfers.length
-      ? p.transfers.map(t => ` pass=${t.at + 1}:${t.to}${t.recvAt != null ? "@" + (t.recvAt + 1) : ""}`).join("")
+      ? p.transfers.map(t => (t.kind === "shot" ? " rebound=" : " pass=")
+          + `${t.at + 1}:${t.to}${t.recvAt != null ? "@" + (t.recvAt + 1) : ""}`).join("")
       : "";
     const sht = p.kind === "puck" && (p.carrier || p.pickup) && p.shotAt != null ? ` shoot=${p.shotAt + 1}` : "";
-    const reb = p.kind === "puck" && p.shotAt != null && p.rebound
-      ? ` rebound=${p.rebound.to}${p.rebound.at != null ? "@" + (p.rebound.at + 1) : ""}` : "";
-    const rsh = p.kind === "puck" && p.shotAt != null && p.rebound && p.reshoot != null ? ` reshoot=${p.reshoot + 1}` : "";
-    const nt = p.kind === "puck" && p.shotAt != null && (p.net === "left" || p.net === "right") ? ` net=${p.net}` : "";
+    const hasShot = p.kind === "puck" && (p.shotAt != null || (p.transfers || []).some(t => t.kind === "shot"));
+    const nt = hasShot && (p.net === "left" || p.net === "right") ? ` net=${p.net}` : "";
     const fac = p.kind === "player" && !p.path.length && p.facing ? ` face=${f1(p.facing)}` : "";
-    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${car}${gp}${pas}${sht}${reb}${rsh}${nt}${fac}${spd}`);
+    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${car}${gp}${pas}${sht}${nt}${fac}${spd}`);
     if (p.path.length) out.push(`PATH ${p.id} ${p.path.map(segToStr).join(" ")}`);
   });
   return out.join("\n") + "\n";

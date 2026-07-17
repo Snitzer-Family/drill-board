@@ -84,42 +84,6 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
         cur = pl;
         tBase = tPick;
       } else return;
-      (pk.transfers || []).forEach(tr => {
-        const rec = pieces.find(q => q.id === tr.to && q.kind === "player");
-        if (!rec || rec.id === cur.id || !cur.path.length) return;
-        const atIdx = Math.max(0, Math.min(tr.at, cur.path.length - 1));
-        const launchT = Math.max(tBase, routeTimeW(cur, warp, atIdx));
-        const launch = bladeAt(cur, launchT, warp);
-        let target, tArr;
-        if (tr.recvAt != null && rec.path.length) {
-          const rj = Math.max(0, Math.min(tr.recvAt, rec.path.length - 1));
-          const anchor = { x: rec.path[rj].x, y: rec.path[rj].y };
-          tArr = launchT + Math.hypot(anchor.x - launch.x, anchor.y - launch.y) / vPass();
-          if (!warp[rec.id]) {
-            let stops = 0, moving = 0;
-            for (let i = 0; i <= rj; i++) {
-              stops += rec.path[i].stop || 0;
-              moving += segMoveTime(rec, rec.path[i], i);
-            }
-            const avail = tArr - stops;
-            if (moving > 0 && avail > 0.05)
-              warp[rec.id] = { upto: rj, f: Math.min(4, Math.max(0.25, moving / avail)) };
-          }
-          target = bladeAt(rec, routeTimeW(rec, warp, rj), warp);
-          tArr = launchT + Math.hypot(target.x - launch.x, target.y - launch.y) / vPass();
-        } else {
-          tArr = launchT;
-          for (let k = 0; k < 3; k++) {
-            target = bladeAt(rec, tArr, warp);
-            tArr = launchT + Math.hypot(target.x - launch.x, target.y - launch.y) / vPass();
-          }
-          target = bladeAt(rec, tArr, warp);
-        }
-        legs.push({ type: "fly", x0: launch.x, y0: launch.y, x1: target.x, y1: target.y, t0: launchT, t1: tArr });
-        legs.push({ type: "ride", id: rec.id, t0: tArr });
-        cur = rec;
-        tBase = tArr;
-      });
       // fire the current carrier's shot at shootIdx; the puck flies to the net,
       // caroms off it and glides to rest in the slot. Returns the rest point.
       // Path-less (stationary) shooters release immediately at tBase.
@@ -155,31 +119,64 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
         tBase = tArr + tGlide;
         return restPt;
       };
-      if (pk.shotAt != null && cur) {
-        // rebound put-back: another player collects the loose rebound and, if
-        // reshoot is set, fires it again. Aim the carom at that collector's
-        // gather spot so it rolls to where they'll be, then hold it there
-        // until they arrive and take possession.
-        const rc = pk.rebound && pieces.find(q => q.id === pk.rebound.to && q.kind === "player");
-        let gi = -1, aim = null;
-        if (rc) {
-          if (rc.path.length) {
-            gi = pk.rebound.at == null ? rc.path.length - 1
-              : Math.max(0, Math.min(pk.rebound.at, rc.path.length - 1));
-            aim = { x: rc.path[gi].x, y: rc.path[gi].y };
+      // walk the chain: each transfer is a pass or a shot-with-rebound. A shot
+      // transfer fires at the net, its carom rolls to the named collector's
+      // gather spot, and that collector takes possession and carries on — so
+      // the normal pass/shoot options resume from the collection point.
+      (pk.transfers || []).forEach(tr => {
+        const rec = pieces.find(q => q.id === tr.to && q.kind === "player");
+        if (!rec || rec.id === cur.id) return;
+        if (tr.kind === "shot") {
+          let gi = -1, aim = null;
+          if (rec.path.length) {
+            gi = tr.recvAt == null ? rec.path.length - 1
+              : Math.max(0, Math.min(tr.recvAt, rec.path.length - 1));
+            aim = { x: rec.path[gi].x, y: rec.path[gi].y };
           } else {
-            aim = { x: rc.x, y: rc.y };
+            aim = { x: rec.x, y: rec.y };
           }
-        }
-        doShot(pk.shotAt, aim);
-        if (rc) {
-          const tGather = gi >= 0 ? Math.max(tBase, routeTimeW(rc, warp, gi)) : tBase;
-          legs.push({ type: "ride", id: rc.id, t0: tGather });
-          cur = rc;
+          doShot(tr.at, aim);                            // carom rolls to the collector
+          const tGather = gi >= 0 ? Math.max(tBase, routeTimeW(rec, warp, gi)) : tBase;
+          legs.push({ type: "ride", id: rec.id, t0: tGather });
+          cur = rec;
           tBase = tGather;
-          if (pk.reshoot != null) doShot(pk.reshoot);
+          return;
         }
-      }
+        if (!cur.path.length) return;                    // a pass needs a launch point
+        const atIdx = Math.max(0, Math.min(tr.at, cur.path.length - 1));
+        const launchT = Math.max(tBase, routeTimeW(cur, warp, atIdx));
+        const launch = bladeAt(cur, launchT, warp);
+        let target, tArr;
+        if (tr.recvAt != null && rec.path.length) {
+          const rj = Math.max(0, Math.min(tr.recvAt, rec.path.length - 1));
+          const anchor = { x: rec.path[rj].x, y: rec.path[rj].y };
+          tArr = launchT + Math.hypot(anchor.x - launch.x, anchor.y - launch.y) / vPass();
+          if (!warp[rec.id]) {
+            let stops = 0, moving = 0;
+            for (let i = 0; i <= rj; i++) {
+              stops += rec.path[i].stop || 0;
+              moving += segMoveTime(rec, rec.path[i], i);
+            }
+            const avail = tArr - stops;
+            if (moving > 0 && avail > 0.05)
+              warp[rec.id] = { upto: rj, f: Math.min(4, Math.max(0.25, moving / avail)) };
+          }
+          target = bladeAt(rec, routeTimeW(rec, warp, rj), warp);
+          tArr = launchT + Math.hypot(target.x - launch.x, target.y - launch.y) / vPass();
+        } else {
+          tArr = launchT;
+          for (let k = 0; k < 3; k++) {
+            target = bladeAt(rec, tArr, warp);
+            tArr = launchT + Math.hypot(target.x - launch.x, target.y - launch.y) / vPass();
+          }
+          target = bladeAt(rec, tArr, warp);
+        }
+        legs.push({ type: "fly", x0: launch.x, y0: launch.y, x1: target.x, y1: target.y, t0: launchT, t1: tArr });
+        legs.push({ type: "ride", id: rec.id, t0: tArr });
+        cur = rec;
+        tBase = tArr;
+      });
+      if (pk.shotAt != null && cur) doShot(pk.shotAt); // terminal shot (no collector)
       let relT = Infinity;
       if (pk.path.length && pk.shotAt == null && !pk.pickup) {
         const finish = Math.max(tBase + 0.01, routeTimeW(cur, warp));
