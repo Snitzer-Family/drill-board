@@ -113,7 +113,7 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
           restPt = { x: clampX(net.x + (bx / bmag) * BOUNCE), y: clampY(net.y + (by / bmag) * BOUNCE) };
         }
         const dGlide = Math.hypot(restPt.x - net.x, restPt.y - net.y);
-        const tGlide = Math.max(0.35, dGlide / Math.max(1e-3, pace * SPEED.pass * 0.8));
+        const tGlide = Math.max(0.35, dGlide / Math.max(1e-3, pace * 3.2)); // loose-puck roll
         legs.push({ type: "skid", x0: net.x, y0: net.y, x1: restPt.x, y1: restPt.y, t0: tArr, t1: tArr + tGlide });
         legs.push({ type: "rest", x: restPt.x, y: restPt.y, t0: tArr + tGlide });
         tBase = tArr + tGlide;
