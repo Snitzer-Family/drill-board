@@ -88,8 +88,8 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
       // caroms off it and glides to rest in the slot. Returns the rest point.
       // Path-less (stationary) shooters release immediately at tBase.
       const doShot = (shootIdx, aimPt) => {
-        const launchT = cur.path.length
-          ? Math.max(tBase, routeTimeW(cur, warp, Math.max(0, Math.min(shootIdx, cur.path.length - 1))))
+        const launchT = (cur.path.length && shootIdx >= 0)
+          ? Math.max(tBase, routeTimeW(cur, warp, Math.min(shootIdx, cur.path.length - 1)))
           : tBase;
         const launch = bladeAt(cur, launchT, warp);
         const NETS = { left: { x: 15, y: 42.5 }, right: { x: 185, y: 42.5 } };
@@ -142,9 +142,10 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
           tBase = tGather;
           return;
         }
-        // a route-less carrier releases as soon as they have the puck (tBase)
-        const launchMin = cur.path.length
-          ? Math.max(tBase, routeTimeW(cur, warp, Math.max(0, Math.min(tr.at, cur.path.length - 1))))
+        // at < 0 means "from the starting spot" (before skating); a route-less
+        // carrier likewise releases as soon as it has the puck (tBase)
+        const launchMin = (cur.path.length && tr.at >= 0)
+          ? Math.max(tBase, routeTimeW(cur, warp, Math.min(tr.at, cur.path.length - 1)))
           : tBase;
         let launchT = launchMin;
         let launch = bladeAt(cur, launchT, warp);

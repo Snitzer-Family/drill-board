@@ -961,6 +961,34 @@ export default function DrillAnimator() {
               )}
             </div>
           )}
+          {/* give-and-go: this player is also the FINAL possessor, so offer the
+              return reception + shot here too (their earlier pass resolved above) */}
+          {(() => {
+            const finalStage = ts.length;
+            if (chain[finalStage] !== p.id || finalStage === stage) return null;
+            const inc = ts[finalStage - 1];               // the pass that returns the puck
+            return (
+              <>
+                {inc && (
+                  <div className="hd-poprow">
+                    <button className={`hd-mini${inc.recvAt === i ? " on" : ""}`}
+                      onClick={() => setRecvAt(pk.id, finalStage - 1, inc.recvAt === i ? null : i)}>
+                      {inc.kind === "shot"
+                        ? (inc.recvAt === i ? "✓ Collecting rebound here" : "Collect rebound here")
+                        : (inc.recvAt === i ? "✓ Receiving here" : "Receive pass here")}
+                    </button>
+                  </div>
+                )}
+                <div className="hd-poprow">
+                  <button className={`hd-mini${pk.shotAt === i ? " on" : ""}`}
+                    onClick={() => updateById(pk.id, pk.shotAt === i ? { shotAt: null } : { shotAt: i })}>
+                    {pk.shotAt === i ? "✓ Shooting at net" : "🥅 Shoot at net"}
+                  </button>
+                </div>
+                {pk.shotAt === i && netRow(pk)}
+              </>
+            );
+          })()}
         </>
       );
     };
@@ -1040,11 +1068,12 @@ export default function DrillAnimator() {
               })()}
               {/* host the chain (pass / shoot / rebound) on the player itself
                   for a route-less player, and for any puck head so the option
-                  stays put here even after a route is added (head holds from pt 0) */}
+                  stays put after a route is added — i=-1 releases from the
+                  starting spot, before skating to the first waypoint */}
               {(p.path.length === 0
                 || pieces.some(q => q.kind === "puck"
                   && (q.carrier === p.id || (q.pickup && q.pickup.to === p.id))))
-                && chainControls(p, 0)}
+                && chainControls(p, -1)}
             </>
           )}
           {p.kind === "puck" && pieces.some(q => q.kind === "player") && (
@@ -1544,6 +1573,7 @@ export default function DrillAnimator() {
             <code> on=F1</code> rides that player's blade until the carrier reaches the puck's spot.
             <code> pass=2:F2@3</code> passes at the carrier's point 2 to F2, received at F2's
             point 3 — the receiver's pace auto-syncs (omit <code>@3</code> to lead them instead).
+            Point <b>0</b> is the starting spot (release before skating to point 1).
             <code> shoot=4</code> fires at the nearest net when the final carrier reaches point 4.
             <code> pickup=F2@3</code> — a loose puck hops onto F2's blade at their point 3.
             <code> face=45</code> sets a stationary player's heading (degrees).

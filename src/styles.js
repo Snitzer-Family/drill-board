@@ -99,6 +99,11 @@ export const STYLES = `
         .hd-preso-text { font-size:15px; font-weight:600; color:#eef4fa; line-height:1.3; }
         .hd-preso-btn { flex:none; padding:7px 12px; font-size:12.5px; font-weight:700;
           background:#1f4fa3; border:1px solid #1f4fa3; color:#fff; border-radius:8px; cursor:pointer; }
+        @media (pointer: fine) and (min-width: 760px) {
+          .hd-preso { max-width:min(760px, 80vw); gap:18px; padding:16px 22px; bottom:calc(74px + var(--hd-b)); }
+          .hd-preso-text { font-size:24px; }
+          .hd-preso-btn { font-size:15px; padding:9px 16px; }
+        }
         /* shared bits */
         .hd-swatch { width:24px; height:24px; border-radius:50%; border:2px solid transparent; cursor:pointer; }
         .hd-swatch.on { border-color:#ffd447; }
