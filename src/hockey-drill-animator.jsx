@@ -320,17 +320,21 @@ export default function DrillAnimator() {
   const STRIDE_LAMBDA = 11; // ft per full left-right stride cycle
   const STRIDE_AMP = 0.32;  // ft of lateral sway at full glide
   const STRIDE_LEAN = 2.5;  // deg of body lean into each push
+  const PLANT_DEG = 55;     // deg the body pivots sideways in a hockey stop
   function displayPos(p) {
     const dp = displayPosAt(p, animT <= 0 ? 0 : animT * totalTime);
     if (p.kind !== "player" || !(dp.v > 0.02)) return dp;
     const phase = (2 * Math.PI * (dp.dist || 0)) / STRIDE_LAMBDA;
     const sway = Math.sin(phase) * STRIDE_AMP * dp.v;
     const perp = (((dp.a || 0) + 90) * Math.PI) / 180;
+    // hockey stop: as speed bleeds off, plant the body sideways (toward the
+    // last stride edge) so the finish reads like a bite, not a coast
+    const plant = dp.braking ? PLANT_DEG * (1 - dp.v) * (Math.sin(phase) >= 0 ? 1 : -1) : 0;
     return {
       ...dp,
       x: clampX(dp.x + Math.cos(perp) * sway),
       y: clampY(dp.y + Math.sin(perp) * sway),
-      a: (dp.a || 0) + STRIDE_LEAN * Math.cos(phase) * dp.v,
+      a: (dp.a || 0) + STRIDE_LEAN * Math.cos(phase) * dp.v + plant,
     };
   }
 

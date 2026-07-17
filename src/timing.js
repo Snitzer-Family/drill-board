@@ -120,10 +120,19 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
         const launch = bladeAt(cur, launchT, warp);
         const net = launch.x < 100 ? { x: 15, y: 42.5 } : { x: 185, y: 42.5 };
         const vShot = pace * SPEED.shot * (pk.speed || 1);
-        const tArr = launchT + Math.hypot(net.x - launch.x, net.y - launch.y) / vShot;
+        const inx = net.x - launch.x, iny = net.y - launch.y;
+        const mag = Math.hypot(inx, iny) || 1;
+        const tArr = launchT + mag / vShot;
         legs.push({ type: "fly", shot: true, x0: launch.x, y0: launch.y, x1: net.x, y1: net.y, t0: launchT, t1: tArr });
-        legs.push({ type: "rest", x: net.x, y: net.y, t0: tArr });
-        tBase = tArr;
+        // rebound: puck caroms back off the net and glides to rest in the slot
+        let bx = -inx / mag, by = (iny / mag) * 0.5;
+        const bmag = Math.hypot(bx, by) || 1;
+        const BOUNCE = 8;
+        const restPt = { x: clampX(net.x + (bx / bmag) * BOUNCE), y: clampY(net.y + (by / bmag) * BOUNCE) };
+        const tGlide = Math.max(0.35, BOUNCE / Math.max(1e-3, pace * SPEED.pass * 0.8));
+        legs.push({ type: "skid", x0: net.x, y0: net.y, x1: restPt.x, y1: restPt.y, t0: tArr, t1: tArr + tGlide });
+        legs.push({ type: "rest", x: restPt.x, y: restPt.y, t0: tArr + tGlide });
+        tBase = tArr + tGlide;
       }
       let relT = Infinity;
       if (pk.path.length && pk.shotAt == null && !pk.pickup) {
@@ -160,7 +169,7 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
   // duration (so routeTimeW / pass sync are untouched) while shaping velocity.
   // Returns eased arc fraction s and normalized speed v (0 at rest, 1 cruising).
   const RAMP_UP = 0.15;   // explosive push-off — short accel ramp
-  const RAMP_DOWN = 0.35; // softer glide into a stop
+  const RAMP_DOWN = 0.12; // hockey stop — carry speed then bite the ice hard
   function easeLeg(u, a, b) {
     if (a <= 0 && b <= 0) return { s: u, v: 1 };
     const vmax = 1 / (1 - (a + b) / 2);
@@ -199,6 +208,7 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
           const nxt = p.path[i + 1];
           const exitRest = i === p.path.length - 1 || (nxt && (nxt.stop || 0) > 0);
           const { s: sf, v } = easeLeg(e / mt, entryRest ? RAMP_UP : 0, exitRest ? RAMP_DOWN : 0);
+          const braking = exitRest && e / mt > 1 - RAMP_DOWN;
           const l = L * sf;
           const pt = el.getPointAtLength(l);
           const q = el.getPointAtLength(Math.min(L, l + 0.6));
@@ -209,7 +219,7 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
           } else {
             a = (Math.atan2(q.y - pt.y, q.x - pt.x) * 180) / Math.PI;
           }
-          return { x: pt.x, y: pt.y, a: a + flip(s), v, dist: dist + l };
+          return { x: pt.x, y: pt.y, a: a + flip(s), v, dist: dist + l, braking };
         } catch { return { ...prev, a: 0, v: 0, dist }; }
       }
       e -= mt;
@@ -234,8 +244,13 @@ export function createTiming({ pieces, pace, segRefs, planCache }) {
           const k = Math.max(0, Math.min(1, (e - leg.t0) / Math.max(0.001, leg.t1 - leg.t0)));
           return { x: leg.x0 + (leg.x1 - leg.x0) * k, y: leg.y0 + (leg.y1 - leg.y0) * k, a: 0 };
         }
+        if (leg.type === "skid" && e < leg.t1) {
+          const u = Math.max(0, Math.min(1, (e - leg.t0) / Math.max(0.001, leg.t1 - leg.t0)));
+          const k = 1 - (1 - u) * (1 - u); // ease-out: rebound pops then glides to rest
+          return { x: leg.x0 + (leg.x1 - leg.x0) * k, y: leg.y0 + (leg.y1 - leg.y0) * k, a: 0 };
+        }
         if (leg.type === "free") return routePosAt(p, e, warp);
-        if (leg.type === "fly") return { x: leg.x1, y: leg.y1, a: 0 };
+        if (leg.type === "fly" || leg.type === "skid") return { x: leg.x1, y: leg.y1, a: 0 };
         if (leg.type === "rest") return { x: leg.x, y: leg.y, a: 0 };
         const car = pieces.find(q => q.id === leg.id);
         if (car) return bladeAt(car, Math.min(e, routeTimeW(car, warp)), warp);
