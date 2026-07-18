@@ -227,17 +227,21 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
           const launchT = (cur.path.length && tr.at >= 0)
             ? Math.max(tBase, routeTimeW(cur, warp, Math.min(tr.at, cur.path.length - 1))) : tBase;
           const launch = bladeAt(cur, launchT, warp);
-          let anchor;
+          let anchor, gj = -1;
           if (rec.path.length) {
-            const gj = tr.recvAt == null ? rec.path.length - 1 : Math.max(0, Math.min(tr.recvAt, rec.path.length - 1));
+            gj = tr.recvAt == null ? rec.path.length - 1 : Math.max(0, Math.min(tr.recvAt, rec.path.length - 1));
             anchor = { x: rec.path[gj].x, y: rec.path[gj].y };
           } else anchor = { x: rec.x, y: rec.y };
           const poly = tr.kind === "rim" ? boards.rimPath(launch, anchor)
             : [launch, boards.clampInside(anchor.x, anchor.y)];
           const r = pushTravel(poly, launchT, tr.kind === "rim" ? vRim() : vChip(),
             { by: cur.id, rim: tr.kind === "rim", chip: tr.kind === "chip" });
-          legs.push({ type: "ride", id: rec.id, t0: r.t, catch: true });
-          cur = rec; tBase = r.t; return;
+          // the puck lands loose and waits at the spot until the collector's route
+          // reaches it (so a chip/rim can be picked up at a future waypoint)
+          const gatherT = gj >= 0 ? Math.max(r.t, routeTimeW(rec, warp, gj)) : r.t;
+          if (gatherT > r.t + 1e-3) legs.push({ type: "rest", x: r.end.x, y: r.end.y, t0: r.t });
+          legs.push({ type: "ride", id: rec.id, t0: gatherT, catch: true });
+          cur = rec; tBase = gatherT; return;
         }
         if (tr.kind === "shot") {                             // (may rebound to the shooter)
           let gi = -1, aim = null;
