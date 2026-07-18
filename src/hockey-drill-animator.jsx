@@ -95,6 +95,7 @@ export default function DrillAnimator() {
   const presoDelayRef = useRef(2.5);
   const presoRef = useRef(false);
   const loopRef = useRef(false);
+  const loopPendingRef = useRef(false); // holding on the finished drill before a loop restart
   const popDrag = useRef(null);
   const lastLineTap = useRef(null);
   const lastIceTap = useRef(null); // double-click/tap on empty ice → add menu
@@ -395,14 +396,20 @@ export default function DrillAnimator() {
     // skip steps already behind the current position when (re)starting
     const nowT = animRef.current * Math.max(0.1, totalRef.current);
     nextStepRef.current = stepsRef.current.filter(s => s.t < nowT - 1e-3).length;
-    holdRef.current = 0;
+    holdRef.current = 0; loopPendingRef.current = false;
     const step = now => {
       const dt = (now - last) / 1000;
       last = now;
       const T = Math.max(0.1, totalRef.current);
       if (holdRef.current > 0) {                       // paused, reading a step
         holdRef.current -= dt;
-        if (holdRef.current <= 0) { holdRef.current = 0; setHoldStep(null); }
+        if (holdRef.current <= 0) {
+          holdRef.current = 0; setHoldStep(null);
+          if (loopPendingRef.current) {                // end-of-drill pause done → restart
+            loopPendingRef.current = false;
+            animRef.current = 0; setAnimT(0); nextStepRef.current = 0; setPlaySeed(s => s + 1);
+          }
+        }
         raf = requestAnimationFrame(step);
         return;
       }
@@ -423,9 +430,9 @@ export default function DrillAnimator() {
         }
       }
       if (t >= 1) {
-        if (loopRef.current) {                         // replay from the top, reroll saves/goals
-          animRef.current = 0; last = now; nextStepRef.current = 0; holdRef.current = 0;
-          setAnimT(0); setHoldStep(null); setPlaySeed(s => s + 1);
+        if (loopRef.current) {                         // hold on the finished drill, then replay
+          animRef.current = 1; setAnimT(1);
+          holdRef.current = 1; loopPendingRef.current = true;
           raf = requestAnimationFrame(step);
           return;
         }
@@ -439,7 +446,7 @@ export default function DrillAnimator() {
     return () => cancelAnimationFrame(raf);
   }, [playing]); // eslint-disable-line
 
-  function resetAnim() { animRef.current = 0; setAnimT(0); holdRef.current = 0; nextStepRef.current = 0; setHoldStep(null); }
+  function resetAnim() { animRef.current = 0; setAnimT(0); holdRef.current = 0; loopPendingRef.current = false; nextStepRef.current = 0; setHoldStep(null); }
   function skipHold() { holdRef.current = 0; setHoldStep(null); }
 
   // one re-render after mount so hidden path lengths are measured
