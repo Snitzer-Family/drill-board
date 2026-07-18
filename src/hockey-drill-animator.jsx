@@ -74,6 +74,9 @@ export default function DrillAnimator() {
   const [showZones, setShowZones] = useState(false);   // named ice-area overlay
   const [playSeed, setPlaySeed] = useState(0);         // bumps each play → new save/goal rolls
   const [loopMode, setLoopMode] = useState(false);     // replay the routine continuously
+  const [loopPause, setLoopPause] = useState(1);       // seconds held on the finished drill
+  const [drillTitle, setDrillTitle] = useState(init.title || "");
+  const [drillDesc, setDrillDesc] = useState(init.desc || "");
   const [drawPreview, setDrawPreview] = useState(null);
   const [loupe, setLoupe] = useState(null);
   const [popOff, setPopOff] = useState({ x: 0, y: 0 });
@@ -96,6 +99,7 @@ export default function DrillAnimator() {
   const presoRef = useRef(false);
   const loopRef = useRef(false);
   const loopPendingRef = useRef(false); // holding on the finished drill before a loop restart
+  const loopPauseRef = useRef(1);
   const popDrag = useRef(null);
   const lastLineTap = useRef(null);
   const lastIceTap = useRef(null); // double-click/tap on empty ice → add menu
@@ -389,6 +393,7 @@ export default function DrillAnimator() {
   presoDelayRef.current = presoDelay;
   presoRef.current = presentation;
   loopRef.current = loopMode;
+  loopPauseRef.current = loopPause;
 
   useEffect(() => {
     if (!playing) return;
@@ -431,8 +436,12 @@ export default function DrillAnimator() {
       }
       if (t >= 1) {
         if (loopRef.current) {                         // hold on the finished drill, then replay
-          animRef.current = 1; setAnimT(1);
-          holdRef.current = 1; loopPendingRef.current = true;
+          if (loopPauseRef.current > 0) {
+            animRef.current = 1; setAnimT(1);
+            holdRef.current = loopPauseRef.current; loopPendingRef.current = true;
+          } else {
+            animRef.current = 0; setAnimT(0); nextStepRef.current = 0; setPlaySeed(s => s + 1);
+          }
           raf = requestAnimationFrame(step);
           return;
         }
@@ -882,21 +891,21 @@ export default function DrillAnimator() {
 
   /* ----- text / files ----- */
   function openText() {
-    setTextDraft(serializeDrill(rink, pieces));
+    setTextDraft(serializeDrill(rink, pieces, drillTitle, drillDesc));
     setTextError("");
     setOpenMenu("text");
   }
   function applyText() {
     const r = parseDrill(textDraft);
     if (r.errors.length) { setTextError(r.errors.join("\n")); return; }
-    setRink(r.rink); setPieces(r.pieces); setSelectedId(null); setPopup(null);
+    setRink(r.rink); setPieces(r.pieces); setDrillTitle(r.title); setDrillDesc(r.desc); setSelectedId(null); setPopup(null);
     resetAnim(); setTextError(""); setOpenMenu(null);
   }
   function exportTxt() {
-    const blob = new Blob([serializeDrill(rink, pieces)], { type: "text/plain" });
+    const blob = new Blob([serializeDrill(rink, pieces, drillTitle, drillDesc)], { type: "text/plain" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = "drill.txt";
+    a.download = `${(drillTitle || "drill").replace(/[^\w-]+/g, "_").toLowerCase()}.txt`;
     a.click();
     URL.revokeObjectURL(a.href);
   }
@@ -908,7 +917,7 @@ export default function DrillAnimator() {
       const txt = String(reader.result);
       const r = parseDrill(txt);
       if (r.errors.length) { setTextDraft(txt); setTextError(r.errors.join("\n")); setOpenMenu("text"); return; }
-      setRink(r.rink); setPieces(r.pieces); setSelectedId(null); setPopup(null);
+      setRink(r.rink); setPieces(r.pieces); setDrillTitle(r.title); setDrillDesc(r.desc); setSelectedId(null); setPopup(null);
       resetAnim(); setTextError(""); setOpenMenu(null);
     };
     reader.readAsText(f);
@@ -1696,6 +1705,10 @@ export default function DrillAnimator() {
       {openMenu === "settings" && (
         <div className="hd-menu tl">
           <div className="hd-mh">Drill</div>
+          <input className="hd-input" placeholder="Drill name" value={drillTitle}
+            onChange={e => setDrillTitle(e.target.value)} />
+          <textarea className="hd-input" style={{ minHeight: 46, resize: "vertical", fontFamily: "inherit" }}
+            placeholder="Description" value={drillDesc} onChange={e => setDrillDesc(e.target.value)} spellCheck={false} />
           <button className="hd-item" onClick={openText}>⌨ Text editor</button>
           <button className="hd-item" onClick={() => { exportTxt(); setOpenMenu(null); }}>⇩ Export .txt</button>
           <button className="hd-item" onClick={() => fileRef.current?.click()}>⇧ Load .txt</button>
@@ -1720,6 +1733,10 @@ export default function DrillAnimator() {
               <button key={v} className={`hd-mini${playRoutes === v ? " on" : ""}`}
                 onClick={() => setPlayRoutes(v)}>{lab}</button>
             ))}
+          </div>
+          <div className="hd-poprow" style={{ marginTop: 4 }}>
+            <span>Loop end pause</span>
+            <Stepper value={loopPause} onChange={setLoopPause} step={0.5} min={0} />
           </div>
           <div className="hd-mh" style={{ marginTop: 4 }}>Presentation</div>
           <div className="hd-poprow">

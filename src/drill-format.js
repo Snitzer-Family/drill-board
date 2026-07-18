@@ -7,8 +7,12 @@ export function parseDrill(text) {
   const pieces = [];
   const byId = {};
   let rink = "full";
+  let title = "", desc = "";
   const errors = [];
   text.split(/\r?\n/).forEach((raw, i) => {
+    // TITLE/DESC take the whole rest of the line (may contain spaces or #)
+    const meta = /^\s*(title|desc)\b\s*(.*)$/i.exec(raw);
+    if (meta) { if (meta[1].toLowerCase() === "title") title = meta[2].trim(); else desc = meta[2].trim(); return; }
     const line = raw.replace(/#(?!([0-9a-fA-F]{3}){1,2}\b).*$/, "").trim();
     if (!line) return;
     const tok = line.split(/[\s,]+/);
@@ -92,7 +96,7 @@ export function parseDrill(text) {
       } else throw new Error(`unknown command "${tok[0]}"`);
     } catch (e) { errors.push(`line ${i + 1}: ${e.message}`); }
   });
-  return { rink, pieces, errors };
+  return { rink, pieces, errors, title, desc };
 }
 
 const f1 = n => (Math.round(n * 10) / 10).toString();
@@ -110,8 +114,11 @@ function segToStr(s) {
   return `${pre}C ${f1(s.c1x)},${f1(s.c1y)} ${f1(s.c2x)},${f1(s.c2y)} ${f1(s.x)},${f1(s.y)}`;
 }
 
-export function serializeDrill(rink, pieces) {
-  const out = [`RINK ${rink}`, ""];
+export function serializeDrill(rink, pieces, title = "", desc = "") {
+  const out = [`RINK ${rink}`];
+  if (title && title.trim()) out.push(`TITLE ${title.trim()}`);
+  if (desc && desc.trim()) out.push(`DESC ${desc.trim()}`);
+  out.push("");
   pieces.forEach(p => {
     const lbl = p.kind === "player" && p.label ? " " + p.label : "";
     const spd = p.speed && p.speed !== 1 ? ` speed=${f2(p.speed)}` : "";
