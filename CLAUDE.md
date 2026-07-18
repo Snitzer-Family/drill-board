@@ -20,7 +20,10 @@ Live: https://snitzer-family.github.io/drill-board/
 
 - `constants.js` — rink dims, views, colors, speeds, APP_VERSION, ICON_SCALE,
   DEFAULT_TEXT
-- `drill-format.js` — the drill text DSL parser/serializer (round-trips)
+- `drill-format.js` — the drill text DSL parser/serializer (round-trips) +
+  `extractDrill()` (pulls the DSL out of a markdown ```drill fence)
+- `docs/drill-dsl.md` — the full DSL reference + markdown embed format; keep it
+  in sync with the parser/serializer on any DSL change
 - `geometry.js` — bezier eval/subdivision, zigzags, RDP + Catmull-Rom fitting
 - `rink.jsx` — rink markings (goal lines at x=17/183, end-zone dots at 42/158
   — intentionally NOT regulation; yFix prop counter-corrects fill-stretch so
@@ -37,8 +40,10 @@ Live: https://snitzer-family.github.io/drill-board/
 - Coordinates are real rink feet: x 0–200, y 0–85. All timing derives from
   arc length ÷ (pace × speed class × piece speed × leg rate); drill timing
   must NEVER depend on screen geometry.
-- DSL round-trip: any model change needs parser + serializer + help-text
-  updates together (`pass=`, `shoot=`, `pickup=`, `on=`, `face=`, `hand=`).
+- DSL round-trip: any model change needs parser + serializer + help-text +
+  `docs/drill-dsl.md` updates together (`pass=`, `shoot=`, `rebound=`, `rim=`,
+  `chip=`/`~deg` aim, `pickup=`, `on=`, `net=`, `face=`, `hand=`, `hold=`,
+  `goalie`, `defense`).
 - Puck chains: carrier/pickup head → transfers[] → optional shotAt. UI stage
   resolution is possession-aware (players can repeat in a chain — give-and-go).
 - The fill-mode stretch is cosmetic-only: positions stretch, rink circles are

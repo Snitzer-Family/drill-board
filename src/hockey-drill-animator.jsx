@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useLayoutEffect } from "react";
 import { VIEWS, COLORS, vb, APP_VERSION, ICON_SCALE, BUILD_STAMP, DEFAULT_TEXT } from "./constants.js";
-import { parseDrill, serializeDrill } from "./drill-format.js";
+import { parseDrill, serializeDrill, extractDrill } from "./drill-format.js";
 import { clampX, clampY, segEnd, segD, nearestT, splitSeg, zigzagPoints, convertSeg, fitRoute } from "./geometry.js";
 import { RinkMarkings } from "./rink.jsx";
 import { ZONES, zoneAt } from "./zones.js";
@@ -78,6 +78,7 @@ export default function DrillAnimator() {
   const [loopPause, setLoopPause] = useState(1);       // seconds held on the finished drill
   const [drillTitle, setDrillTitle] = useState(init.title || "");
   const [drillDesc, setDrillDesc] = useState(init.desc || "");
+  const [toast, setToast] = useState("");
   const [aiPlay, setAiPlay] = useState(false);         // "Let AI play" 5v5 mode
   const [aiMins, setAiMins] = useState(2);             // duration in minutes
   const [, aiTick] = useState(0);                      // force re-render each sim frame
@@ -979,18 +980,31 @@ export default function DrillAnimator() {
     setOpenMenu("text");
   }
   function applyText() {
-    const r = parseDrill(textDraft);
+    const r = parseDrill(extractDrill(textDraft));   // accepts a pasted ```drill markdown block
     if (r.errors.length) { setTextError(r.errors.join("\n")); return; }
     setRink(r.rink); setPieces(r.pieces); setDrillTitle(r.title); setDrillDesc(r.desc); setSelectedId(null); setPopup(null);
     resetAnim(); setTextError(""); setOpenMenu(null);
   }
-  function exportTxt() {
-    const blob = new Blob([serializeDrill(rink, pieces, drillTitle, drillDesc)], { type: "text/plain" });
+  const slug = () => (drillTitle || "drill").replace(/[^\w-]+/g, "_").toLowerCase();
+  // a drill as a markdown doc: title heading + description + a ```drill fenced
+  // block that round-trips (renders as a code block in Obsidian / on the web)
+  function toMarkdown() {
+    const dsl = serializeDrill(rink, pieces, drillTitle, drillDesc).trimEnd();
+    const title = (drillTitle || "Drill").trim();
+    const desc = drillDesc && drillDesc.trim() ? drillDesc.trim() + "\n\n" : "";
+    return `# ${title}\n\n${desc}\`\`\`drill\n${dsl}\n\`\`\`\n`;
+  }
+  function download(name, text, type) {
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `${(drillTitle || "drill").replace(/[^\w-]+/g, "_").toLowerCase()}.txt`;
-    a.click();
+    a.href = URL.createObjectURL(new Blob([text], { type }));
+    a.download = name; a.click();
     URL.revokeObjectURL(a.href);
+  }
+  function exportTxt() { download(`${slug()}.txt`, serializeDrill(rink, pieces, drillTitle, drillDesc), "text/plain"); }
+  function exportMd() { download(`${slug()}.md`, toMarkdown(), "text/markdown"); }
+  function copyMd() {
+    navigator.clipboard?.writeText(toMarkdown());
+    setToast("Markdown copied"); setTimeout(() => setToast(""), 1400);
   }
   function importTxt(e) {
     const f = e.target.files?.[0];
@@ -998,7 +1012,7 @@ export default function DrillAnimator() {
     const reader = new FileReader();
     reader.onload = () => {
       const txt = String(reader.result);
-      const r = parseDrill(txt);
+      const r = parseDrill(extractDrill(txt));      // .txt or a .md with a ```drill block
       if (r.errors.length) { setTextDraft(txt); setTextError(r.errors.join("\n")); setOpenMenu("text"); return; }
       setRink(r.rink); setPieces(r.pieces); setDrillTitle(r.title); setDrillDesc(r.desc); setSelectedId(null); setPopup(null);
       resetAnim(); setTextError(""); setOpenMenu(null);
@@ -1656,7 +1670,7 @@ export default function DrillAnimator() {
           )}
           {selected && renderHandles(selected)}
           {selected && renderRotateHandle(selected)}
-          {selected && renderChipAim(selected)}
+          {pieces.map(p => <g key={`ca-${p.id}`}>{renderChipAim(p)}</g>)}
           {pieces.map(p => {
             const dp = displayPos(p);
             return (
@@ -1874,7 +1888,7 @@ export default function DrillAnimator() {
               );
             })}
             {selected && renderRotateHandle(selected)}
-          {selected && renderChipAim(selected)}
+          {pieces.map(p => <g key={`ca-${p.id}`}>{renderChipAim(p)}</g>)}
             </g>
           </svg>
           {renderPopout()}
@@ -1949,7 +1963,9 @@ export default function DrillAnimator() {
             placeholder="Description" value={drillDesc} onChange={e => setDrillDesc(e.target.value)} spellCheck={false} />
           <button className="hd-item" onClick={openText}>⌨ Text editor</button>
           <button className="hd-item" onClick={() => { exportTxt(); setOpenMenu(null); }}>⇩ Export .txt</button>
-          <button className="hd-item" onClick={() => fileRef.current?.click()}>⇧ Load .txt</button>
+          <button className="hd-item" onClick={() => { exportMd(); setOpenMenu(null); }}>⬇ Export .md</button>
+          <button className="hd-item" onClick={() => { copyMd(); setOpenMenu(null); }}>⧉ Copy markdown</button>
+          <button className="hd-item" onClick={() => fileRef.current?.click()}>⇧ Load .txt / .md</button>
           <button className="hd-item danger"
             onClick={() => {
               if (!pieces.length || window.confirm("Clear all pieces from the board?")) {
@@ -2108,7 +2124,12 @@ export default function DrillAnimator() {
         </div>
       )}
 
-      <input ref={fileRef} type="file" accept=".txt,text/plain" style={{ display: "none" }} onChange={importTxt} />
+      <input ref={fileRef} type="file" accept=".txt,.md,.markdown,text/plain,text/markdown" style={{ display: "none" }} onChange={importTxt} />
+      {toast && (
+        <div style={{ position: "fixed", left: "50%", bottom: "calc(64px + env(safe-area-inset-bottom))",
+          transform: "translateX(-50%)", background: "rgba(20,26,32,0.92)", color: "#eaf2f8",
+          padding: "6px 14px", borderRadius: 8, fontSize: 13, zIndex: 9999, pointerEvents: "none" }}>{toast}</div>
+      )}
       {showDiag && <DiagPanel />}
     </div>
   );

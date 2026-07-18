@@ -3,6 +3,13 @@ import { VIEWS } from "./constants.js";
 
 /* ---------------- text format ---------------- */
 
+// Pull the drill DSL out of a markdown ```drill fenced block, so a drill pasted
+// from a note or webpage round-trips. Returns the text unchanged if no fence.
+export function extractDrill(text) {
+  const m = /```drill[^\n]*\r?\n([\s\S]*?)```/i.exec(text);
+  return m ? m[1].replace(/\s+$/, "") : text;
+}
+
 export function parseDrill(text) {
   const pieces = [];
   const byId = {};
