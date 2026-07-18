@@ -1348,7 +1348,7 @@ export default function DrillAnimator() {
               })()}
             </>
           )}
-          {p.kind !== "cone" && (
+          {(p.kind === "player" || p.kind === "puck") && (
             <div className="hd-poprow">
               <span>Speed ×{(p.speed || 1).toFixed(2)}</span>
               <input type="range" min={0.5} max={2} step={0.05} value={p.speed || 1} style={{ flex: 1, minWidth: 80 }}
