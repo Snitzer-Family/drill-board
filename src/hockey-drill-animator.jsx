@@ -1217,22 +1217,28 @@ export default function DrillAnimator() {
           )}
           {canAct && (
             <div className="hd-poprow">
-              <span>Board play</span>
-              {(() => {
-                const on = from && from.kind === "chip" && from.at === i && from.to === p.id;
+              <span>Chip to</span>
+              {[p, ...others].map(o => {
+                const self = o.id === p.id;
+                const on = from && from.kind === "chip" && from.at === i && from.to === o.id;
                 return (
-                  <button className={`hd-mini${on ? " on" : ""}`}
-                    onClick={() => setTransfer(pk.id, stage, on ? null : { at: i, to: p.id, recvAt: null, kind: "chip" })}>
-                    {on ? "✓ Chip to self" : "Chip to self"}
+                  <button key={`chip-${o.id}`} className={`hd-mini${on ? " on" : ""}`}
+                    onClick={() => setTransfer(pk.id, stage, on ? null : { at: i, to: o.id, recvAt: null, kind: "chip" })}>
+                    {self ? "self" : o.id}
                   </button>
                 );
-              })()}
+              })}
+            </div>
+          )}
+          {canAct && others.length > 0 && (
+            <div className="hd-poprow">
+              <span>Rim to</span>
               {others.map(o => {
                 const on = from && from.kind === "rim" && from.at === i && from.to === o.id;
                 return (
                   <button key={`rim-${o.id}`} className={`hd-mini${on ? " on" : ""}`}
                     onClick={() => setTransfer(pk.id, stage, on ? null : { at: i, to: o.id, recvAt: null, kind: "rim" })}>
-                    Rim to {o.id}
+                    {o.id}
                   </button>
                 );
               })}
@@ -1247,10 +1253,6 @@ export default function DrillAnimator() {
               <button className={`hd-mini${pk.rimAt === i ? " on" : ""}`}
                 onClick={() => setTerminal(pk.id, "rimAt", i)}>
                 {pk.rimAt === i ? "✓ Hard rim" : "Hard rim"}
-              </button>
-              <button className={`hd-mini${pk.chipAt === i ? " on" : ""}`}
-                onClick={() => setTerminal(pk.id, "chipAt", i)}>
-                {pk.chipAt === i ? "✓ Chip" : "Chip"}
               </button>
             </div>
           )}
@@ -1296,10 +1298,6 @@ export default function DrillAnimator() {
                   <button className={`hd-mini${pk.rimAt === i ? " on" : ""}`}
                     onClick={() => setTerminal(pk.id, "rimAt", i)}>
                     {pk.rimAt === i ? "✓ Hard rim" : "Hard rim"}
-                  </button>
-                  <button className={`hd-mini${pk.chipAt === i ? " on" : ""}`}
-                    onClick={() => setTerminal(pk.id, "chipAt", i)}>
-                    {pk.chipAt === i ? "✓ Chip" : "Chip"}
                   </button>
                 </div>
                 {pk.shotAt === i && netRow(pk)}
@@ -2084,9 +2082,10 @@ export default function DrillAnimator() {
             point 3 — the receiver's pace auto-syncs (omit <code>@3</code> to lead them instead).
             Point <b>0</b> is the starting spot (release before skating to point 1).
             <code> shoot=4</code> fires at point 4 (targets the nearest net/passer, or <code>net=N2</code>/<code>net=PS1</code> for a specific one).
-            <code> rim=4</code>/<code>chip=4</code> hard-rims or chips the puck off the boards at point 4;
-            <code> rim=4:F2</code> rims it around to F2, <code>chip=4:F1</code> chips it (to self is allowed).
-            A chip follows the player's facing; append <code>~deg</code> (e.g. <code>chip=4~90</code>) to aim it, or drag the on-ice aim ring.
+            <code> rim=4</code> hard-rims the puck around the boards (a clear);
+            <code> rim=4:F2</code> rims it around to F2. A <b>chip</b> always goes to a collector:
+            <code> chip=4:F1</code> banks it off the boards for F1 (self or a teammate), who collects it at a
+            later waypoint. Aim it with <code>~deg</code> (e.g. <code>chip=4:F1~90</code>) or drag the on-ice aim ring.
             <code> pickup=F2@3</code> — a loose puck hops onto F2's blade at their point 3.
             <code> face=45</code> sets a stationary player's heading (degrees).
             <code> hold=line</code> makes a player wait at the blue line until the puck enters the zone.

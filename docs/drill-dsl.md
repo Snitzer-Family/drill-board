@@ -99,10 +99,9 @@ Places a piece. `id` is any unique token (e.g. `F1`, `PK1`, `N2`).
 | `pass=<pt>:<to>[@<recv>]` | Pass at point `pt` to player `to`, caught at their point `recv` |
 | `rebound=<pt>:<to>[@<recv>]` | Shoot at `pt`; the carom is collected by `to` at their point `recv` |
 | `shoot=<pt>` | Terminal shot at point `pt` |
-| `rim=<pt>` | Terminal hard rim around the boards |
+| `rim=<pt>` | Terminal hard rim around the boards (a clear) |
 | `rim=<pt>:<to>[@<recv>]` | Rim around the boards to player `to` |
-| `chip=<pt>[~<deg>]` | Terminal chip; banks off the boards. `~<deg>` aims it (else the player's facing) |
-| `chip=<pt>:<to>[@<recv>][~<deg>]` | Chip to a collector (`to` may be the chipper for chip-to-self) |
+| `chip=<pt>:<to>[@<recv>][~<deg>]` | Chip: banks off the boards to `to` (self or a teammate), who collects it at their point `recv`. `~<deg>` aims it (else the chipper's facing). A chip always goes to a collector — it does not end possession. |
 | `pickup=<to>@<pt>` | A loose puck hops onto player `to`'s blade at their point `pt` |
 
 ### `PATH <id> <segments…>`
