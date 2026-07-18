@@ -75,27 +75,27 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
         fill={p.color} stroke={selected ? "#ffd447" : "#fff"} strokeWidth={0.35} strokeLinejoin="round" pointerEvents="none" />
     );
   else if (p.kind === "bumper") {
-    // a long foam pad laid on the ice; runs along local +x, rotate with facing
+    // ~6 ft foam pad laid on the ice; runs along local +x, rotate with facing
     const foam = p.color || "#4d6fa6";
     body = (
       <g pointerEvents="none">
-        {selected && <rect x={-7.6} y={-1.5} width={15.2} height={3} rx={1.5} fill="none" stroke="#ffd447" strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
-        <rect x={-7} y={-0.95} width={14} height={1.9} rx={0.95} fill={foam} stroke="#fff" strokeWidth={0.3} />
-        <path d="M -3.5 -0.75 L -3.5 0.75 M 0 -0.75 L 0 0.75 M 3.5 -0.75 L 3.5 0.75" stroke="#fff" strokeWidth={0.18} opacity={0.4} />
+        {selected && <rect x={-4.3} y={-1.05} width={8.6} height={2.1} rx={1.05} fill="none" stroke="#ffd447" strokeWidth={0.35} strokeDasharray="1.2 0.9" />}
+        <rect x={-3.75} y={-0.6} width={7.5} height={1.2} rx={0.6} fill={foam} stroke="#fff" strokeWidth={0.28} />
+        <path d="M -1.85 -0.5 L -1.85 0.5 M 0 -0.5 L 0 0.5 M 1.85 -0.5 L 1.85 0.5" stroke="#fff" strokeWidth={0.16} opacity={0.4} />
       </g>
     );
   } else if (p.kind === "deker") {
-    // stickhandling gate: a stick shaft on two pegs; puck goes under it, across
-    // the gap (local x). the shaft runs along local y, rotate with facing.
+    // ~2 ft stickhandling gate: a stick shaft on two pegs; puck goes under it,
+    // across the gap (local x). the shaft runs along local y, rotate with facing.
     const wood = p.color || "#c79a4e";
     body = (
       <g pointerEvents="none">
-        {selected && <rect x={-2.5} y={-3.1} width={5} height={6.2} rx={0.8} fill="none" stroke="#ffd447" strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
-        <line x1={-2.6} y1={0} x2={2.6} y2={0} stroke="#1d2126" strokeWidth={0.22} opacity={0.32} strokeDasharray="0.6 0.5" />
-        <circle cx={0} cy={-1.6} r={0.55} fill="#e0731d" stroke="#fff" strokeWidth={0.2} />
-        <circle cx={0} cy={1.6} r={0.55} fill="#e0731d" stroke="#fff" strokeWidth={0.2} />
-        <rect x={-0.32} y={-2.6} width={0.64} height={5.2} rx={0.32} fill={wood} stroke="#5a4420" strokeWidth={0.2} />
-        <path d="M -0.15 -2.5 Q 1.25 -2.85 1.55 -1.7" fill="none" stroke={wood} strokeWidth={0.65} strokeLinecap="round" />
+        {selected && <rect x={-1.5} y={-1.7} width={3} height={3.4} rx={0.6} fill="none" stroke="#ffd447" strokeWidth={0.35} strokeDasharray="1.2 0.9" />}
+        <line x1={-1.35} y1={0} x2={1.35} y2={0} stroke="#1d2126" strokeWidth={0.18} opacity={0.32} strokeDasharray="0.4 0.35" />
+        <circle cx={0} cy={-0.8} r={0.4} fill="#e0731d" stroke="#fff" strokeWidth={0.16} />
+        <circle cx={0} cy={0.8} r={0.4} fill="#e0731d" stroke="#fff" strokeWidth={0.16} />
+        <rect x={-0.26} y={-1.3} width={0.52} height={2.6} rx={0.26} fill={wood} stroke="#5a4420" strokeWidth={0.18} />
+        <path d="M -0.1 -1.25 Q 0.85 -1.5 1.05 -0.75" fill="none" stroke={wood} strokeWidth={0.5} strokeLinecap="round" />
       </g>
     );
   } else {
@@ -132,9 +132,9 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
       {p.kind === "net"
         ? <rect x={-5} y={-4.2} width={5.5} height={8.4} fill="transparent" onPointerDown={onDown} style={{ cursor: "grab" }} />
         : p.kind === "bumper"
-        ? <rect x={-7.2} y={-1.7} width={14.4} height={3.4} fill="transparent" onPointerDown={onDown} style={{ cursor: "grab" }} />
+        ? <rect x={-4} y={-1.2} width={8} height={2.4} fill="transparent" onPointerDown={onDown} style={{ cursor: "grab" }} />
         : p.kind === "deker"
-        ? <rect x={-2.5} y={-3.2} width={5} height={6.4} fill="transparent" onPointerDown={onDown} style={{ cursor: "grab" }} />
+        ? <rect x={-1.6} y={-1.8} width={3.2} height={3.6} fill="transparent" onPointerDown={onDown} style={{ cursor: "grab" }} />
         : <circle cx={0} cy={0} r={p.kind === "puck" ? 3.4 : 6.8} fill="transparent" onPointerDown={onDown} style={{ cursor: "grab" }} />}
       {onStickDown && p.kind === "player" && (
         <circle cx={4.7} cy={p.hand === "L" ? -2.55 : 2.55} r={3.3} fill="transparent"
