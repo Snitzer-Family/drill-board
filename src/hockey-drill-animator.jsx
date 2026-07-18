@@ -649,7 +649,7 @@ export default function DrillAnimator() {
     const colorIdx = pieces.filter(p => p.kind === "player").length % COLORS.length;
     return {
       id, kind, x: pt.x, y: pt.y, speed: kind === "player" ? 1.5 : 1, hand: "R", carrier: null,
-      facing: kind === "net" && pt.x >= 100 ? 180 : 0, transfers: [], shotAt: null, rimAt: null, chipAt: null, pickup: null, net: null, holdLine: false, goalie: false, defense: false,
+      facing: kind === "net" && pt.x >= 100 ? 180 : 0, transfers: [], shotAt: null, rimAt: null, chipAt: null, chipAim: null, pickup: null, net: null, holdLine: false, goalie: false, defense: false,
       color: kind === "player" ? COLORS[colorIdx] : kind === "cone" ? "#e0731d" : kind === "net" ? "#c81e33"
         : kind === "bumper" ? "#4d6fa6" : kind === "deker" ? "#c79a4e" : kind === "passer" ? "#57636f" : "#14171a",
       label: kind === "player" ? id : "", path: [],
@@ -696,6 +696,15 @@ export default function DrillAnimator() {
       if (q.id !== pkId) return q;
       const on = q[field] === i;
       return { ...q, shotAt: null, rimAt: null, chipAt: null, ...(on ? {} : { [field]: i }) };
+    });
+  }
+  // per-chip aim override (deg, or null to follow the player's facing)
+  function setChipAim(pkId, target, deg) {
+    update(q => {
+      if (q.id !== pkId) return q;
+      if (target.terminal) return { ...q, chipAim: deg };
+      const ts = (q.transfers || []).map((t, k) => (k === target.stage ? { ...t, aim: deg == null ? undefined : deg } : t));
+      return { ...q, transfers: ts };
     });
   }
   function setRecvAt(pkId, trIdx, idx) {
@@ -884,6 +893,11 @@ export default function DrillAnimator() {
       });
       return;
     }
+    if (d.kind === "chipaim") {
+      const ang = Math.round((Math.atan2(pt.y - d.origin.y, pt.x - d.origin.x) * 180) / Math.PI);
+      setChipAim(d.pkId, d.target, ang);
+      return;
+    }
     if (d.kind === "piece") {
       const dx = pt.x - d.last.x, dy = pt.y - d.last.y;
       d.last = pt;
@@ -937,6 +951,7 @@ export default function DrillAnimator() {
       }
     }
     if (d.moved) return;
+    if (d.kind === "chipaim") { setChipAim(d.pkId, d.target, null); return; }  // tap to clear the aim
     if (d.kind === "rotate") { setPopup({ type: "piece", id: d.id }); return; }
     if (d.kind === "piece") {
       if (d.line != null) {
@@ -1050,6 +1065,44 @@ export default function DrillAnimator() {
           onPointerDown={e => handleDown(e, { kind: "rotate", id: p.id, offset: 0 })} />
       </g>
     );
+  }
+
+  // draggable aim handle at a chip's release point (route players only): drag to
+  // override the chip direction, tap to clear it back to the player's facing
+  function renderChipAim(p) {
+    if (!editing || tool === "draw" || p.kind !== "player" || !p.path.length) return null;
+    const pk = pieces.find(q => q.kind === "puck" && puckChain(q).includes(p.id));
+    if (!pk) return null;
+    const chain = puckChain(pk);
+    const ts = pk.transfers || [];
+    const knobs = [];
+    ts.forEach((tr, s) => {
+      if (tr.kind === "chip" && chain[s] === p.id) knobs.push({ at: tr.at, aim: tr.aim, target: { stage: s } });
+    });
+    if (pk.chipAt != null && chain[chain.length - 1] === p.id)
+      knobs.push({ at: pk.chipAt, aim: pk.chipAim, target: { terminal: true } });
+    if (!knobs.length) return null;
+    const R = 8;
+    return knobs.map((k, idx) => {
+      const here = k.at < 0 ? { x: p.x, y: p.y } : segEnd(p, k.at);
+      const nextPt = p.path[k.at + 1] ? segEnd(p, k.at + 1) : null;
+      const defDir = nextPt
+        ? Math.atan2(nextPt.y - here.y, nextPt.x - here.x)
+        : (() => { const pv = k.at - 1 < 0 ? { x: p.x, y: p.y } : segEnd(p, k.at - 1); return Math.atan2(here.y - pv.y, here.x - pv.x); })();
+      const a = k.aim != null ? (k.aim * Math.PI) / 180 : defDir;
+      const kx = here.x + Math.cos(a) * R, ky = here.y + Math.sin(a) * R;
+      const custom = k.aim != null;
+      const col = custom ? "#3a8dff" : "#9fb4c6";
+      return (
+        <g key={`chipaim-${p.id}-${idx}`}>
+          <circle cx={here.x} cy={here.y} r={R} fill="none" stroke={col} strokeWidth={0.25} strokeDasharray="1 1" opacity={0.7} pointerEvents="none" />
+          <line x1={here.x} y1={here.y} x2={kx} y2={ky} stroke={col} strokeWidth={0.35} opacity={0.75} pointerEvents="none" />
+          <circle cx={kx} cy={ky} r={1.6} fill={col} stroke="#12233a" strokeWidth={0.35} pointerEvents="none" />
+          <circle cx={kx} cy={ky} r={4.2} fill="transparent" style={{ cursor: "grab" }}
+            onPointerDown={e => handleDown(e, { kind: "chipaim", pkId: pk.id, target: k.target, origin: here })} />
+        </g>
+      );
+    });
   }
 
   function renderStops(p) {
@@ -1603,6 +1656,7 @@ export default function DrillAnimator() {
           )}
           {selected && renderHandles(selected)}
           {selected && renderRotateHandle(selected)}
+          {selected && renderChipAim(selected)}
           {pieces.map(p => {
             const dp = displayPos(p);
             return (
@@ -1820,6 +1874,7 @@ export default function DrillAnimator() {
               );
             })}
             {selected && renderRotateHandle(selected)}
+          {selected && renderChipAim(selected)}
             </g>
           </svg>
           {renderPopout()}
@@ -2015,6 +2070,7 @@ export default function DrillAnimator() {
             <code> shoot=4</code> fires at point 4 (targets the nearest net/passer, or <code>net=N2</code>/<code>net=PS1</code> for a specific one).
             <code> rim=4</code>/<code>chip=4</code> hard-rims or chips the puck off the boards at point 4;
             <code> rim=4:F2</code> rims it around to F2, <code>chip=4:F1</code> chips it (to self is allowed).
+            A chip follows the player's facing; append <code>~deg</code> (e.g. <code>chip=4~90</code>) to aim it, or drag the on-ice aim ring.
             <code> pickup=F2@3</code> — a loose puck hops onto F2's blade at their point 3.
             <code> face=45</code> sets a stationary player's heading (degrees).
             <code> hold=line</code> makes a player wait at the blue line until the puck enters the zone.

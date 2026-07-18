@@ -104,8 +104,9 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
       // the direction the player is facing at time t — the exact angle its icon
       // shows (facing for a stationary player, the movement/tangent for a route
       // player), so a chip goes the way they're pointed
-      const chipHeading = (p, t) => {
-        const a = ((routePosAt(p, t, warp).a || 0) * Math.PI) / 180;
+      const chipHeading = (p, t, aim) => {
+        const deg = aim != null ? aim : routePosAt(p, t, warp).a || 0;   // explicit aim overrides facing
+        const a = (deg * Math.PI) / 180;
         return { x: Math.cos(a), y: Math.sin(a) };
       };
       if (pk.carrier) {
@@ -232,7 +233,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
           // carrier's heading and banks off the boards, landing loose in space
           let poly, speed;
           if (tr.kind === "rim") { poly = boards.rimPath(launch, anchor); speed = vRim(); }
-          else { const h = chipHeading(cur, launchT); poly = boards.slide(launch.x, launch.y, h.x, h.y, 20); speed = vChip(); }
+          else { const h = chipHeading(cur, launchT, tr.aim); poly = boards.slide(launch.x, launch.y, h.x, h.y, 20); speed = vChip(); }
           const r = pushTravel(poly, launchT, speed, { by: cur.id, rim: tr.kind === "rim", chip: tr.kind === "chip" });
           // the puck lands loose and waits at the spot until the collector's route
           // reaches its collect waypoint (pick it up like a rebound)
@@ -315,7 +316,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
         const at = pk.chipAt;
         const launchT = (cur.path.length && at >= 0) ? Math.max(tBase, routeTimeW(cur, warp, Math.min(at, cur.path.length - 1))) : tBase;
         const launch = bladeAt(cur, launchT, warp);
-        const h = chipHeading(cur, launchT);
+        const h = chipHeading(cur, launchT, pk.chipAim);
         const r = pushTravel(boards.slide(launch.x, launch.y, h.x, h.y, 16), launchT, vChip(), { by: cur.id, chip: true });
         legs.push({ type: "rest", x: r.end.x, y: r.end.y, t0: r.t }); tBase = r.t;
       }
