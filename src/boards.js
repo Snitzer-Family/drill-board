@@ -56,6 +56,27 @@ export function clampInside(x, y) {
   return { x: n.x, y: n.y };
 }
 
+// keep a moving puck inside the boards, reflecting its velocity off them
+export function contain(x, y, vx, vy, restitution = 0.7) {
+  if (isInside(x, y)) return { x, y, vx, vy, hit: false };
+  const n = nearest(x, y);
+  const dot = vx * n.nx + vy * n.ny;                 // n is the inward normal
+  if (dot < 0) { vx = (vx - 2 * dot * n.nx) * restitution; vy = (vy - 2 * dot * n.ny) * restitution; }
+  return { x: n.x, y: n.y, vx, vy, hit: true };
+}
+
+// unit tangent along the boards near a point, pointing toward `toward`
+export function tangentToward(from, toward) {
+  const s = project(from).s;
+  const a = pointAt(s + 3), b = pointAt(s - 3);
+  const pick = Math.hypot(a.x - toward.x, a.y - toward.y) < Math.hypot(b.x - toward.x, b.y - toward.y) ? a : b;
+  const dx = pick.x - from.x, dy = pick.y - from.y, m = Math.hypot(dx, dy) || 1;
+  return { x: dx / m, y: dy / m };
+}
+
+// distance from a point to the nearest board
+export const edgeDist = (x, y) => { const p = project({ x, y }); return Math.hypot(p.x - x, p.y - y); };
+
 export function pointAt(s) {
   s = ((s % PERIM) + PERIM) % PERIM;
   for (const g of S) {

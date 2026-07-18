@@ -9,6 +9,7 @@
 //
 // Rink feet: x 0..200, y 0..85. Goal lines 17/183, blue lines 75/125,
 // center 100. End-zone dots (45/155, 20.5/64.5), neutral dots (80/120, …).
+import * as boards from "./boards.js";
 
 /* ------------------------------------------------------------------ */
 /* tunables                                                           */
@@ -16,6 +17,7 @@ const SKATE = 26;                 // max skater speed (ft/s)
 const CARRY_SPEED = 23;           // carriers skate a touch slower
 const ACC = 80;                   // steering responsiveness
 const PASS_V = 74, SHOT_V = 108, DUMP_V = 80;
+const RIM_V = 96, CHIP_V = 54;    // rim the boards / soft self-chip
 const REACH = 2.9;                // puck pickup radius
 const SHOT_RANGE = 46;
 const LANE_BUF = 4.6;             // a passing/shooting lane is blocked within this
@@ -205,6 +207,32 @@ function decideCarrier(g, car, dt) {
     }
   }
 
+  // 1b) RIM — near our own boards under pressure (breakout / clear): rim it up
+  // the wall so it follows the boards to a winger instead of forcing a play
+  const edge = boards.edgeDist(car.x, car.y);
+  if (!puckInOz && edge < 10 && pressure < 8.5 && R() < 2.2 * dt) {
+    const dv = boards.tangentToward({ x: car.x, y: car.y }, net);   // along the boards, up-ice
+    release(); puck.shot = null;
+    puck.vx = dv.x * RIM_V; puck.vy = dv.y * RIM_V;
+    car.a = (Math.atan2(dv.y, dv.x) * 180) / Math.PI;
+    return;
+  }
+
+  // 1c) SELF-CHIP — a defender is square in the lane; chip past him to open ice
+  // and chase it (beat the check off the boards / into space)
+  if (zone !== "dz" && pressure < 6.5) {
+    const toNet = Math.atan2(net.y - car.y, net.x - car.x);
+    const toD = Math.atan2(nearD.y - car.y, nearD.x - car.x);
+    const blocking = Math.abs(Math.atan2(Math.sin(toD - toNet), Math.cos(toD - toNet))) < 0.55;
+    if (blocking && R() < 2.6 * dt) {
+      const side = car.y <= nearD.y ? -1 : 1;                        // toward the open side
+      const ang = toNet + side * 0.5;
+      release(); puck.shot = null;
+      puck.vx = Math.cos(ang) * CHIP_V; puck.vy = Math.sin(ang) * CHIP_V;
+      return;
+    }
+  }
+
   // 2) PASS — when pressured, hit the best open, onside, more-advanced teammate
   if (pressure < 9) {
     let best = null, bestScore = -1e9;
@@ -333,15 +361,14 @@ export function stepGame(g, dt) {
   if (carrier) {
     const on = attNet(carrier.team);
     const ang = Math.atan2(on.y - carrier.y, on.x - carrier.x);
-    puck.x = carrier.x + Math.cos(ang) * 2.2;
-    puck.y = carrier.y + Math.sin(ang) * 2.2;
+    const cc = boards.clampInside(carrier.x + Math.cos(ang) * 2.2, carrier.y + Math.sin(ang) * 2.2);
+    puck.x = cc.x; puck.y = cc.y;
     puck.lastTeam = carrier.team;
   } else if (puck.flying) {
     puck.x += puck.vx * dt; puck.y += puck.vy * dt;
     puck.vx *= 0.987; puck.vy *= 0.987;
-    if (puck.x < 4 || puck.x > 196) puck.vx *= -0.55;
-    if (puck.y < 4 || puck.y > 81) puck.vy *= -0.55;
-    puck.x = cX(puck.x); puck.y = cY(puck.y);
+    const c = boards.contain(puck.x, puck.y, puck.vx, puck.vy, 0.75);  // rim / bounce off the boards
+    puck.x = c.x; puck.y = c.y; puck.vx = c.vx; puck.vy = c.vy;
     // a shot arriving at the net → goal or save (rebound)
     if (puck.shot && D(puck, puck.shot.net) < 4.5) {
       if (puck.shot.goal) { g.score[puck.shot.team]++; faceoff(g, 100, 42.5, "GOAL!"); updateGoalies(g); return g; }
@@ -411,7 +438,8 @@ export function stepGame(g, dt) {
       p.vx += ((p.x - q.x) / d) * 9 * dt; p.vy += ((p.y - q.y) / d) * 9 * dt; } } });
     const sp = Math.hypot(p.vx, p.vy);
     if (sp > SKATE) { p.vx = (p.vx / sp) * SKATE; p.vy = (p.vy / sp) * SKATE; }
-    p.x = cX(p.x + p.vx * dt); p.y = cY(p.y + p.vy * dt);
+    const pc = boards.clampInside(p.x + p.vx * dt, p.y + p.vy * dt);   // skaters ride the boards
+    p.x = pc.x; p.y = pc.y;
     if (sp > 3 && !(carNow && p.id === carNow.id)) p.a = (Math.atan2(p.vy, p.vx) * 180) / Math.PI;
     else if (carNow && p.id === carNow.id) { const n = attNet(p.team); p.a = (Math.atan2(n.y - p.y, n.x - p.x) * 180) / Math.PI; }
   });

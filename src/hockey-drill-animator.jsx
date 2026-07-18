@@ -1684,6 +1684,11 @@ export default function DrillAnimator() {
             {/* ---- "Let AI play" 5v5 overlay (replaces the scripted content) ---- */}
             {aiPlay && aiRef.current && (
               <g pointerEvents="none">
+                {[{ x: 17, y: 42.5, a: 0 }, { x: 183, y: 42.5, a: 180 }].map((n, i) => {
+                  const fx = iconXf(n);
+                  return <PieceIcon key={`ainet-${i}`} p={{ kind: "net", color: "#c81e33" }}
+                    pos={n} xf={fx.t} thDeg={fx.th} onDown={() => {}} />;
+                })}
                 {aiRef.current.goalies.map((gl, i) => {
                   const fx = iconXf({ x: gl.x, y: gl.y, a: gl.a });
                   const col = "#2f9e57", dark = "#1d2126";
