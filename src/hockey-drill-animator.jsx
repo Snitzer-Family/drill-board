@@ -492,7 +492,36 @@ export default function DrillAnimator() {
   function displaySwing(p) {
     return p.kind === "player" && animT > 0 ? stickSwing(p.id, animT * totalTime) : 0;
   }
+  // an auto-reacting defenseman: hold the middle / front of the defended net,
+  // stay goal-side of the puck (keep the attacker in front), gap up toward it.
+  function dmanPos(p) {
+    const home = { x: p.x, y: p.y };
+    // net this D defends: nearest net piece, else the goal line on its side
+    const nets = pieces.filter(q => q.kind === "net");
+    let net = home.x < 100 ? { x: 17, y: 42.5 } : { x: 183, y: 42.5 };
+    if (nets.length) {
+      const n = nets.reduce((a, b) => (Math.hypot(b.x - home.x, b.y - home.y) < Math.hypot(a.x - home.x, a.y - home.y) ? b : a));
+      net = { x: n.x, y: n.y };
+    }
+    const fwd = net.x < 100 ? 1 : -1;                     // toward center ice (up the slot)
+    // threat = the nearest puck's live position (carried puck ≈ the puck carrier)
+    const pucks = pieces.filter(q => q.kind === "puck");
+    let threat = null, best = Infinity;
+    pucks.forEach(pk => { const d = displayPos(pk); const dist = Math.hypot(d.x - net.x, d.y - net.y); if (dist < best) { best = dist; threat = d; } });
+    if (!threat) return { x: home.x, y: home.y, a: p.facing || 0 };
+    const dx = threat.x - net.x, dy = threat.y - net.y;
+    const dist = Math.hypot(dx, dy) || 1;
+    const inFront = dx * fwd > 0;                          // puck on the ice-side of the net
+    const gap = Math.max(7, Math.min(20, dist * 0.42));   // gap up with the threat, capped in the slot
+    let tx, ty;
+    if (inFront) { tx = net.x + (dx / dist) * gap; ty = net.y + (dy / dist) * gap; }
+    else { tx = net.x + fwd * 13; ty = net.y; }           // puck behind → hold net-front
+    ty = ty + (42.5 - ty) * 0.3;                          // bias to the middle of the ice
+    return { x: clampX(tx), y: clampY(ty), a: (Math.atan2(threat.y - ty, threat.x - tx) * 180) / Math.PI };
+  }
+
   function displayPos(p) {
+    if (p.kind === "player" && p.defense) return animT > 0 ? dmanPos(p) : { x: p.x, y: p.y, a: p.facing || 0 };
     const dp = displayPosAt(p, animT <= 0 ? 0 : animT * totalTime);
     if (p.kind !== "player" || !(dp.smul > 0.02)) return dp;
     const r = dp.smul;                                    // effective speed multiple
@@ -590,7 +619,7 @@ export default function DrillAnimator() {
     const colorIdx = pieces.filter(p => p.kind === "player").length % COLORS.length;
     return {
       id, kind, x: pt.x, y: pt.y, speed: kind === "player" ? 1.5 : 1, hand: "R", carrier: null,
-      facing: kind === "net" && pt.x >= 100 ? 180 : 0, transfers: [], shotAt: null, pickup: null, net: null, holdLine: false, goalie: false,
+      facing: kind === "net" && pt.x >= 100 ? 180 : 0, transfers: [], shotAt: null, pickup: null, net: null, holdLine: false, goalie: false, defense: false,
       color: kind === "player" ? COLORS[colorIdx] : kind === "cone" ? "#e0731d" : kind === "net" ? "#c81e33" : "#14171a",
       label: kind === "player" ? id : "", path: [],
     };
@@ -1219,7 +1248,7 @@ export default function DrillAnimator() {
                   </div>
                 );
               })()}
-              {p.path.length > 0 && (
+              {p.path.length > 0 && !p.defense && (
                 <div className="hd-poprow">
                   <button className={`hd-mini${p.holdLine ? " on" : ""}`}
                     onClick={() => updateById(p.id, { holdLine: !p.holdLine })}>
@@ -1228,6 +1257,13 @@ export default function DrillAnimator() {
                   <span style={{ fontSize: 11, color: "#8b99a8" }}>waits for the puck to enter the zone</span>
                 </div>
               )}
+              <div className="hd-poprow">
+                <button className={`hd-mini${p.defense ? " on" : ""}`}
+                  onClick={() => updateById(p.id, { defense: !p.defense })}>
+                  {p.defense ? "✓ Auto defense" : "🛡 Auto defense"}
+                </button>
+                <span style={{ fontSize: 11, color: "#8b99a8" }}>holds the slot, tracks the puck goal-side</span>
+              </div>
               {/* host the chain (pass / shoot / rebound) on the player itself
                   for a route-less player, and for any puck head so the option
                   stays put after a route is added — i=-1 releases from the
@@ -1283,7 +1319,7 @@ export default function DrillAnimator() {
               <Stepper value={p.path[0].stop || 0} onChange={v => updateSeg(p.id, 0, { stop: v })} />
             </div>
           )}
-          {(p.kind === "player" || p.kind === "puck") && (
+          {(p.kind === "player" || p.kind === "puck") && !p.defense && (
             <div className="hd-poprow">
               <span>Add leg</span>
               <button className="hd-mini" onClick={() => addSegment(p.id, "L")}>⎯</button>

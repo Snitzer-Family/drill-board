@@ -30,7 +30,7 @@ export function parseDrill(text) {
         let color = kind === "cone" ? "#e0731d" : kind === "puck" ? "#14171a" : kind === "net" ? "#c81e33" : "#d7263d";
         let label = kind === "player" ? id : "";
         let speed = 1, hand = "R", carrier = null, facing = 0, shotAt = null, pickup = null;
-        let net = null, holdLine = false, goalie = false;
+        let net = null, holdLine = false, goalie = false, defense = false;
         const transfers = [];
         rest.forEach(r => {
           if (r.startsWith("#")) color = r;
@@ -67,9 +67,10 @@ export function parseDrill(text) {
               if (!isNaN(n)) facing = n;
             }
           } else if (r === "goalie") goalie = true;
+          else if (r === "defense") defense = true;
           else label = r;
         });
-        const p = { id, kind, x, y, color, label, speed, hand, carrier, facing, transfers, shotAt, pickup, net, holdLine, goalie, path: [] };
+        const p = { id, kind, x, y, color, label, speed, hand, carrier, facing, transfers, shotAt, pickup, net, holdLine, goalie, defense, path: [] };
         pieces.push(p); byId[id] = p;
       } else if (cmd === "PATH") {
         const id = tok[1];
@@ -136,7 +137,8 @@ export function serializeDrill(rink, pieces, title = "", desc = "") {
     const fac = (p.kind === "player" && !p.path.length || p.kind === "net") && p.facing ? ` face=${f1(p.facing)}` : "";
     const hld = p.kind === "player" && p.holdLine ? " hold=line" : "";
     const gl = p.kind === "net" && p.goalie ? " goalie" : "";
-    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${car}${gp}${pas}${sht}${nt}${hld}${fac}${gl}${spd}`);
+    const df = p.kind === "player" && p.defense ? " defense" : "";
+    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${car}${gp}${pas}${sht}${nt}${hld}${fac}${gl}${df}${spd}`);
     if (p.path.length) out.push(`PATH ${p.id} ${p.path.map(segToStr).join(" ")}`);
   });
   return out.join("\n") + "\n";
