@@ -490,6 +490,22 @@ export default function DrillAnimator() {
   // play nears. Clamped to the net's front hemisphere so it stays in the crease.
   function goaliePos(net) {
     const f = ((net.facing || 0) * Math.PI) / 180;    // net mouth opens this way
+    const e = animT <= 0 ? 0 : animT * totalTime;
+    // freeze on a shot: once a shot at this net is released, the goalie sets and
+    // holds — on a save the puck stops right at it, a corner goal beats it clean
+    const { plans } = getPlan();
+    let shot = null;
+    for (const pid in plans) for (const leg of plans[pid].legs) {
+      if (leg.type === "fly" && leg.shot && e >= leg.t0
+        && Math.hypot(leg.x1 - net.x, leg.y1 - net.y) < 12
+        && (!shot || leg.t0 > shot.t0)) shot = leg;
+    }
+    if (shot) {
+      const dx = shot.x0 - net.x, dy = shot.y0 - net.y;
+      const m = Math.hypot(dx, dy) || 1;
+      const R = shot.save ? 2.5 : 2;                   // save depth matches the puck's stop point
+      return { x: net.x + (dx / m) * R, y: net.y + (dy / m) * R, a: (Math.atan2(dy, dx) * 180) / Math.PI };
+    }
     const pucks = pieces.filter(q => q.kind === "puck");
     let aim = { x: net.x + Math.cos(f) * 20, y: net.y + Math.sin(f) * 20 }, best = Infinity;
     pucks.forEach(pk => {
@@ -612,6 +628,11 @@ export default function DrillAnimator() {
   function beginDraw(e, existingId) {
     const pt = svgPt(e);
     let id = existingId || selectedId;
+    const t = id && pieces.find(q => q.id === id);
+    if (t && t.kind !== "player" && t.kind !== "puck") {
+      if (existingId) return;                 // cones/nets can't be routed
+      id = null;                              // one was just selected — draw a fresh player
+    }
     if (!id) {
       const np = makePiece("player", pt);
       setPieces(ps => [...ps, np]);
@@ -811,6 +832,15 @@ export default function DrillAnimator() {
     setLoupe(null);
     if (!d) return;
     if (d.kind === "drawing") { finishDraw(); return; }
+    // snap a dropped net into a standard goal position if it's near one
+    if (d.kind === "piece" && d.moved && d.line == null) {
+      const pc = pieces.find(q => q.id === d.id);
+      if (pc && pc.kind === "net") {
+        const spots = [{ x: 17, y: 42.5, facing: 0 }, { x: 183, y: 42.5, facing: 180 }];
+        const near = spots.find(s => Math.hypot(s.x - pc.x, s.y - pc.y) < 12);
+        if (near) updateById(pc.id, near);
+      }
+    }
     if (d.moved) return;
     if (d.kind === "rotate") { setPopup({ type: "piece", id: d.id }); return; }
     if (d.kind === "piece") {
@@ -1226,12 +1256,14 @@ export default function DrillAnimator() {
               <Stepper value={p.path[0].stop || 0} onChange={v => updateSeg(p.id, 0, { stop: v })} />
             </div>
           )}
-          <div className="hd-poprow">
-            <span>Add leg</span>
-            <button className="hd-mini" onClick={() => addSegment(p.id, "L")}>⎯</button>
-            <button className="hd-mini" onClick={() => addSegment(p.id, "Q")}>⌒</button>
-            <button className="hd-mini" onClick={() => addSegment(p.id, "C")}>∿</button>
-          </div>
+          {(p.kind === "player" || p.kind === "puck") && (
+            <div className="hd-poprow">
+              <span>Add leg</span>
+              <button className="hd-mini" onClick={() => addSegment(p.id, "L")}>⎯</button>
+              <button className="hd-mini" onClick={() => addSegment(p.id, "Q")}>⌒</button>
+              <button className="hd-mini" onClick={() => addSegment(p.id, "C")}>∿</button>
+            </div>
+          )}
           <div className="hd-poprow">
             {p.path.length > 0 && (
               <button className="hd-mini" onClick={() => { updateById(p.id, { path: [] }); setPopup(null); }}>Clear route</button>

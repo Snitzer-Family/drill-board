@@ -28,8 +28,6 @@ export function RinkMarkings({ yFix = 1 }) {
       <ellipse cx={100} cy={42.5} rx={15} ry={15 * yFix} fill="none" stroke="#1f4fa3" strokeWidth={0.4} />
       <ellipse cx={100} cy={42.5} rx={0.9} ry={0.9 * yFix} fill="#1f4fa3" />
       {dots}
-      <rect x={13} y={39.5} width={4} height={6} fill="none" stroke="#d7263d" strokeWidth={0.35} />
-      <rect x={183} y={39.5} width={4} height={6} fill="none" stroke="#d7263d" strokeWidth={0.35} />
       <rect x={0.5} y={0.5} width={199} height={84} rx={27.5} ry={27.5 * yFix} fill="none" stroke="#31404e" strokeWidth={1} />
     </g>
   );

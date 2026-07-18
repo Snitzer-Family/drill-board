@@ -128,8 +128,9 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
         const goalie = !!(netPiece && netPiece.goalie);
         const isGoal = goalie ? rand(`${pk.id}:${legs.length}`) >= SAVE_PROB : false;
 
-        if (goalie && isGoal) {                               // beats the goalie — into the net
-          const endPt = { x: clampX(net.x + ux * 2), y: clampY(net.y + uy * 2) };
+        if (goalie && isGoal) {                               // beats the goalie — corner of the net
+          const side = rand(`${pk.id}:${legs.length}:c`) >= 0.5 ? 1 : -1;
+          const endPt = { x: clampX(net.x + ux * 1.5 - uy * side * 2.2), y: clampY(net.y + uy * 1.5 + ux * side * 2.2) };
           const tArr = launchT + Math.hypot(endPt.x - launch.x, endPt.y - launch.y) / vShot;
           legs.push({ type: "fly", shot: true, goal: true, by: cur.id, x0: launch.x, y0: launch.y, x1: endPt.x, y1: endPt.y, t0: launchT, t1: tArr });
           legs.push({ type: "rest", x: endPt.x, y: endPt.y, t0: tArr });
