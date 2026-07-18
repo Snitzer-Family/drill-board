@@ -3,6 +3,7 @@
 // array; the React component passes its refs in each render.
 import { SPEED, ICON_SCALE, SAVE_PROB } from "./constants.js";
 import { clampX, clampY, segEnd, segTangentAngle } from "./geometry.js";
+import * as boards from "./boards.js";
 
 const GOALIE_DEPTH = 2.5; // how far out front of the net the goalie plays
 
@@ -73,9 +74,34 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
     pieces.forEach(pk => {
       if (pk.kind !== "puck") return;
       const vPass = () => pace * SPEED.pass * (pk.speed || 1);
+      const vRim = () => pace * SPEED.pass * 1.1 * (pk.speed || 1);   // rim rides fast
+      const vChip = () => pace * SPEED.pass * 0.7 * (pk.speed || 1);  // chip is soft
       const legs = [];
       let cur = null;
       let tBase = 0;
+      // lay a moving polyline (rim / chip travel) down as a chain of fly legs
+      const pushTravel = (poly, t0, speed, flag = {}) => {
+        let t = t0, prev = poly[0];
+        for (let k = 1; k < poly.length; k++) {
+          const seg = poly[k];
+          const dt = Math.max(1e-3, Math.hypot(seg.x - prev.x, seg.y - prev.y) / Math.max(1e-3, speed));
+          legs.push({ type: "fly", x0: prev.x, y0: prev.y, x1: seg.x, y1: seg.y, t0: t, t1: t + dt,
+            ...(k === 1 && flag.by ? { by: flag.by } : {}), rim: !!flag.rim, chip: !!flag.chip });
+          t += dt; prev = seg;
+        }
+        return { t, end: prev };
+      };
+      // the carrier's heading at time t (used to chip into space)
+      const headingAt = (p, t) => {
+        const a = bladeAt(p, t - 0.05, warp), b = bladeAt(p, t + 0.05, warp);
+        let dx = b.x - a.x, dy = b.y - a.y, m = Math.hypot(dx, dy);
+        if (m < 1e-3) {
+          if (p.facing) { dx = Math.cos((p.facing * Math.PI) / 180); dy = Math.sin((p.facing * Math.PI) / 180); }
+          else { dx = p.x < 100 ? 1 : -1; dy = 0; }
+          m = 1;
+        }
+        return { x: dx / m, y: dy / m };
+      };
       if (pk.carrier) {
         cur = pieces.find(q => q.id === pk.carrier && q.kind === "player");
         if (!cur) return;
@@ -170,7 +196,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
           }
           const bmag = Math.hypot(bx, by) || 1;
           const BOUNCE = goalie ? 5 : 8;
-          restPt = { x: clampX(hit.x + (bx / bmag) * BOUNCE), y: clampY(hit.y + (by / bmag) * BOUNCE) };
+          restPt = boards.clampInside(hit.x + (bx / bmag) * BOUNCE, hit.y + (by / bmag) * BOUNCE);
         }
         const dGlide = Math.hypot(restPt.x - hit.x, restPt.y - hit.y);
         const tGlide = Math.max(0.35, dGlide / Math.max(1e-3, pace * 3.2)); // loose-puck roll
@@ -186,7 +212,23 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
       (pk.transfers || []).forEach(tr => {
         const rec = pieces.find(q => q.id === tr.to && q.kind === "player");
         if (!rec) return;
-        if (tr.kind !== "shot" && rec.id === cur.id) return;  // no passing to yourself
+        if (tr.kind === "pass" && rec.id === cur.id) return;  // no plain pass to yourself
+        if (tr.kind === "rim" || tr.kind === "chip") {        // rim the boards / chip (to self ok)
+          const launchT = (cur.path.length && tr.at >= 0)
+            ? Math.max(tBase, routeTimeW(cur, warp, Math.min(tr.at, cur.path.length - 1))) : tBase;
+          const launch = bladeAt(cur, launchT, warp);
+          let anchor;
+          if (rec.path.length) {
+            const gj = tr.recvAt == null ? rec.path.length - 1 : Math.max(0, Math.min(tr.recvAt, rec.path.length - 1));
+            anchor = { x: rec.path[gj].x, y: rec.path[gj].y };
+          } else anchor = { x: rec.x, y: rec.y };
+          const poly = tr.kind === "rim" ? boards.rimPath(launch, anchor)
+            : [launch, boards.clampInside(anchor.x, anchor.y)];
+          const r = pushTravel(poly, launchT, tr.kind === "rim" ? vRim() : vChip(),
+            { by: cur.id, rim: tr.kind === "rim", chip: tr.kind === "chip" });
+          legs.push({ type: "ride", id: rec.id, t0: r.t, catch: true });
+          cur = rec; tBase = r.t; return;
+        }
         if (tr.kind === "shot") {                             // (may rebound to the shooter)
           let gi = -1, aim = null;
           if (rec.path.length) {
@@ -251,8 +293,22 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
         tBase = tArr;
       });
       if (pk.shotAt != null && cur) doShot(pk.shotAt); // terminal shot (no collector)
+      else if (pk.rimAt != null && cur) {              // terminal hard rim around the boards
+        const at = pk.rimAt;
+        const launchT = (cur.path.length && at >= 0) ? Math.max(tBase, routeTimeW(cur, warp, Math.min(at, cur.path.length - 1))) : tBase;
+        const launch = bladeAt(cur, launchT, warp);
+        const r = pushTravel(boards.rimAround(launch, 65), launchT, vRim(), { by: cur.id, rim: true });
+        legs.push({ type: "rest", x: r.end.x, y: r.end.y, t0: r.t }); tBase = r.t;
+      } else if (pk.chipAt != null && cur) {           // terminal chip into space (bounces)
+        const at = pk.chipAt;
+        const launchT = (cur.path.length && at >= 0) ? Math.max(tBase, routeTimeW(cur, warp, Math.min(at, cur.path.length - 1))) : tBase;
+        const launch = bladeAt(cur, launchT, warp);
+        const h = headingAt(cur, launchT);
+        const r = pushTravel(boards.slide(launch.x, launch.y, h.x, h.y, 16), launchT, vChip(), { by: cur.id, chip: true });
+        legs.push({ type: "rest", x: r.end.x, y: r.end.y, t0: r.t }); tBase = r.t;
+      }
       let relT = Infinity;
-      if (pk.path.length && pk.shotAt == null && !pk.pickup) {
+      if (pk.path.length && pk.shotAt == null && pk.rimAt == null && pk.chipAt == null && !pk.pickup) {
         const finish = Math.max(tBase + 0.01, routeTimeW(cur, warp));
         relT = finish;
         const step = Math.max(0.03, (finish - tBase) / 200);

@@ -649,7 +649,7 @@ export default function DrillAnimator() {
     const colorIdx = pieces.filter(p => p.kind === "player").length % COLORS.length;
     return {
       id, kind, x: pt.x, y: pt.y, speed: kind === "player" ? 1.5 : 1, hand: "R", carrier: null,
-      facing: kind === "net" && pt.x >= 100 ? 180 : 0, transfers: [], shotAt: null, pickup: null, net: null, holdLine: false, goalie: false, defense: false,
+      facing: kind === "net" && pt.x >= 100 ? 180 : 0, transfers: [], shotAt: null, rimAt: null, chipAt: null, pickup: null, net: null, holdLine: false, goalie: false, defense: false,
       color: kind === "player" ? COLORS[colorIdx] : kind === "cone" ? "#e0731d" : kind === "net" ? "#c81e33"
         : kind === "bumper" ? "#4d6fa6" : kind === "deker" ? "#c79a4e" : kind === "passer" ? "#57636f" : "#14171a",
       label: kind === "player" ? id : "", path: [],
@@ -687,7 +687,15 @@ export default function DrillAnimator() {
       if (q.id !== pkId) return q;
       const ts = (q.transfers || []).slice(0, stage);
       if (tr) ts[stage] = tr;
-      return { ...q, transfers: ts, shotAt: null };
+      return { ...q, transfers: ts, shotAt: null, rimAt: null, chipAt: null };
+    });
+  }
+  // terminal actions (shoot / hard rim / chip into space) are mutually exclusive
+  function setTerminal(pkId, field, i) {
+    update(q => {
+      if (q.id !== pkId) return q;
+      const on = q[field] === i;
+      return { ...q, shotAt: null, rimAt: null, chipAt: null, ...(on ? {} : { [field]: i }) };
     });
   }
   function setRecvAt(pkId, trIdx, idx) {
@@ -1140,11 +1148,42 @@ export default function DrillAnimator() {
               ))}
             </div>
           )}
+          {canAct && others.length > 0 && (
+            <div className="hd-poprow">
+              <span>Rim to</span>
+              {others.map(o => {
+                const on = from && from.kind === "rim" && from.at === i && from.to === o.id;
+                return (
+                  <button key={`rim-${o.id}`} className={`hd-mini${on ? " on" : ""}`}
+                    onClick={() => setTransfer(pk.id, stage, on ? null : { at: i, to: o.id, recvAt: null, kind: "rim" })}>
+                    {o.id}
+                  </button>
+                );
+              })}
+              {(() => {
+                const on = from && from.kind === "chip" && from.at === i && from.to === p.id;
+                return (
+                  <button className={`hd-mini${on ? " on" : ""}`}
+                    onClick={() => setTransfer(pk.id, stage, on ? null : { at: i, to: p.id, recvAt: null, kind: "chip" })}>
+                    Chip to self
+                  </button>
+                );
+              })()}
+            </div>
+          )}
           {stage === (pk.transfers || []).length && (
             <div className="hd-poprow">
               <button className={`hd-mini${pk.shotAt === i ? " on" : ""}`}
-                onClick={() => updateById(pk.id, pk.shotAt === i ? { shotAt: null } : { shotAt: i })}>
+                onClick={() => setTerminal(pk.id, "shotAt", i)}>
                 {pk.shotAt === i ? `✓ Shooting at ${pk.net || "nearest"}` : `🥅 Shoot at ${pk.net || "nearest"}`}
+              </button>
+              <button className={`hd-mini${pk.rimAt === i ? " on" : ""}`}
+                onClick={() => setTerminal(pk.id, "rimAt", i)}>
+                {pk.rimAt === i ? "✓ Hard rim" : "Hard rim"}
+              </button>
+              <button className={`hd-mini${pk.chipAt === i ? " on" : ""}`}
+                onClick={() => setTerminal(pk.id, "chipAt", i)}>
+                {pk.chipAt === i ? "✓ Chip" : "Chip"}
               </button>
             </div>
           )}
@@ -1184,8 +1223,16 @@ export default function DrillAnimator() {
                 )}
                 <div className="hd-poprow">
                   <button className={`hd-mini${pk.shotAt === i ? " on" : ""}`}
-                    onClick={() => updateById(pk.id, pk.shotAt === i ? { shotAt: null } : { shotAt: i })}>
+                    onClick={() => setTerminal(pk.id, "shotAt", i)}>
                     {pk.shotAt === i ? `✓ Shooting at ${pk.net || "nearest"}` : `🥅 Shoot at ${pk.net || "nearest"}`}
+                  </button>
+                  <button className={`hd-mini${pk.rimAt === i ? " on" : ""}`}
+                    onClick={() => setTerminal(pk.id, "rimAt", i)}>
+                    {pk.rimAt === i ? "✓ Hard rim" : "Hard rim"}
+                  </button>
+                  <button className={`hd-mini${pk.chipAt === i ? " on" : ""}`}
+                    onClick={() => setTerminal(pk.id, "chipAt", i)}>
+                    {pk.chipAt === i ? "✓ Chip" : "Chip"}
                   </button>
                 </div>
                 {pk.shotAt === i && netRow(pk)}
@@ -1466,9 +1513,9 @@ export default function DrillAnimator() {
                   return (
                     <button key={q.id} className={`hd-mini${on ? " on" : ""}`}
                       onClick={() => updateById(q.id, on
-                        ? { pickup: null, transfers: [], shotAt: null }
+                        ? { pickup: null, transfers: [], shotAt: null, rimAt: null, chipAt: null }
                         : { pickup: { to: p.id, at: i },
-                            ...(same ? {} : { transfers: [], shotAt: null }) })}>
+                            ...(same ? {} : { transfers: [], shotAt: null, rimAt: null, chipAt: null }) })}>
                       {q.id}
                     </button>
                   );
@@ -1961,6 +2008,8 @@ export default function DrillAnimator() {
             point 3 — the receiver's pace auto-syncs (omit <code>@3</code> to lead them instead).
             Point <b>0</b> is the starting spot (release before skating to point 1).
             <code> shoot=4</code> fires at point 4 (targets the nearest net/passer, or <code>net=N2</code>/<code>net=PS1</code> for a specific one).
+            <code> rim=4</code>/<code>chip=4</code> hard-rims or chips the puck off the boards at point 4;
+            <code> rim=4:F2</code> rims it around to F2, <code>chip=4:F1</code> chips it (to self is allowed).
             <code> pickup=F2@3</code> — a loose puck hops onto F2's blade at their point 3.
             <code> face=45</code> sets a stationary player's heading (degrees).
             <code> hold=line</code> makes a player wait at the blue line until the puck enters the zone.
