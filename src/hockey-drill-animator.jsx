@@ -1040,14 +1040,14 @@ export default function DrillAnimator() {
               ))}
             </div>
           )}
-          {canAct && others.length > 0 && (
+          {canAct && (
             <div className="hd-poprow">
               <span>Shoot, rebound to</span>
-              {others.map(o => (
+              {[p, ...others].map(o => (
                 <button key={o.id} className={`hd-mini${isShot(o.id) ? " on" : ""}`}
                   onClick={() => setTransfer(pk.id, stage,
                     isShot(o.id) ? null : { at: i, to: o.id, recvAt: null, kind: "shot" })}>
-                  {o.id}
+                  {o.id === p.id ? "self" : o.id}
                 </button>
               ))}
             </div>
@@ -1533,12 +1533,20 @@ export default function DrillAnimator() {
               const gp = goaliePos(net);
               const fx = iconXf(gp);
               const col = net.color || "#c81e33";
+              const dark = "#1d2126";
+              // local +x faces the shooter: chest, mask, two leg pads out front,
+              // catch glove (top), blocker + goalie stick (bottom)
               return (
                 <g key={`goalie-${net.id}`} transform={fx.t} pointerEvents="none">
-                  <ellipse cx={0} cy={0} rx={1.7} ry={2.7} fill="#eef2f6" stroke="#2a2f36" strokeWidth={0.35} />
-                  <rect x={-0.6} y={-2.9} width={1.5} height={1} rx={0.3} fill="#2a2f36" />
-                  <rect x={-0.6} y={1.9} width={1.5} height={1} rx={0.3} fill="#2a2f36" />
-                  <circle cx={0.7} cy={0} r={0.95} fill={col} stroke="#2a2f36" strokeWidth={0.3} />
+                  <path d="M 2.3 2.2 L 3.9 1 M 3.9 1.1 L 4.5 -1.1" stroke={dark} strokeWidth={1} strokeLinecap="round" />
+                  <rect x={-1.7} y={-1.5} width={2.4} height={3} rx={1.05} fill={col} stroke="#fff" strokeWidth={0.3} />
+                  <rect x={0.2} y={-1.85} width={2.6} height={1.5} rx={0.42} fill="#eef2f6" stroke="#2a2f36" strokeWidth={0.3} />
+                  <rect x={0.2} y={0.35} width={2.6} height={1.5} rx={0.42} fill="#eef2f6" stroke="#2a2f36" strokeWidth={0.3} />
+                  <circle cx={1.95} cy={-2.4} r={1.05} fill="#e8edf2" stroke="#2a2f36" strokeWidth={0.32} />
+                  <circle cx={1.95} cy={-2.4} r={0.48} fill="none" stroke="#2a2f36" strokeWidth={0.18} opacity={0.55} />
+                  <rect x={1.35} y={1.6} width={1.85} height={1.5} rx={0.28} fill="#e8edf2" stroke="#2a2f36" strokeWidth={0.32} />
+                  <circle cx={-0.15} cy={0} r={0.92} fill={col} stroke="#fff" strokeWidth={0.3} />
+                  <path d="M 0.35 -0.55 Q 0.85 0 0.35 0.55" fill="none" stroke="#fff" strokeWidth={0.16} opacity={0.55} />
                 </g>
               );
             })}

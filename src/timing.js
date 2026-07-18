@@ -127,10 +127,15 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
         const ux = inx / mag, uy = iny / mag;                 // unit vector toward the net
         const goalie = !!(netPiece && netPiece.goalie);
         const isGoal = goalie ? rand(`${pk.id}:${legs.length}`) >= SAVE_PROB : false;
+        // randomize placement across the ~6 ft mouth: posts / sides / center
+        const px = -uy, py = ux;                              // lateral (across the mouth)
+        const GOAL_HALF = 2.6;
+        const place = rand(`${pk.id}:${legs.length}:p`) * 2 - 1; // −1..1 across the net
 
-        if (goalie && isGoal) {                               // beats the goalie — corner of the net
-          const side = rand(`${pk.id}:${legs.length}:c`) >= 0.5 ? 1 : -1;
-          const endPt = { x: clampX(net.x + ux * 1.5 - uy * side * 2.2), y: clampY(net.y + uy * 1.5 + ux * side * 2.2) };
+        if (goalie && isGoal) {                               // beats the goalie — to a post/corner
+          const side = place >= 0 ? 1 : -1;
+          const lat = side * (0.7 + Math.abs(place) * 0.3) * GOAL_HALF;
+          const endPt = { x: clampX(net.x + ux * 1.5 + px * lat), y: clampY(net.y + uy * 1.5 + py * lat) };
           const tArr = launchT + Math.hypot(endPt.x - launch.x, endPt.y - launch.y) / vShot;
           legs.push({ type: "fly", shot: true, goal: true, by: cur.id, x0: launch.x, y0: launch.y, x1: endPt.x, y1: endPt.y, t0: launchT, t1: tArr });
           legs.push({ type: "rest", x: endPt.x, y: endPt.y, t0: tArr });
@@ -138,8 +143,10 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
           return endPt;
         }
 
-        // save (stopped at the goalie) or no-goalie (caroms off the net)
-        const hit = goalie ? { x: net.x - ux * GOALIE_DEPTH, y: net.y - uy * GOALIE_DEPTH } : net;
+        // save (stopped at the goalie) or no-goalie (varied hit on the mouth, caroms)
+        const hit = goalie
+          ? { x: net.x - ux * GOALIE_DEPTH, y: net.y - uy * GOALIE_DEPTH }
+          : { x: clampX(net.x + px * place * GOAL_HALF), y: clampY(net.y + py * place * GOAL_HALF) };
         const tArr = launchT + Math.hypot(hit.x - launch.x, hit.y - launch.y) / vShot;
         legs.push({ type: "fly", shot: true, save: goalie, by: cur.id, x0: launch.x, y0: launch.y, x1: hit.x, y1: hit.y, t0: launchT, t1: tArr });
         // rebound: to the collector's gather spot, else a damped carom into the slot
@@ -165,8 +172,9 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
       // the normal pass/shoot options resume from the collection point.
       (pk.transfers || []).forEach(tr => {
         const rec = pieces.find(q => q.id === tr.to && q.kind === "player");
-        if (!rec || rec.id === cur.id) return;
-        if (tr.kind === "shot") {
+        if (!rec) return;
+        if (tr.kind !== "shot" && rec.id === cur.id) return;  // no passing to yourself
+        if (tr.kind === "shot") {                             // (may rebound to the shooter)
           let gi = -1, aim = null;
           if (rec.path.length) {
             gi = tr.recvAt == null ? rec.path.length - 1
