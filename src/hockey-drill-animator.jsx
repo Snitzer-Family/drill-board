@@ -6,6 +6,7 @@ import { RinkMarkings } from "./rink.jsx";
 import { ZONES, zoneAt } from "./zones.js";
 import { PieceIcon, Stepper, DiagPanel } from "./icons.jsx";
 import { createTiming } from "./timing.js";
+import { newGame, stepGame } from "./ai-game.js";
 import { STYLES } from "./styles.js";
 
 /* ============================================================
@@ -77,6 +78,11 @@ export default function DrillAnimator() {
   const [loopPause, setLoopPause] = useState(1);       // seconds held on the finished drill
   const [drillTitle, setDrillTitle] = useState(init.title || "");
   const [drillDesc, setDrillDesc] = useState(init.desc || "");
+  const [aiPlay, setAiPlay] = useState(false);         // "Let AI play" 5v5 mode
+  const [aiMins, setAiMins] = useState(2);             // duration in minutes
+  const [, aiTick] = useState(0);                      // force re-render each sim frame
+  const aiRef = useRef(null);
+  const aiClockRef = useRef(0);
   const [drawPreview, setDrawPreview] = useState(null);
   const [loupe, setLoupe] = useState(null);
   const [popOff, setPopOff] = useState({ x: 0, y: 0 });
@@ -105,7 +111,7 @@ export default function DrillAnimator() {
   const lastIceTap = useRef(null); // double-click/tap on empty ice → add menu
 
   const selected = pieces.find(p => p.id === selectedId) || null;
-  const editing = animT === 0 && !playing;
+  const editing = animT === 0 && !playing && !aiPlay;
 
   useEffect(() => { setPopOff({ x: 0, y: 0 }); },
     [popup?.type, popup?.id, popup?.seg, popup?.pt?.x, popup?.pt?.y]);
@@ -457,6 +463,29 @@ export default function DrillAnimator() {
 
   function resetAnim() { animRef.current = 0; setAnimT(0); holdRef.current = 0; loopPendingRef.current = false; nextStepRef.current = 0; setHoldStep(null); }
   function skipHold() { holdRef.current = 0; setHoldStep(null); }
+
+  // "Let AI play" — a self-contained 5v5 sim loop, independent of the scripted timeline
+  useEffect(() => {
+    if (!aiPlay) return;
+    if (!aiRef.current) aiRef.current = newGame();
+    let raf, last = performance.now();
+    const step = now => {
+      const dt = (now - last) / 1000; last = now;
+      aiClockRef.current += dt;
+      stepGame(aiRef.current, dt);
+      if (aiClockRef.current >= aiMins * 60) { setAiPlay(false); return; }
+      aiTick(t => t + 1);
+      raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [aiPlay]); // eslint-disable-line
+  const startAiPlay = () => {
+    setPlaying(false); resetAnim();
+    aiRef.current = newGame(); aiClockRef.current = 0;
+    setOpenMenu(null); setPopup(null); setSelectedId(null);
+    setAiPlay(true);
+  };
 
   // one re-render after mount so hidden path lengths are measured
   const [, bumpTick] = useState(0);
@@ -1539,8 +1568,8 @@ export default function DrillAnimator() {
 
   // during playback the "Routes on play" setting controls what stays visible;
   // while editing everything shows regardless
-  const showRoutes = editing || playRoutes !== "hide";      // player route lines + stops
-  const showPuckPaths = editing || playRoutes === "all";    // planned pass / shot lines
+  const showRoutes = !aiPlay && (editing || playRoutes !== "hide");   // player route lines + stops
+  const showPuckPaths = !aiPlay && (editing || playRoutes === "all"); // planned pass / shot lines
 
   return (
     <div className="hd-root" ref={rootRef}>
@@ -1591,8 +1620,37 @@ export default function DrillAnimator() {
               </g>
             )}
 
+            {/* ---- "Let AI play" 5v5 overlay (replaces the scripted content) ---- */}
+            {aiPlay && aiRef.current && (
+              <g pointerEvents="none">
+                {aiRef.current.goalies.map((gl, i) => {
+                  const fx = iconXf({ x: gl.x, y: gl.y, a: gl.a });
+                  const col = "#2f9e57", dark = "#1d2126";
+                  return (
+                    <g key={`aig-${i}`} transform={fx.t}>
+                      <path d="M 2.3 2.2 L 3.9 1 M 3.9 1.1 L 4.5 -1.1" stroke={dark} strokeWidth={1} strokeLinecap="round" />
+                      <rect x={-1.7} y={-1.5} width={2.4} height={3} rx={1.05} fill={col} stroke="#fff" strokeWidth={0.3} />
+                      <rect x={0.2} y={-1.85} width={2.6} height={1.5} rx={0.42} fill="#eef2f6" stroke="#2a2f36" strokeWidth={0.3} />
+                      <rect x={0.2} y={0.35} width={2.6} height={1.5} rx={0.42} fill="#eef2f6" stroke="#2a2f36" strokeWidth={0.3} />
+                      <circle cx={1.95} cy={-2.4} r={1.05} fill="#e8edf2" stroke="#2a2f36" strokeWidth={0.32} />
+                      <rect x={1.35} y={1.6} width={1.85} height={1.5} rx={0.28} fill="#e8edf2" stroke="#2a2f36" strokeWidth={0.32} />
+                      <circle cx={-0.15} cy={0} r={0.92} fill={col} stroke="#fff" strokeWidth={0.3} />
+                    </g>
+                  );
+                })}
+                {(() => { const fx = iconXf({ x: aiRef.current.puck.x, y: aiRef.current.puck.y }); return (
+                  <g transform={fx.t}><circle cx={0} cy={0} r={1.5} fill="#14171a" stroke="#fff" strokeWidth={0.4} /></g>); })()}
+                {aiRef.current.players.map(pl => {
+                  const dp = { x: pl.x, y: pl.y, a: pl.a };
+                  const fx = iconXf(dp);
+                  return <PieceIcon key={`aip-${pl.id}`} p={{ kind: "player", color: pl.color, hand: "R", label: "" }}
+                    pos={dp} xf={fx.t} thDeg={fx.th} onDown={() => {}} />;
+                })}
+              </g>
+            )}
+
             {/* goalies track the puck in front of their net (below the action) */}
-            {pieces.filter(q => q.kind === "net" && q.goalie).map(net => {
+            {!aiPlay && pieces.filter(q => q.kind === "net" && q.goalie).map(net => {
               const gp = goaliePos(net);
               const fx = iconXf(gp);
               const col = net.color || "#c81e33";
@@ -1614,7 +1672,7 @@ export default function DrillAnimator() {
               );
             })}
 
-            {pieces.map(p => {
+            {!aiPlay && pieces.map(p => {
               let prev = { x: p.x, y: p.y };
               return p.path.map((s, i) => {
                 const d = segD(prev, s);
@@ -1675,7 +1733,7 @@ export default function DrillAnimator() {
 
             {/* nets sit on the ice (bottom); players paint above pucks so a
                carried puck can't steal the grab; rotate ring is drawn last */}
-            {[...pieces]
+            {!aiPlay && [...pieces]
               .sort((a, b) => {
                 const rank = k => (k === "net" ? 0 : k === "player" ? 2 : 1);
                 return rank(a.kind) - rank(b.kind);
@@ -1699,6 +1757,21 @@ export default function DrillAnimator() {
         </div>
       </div>
 
+      {/* ---------- AI game scoreboard ---------- */}
+      {aiPlay && aiRef.current && (
+        <div className="hd-preso" style={{ bottom: "auto", top: "calc(10px + env(safe-area-inset-top))" }}>
+          <div className="hd-preso-text">
+            <span style={{ color: "#ff6b7a" }}>{aiRef.current.score[0]}</span>
+            <span style={{ opacity: 0.6, margin: "0 6px" }}>–</span>
+            <span style={{ color: "#6ea8ff" }}>{aiRef.current.score[1]}</span>
+            <span style={{ opacity: 0.7, marginLeft: 14, fontSize: "0.8em" }}>
+              {Math.max(0, Math.ceil(aiMins * 60 - aiClockRef.current))}s{aiRef.current.msg ? ` · ${aiRef.current.msg}` : ""}
+            </span>
+          </div>
+          <button className="hd-preso-btn" onClick={() => setAiPlay(false)}>■ Stop</button>
+        </div>
+      )}
+
       {/* ---------- presentation caption ---------- */}
       {presentation && holdStep && (
         <div className="hd-preso">
@@ -1708,8 +1781,10 @@ export default function DrillAnimator() {
       )}
 
       {/* ---------- draggable play dock (mobile) ---------- */}
-      <div className="hd-playdock" ref={playRef}
-        style={playPos ? { left: playPos.x, top: playPos.y, transform: "none" } : undefined}>
+      <div className="hd-playdock" ref={playRef} style={{
+        ...(playPos ? { left: playPos.x, top: playPos.y, transform: "none" } : {}),
+        ...(aiPlay ? { display: "none" } : {}),
+      }}>
         <span className="hd-grip" onPointerDown={playDragStart} onPointerMove={playDragMove}
           onPointerUp={playDragEnd} onPointerCancel={playDragEnd}>⠿</span>
         <button className={`hd-fab small${loopMode ? " on" : ""}`} title="Loop"
@@ -1729,10 +1804,12 @@ export default function DrillAnimator() {
         <button className={`hd-barbtn${tool === "draw" ? " draw-on" : openMenu === "tools" ? " on" : ""}`}
           onClick={() => setOpenMenu(m => (m === "tools" ? null : "tools"))}>✎</button>
         {/* play controls live in the bar on desktop (hidden on mobile via CSS) */}
-        <button className={`hd-barbtn hd-barplay${loopMode ? " on" : ""}`} title="Loop"
-          onClick={() => setLoopMode(v => !v)}>🔁</button>
-        <button className="hd-barbtn hd-barplay play" onClick={togglePlay}>{playing ? "❚❚" : "▶"}</button>
-        <button className="hd-barbtn hd-barplay" title={playing ? "Stop" : "Reset"} onClick={resetPlay}>{playing ? "■" : "⟲"}</button>
+        {!aiPlay && <>
+          <button className={`hd-barbtn hd-barplay${loopMode ? " on" : ""}`} title="Loop"
+            onClick={() => setLoopMode(v => !v)}>🔁</button>
+          <button className="hd-barbtn hd-barplay play" onClick={togglePlay}>{playing ? "❚❚" : "▶"}</button>
+          <button className="hd-barbtn hd-barplay" title={playing ? "Stop" : "Reset"} onClick={resetPlay}>{playing ? "■" : "⟲"}</button>
+        </>}
         <div className="hd-barhint">{toolHint || ""}</div>
         <div className="hd-ver">v{APP_VERSION} · {BUILD_STAMP}</div>
       </div>
@@ -1773,6 +1850,12 @@ export default function DrillAnimator() {
           <div className="hd-poprow" style={{ marginTop: 4 }}>
             <span>Loop end pause</span>
             <Stepper value={loopPause} onChange={setLoopPause} step={0.5} min={0} />
+          </div>
+          <div className="hd-mh" style={{ marginTop: 4 }}>Let AI play</div>
+          <div className="hd-poprow">
+            <span>5v5 for</span>
+            <Stepper value={aiMins} onChange={setAiMins} step={1} min={1} suffix="m" />
+            <button className="hd-mini" onClick={startAiPlay}>▶ Start</button>
           </div>
           <div className="hd-mh" style={{ marginTop: 4 }}>Presentation</div>
           <div className="hd-poprow">
