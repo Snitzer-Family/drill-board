@@ -295,22 +295,27 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
       const el = segRefs.current[`${p.id}/${seg}`];
       let L = 0; try { L = el ? el.getTotalLength() : 0; } catch { L = 0; }
       if (!el || !L) return;
-      let fCross = 0, cx = p.path[seg].x, cy = p.path[seg].y;
+      // the crossing must go from the NEUTRAL zone (75..125) over the blue line
+      // into the offensive zone — not just any blue line the route may touch
+      let found = false, fCross = 0, cx = p.path[seg].x, cy = p.path[seg].y;
       let prevX = seg === 0 ? p.x : p.path[seg - 1].x, prevL = 0;
-      const steps = Math.max(6, Math.ceil(L / 2));
+      const steps = Math.max(10, Math.ceil(L));
       for (let k = 1; k <= steps; k++) {
         const l = (L * k) / steps;
         let pt; try { pt = el.getPointAtLength(l); } catch { break; }
-        const crossed = into < 0 ? prevX >= bx && pt.x < bx : prevX <= bx && pt.x > bx;
+        const fromNeutral = prevX >= 75 && prevX <= 125;
+        const crossed = fromNeutral && (into < 0 ? pt.x < bx : pt.x > bx);
         if (crossed) {
           const f = (bx - prevX) / ((pt.x - prevX) || 1);
           const lc = prevL + (l - prevL) * f;
           fCross = Math.max(0, Math.min(1, lc / L));
           try { const c = el.getPointAtLength(lc); cx = c.x; cy = c.y; } catch { /* keep endpoint */ }
+          found = true;
           break;
         }
         prevX = pt.x; prevL = l;
       }
+      if (!found) return;                                  // no neutral → o-zone entry to hold at
       // when the player naturally reaches the blue line, then the puck's entry
       const tCross = routeTimeW(p, warp, seg - 1) + effMove(p, p.path[seg], seg, warp) * fCross;
       const tPuck = puckEnter(bx, into);
