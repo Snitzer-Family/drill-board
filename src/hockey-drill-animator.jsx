@@ -637,7 +637,8 @@ export default function DrillAnimator() {
     });
 
   function nextId(kind) {
-    const prefix = kind === "player" ? "P" : kind === "puck" ? "PK" : kind === "net" ? "N" : "C";
+    const prefix = kind === "player" ? "P" : kind === "puck" ? "PK" : kind === "net" ? "N"
+      : kind === "bumper" ? "B" : kind === "deker" ? "DK" : "C";
     let n = 1;
     while (pieces.some(p => p.id === prefix + n)) n++;
     return prefix + n;
@@ -649,7 +650,8 @@ export default function DrillAnimator() {
     return {
       id, kind, x: pt.x, y: pt.y, speed: kind === "player" ? 1.5 : 1, hand: "R", carrier: null,
       facing: kind === "net" && pt.x >= 100 ? 180 : 0, transfers: [], shotAt: null, pickup: null, net: null, holdLine: false, goalie: false, defense: false,
-      color: kind === "player" ? COLORS[colorIdx] : kind === "cone" ? "#e0731d" : kind === "net" ? "#c81e33" : "#14171a",
+      color: kind === "player" ? COLORS[colorIdx] : kind === "cone" ? "#e0731d" : kind === "net" ? "#c81e33"
+        : kind === "bumper" ? "#4d6fa6" : kind === "deker" ? "#c79a4e" : "#14171a",
       label: kind === "player" ? id : "", path: [],
     };
   }
@@ -1026,7 +1028,8 @@ export default function DrillAnimator() {
   // rotation ring + knob for a selected stationary player (touch-friendly);
   // the knob sits at the current facing angle, radius 7 ft
   function renderRotateHandle(p) {
-    if (!editing || tool === "draw" || (p.kind !== "player" && p.kind !== "net") || p.path.length) return null;
+    const rotatable = p.kind === "net" || p.kind === "bumper" || p.kind === "deker" || (p.kind === "player" && !p.path.length);
+    if (!editing || tool === "draw" || !rotatable) return null;
     const a = ((p.facing || 0) * Math.PI) / 180;
     const R = 7;
     const kx = p.x + Math.cos(a) * R, ky = p.y + Math.sin(a) * R;
@@ -1204,12 +1207,15 @@ export default function DrillAnimator() {
           <button className="hd-mini" onClick={() => addPieceAt("puck", popup.pt)}>● Puck</button>
           <button className="hd-mini" onClick={() => addPieceAt("cone", popup.pt)}>▲ Cone</button>
           <button className="hd-mini" onClick={() => addPieceAt("net", popup.pt)}>🥅 Net</button>
+          <button className="hd-mini" onClick={() => addPieceAt("bumper", popup.pt)}>▬ Bumper</button>
+          <button className="hd-mini" onClick={() => addPieceAt("deker", popup.pt)}>π Deker</button>
         </div>
       );
     } else if (popup.type === "piece") {
       anchorPt = { x: p.x, y: p.y };
       title = p.kind === "player" ? `Player ${p.id}` : p.kind === "puck" ? `Puck ${p.id}`
-        : p.kind === "net" ? `Net ${p.id}` : `Cone ${p.id}`;
+        : p.kind === "net" ? `Net ${p.id}` : p.kind === "bumper" ? `Bumper ${p.id}`
+        : p.kind === "deker" ? `Deker ${p.id}` : `Cone ${p.id}`;
       body = (
         <>
           {p.kind === "net" && (
@@ -1219,6 +1225,13 @@ export default function DrillAnimator() {
                 {p.goalie ? "✓ Goalie in net" : "🥅 Goalie in net"}
               </button>
               <span style={{ fontSize: 11, color: "#8b99a8" }}>drag to move · ring to rotate</span>
+            </div>
+          )}
+          {(p.kind === "bumper" || p.kind === "deker") && (
+            <div className="hd-poprow">
+              <span style={{ fontSize: 11, color: "#8b99a8" }}>
+                {p.kind === "deker" ? "stickhandle under the stick · " : ""}drag to move · ring to rotate
+              </span>
             </div>
           )}
           {p.kind === "player" && (
@@ -1739,7 +1752,7 @@ export default function DrillAnimator() {
                carried puck can't steal the grab; rotate ring is drawn last */}
             {!aiPlay && [...pieces]
               .sort((a, b) => {
-                const rank = k => (k === "net" ? 0 : k === "player" ? 2 : 1);
+                const rank = k => (k === "net" || k === "bumper" || k === "deker" ? 0 : k === "player" ? 2 : 1);
                 return rank(a.kind) - rank(b.kind);
               })
               .map(p => {
@@ -1910,6 +1923,8 @@ export default function DrillAnimator() {
           <button className="hd-item" onClick={() => { setTool("puck"); setOpenMenu(null); }}>● Puck</button>
           <button className="hd-item" onClick={() => { setTool("cone"); setOpenMenu(null); }}>▲ Cone</button>
           <button className="hd-item" onClick={() => { setTool("net"); setOpenMenu(null); }}>🥅 Net</button>
+          <button className="hd-item" onClick={() => { setTool("bumper"); setOpenMenu(null); }}>▬ Bumper</button>
+          <button className="hd-item" onClick={() => { setTool("deker"); setOpenMenu(null); }}>π Deker</button>
           <button className="hd-item" onClick={() => { resetAnim(); setPlaying(false); setPopup(null); setTool("draw"); setOpenMenu(null); }}>
             ✎ Draw a route
           </button>
@@ -1932,7 +1947,8 @@ export default function DrillAnimator() {
           </div>
           <div className="hd-note">
             Feet: x 0–200, y 0–85. <b>RINK</b> full|half|quarter ·
-            <b> PIECE</b> id player|puck|cone|net x y [#color] [label] [speed=1.2] [hand=L] [on=F1]
+            <b> PIECE</b> id player|puck|cone|net|bumper|deker x y [#color] [label] [speed=1.2] [hand=L] [on=F1]
+            (a <b>bumper</b> is a long foam barrier and a <b>deker</b> a stickhandling gate — both take <code>face=deg</code>)
             (a <b>net</b> takes <code>face=deg</code> and <code>goalie</code>; a goalie tracks the puck and
             randomly saves or lets in each shot) ·
             <b> PATH</b> id segments (<b>L</b> x,y · <b>Q</b> cx,cy x,y · <b>C</b> c1x,c1y c2x,c2y x,y).
