@@ -25,10 +25,10 @@ export function parseDrill(text) {
       } else if (cmd === "PIECE") {
         const [, id, kind, xs, ys, ...rest] = tok;
         const x = parseFloat(xs), y = parseFloat(ys);
-        if (!id || !["player", "puck", "cone", "net", "bumper", "deker"].includes(kind) || isNaN(x) || isNaN(y))
+        if (!id || !["player", "puck", "cone", "net", "bumper", "deker", "passer"].includes(kind) || isNaN(x) || isNaN(y))
           throw new Error("PIECE needs: id kind x y");
         let color = kind === "cone" ? "#e0731d" : kind === "puck" ? "#14171a" : kind === "net" ? "#c81e33"
-          : kind === "bumper" ? "#4d6fa6" : kind === "deker" ? "#c79a4e" : "#d7263d";
+          : kind === "bumper" ? "#4d6fa6" : kind === "deker" ? "#c79a4e" : kind === "passer" ? "#57636f" : "#d7263d";
         let label = kind === "player" ? id : "";
         let speed = 1, hand = "R", carrier = null, facing = 0, shotAt = null, pickup = null;
         let net = null, holdLine = false, goalie = false, defense = false;
@@ -135,7 +135,7 @@ export function serializeDrill(rink, pieces, title = "", desc = "") {
     const sht = p.kind === "puck" && (p.carrier || p.pickup) && p.shotAt != null ? ` shoot=${p.shotAt + 1}` : "";
     const hasShot = p.kind === "puck" && (p.shotAt != null || (p.transfers || []).some(t => t.kind === "shot"));
     const nt = hasShot && p.net ? ` net=${p.net}` : "";
-    const rotatable = p.kind === "net" || p.kind === "bumper" || p.kind === "deker" || (p.kind === "player" && !p.path.length);
+    const rotatable = p.kind === "net" || p.kind === "bumper" || p.kind === "deker" || p.kind === "passer" || (p.kind === "player" && !p.path.length);
     const fac = rotatable && p.facing ? ` face=${f1(p.facing)}` : "";
     const hld = p.kind === "player" && p.holdLine ? " hold=line" : "";
     const gl = p.kind === "net" && p.goalie ? " goalie" : "";
