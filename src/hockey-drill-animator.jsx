@@ -2084,8 +2084,9 @@ export default function DrillAnimator() {
             <code> shoot=4</code> fires at point 4 (targets the nearest net/passer, or <code>net=N2</code>/<code>net=PS1</code> for a specific one).
             <code> rim=4</code> hard-rims the puck around the boards (a clear);
             <code> rim=4:F2</code> rims it around to F2. A <b>chip</b> always goes to a collector:
-            <code> chip=4:F1</code> banks it off the boards for F1 (self or a teammate), who collects it at a
-            later waypoint. Aim it with <code>~deg</code> (e.g. <code>chip=4:F1~90</code>) or drag the on-ice aim ring.
+            <code> chip=4:F1</code> banks it off the boards for F1 (self or a teammate) and carries as far as
+            their collect waypoint (harder for a farther pickup). Aim it with <code>~deg</code>
+            (e.g. <code>chip=4:F1~-60</code> for a bank off the glass) or drag the on-ice aim ring.
             <code> pickup=F2@3</code> — a loose puck hops onto F2's blade at their point 3.
             <code> face=45</code> sets a stationary player's heading (degrees).
             <code> hold=line</code> makes a player wait at the blue line until the puck enters the zone.

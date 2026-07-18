@@ -101,7 +101,7 @@ Places a piece. `id` is any unique token (e.g. `F1`, `PK1`, `N2`).
 | `shoot=<pt>` | Terminal shot at point `pt` |
 | `rim=<pt>` | Terminal hard rim around the boards (a clear) |
 | `rim=<pt>:<to>[@<recv>]` | Rim around the boards to player `to` |
-| `chip=<pt>:<to>[@<recv>][~<deg>]` | Chip: banks off the boards to `to` (self or a teammate), who collects it at their point `recv`. `~<deg>` aims it (else the chipper's facing). A chip always goes to a collector — it does not end possession. |
+| `chip=<pt>:<to>[@<recv>][~<deg>]` | Chip to `to` (self or a teammate): fires along the chipper's facing (or `~<deg>` aim), banks off the boards, and carries exactly as far as `to`'s pickup point `recv` — a harder chip for a farther pickup. Aim it into the boards for a bank-off-the-glass to yourself. Always goes to a collector; never ends possession. |
 | `pickup=<to>@<pt>` | A loose puck hops onto player `to`'s blade at their point `pt` |
 
 ### `PATH <id> <segments…>`
@@ -133,21 +133,21 @@ is the piece's starting spot (so `shoot=0` / `chip=0` releases before skating).
 ````markdown
 ```drill
 RINK full
-TITLE Chip Past the D (Neutral Zone)
-DESC F1 chips past the standing-up D in the neutral zone and skates onto it.
+TITLE Chip Off the Boards, Behind the D
+DESC F1 banks a chip off the boards past the standing-up D and picks it up behind him in the neutral zone.
 PIECE N2 net 183 42.5 face=180 goalie
-PIECE D1 player 116 40 D1 defense
-PIECE F1 player 45 20 F1
-PATH F1 L 80,22 L 102,30 L 150,46
-PIECE PK1 puck 45 20 on=F1 chip=2:F1@3
+PIECE D1 player 110 20 D1 defense
+PIECE F1 player 46 26 F1
+PATH F1 L 80,14 L 100,12 L 120,26
+PIECE PK1 puck 46 26 on=F1 chip=2:F1@3~-60
 ```
 ````
 
-- `F1` carries from `(45,20)` up the middle.
-- At **point 2** `(102,30)` — in the neutral zone, right at `D1` — the puck is
-  chipped past the defenceman (along F1's heading; add `~<deg>` to aim it).
-- `F1` skates to **point 3** `(150,46)` in the offensive zone and **collects the
-  loose puck** there.
+- `F1` carries from `(46,26)` up the wall.
+- At **point 2** `(100,12)` — in the neutral zone at `D1` — the chip is aimed
+  into the boards (`~-60`); it **banks off the glass** past the D.
+- The chip carries exactly as far as **point 3** `(120,26)`, where `F1` — having
+  slipped past D1 — **collects it behind him**, still in the neutral zone.
 - `D1` is an auto-defenceman; `N2` has a goalie.
 
 ---

@@ -165,3 +165,21 @@ function rayHit(x, y, ux, uy, max) {
   for (let t = 0.5; t <= max; t += 0.5) if (!isInside(x + ux * t, y + uy * t)) return t - 0.5;
   return max;
 }
+
+// a chip fired along (ux,uy) that banks off the boards and travels only as far
+// as needed to reach `target` — the distance auto-adjusts to the pickup spot,
+// so aiming into the boards banks it there. Returns the polyline (ends at target).
+export function slideTo(x, y, ux, uy, target, maxDist = 130) {
+  const v = slide(x, y, ux, uy, maxDist);
+  let best = { d: Infinity, seg: 1 };
+  for (let k = 1; k < v.length; k++) {
+    const a = v[k - 1], b = v[k];
+    const vx = b.x - a.x, vy = b.y - a.y, L2 = vx * vx + vy * vy || 1;
+    const s = Math.max(0, Math.min(1, ((target.x - a.x) * vx + (target.y - a.y) * vy) / L2));
+    const d = Math.hypot(target.x - (a.x + vx * s), target.y - (a.y + vy * s));
+    if (d < best.d) best = { d, seg: k };
+  }
+  const pts = v.slice(0, best.seg);   // bank vertices before the closest approach
+  pts.push({ x: target.x, y: target.y });
+  return pts;
+}

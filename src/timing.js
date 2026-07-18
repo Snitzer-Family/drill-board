@@ -230,10 +230,18 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
             anchor = { x: rec.path[gj].x, y: rec.path[gj].y };
           } else anchor = { x: rec.x, y: rec.y };
           // rim follows the boards to the collector; a chip fires along the
-          // carrier's heading and banks off the boards, landing loose in space
+          // carrier's facing/aim, banks off the boards, and travels exactly as
+          // far as it takes to reach the collector's spot — a harder chip for a
+          // farther pickup, softer for a nearer one
           let poly, speed;
           if (tr.kind === "rim") { poly = boards.rimPath(launch, anchor); speed = vRim(); }
-          else { const h = chipHeading(cur, launchT, tr.aim); poly = boards.slide(launch.x, launch.y, h.x, h.y, 20); speed = vChip(); }
+          else {
+            const h = chipHeading(cur, launchT, tr.aim);
+            poly = boards.slideTo(launch.x, launch.y, h.x, h.y, anchor);
+            let len = 0;
+            for (let k = 1; k < poly.length; k++) len += Math.hypot(poly[k].x - poly[k - 1].x, poly[k].y - poly[k - 1].y);
+            speed = vChip() + (vRim() - vChip()) * Math.min(1, Math.max(0, (len - 18) / 40));  // hard vs soft
+          }
           const r = pushTravel(poly, launchT, speed, { by: cur.id, rim: tr.kind === "rim", chip: tr.kind === "chip" });
           // the puck lands loose and waits at the spot until the collector's route
           // reaches its collect waypoint (pick it up like a rebound)
