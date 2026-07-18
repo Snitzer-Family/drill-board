@@ -73,6 +73,7 @@ export default function DrillAnimator() {
   const [minorDesc, setMinorDesc] = useState(false);   // describe zones skated through
   const [showZones, setShowZones] = useState(false);   // named ice-area overlay
   const [playSeed, setPlaySeed] = useState(0);         // bumps each play → new save/goal rolls
+  const [loopMode, setLoopMode] = useState(false);     // replay the routine continuously
   const [drawPreview, setDrawPreview] = useState(null);
   const [loupe, setLoupe] = useState(null);
   const [popOff, setPopOff] = useState({ x: 0, y: 0 });
@@ -93,6 +94,7 @@ export default function DrillAnimator() {
   const stepsRef = useRef([]);      // presentation steps, mirrored for the raf loop
   const presoDelayRef = useRef(2.5);
   const presoRef = useRef(false);
+  const loopRef = useRef(false);
   const popDrag = useRef(null);
   const lastLineTap = useRef(null);
   const lastIceTap = useRef(null); // double-click/tap on empty ice → add menu
@@ -385,6 +387,7 @@ export default function DrillAnimator() {
   stepsRef.current = presoSteps;
   presoDelayRef.current = presoDelay;
   presoRef.current = presentation;
+  loopRef.current = loopMode;
 
   useEffect(() => {
     if (!playing) return;
@@ -419,7 +422,15 @@ export default function DrillAnimator() {
           }
         }
       }
-      if (t >= 1) { animRef.current = 1; setAnimT(1); setPlaying(false); setHoldStep(null); return; }
+      if (t >= 1) {
+        if (loopRef.current) {                         // replay from the top, reroll saves/goals
+          animRef.current = 0; last = now; nextStepRef.current = 0; holdRef.current = 0;
+          setAnimT(0); setHoldStep(null); setPlaySeed(s => s + 1);
+          raf = requestAnimationFrame(step);
+          return;
+        }
+        animRef.current = 1; setAnimT(1); setPlaying(false); setHoldStep(null); return;
+      }
       animRef.current = t;
       setAnimT(t);
       raf = requestAnimationFrame(step);
@@ -1649,8 +1660,10 @@ export default function DrillAnimator() {
         style={playPos ? { left: playPos.x, top: playPos.y, transform: "none" } : undefined}>
         <span className="hd-grip" onPointerDown={playDragStart} onPointerMove={playDragMove}
           onPointerUp={playDragEnd} onPointerCancel={playDragEnd}>⠿</span>
+        <button className={`hd-fab small${loopMode ? " on" : ""}`} title="Loop"
+          onClick={() => setLoopMode(v => !v)}>🔁</button>
         <button className="hd-fab small play" onClick={togglePlay}>{playing ? "❚❚" : "▶"}</button>
-        <button className="hd-fab small" onClick={resetPlay}>⟲</button>
+        <button className="hd-fab small" title={playing ? "Stop" : "Reset"} onClick={resetPlay}>{playing ? "■" : "⟲"}</button>
       </div>
 
       {/* ---------- bottom menu bar ---------- */}
@@ -1664,8 +1677,10 @@ export default function DrillAnimator() {
         <button className={`hd-barbtn${tool === "draw" ? " draw-on" : openMenu === "tools" ? " on" : ""}`}
           onClick={() => setOpenMenu(m => (m === "tools" ? null : "tools"))}>✎</button>
         {/* play controls live in the bar on desktop (hidden on mobile via CSS) */}
+        <button className={`hd-barbtn hd-barplay${loopMode ? " on" : ""}`} title="Loop"
+          onClick={() => setLoopMode(v => !v)}>🔁</button>
         <button className="hd-barbtn hd-barplay play" onClick={togglePlay}>{playing ? "❚❚" : "▶"}</button>
-        <button className="hd-barbtn hd-barplay" onClick={resetPlay}>⟲</button>
+        <button className="hd-barbtn hd-barplay" title={playing ? "Stop" : "Reset"} onClick={resetPlay}>{playing ? "■" : "⟲"}</button>
         <div className="hd-barhint">{toolHint || ""}</div>
         <div className="hd-ver">v{APP_VERSION} · {BUILD_STAMP}</div>
       </div>
