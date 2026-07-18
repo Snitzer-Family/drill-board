@@ -20,6 +20,14 @@ const REACH = 2.9;                // puck pickup radius
 const SHOT_RANGE = 46;
 const LANE_BUF = 4.6;             // a passing/shooting lane is blocked within this
 const GAP_LOOK = 14;              // carrier looks this far ahead for a defender
+// contact & takeaways
+const STEAL_RANGE = 3.7;          // poke / stick-check reach
+const STEAL_RATE = 2.1;           // takeaways per second while a defender is in tight
+const HIT_RANGE = 3.3;            // body-check contact range
+const HIT_CLOSE = 11;             // min closing speed (ft/s) to land a check
+const HIT_RATE = 3.0;             // checks per second once lined up
+const STUN = 0.9;                 // seconds a checked player is down
+const KNOCK = 15;                 // body-check knockback impulse
 
 /* ------------------------------------------------------------------ */
 /* geometry                                                           */
@@ -62,13 +70,13 @@ export function newGame() {
   for (let t = 0; t < 2; t++)
     for (let i = 0; i < 5; i++)
       players.push({ id: `${t}${roles[i]}`, team: t, color: cols[t], role: roles[i],
-        x: 100, y: 42.5, vx: 0, vy: 0, a: t === 0 ? 0 : 180, tx: 100, ty: 42.5 });
+        x: 100, y: 42.5, vx: 0, vy: 0, a: t === 0 ? 0 : 180, tx: 100, ty: 42.5, stun: 0 });
   const g = {
     players,
     puck: { x: 100, y: 42.5, vx: 0, vy: 0, carrier: null, flying: false, shot: null,
       lastTeam: 0, releaseFeet: 0, pf: 83 },
     goalies: [{ x: 17, y: 42.5, a: 0 }, { x: 183, y: 42.5, a: 180 }],
-    score: [0, 0], faceoff: 1, msg: "Face-off",
+    score: [0, 0], faceoff: 1, msg: "Face-off", flashT: 0,
   };
   faceoff(g, 100, 42.5, "Face-off");
   return g;
@@ -84,9 +92,9 @@ function faceoff(g, dotX, dotY, msg) {
   g.players.forEach(pl => {
     pl.x = cX(dotX - dir(pl.team) * back[pl.role]);
     pl.y = cY(dotY + yoff[pl.role]);
-    pl.vx = 0; pl.vy = 0; pl.a = pl.team === 0 ? 0 : 180;
+    pl.vx = 0; pl.vy = 0; pl.a = pl.team === 0 ? 0 : 180; pl.stun = 0;
   });
-  g.faceoff = 1; g.msg = msg;
+  g.faceoff = 1; g.msg = msg; g.flashT = 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -255,6 +263,41 @@ function carrierAim(car, net, opp) {
 }
 
 /* ------------------------------------------------------------------ */
+/* contact — body checks and stick/poke takeaways strip the carrier    */
+function resolveContact(g, dt) {
+  const { players, puck } = g;
+  const car = puck.carrier && players.find(p => p.id === puck.carrier);
+  if (!car || car.stun > 0) return;
+  const opp = players.filter(p => p.team !== car.team && p.stun <= 0);
+  if (!opp.length) return;
+  const near = opp.reduce((a, b) => (D(b, car) < D(a, car) ? b : a));
+  const nd = D(near, car) || 1;
+  const ux = (car.x - near.x) / nd, uy = (car.y - near.y) / nd;
+  const closing = near.vx * ux + near.vy * uy;      // how fast the checker is bearing in
+
+  const drop = (ang, v) => {                          // knock the puck loose
+    puck.carrier = null; puck.flying = true; puck.shot = null;
+    puck.vx = Math.cos(ang) * v; puck.vy = Math.sin(ang) * v;
+    puck.lastTeam = car.team; puck.releaseFeet = feetOf(car.team, car.x);
+    puck.pf = feetOf(car.team, puck.x);
+  };
+
+  // BODY CHECK — a defender closing hard within contact range levels the carrier
+  if (nd < HIT_RANGE && closing > HIT_CLOSE && R() < HIT_RATE * dt) {
+    car.stun = STUN;
+    car.vx = ux * KNOCK; car.vy = uy * KNOCK;         // knocked off the puck
+    drop(Math.atan2(uy, ux) + (R() - 0.5) * 1.3, 26 + R() * 20);  // puck squirts past the hit
+    near.vx *= 0.45; near.vy *= 0.45;                 // checker follows through
+    g.msg = "Big hit!"; g.flashT = 1.1;
+    return;
+  }
+  // STICK / POKE CHECK — strip the puck when in tight, no hit
+  if (nd < STEAL_RANGE && R() < STEAL_RATE * dt) {
+    drop(Math.atan2(near.y - car.y, near.x - car.x) + (R() - 0.5) * 0.7, 10 + R() * 14);
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* goalies track the puck on the crease arc                            */
 function updateGoalies(g) {
   const { puck } = g;
@@ -283,6 +326,7 @@ export function stepGame(g, dt) {
     updateGoalies(g);
     return g;
   }
+  if (g.flashT > 0) { g.flashT -= dt; if (g.flashT <= 0) g.msg = ""; }  // clear "Big hit!"
 
   // ---- puck motion + rules ----
   const carrier = puck.carrier && players.find(p => p.id === puck.carrier);
@@ -328,16 +372,20 @@ export function stepGame(g, dt) {
     puck.pf = f;
   }
 
-  // ---- possession: nearest man within reach gains the puck ----
+  // ---- possession: nearest man within reach gains the puck (not if down) ----
   if (!puck.carrier) {
     let best = null, bd = REACH;
     players.forEach(p => {
+      if (p.stun > 0) return;
       const d = D(p, puck);
       if (d < bd && (!puck.flying || Math.hypot(puck.vx, puck.vy) < 52)) { bd = d; best = p; }
     });
     if (best) { puck.carrier = best.id; puck.flying = false; puck.vx = puck.vy = 0;
       puck.shot = null; puck.lastTeam = best.team; puck.pf = feetOf(best.team, puck.x); }
   }
+
+  // ---- contact: check / strip the carrier, then re-read possession ----
+  resolveContact(g, dt);
 
   // ---- decisions & structure ----
   const car = puck.carrier && players.find(p => p.id === puck.carrier);
@@ -347,6 +395,11 @@ export function stepGame(g, dt) {
   // ---- movement ----
   const carNow = puck.carrier && players.find(p => p.id === puck.carrier);
   players.forEach(p => {
+    if (p.stun > 0) {                          // knocked down — slide, then get up
+      p.stun -= dt; p.vx *= 0.85; p.vy *= 0.85;
+      p.x = cX(p.x + p.vx * dt); p.y = cY(p.y + p.vy * dt);
+      return;
+    }
     if (carNow && p.id === carNow.id) {
       const aim = carrierAim(p, attNet(p.team), players.filter(q => q.team !== p.team));
       steer(p, aim.x, aim.y, dt, CARRY_SPEED);

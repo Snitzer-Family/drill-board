@@ -1643,8 +1643,12 @@ export default function DrillAnimator() {
                 {aiRef.current.players.map(pl => {
                   const dp = { x: pl.x, y: pl.y, a: pl.a };
                   const fx = iconXf(dp);
-                  return <PieceIcon key={`aip-${pl.id}`} p={{ kind: "player", color: pl.color, hand: "R", label: "" }}
-                    pos={dp} xf={fx.t} thDeg={fx.th} onDown={() => {}} />;
+                  return (
+                    <g key={`aip-${pl.id}`} opacity={pl.stun > 0 ? 0.4 : 1}>
+                      <PieceIcon p={{ kind: "player", color: pl.color, hand: "R", label: "" }}
+                        pos={dp} xf={fx.t} thDeg={fx.th} onDown={() => {}} />
+                    </g>
+                  );
                 })}
               </g>
             )}
