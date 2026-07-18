@@ -152,12 +152,22 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
           : { x: clampX(net.x + px * place * GOAL_HALF), y: clampY(net.y + py * place * GOAL_HALF) };
         const tArr = launchT + Math.hypot(hit.x - launch.x, hit.y - launch.y) / vShot;
         legs.push({ type: "fly", shot: true, save: goalie, by: cur.id, x0: launch.x, y0: launch.y, x1: hit.x, y1: hit.y, t0: launchT, t1: tArr });
-        // rebound: to the collector's gather spot, else a damped carom into the slot
+        // rebound: to the collector's gather spot, else a damped carom. A passer
+        // reflects the shot off its face (normal = its facing); a net without a
+        // goalie just kicks it back toward the slot.
         let restPt;
         if (aimPt) {
           restPt = { x: clampX(aimPt.x), y: clampY(aimPt.y) };
         } else {
-          const bx = -ux, by = uy * 0.5;
+          let bx, by;
+          if (netPiece && netPiece.kind === "passer") {
+            const fa = ((netPiece.facing || 0) * Math.PI) / 180;
+            const nx = Math.cos(fa), ny = Math.sin(fa);       // rebound-face normal
+            const dot = ux * nx + uy * ny;
+            bx = ux - 2 * dot * nx; by = uy - 2 * dot * ny;   // r = d − 2(d·n)n
+          } else {
+            bx = -ux; by = uy * 0.5;                          // net w/o goalie: kick back
+          }
           const bmag = Math.hypot(bx, by) || 1;
           const BOUNCE = goalie ? 5 : 8;
           restPt = { x: clampX(hit.x + (bx / bmag) * BOUNCE), y: clampY(hit.y + (by / bmag) * BOUNCE) };
