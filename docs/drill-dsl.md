@@ -133,20 +133,21 @@ is the piece's starting spot (so `shoot=0` / `chip=0` releases before skating).
 ````markdown
 ```drill
 RINK full
-TITLE Chip-and-Chase off the Wall
-DESC F1 skates the wall, chips off the boards past the D, and skates onto it.
+TITLE Chip Past the D (Neutral Zone)
+DESC F1 chips past the standing-up D in the neutral zone and skates onto it.
 PIECE N2 net 183 42.5 face=180 goalie
-PIECE D1 player 105 26 D1 defense
-PIECE F1 player 40 12 F1
-PATH F1 L 90,12 L 140,20 L 162,42
-PIECE PK1 puck 40 12 on=F1 chip=2:F1@3
+PIECE D1 player 116 40 D1 defense
+PIECE F1 player 45 20 F1
+PATH F1 L 80,22 L 102,30 L 150,46
+PIECE PK1 puck 45 20 on=F1 chip=2:F1@3
 ```
 ````
 
-- `F1` carries from `(40,12)` up the wall.
-- At **point 2** `(140,20)` the puck is chipped (banking off the near boards,
-  along F1's heading — or add `~<deg>` to aim it).
-- `F1` skates to **point 3** `(162,42)` and **collects the loose puck** there.
+- `F1` carries from `(45,20)` up the middle.
+- At **point 2** `(102,30)` — in the neutral zone, right at `D1` — the puck is
+  chipped past the defenceman (along F1's heading; add `~<deg>` to aim it).
+- `F1` skates to **point 3** `(150,46)` in the offensive zone and **collects the
+  loose puck** there.
 - `D1` is an auto-defenceman; `N2` has a goalie.
 
 ---
