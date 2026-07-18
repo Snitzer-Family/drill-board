@@ -104,8 +104,9 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
           ? Math.max(tBase, routeTimeW(cur, warp, Math.min(shootIdx, cur.path.length - 1)))
           : tBase;
         const launch = bladeAt(cur, launchT, warp);
-        // target the nearest net piece (respecting a forced side), else default
-        const nets = pieces.filter(q => q.kind === "net");
+        // target the nearest net or passer (respecting a forced side), else default;
+        // a passer has no goalie, so shots at it always take the carom/rebound path
+        const nets = pieces.filter(q => q.kind === "net" || q.kind === "passer");
         let net, netPiece = null;
         if (nets.length) {
           netPiece = pk.net && nets.find(n => n.id === pk.net);   // a specific net by id

@@ -1074,15 +1074,15 @@ export default function DrillAnimator() {
     const p = pieces.find(q => q.id === popup.id);
     if (!p && popup.type !== "add") return null;
 
-    // which net a shot aims at (default: nearest to the shooter)
+    // which net or passer a shot aims at (default: nearest to the shooter)
     const netRow = pk => {
-      const nets = pieces.filter(q => q.kind === "net");
+      const targets = pieces.filter(q => q.kind === "net" || q.kind === "passer");
       return (
         <div className="hd-poprow">
-          <span>At net</span>
+          <span>Target</span>
           <button className={`hd-mini${!pk.net ? " on" : ""}`}
             onClick={() => updateById(pk.id, { net: null })}>Nearest</button>
-          {nets.map(n => (
+          {targets.map(n => (
             <button key={n.id} className={`hd-mini${pk.net === n.id ? " on" : ""}`}
               onClick={() => updateById(pk.id, { net: pk.net === n.id ? null : n.id })}>{n.id}</button>
           ))}
@@ -1144,7 +1144,7 @@ export default function DrillAnimator() {
             <div className="hd-poprow">
               <button className={`hd-mini${pk.shotAt === i ? " on" : ""}`}
                 onClick={() => updateById(pk.id, pk.shotAt === i ? { shotAt: null } : { shotAt: i })}>
-                {pk.shotAt === i ? "✓ Shooting at net" : "🥅 Shoot at net"}
+                {pk.shotAt === i ? `✓ Shooting at ${pk.net || "nearest"}` : `🥅 Shoot at ${pk.net || "nearest"}`}
               </button>
             </div>
           )}
@@ -1185,7 +1185,7 @@ export default function DrillAnimator() {
                 <div className="hd-poprow">
                   <button className={`hd-mini${pk.shotAt === i ? " on" : ""}`}
                     onClick={() => updateById(pk.id, pk.shotAt === i ? { shotAt: null } : { shotAt: i })}>
-                    {pk.shotAt === i ? "✓ Shooting at net" : "🥅 Shoot at net"}
+                    {pk.shotAt === i ? `✓ Shooting at ${pk.net || "nearest"}` : `🥅 Shoot at ${pk.net || "nearest"}`}
                   </button>
                 </div>
                 {pk.shotAt === i && netRow(pk)}
@@ -1960,7 +1960,7 @@ export default function DrillAnimator() {
             <code> pass=2:F2@3</code> passes at the carrier's point 2 to F2, received at F2's
             point 3 — the receiver's pace auto-syncs (omit <code>@3</code> to lead them instead).
             Point <b>0</b> is the starting spot (release before skating to point 1).
-            <code> shoot=4</code> fires at point 4 (targets the nearest net, or <code>net=N2</code> for a specific one).
+            <code> shoot=4</code> fires at point 4 (targets the nearest net/passer, or <code>net=N2</code>/<code>net=PS1</code> for a specific one).
             <code> pickup=F2@3</code> — a loose puck hops onto F2's blade at their point 3.
             <code> face=45</code> sets a stationary player's heading (degrees).
             <code> hold=line</code> makes a player wait at the blue line until the puck enters the zone.
