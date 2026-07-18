@@ -126,7 +126,9 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
         const mag = Math.hypot(inx, iny) || 1;
         const ux = inx / mag, uy = iny / mag;                 // unit vector toward the net
         const goalie = !!(netPiece && netPiece.goalie);
-        const isGoal = goalie ? rand(`${pk.id}:${legs.length}`) >= SAVE_PROB : false;
+        // a rebound-designated shot (aimPt = a collector's gather spot) must be
+        // saved so the rebound actually comes out; only free shots roll goal/save
+        const isGoal = goalie && !aimPt ? rand(`${pk.id}:${legs.length}`) >= SAVE_PROB : false;
         // randomize placement across the ~6 ft mouth: posts / sides / center
         const px = -uy, py = ux;                              // lateral (across the mouth)
         const GOAL_HALF = 2.6;
