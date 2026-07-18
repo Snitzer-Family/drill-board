@@ -485,23 +485,28 @@ export default function DrillAnimator() {
     };
   }
 
-  // goalie plays an arc across the top of the crease, centered on the puck's
-  // angle. Clamped to the net's front hemisphere so it slides along the front
-  // and hugs the posts but never drifts behind / inside the net.
+  // goalie plays the angle: it slides across the front to cover the puck, comes
+  // out to challenge when the puck is far, and backs to the goal line as the
+  // play nears. Clamped to the net's front hemisphere so it stays in the crease.
   function goaliePos(net) {
     const f = ((net.facing || 0) * Math.PI) / 180;    // net mouth opens this way
     const pucks = pieces.filter(q => q.kind === "puck");
-    let aim = { x: net.x + Math.cos(f) * 10, y: net.y + Math.sin(f) * 10 }, best = Infinity;
+    let aim = { x: net.x + Math.cos(f) * 20, y: net.y + Math.sin(f) * 20 }, best = Infinity;
     pucks.forEach(pk => {
       const dp = displayPos(pk);
       const d = Math.hypot(dp.x - net.x, dp.y - net.y);
       if (d < best) { best = d; aim = dp; }
     });
+    const dist = best === Infinity ? 30 : best;
+    // depth: deep on the line when close, out to the top of the crease when far
+    const D_NEAR = 9, D_FAR = 45, R_MIN = 0.6, R_MAX = 6;
+    const u = Math.max(0, Math.min(1, (dist - D_NEAR) / (D_FAR - D_NEAR)));
+    const R = R_MIN + (R_MAX - R_MIN) * (u * u * (3 - 2 * u)); // smoothstep
+    // angle: track the puck aggressively, clamped so we never back into the net
     let rel = Math.atan2(aim.y - net.y, aim.x - net.x) - f;
     rel = Math.atan2(Math.sin(rel), Math.cos(rel));    // normalize to −π..π
-    const MAXREL = (70 * Math.PI) / 180;               // stay across the front only
+    const MAXREL = (78 * Math.PI) / 180;
     rel = Math.max(-MAXREL, Math.min(MAXREL, rel));
-    const R = 2.8;                                      // top-of-crease depth
     const a = f + rel;
     return { x: net.x + Math.cos(a) * R, y: net.y + Math.sin(a) * R, a: (a * 180) / Math.PI };
   }
