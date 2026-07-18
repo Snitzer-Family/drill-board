@@ -90,25 +90,38 @@ export function project(p) {
   return best;
 }
 
+// how far along the boards to aim the entry so the puck meets them at a shallow
+// angle instead of driving straight in and turning 90°
+const leadOf = (from, sF) => Math.min(Math.hypot(from.x - sF.x, from.y - sF.y) * 2.1, 52);
+const segAt = s => { s = ((s % PERIM) + PERIM) % PERIM; for (const g of S) if (s <= g.s0 + g.len + 1e-9) return g; return S[S.length - 1]; };
+// room left on the current straight/arc ahead in direction `dir`
+const roomAhead = (s, dir) => { const g = segAt(s); return dir > 0 ? g.s0 + g.len - s : s - g.s0; };
+
 // polyline that rims from `from` to `to` the short way around the boards
 export function rimPath(from, to) {
   const sF = project(from), sT = project(to);
   const dPlus = (((sT.s - sF.s) % PERIM) + PERIM) % PERIM;
   const dir = dPlus <= PERIM - dPlus ? 1 : -1;
-  const total = dir > 0 ? dPlus : PERIM - dPlus;
-  const pts = [{ x: from.x, y: from.y }, { x: sF.x, y: sF.y }];
-  for (let d = 3; d < total; d += 3) pts.push(pointAt(sF.s + dir * d));
+  const origTotal = dir > 0 ? dPlus : PERIM - dPlus;
+  // keep the entry on the same board section as the nearest point (no corner wrap)
+  const lead = Math.min(leadOf(from, sF), origTotal * 0.5, roomAhead(sF.s, dir));
+  const entryS = sF.s + dir * lead;
+  const total = origTotal - lead;
+  const pts = [{ x: from.x, y: from.y }, pointAt(entryS)];
+  for (let d = 3; d < total; d += 3) pts.push(pointAt(entryS + dir * d));
   pts.push({ x: sT.x, y: sT.y }, { x: to.x, y: to.y });
   return pts;
 }
 
-// polyline that rims `dist` ft around the boards, heading toward the near end
+// polyline that rims `dist` ft around the boards, taking the long way along the
+// nearest board so the entry stays shallow and doesn't cut across a corner
 export function rimAround(from, dist) {
   const sF = project(from);
-  const near = x => Math.min(x - X0, X1 - x);
-  const dir = near(pointAt(sF.s + dist).x) <= near(pointAt(sF.s - dist).x) ? 1 : -1;
-  const pts = [{ x: from.x, y: from.y }, { x: sF.x, y: sF.y }];
-  for (let d = 3; d <= dist; d += 3) pts.push(pointAt(sF.s + dir * d));
+  const dir = roomAhead(sF.s, 1) >= roomAhead(sF.s, -1) ? 1 : -1;  // more straight ahead
+  const lead = Math.min(leadOf(from, sF), Math.max(0, roomAhead(sF.s, dir) - 1));
+  const entryS = sF.s + dir * lead;
+  const pts = [{ x: from.x, y: from.y }, pointAt(entryS)];
+  for (let d = 3; d <= dist; d += 3) pts.push(pointAt(entryS + dir * d));
   return pts;
 }
 

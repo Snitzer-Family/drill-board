@@ -79,12 +79,22 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
       const legs = [];
       let cur = null;
       let tBase = 0;
-      // lay a moving polyline (rim / chip travel) down as a chain of fly legs
+      // lay a moving polyline (rim / chip travel) down as a chain of fly legs.
+      // flag.easeOut (ft) ramps the speed down over the final stretch so the puck
+      // glides to a stop instead of halting abruptly.
       const pushTravel = (poly, t0, speed, flag = {}) => {
+        const remTo = new Array(poly.length).fill(0);
+        for (let k = poly.length - 2; k >= 0; k--)
+          remTo[k] = remTo[k + 1] + Math.hypot(poly[k + 1].x - poly[k].x, poly[k + 1].y - poly[k].y);
         let t = t0, prev = poly[0];
         for (let k = 1; k < poly.length; k++) {
           const seg = poly[k];
-          const dt = Math.max(1e-3, Math.hypot(seg.x - prev.x, seg.y - prev.y) / Math.max(1e-3, speed));
+          let v = speed;
+          if (flag.easeOut) {
+            const rem = (remTo[k - 1] + remTo[k]) / 2;         // avg distance-to-end over this leg
+            if (rem < flag.easeOut) v = speed * (0.15 + 0.85 * (rem / flag.easeOut));
+          }
+          const dt = Math.max(1e-3, Math.hypot(seg.x - prev.x, seg.y - prev.y) / Math.max(1e-3, v));
           legs.push({ type: "fly", x0: prev.x, y0: prev.y, x1: seg.x, y1: seg.y, t0: t, t1: t + dt,
             ...(k === 1 && flag.by ? { by: flag.by } : {}), rim: !!flag.rim, chip: !!flag.chip });
           t += dt; prev = seg;
@@ -297,7 +307,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
         const at = pk.rimAt;
         const launchT = (cur.path.length && at >= 0) ? Math.max(tBase, routeTimeW(cur, warp, Math.min(at, cur.path.length - 1))) : tBase;
         const launch = bladeAt(cur, launchT, warp);
-        const r = pushTravel(boards.rimAround(launch, 65), launchT, vRim(), { by: cur.id, rim: true });
+        const r = pushTravel(boards.rimAround(launch, 65), launchT, vRim(), { by: cur.id, rim: true, easeOut: 26 });
         legs.push({ type: "rest", x: r.end.x, y: r.end.y, t0: r.t }); tBase = r.t;
       } else if (pk.chipAt != null && cur) {           // terminal chip into space (bounces)
         const at = pk.chipAt;
