@@ -1148,27 +1148,27 @@ export default function DrillAnimator() {
               ))}
             </div>
           )}
-          {canAct && others.length > 0 && (
+          {canAct && (
             <div className="hd-poprow">
-              <span>Rim to</span>
-              {others.map(o => {
-                const on = from && from.kind === "rim" && from.at === i && from.to === o.id;
-                return (
-                  <button key={`rim-${o.id}`} className={`hd-mini${on ? " on" : ""}`}
-                    onClick={() => setTransfer(pk.id, stage, on ? null : { at: i, to: o.id, recvAt: null, kind: "rim" })}>
-                    {o.id}
-                  </button>
-                );
-              })}
+              <span>Board play</span>
               {(() => {
                 const on = from && from.kind === "chip" && from.at === i && from.to === p.id;
                 return (
                   <button className={`hd-mini${on ? " on" : ""}`}
                     onClick={() => setTransfer(pk.id, stage, on ? null : { at: i, to: p.id, recvAt: null, kind: "chip" })}>
-                    Chip to self
+                    {on ? "✓ Chip to self" : "Chip to self"}
                   </button>
                 );
               })()}
+              {others.map(o => {
+                const on = from && from.kind === "rim" && from.at === i && from.to === o.id;
+                return (
+                  <button key={`rim-${o.id}`} className={`hd-mini${on ? " on" : ""}`}
+                    onClick={() => setTransfer(pk.id, stage, on ? null : { at: i, to: o.id, recvAt: null, kind: "rim" })}>
+                    Rim to {o.id}
+                  </button>
+                );
+              })}
             </div>
           )}
           {stage === (pk.transfers || []).length && (

@@ -15,10 +15,10 @@ import * as boards from "./boards.js";
 /* tunables                                                           */
 const SKATE = 26;                 // max skater speed (ft/s)
 const CARRY_SPEED = 23;           // carriers skate a touch slower
-const ACC = 80;                   // steering responsiveness
+const ACC = 104;                  // steering responsiveness (turn/redirect quickly)
 const PASS_V = 74, SHOT_V = 108, DUMP_V = 80;
 const RIM_V = 96, CHIP_V = 54;    // rim the boards / soft self-chip
-const REACH = 2.9;                // puck pickup radius
+const REACH = 3.4;                // puck pickup radius
 const SHOT_RANGE = 46;
 const LANE_BUF = 4.6;             // a passing/shooting lane is blocked within this
 const GAP_LOOK = 14;              // carrier looks this far ahead for a defender
@@ -105,7 +105,10 @@ function assignTargets(g) {
   const { players, puck } = g;
   const carrier = puck.carrier && players.find(p => p.id === puck.carrier);
   const possTeam = carrier ? carrier.team : puck.lastTeam;   // the attacking team
-  const loose = !puck.carrier && !puck.flying;
+  // a free puck (loose, or a chip/rim/rebound/pass rolling slowly) — chase it;
+  // predict where it's rolling so the nearest man cuts it off instead of trailing
+  const looseBall = !puck.carrier && !puck.shot && (!puck.flying || Math.hypot(puck.vx, puck.vy) < 46);
+  const lead = { x: cX(puck.x + puck.vx * 0.26), y: cY(puck.y + puck.vy * 0.26) };
   const wallY = puck.y < 42.5 ? 15 : 70;                     // strong-side wall
   const weakY = puck.y < 42.5 ? 70 : 15;
 
@@ -129,11 +132,8 @@ function assignTargets(g) {
       let tx, ty;
       const strong = p === strongW, forward = !isD(p.role);
 
-      if (loose) {
-        // race the nearest man to the puck; everyone else holds a soft home
-        if (p === nearestFwd || (isD(p.role) && p === nearestD && D(p, puck) < 30)) { tx = puck.x; ty = puck.y; }
-        else if (isD(p.role)) { tx = ax(t, OWN_BLUE - 8); ty = p.role === "LD" ? 30 : 55; }
-        else { tx = ax(t, CENTER_F - 6); ty = p.role === "C" ? 42.5 : (p.role === "LW" ? 24 : 61); }
+      if (looseBall && (p === nearestFwd || (isD(p.role) && p === nearestD && D(p, puck) < 34))) {
+        tx = lead.x; ty = lead.y;                                                       // jump the loose puck
       } else if (weAttack && pz === "dz") {
         // BREAKOUT: move the puck out of our end with structure
         if (isD(p.role)) { tx = ax(t, 12); ty = p.role === "LD" ? 27 : 58; }          // D-to-D outlets, low
@@ -405,7 +405,7 @@ export function stepGame(g, dt) {
     players.forEach(p => {
       if (p.stun > 0) return;
       const d = D(p, puck);
-      if (d < bd && (!puck.flying || Math.hypot(puck.vx, puck.vy) < 52)) { bd = d; best = p; }
+      if (d < bd && (!puck.flying || Math.hypot(puck.vx, puck.vy) < 60)) { bd = d; best = p; }
     });
     if (best) { puck.carrier = best.id; puck.flying = false; puck.vx = puck.vy = 0;
       puck.shot = null; puck.lastTeam = best.team; puck.pf = feetOf(best.team, puck.x); }
