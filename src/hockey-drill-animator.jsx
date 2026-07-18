@@ -1192,9 +1192,9 @@ export default function DrillAnimator() {
             <div className="hd-poprow">
               <button className={`hd-mini${incoming.recvAt === i ? " on" : ""}`}
                 onClick={() => setRecvAt(pk.id, stage - 1, incoming.recvAt === i ? null : i)}>
-                {incoming.kind === "shot"
-                  ? (incoming.recvAt === i ? "✓ Collecting rebound here" : "Collect rebound here")
-                  : (incoming.recvAt === i ? "✓ Receiving here" : "Receive pass here")}
+                {incoming.kind === "pass"
+                  ? (incoming.recvAt === i ? "✓ Receiving here" : "Receive pass here")
+                  : (incoming.recvAt === i ? "✓ Collecting loose puck" : "Collect loose puck")}
               </button>
               {incoming.recvAt === i && incoming.kind !== "shot" && p.path.length > 0 && (
                 <span style={{ fontSize: 11, color: "#8b99a8" }}>
@@ -1215,9 +1215,9 @@ export default function DrillAnimator() {
                   <div className="hd-poprow">
                     <button className={`hd-mini${inc.recvAt === i ? " on" : ""}`}
                       onClick={() => setRecvAt(pk.id, finalStage - 1, inc.recvAt === i ? null : i)}>
-                      {inc.kind === "shot"
-                        ? (inc.recvAt === i ? "✓ Collecting rebound here" : "Collect rebound here")
-                        : (inc.recvAt === i ? "✓ Receiving here" : "Receive pass here")}
+                      {inc.kind === "pass"
+                        ? (inc.recvAt === i ? "✓ Receiving here" : "Receive pass here")
+                        : (inc.recvAt === i ? "✓ Collecting loose puck" : "Collect loose puck")}
                     </button>
                   </div>
                 )}

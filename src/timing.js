@@ -101,9 +101,13 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
         }
         return { t, end: prev };
       };
-      // the carrier's heading at time t (used to chip into space)
+      // the carrier's heading at time t — the direction they're skating INTO the
+      // release point (i.e. what they're facing), so a chip banks the way they aim
       const headingAt = (p, t) => {
-        const a = bladeAt(p, t - 0.05, warp), b = bladeAt(p, t + 0.05, warp);
+        // sample two points just before the release, on the incoming segment, so
+        // the blade offset is consistent (it rotates at a waypoint) and the
+        // direction is the way the skater is actually travelling in
+        const a = bladeAt(p, Math.max(0, t - 0.3), warp), b = bladeAt(p, Math.max(0.001, t - 0.05), warp);
         let dx = b.x - a.x, dy = b.y - a.y, m = Math.hypot(dx, dy);
         if (m < 1e-3) {
           if (p.facing) { dx = Math.cos((p.facing * Math.PI) / 180); dy = Math.sin((p.facing * Math.PI) / 180); }
@@ -232,12 +236,14 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
             gj = tr.recvAt == null ? rec.path.length - 1 : Math.max(0, Math.min(tr.recvAt, rec.path.length - 1));
             anchor = { x: rec.path[gj].x, y: rec.path[gj].y };
           } else anchor = { x: rec.x, y: rec.y };
-          const poly = tr.kind === "rim" ? boards.rimPath(launch, anchor)
-            : [launch, boards.clampInside(anchor.x, anchor.y)];
-          const r = pushTravel(poly, launchT, tr.kind === "rim" ? vRim() : vChip(),
-            { by: cur.id, rim: tr.kind === "rim", chip: tr.kind === "chip" });
+          // rim follows the boards to the collector; a chip fires along the
+          // carrier's heading and banks off the boards, landing loose in space
+          let poly, speed;
+          if (tr.kind === "rim") { poly = boards.rimPath(launch, anchor); speed = vRim(); }
+          else { const h = headingAt(cur, launchT); poly = boards.slide(launch.x, launch.y, h.x, h.y, 20); speed = vChip(); }
+          const r = pushTravel(poly, launchT, speed, { by: cur.id, rim: tr.kind === "rim", chip: tr.kind === "chip" });
           // the puck lands loose and waits at the spot until the collector's route
-          // reaches it (so a chip/rim can be picked up at a future waypoint)
+          // reaches its collect waypoint (pick it up like a rebound)
           const gatherT = gj >= 0 ? Math.max(r.t, routeTimeW(rec, warp, gj)) : r.t;
           if (gatherT > r.t + 1e-3) legs.push({ type: "rest", x: r.end.x, y: r.end.y, t0: r.t });
           legs.push({ type: "ride", id: rec.id, t0: gatherT, catch: true });
