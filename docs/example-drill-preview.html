@@ -9,6 +9,12 @@
   .wrap{max-width:940px;margin:0 auto;padding:clamp(28px,5vw,64px) clamp(18px,4vw,40px) 80px}
   .eyebrow{display:inline-flex;align-items:center;gap:8px;font:700 12px/1 var(--font-body);letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
   .eyebrow .rule{width:26px;height:2px;background:var(--red);border-radius:2px}
+  .topbar{display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .copybtn{display:inline-flex;align-items:center;gap:7px;font:600 13px/1 var(--font-body);color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:9px 14px;cursor:pointer;box-shadow:var(--shadow);white-space:nowrap}
+  .copybtn:hover{border-color:var(--red)}
+  .copybtn:focus-visible{outline:2px solid var(--red);outline-offset:2px}
+  .copybtn.done{color:#2f9e57;border-color:#2f9e57}
+  .copybtn svg{width:15px;height:15px;flex:none}
   h1{font:var(--font-display);font-size:clamp(32px,6vw,56px);letter-spacing:-.01em;text-transform:uppercase;text-wrap:balance;margin:16px 0 0;line-height:1}
   .lede{max-width:62ch;margin:14px 0 0;font-size:clamp(16px,2.4vw,19px)}
   .card{margin-top:clamp(26px,4vw,40px);background:var(--panel);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);overflow:hidden}
@@ -33,7 +39,13 @@
   .foot code{font-family:var(--font-mono);color:var(--ink)}</style>
 <div class="wrap">
   <header>
-    <span class="eyebrow"><span class="rule"></span>DrillBoard · Live drill card</span>
+    <div class="topbar">
+      <span class="eyebrow"><span class="rule"></span>DrillBoard · Live drill card</span>
+      <button id="copy" class="copybtn" type="button" title="Copy a link that reopens this exact drill">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>
+        <span class="lbl">Copy link</span>
+      </button>
+    </div>
     <h1 id="title">Drill</h1>
     <p class="lede" id="lede"></p>
   </header>
@@ -599,8 +611,13 @@ function drillSvg(dsl, opts = {}) {
 
 (function(){
   var ta=document.getElementById('dsl'),dia=document.getElementById('diagram'),err=document.getElementById('err'),
-      title=document.getElementById('title'),lede=document.getElementById('lede'),leg=document.getElementById('legend'),meta=document.getElementById('meta');
+      title=document.getElementById('title'),lede=document.getElementById('lede'),leg=document.getElementById('legend'),meta=document.getElementById('meta'),
+      copy=document.getElementById('copy');
   function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+  // URL-safe base64 of UTF-8 text, for sharing the current drill in the link.
+  function enc(s){try{return btoa(unescape(encodeURIComponent(s))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}catch(e){return '';}}
+  function dec(s){try{s=s.replace(/-/g,'+').replace(/_/g,'/');return decodeURIComponent(escape(atob(s)));}catch(e){return null;}}
+  function syncHash(){ try{ history.replaceState(null,'','#d='+enc(ta.value)); }catch(e){} }
   function render(){
     var dsl=extractDrill(ta.value),r;
     try{ r=parseDrill(dsl); dia.innerHTML=drillSvg(dsl); }
@@ -613,7 +630,18 @@ function drillSvg(dsl, opts = {}) {
     L.push('<span><span class="solid"></span>skating route</span>','<span><span class="dash"></span>puck path</span>');
     leg.innerHTML=L.join('');
     meta.textContent=players.length+' skater'+(players.length===1?'':'s')+' \u00b7 live';
+    syncHash();
   }
+  // A shared link carries the drill in #d=… — prefer it over the built-in default.
+  if(location.hash.indexOf('#d=')===0){ var d=dec(location.hash.slice(3)); if(d!=null) ta.value=d; }
+  function fallbackCopy(text){ var t=document.createElement('textarea'); t.value=text; t.setAttribute('readonly',''); t.style.position='fixed'; t.style.top='-1000px'; document.body.appendChild(t); t.select(); try{document.execCommand('copy');}catch(e){} document.body.removeChild(t); }
+  copy.addEventListener('click',function(){
+    syncHash();
+    var url=location.href, lbl=copy.querySelector('.lbl');
+    function done(){ copy.classList.add('done'); lbl.textContent='Link copied'; setTimeout(function(){ copy.classList.remove('done'); lbl.textContent='Copy link'; },1600); }
+    if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(url).then(done,function(){ fallbackCopy(url); done(); }); }
+    else { fallbackCopy(url); done(); }
+  });
   ta.addEventListener('input',render); render();
 })();
 </script>
