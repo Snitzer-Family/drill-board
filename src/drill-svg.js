@@ -9,6 +9,22 @@ import * as boards from "./boards.js";
 const NET_L = { x: 17, y: 42.5 }, NET_R = { x: 183, y: 42.5 };
 const f = n => Math.round(n * 100) / 100;
 const V = (name, fb) => `var(--${name},${fb})`;
+const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+// a movable/resizable on-ice text label (standalone piece or a "label"-mode
+// waypoint description). No stretch here, so it's drawn upright at (x, y).
+function labelSvg(x, y, text, size, color) {
+  const lines = String(text || " ").split("\n");
+  const fs = 3 * (size || 1), lh = fs * 1.18;
+  const w = Math.max(1, ...lines.map(l => l.length)) * fs * 0.56 + fs * 0.8;
+  const h = lines.length * lh + fs * 0.4;
+  const tspans = lines.map((l, k) =>
+    `<tspan x="${f(x)}" y="${f(y + (k - (lines.length - 1) / 2) * lh + fs * 0.34)}">${esc(l || " ")}</tspan>`).join("");
+  return `<g><rect x="${f(x - w / 2)}" y="${f(y - h / 2)}" width="${f(w)}" height="${f(h)}" rx="${f(fs * 0.32)}"`
+    + ` fill="${V("panel", "#fff")}" stroke="${V("line", "#d6e2ea")}" stroke-width="0.3"/>`
+    + `<text font-size="${f(fs)}" font-weight="700" text-anchor="middle" fill="${color || V("ink", "#14202b")}"`
+    + ` font-family="system-ui,sans-serif">${tspans}</text></g>`;
+}
 
 const routePoint = (p, idx) => {
   if (!p.path.length || idx < 0) return { x: p.x, y: p.y };
@@ -142,6 +158,10 @@ export function drillSvg(dsl, opts = {}) {
   const routes = pieces.map(routePath).join("");
   const chains = pieces.filter(p => p.kind === "puck").map(pk => chain(pk, byId, pieces)).join("");
   const icons = [...pieces].sort((a, b) => rank(a.kind) - rank(b.kind)).map(piece).join("");
+  // text labels paint on top: standalone label pieces + "label"-mode waypoints
+  const labels = pieces.filter(p => p.kind === "label").map(p => labelSvg(p.x, p.y, p.text, p.size, p.color)).join("")
+    + pieces.flatMap(p => (p.path || []).filter(s => s.dmode === "label" && s.desc)
+        .map(s => labelSvg(s.x + (s.dox || 0), s.y + (s.doy != null ? s.doy : -5), s.desc, s.dsize, "#14202b"))).join("");
   const wattr = opts.width ? ` width="${opts.width}"` : "";
-  return `<svg class="rink" viewBox="-7 -7 214 99"${wattr} xmlns="http://www.w3.org/2000/svg" role="img">${defs}${rink()}${routes}${chains}${icons}</svg>`;
+  return `<svg class="rink" viewBox="-7 -7 214 99"${wattr} xmlns="http://www.w3.org/2000/svg" role="img">${defs}${rink()}${routes}${chains}${icons}${labels}</svg>`;
 }

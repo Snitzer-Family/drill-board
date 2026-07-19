@@ -20,9 +20,15 @@ export function parseDrill(text) {
     // TITLE/DESC take the whole rest of the line (may contain spaces or #)
     const meta = /^\s*(title|desc)\b\s*(.*)$/i.exec(raw);
     if (meta) { if (meta[1].toLowerCase() === "title") title = meta[2].trim(); else desc = meta[2].trim(); return; }
-    const line = raw.replace(/#(?!([0-9a-fA-F]{3}){1,2}\b).*$/, "").trim();
+    // pull "quoted strings" out first (label / description text) so their spaces,
+    // commas and #s survive comment-stripping and tokenizing; restore via unq()
+    const quotes = [];
+    const protectedRaw = raw.replace(/"([^"]*)"/g, (_, s) => `${quotes.push(s.trim()) - 1}`);
+    const line = protectedRaw.replace(/#(?!([0-9a-fA-F]{3}){1,2}\b).*$/, "").trim();
     if (!line) return;
     const tok = line.split(/[\s,]+/);
+    const unq = t => { const m = /^(\d+)$/.exec(t || ""); return m ? quotes[+m[1]] : t; };
+    const quoted = t => /^\d+$/.test(t || "");
     const cmd = tok[0].toUpperCase();
     try {
       if (cmd === "RINK") {
@@ -32,22 +38,28 @@ export function parseDrill(text) {
       } else if (cmd === "PIECE") {
         const [, id, kind, xs, ys, ...rest] = tok;
         const x = parseFloat(xs), y = parseFloat(ys);
-        if (!id || !["player", "puck", "cone", "net", "bumper", "deker", "passer"].includes(kind) || isNaN(x) || isNaN(y))
+        if (!id || !["player", "puck", "cone", "net", "bumper", "deker", "passer", "label"].includes(kind) || isNaN(x) || isNaN(y))
           throw new Error("PIECE needs: id kind x y");
         let color = kind === "cone" ? "#e0731d" : kind === "puck" ? "#14171a" : kind === "net" ? "#c81e33"
-          : kind === "bumper" ? "#4d6fa6" : kind === "deker" ? "#c79a4e" : kind === "passer" ? "#57636f" : "#d7263d";
+          : kind === "bumper" ? "#4d6fa6" : kind === "deker" ? "#c79a4e" : kind === "passer" ? "#57636f"
+          : kind === "label" ? "#14202b" : "#d7263d";
         let label = kind === "player" ? id : "";
+        let text = "", size = 1;                          // label piece: text + font scale
         let speed = 1, hand = "R", carrier = null, facing = 0, shotAt = null, pickup = null, rimAt = null, chipAt = null, chipAim = null, rimAim = null;
         let net = null, holdLine = false, goalie = false, defense = false;
         const transfers = [];
         rest.forEach(r => {
-          if (r.startsWith("#")) color = r;
+          if (quoted(r)) { text = unq(r); }              // a "quoted string" → label text
+          else if (r.startsWith("#")) color = r;
           else if (r.includes("=")) {
             const [k, v] = r.split("=");
             const key = k.toLowerCase();
             if (key === "speed") {
               const n = parseFloat(v);
               if (!isNaN(n) && n > 0) speed = n;
+            } else if (key === "size") {
+              const n = parseFloat(v);
+              if (!isNaN(n) && n > 0) size = n;
             } else if (key === "hand") hand = v.toUpperCase() === "L" ? "L" : "R";
             else if (key === "on") carrier = v;
             else if (key === "pass") {
@@ -89,17 +101,21 @@ export function parseDrill(text) {
           else if (r === "defense") defense = true;
           else label = r;
         });
-        const p = { id, kind, x, y, color, label, speed, hand, carrier, facing, transfers, shotAt, pickup, rimAt, chipAt, chipAim, rimAim, net, holdLine, goalie, defense, path: [] };
+        const p = { id, kind, x, y, color, label, text, size, speed, hand, carrier, facing, transfers, shotAt, pickup, rimAt, chipAt, chipAim, rimAim, net, holdLine, goalie, defense, path: [] };
         pieces.push(p); byId[id] = p;
       } else if (cmd === "PATH") {
         const id = tok[1];
         const p = byId[id];
         if (!p) throw new Error(`PATH for unknown piece "${id}"`);
         let j = 2, mode = "carry", dir = "fwd", stop = 0, rate = 1, name = null;
+        let dsc = null, dmode = null, dsize = null, dox = null, doy = null;   // waypoint description/label
         const num = () => { const v = parseFloat(tok[j++]); if (isNaN(v)) throw new Error("bad number in PATH"); return v; };
         const push = seg => {
-          p.path.push({ ...seg, mode, dir, stop, rate, ...(name ? { name } : {}) });
+          p.path.push({ ...seg, mode, dir, stop, rate, ...(name ? { name } : {}),
+            ...(dsc ? { desc: dsc } : {}), ...(dmode ? { dmode } : {}), ...(dsize != null ? { dsize } : {}),
+            ...(dox != null ? { dox, doy } : {}) });
           mode = "carry"; dir = "fwd"; stop = 0; rate = 1; name = null;
+          dsc = null; dmode = null; dsize = null; dox = null; doy = null;
         };
         while (j < tok.length) {
           const t = tok[j++].toUpperCase();
@@ -108,6 +124,10 @@ export function parseDrill(text) {
           if (t === "STOP") { stop = num(); continue; }
           if (t === "RATE") { rate = Math.max(0.1, num()); continue; }
           if (t === "NAME") { name = (tok[j++] || "").replace(/_/g, " ").trim() || null; continue; }
+          if (t === "DESC") { dsc = unq(tok[j++]) || null; continue; }        // "free text" description
+          if (t === "SHOW") { const m = (tok[j++] || "").toLowerCase(); dmode = ["auto", "preso", "label"].includes(m) ? m : null; continue; }
+          if (t === "SIZE") { dsize = Math.max(0.2, num()); continue; }
+          if (t === "OFF") { dox = num(); doy = num(); continue; }            // label offset from the waypoint
           if (t === "L") push({ type: "L", x: num(), y: num() });
           else if (t === "Q") push({ type: "Q", cx: num(), cy: num(), x: num(), y: num() });
           else if (t === "C") push({ type: "C", c1x: num(), c1y: num(), c2x: num(), c2y: num(), x: num(), y: num() });
@@ -122,9 +142,19 @@ export function parseDrill(text) {
 const f1 = n => (Math.round(n * 10) / 10).toString();
 const f2 = n => (Math.round(n * 100) / 100).toString();
 
+const qesc = t => `"${String(t).replace(/"/g, "")}"`;   // label/description text as a quoted string
+
 function segToStr(s) {
   let pre = "";
   if (s.name) pre += `NAME ${String(s.name).trim().replace(/\s+/g, "_")} `;
+  if (s.desc) {
+    pre += `DESC ${qesc(s.desc)} `;
+    if (s.dmode && s.dmode !== "auto") pre += `SHOW ${s.dmode} `;
+    if (s.dmode === "label") {
+      if (s.dsize && s.dsize !== 1) pre += `SIZE ${f2(s.dsize)} `;
+      pre += `OFF ${f1(s.dox || 0)},${f1(s.doy != null ? s.doy : -5)} `;
+    }
+  }
   if (s.stop > 0) pre += `STOP ${f1(s.stop)} `;
   if (s.rate && s.rate !== 1) pre += `RATE ${f2(s.rate)} `;
   if (s.dir === "bwd") pre += "BWD ";
@@ -140,6 +170,11 @@ export function serializeDrill(rink, pieces, title = "", desc = "") {
   if (desc && desc.trim()) out.push(`DESC ${desc.trim()}`);
   out.push("");
   pieces.forEach(p => {
+    if (p.kind === "label") {
+      const sz = p.size && p.size !== 1 ? ` size=${f2(p.size)}` : "";
+      out.push(`PIECE ${p.id} label ${f1(p.x)} ${f1(p.y)} ${p.color}${sz} ${qesc(p.text || "")}`);
+      return;
+    }
     const lbl = p.kind === "player" && p.label ? " " + p.label : "";
     const spd = p.speed && p.speed !== 1 ? ` speed=${f2(p.speed)}` : "";
     const hnd = p.kind === "player" && p.hand === "L" ? " hand=L" : "";

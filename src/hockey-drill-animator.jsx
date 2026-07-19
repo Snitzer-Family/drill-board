@@ -9,6 +9,9 @@ import { createTiming } from "./timing.js";
 import { newGame, stepGame } from "./ai-game.js";
 import { STYLES } from "./styles.js";
 
+// swatch palette for on-ice text labels (dark ink first — labels sit on light ice)
+const LABEL_COLORS = ["#14202b", "#d7263d", "#1f4fa3", "#1f8a4c", "#e0731d", "#7a3fa8"];
+
 /* ============================================================
    HOCKEY DRILL ANIMATOR — v5 (full-screen ice)
    Coordinates: real feet. x 0..200 (goal line to goal line),
@@ -384,9 +387,17 @@ export default function DrillAnimator() {
       p.path.forEach((s, i) => {
         const isLast = i === p.path.length - 1;
         const through = minorDesc ? legZones(p, i) : [];
-        if (!s.name && !isLast && through.length === 0) return;
+        const dm = s.dmode || (s.desc ? "auto" : null);
+        // a "presentation" description reads as its own caption, verbatim
+        if (s.desc && dm === "preso") {
+          evs.push({ t: waypointTime(p, i - 1), key: `${p.id}:say:${i}`, auto: s.desc });
+          return;
+        }
+        // an "auto" description names the waypoint; a "label" one is on-ice only
+        const cap = s.desc && dm === "auto" ? s.desc : s.name;
+        if (!cap && !isLast && through.length === 0) return;
         const zn = zoneAt(s.x, s.y);
-        const where = s.name ? s.name : zn ? areaPhrase(zn) : `point ${i + 1}`;
+        const where = cap ? cap : zn ? areaPhrase(zn) : `point ${i + 1}`;
         const via = through.length ? ` through ${joinAreas(through.map(areaPhrase))}` : "";
         evs.push({ t: waypointTime(p, i - 1), key: `${p.id}:move:${i}`, auto: `${nameOf(p.id)} skates${via} to ${where}` });
       });
@@ -639,7 +650,8 @@ export default function DrillAnimator() {
 
   function nextId(kind) {
     const prefix = kind === "player" ? "P" : kind === "puck" ? "PK" : kind === "net" ? "N"
-      : kind === "bumper" ? "B" : kind === "deker" ? "DK" : kind === "passer" ? "PS" : "C";
+      : kind === "bumper" ? "B" : kind === "deker" ? "DK" : kind === "passer" ? "PS"
+      : kind === "label" ? "L" : "C";
     let n = 1;
     while (pieces.some(p => p.id === prefix + n)) n++;
     return prefix + n;
@@ -652,8 +664,9 @@ export default function DrillAnimator() {
       id, kind, x: pt.x, y: pt.y, speed: kind === "player" ? 1.5 : 1, hand: "R", carrier: null,
       facing: kind === "net" && pt.x >= 100 ? 180 : 0, transfers: [], shotAt: null, rimAt: null, chipAt: null, chipAim: null, rimAim: null, pickup: null, net: null, holdLine: false, goalie: false, defense: false,
       color: kind === "player" ? COLORS[colorIdx] : kind === "cone" ? "#e0731d" : kind === "net" ? "#c81e33"
-        : kind === "bumper" ? "#4d6fa6" : kind === "deker" ? "#c79a4e" : kind === "passer" ? "#57636f" : "#14171a",
-      label: kind === "player" ? id : "", path: [],
+        : kind === "bumper" ? "#4d6fa6" : kind === "deker" ? "#c79a4e" : kind === "passer" ? "#57636f"
+        : kind === "label" ? "#14202b" : "#14171a",
+      label: kind === "player" ? id : "", text: kind === "label" ? "Label" : "", size: 1, path: [],
     };
   }
 
@@ -785,7 +798,7 @@ export default function DrillAnimator() {
       const np = makePiece(tool, pt);
       setPieces(ps => [...ps, np]);
       setSelectedId(np.id);
-      setPopup(null);
+      setPopup(tool === "label" ? { type: "piece", id: np.id } : null);   // labels open for text entry
       setTool("select");
       return;
     }
@@ -848,8 +861,13 @@ export default function DrillAnimator() {
     if (!editing) return;
     e.stopPropagation();
     setOpenMenu(null);
+    if (payload.id) setSelectedId(payload.id);
     const pt = svgPt(e);
-    drag.current = { ...payload, start: pt, last: pt, moved: false, touch: e.pointerType !== "mouse" };
+    // resize handle: remember the pointer's starting distance from the label
+    // centre so size scales with how far it's dragged out/in
+    const extra = payload.kind === "resize"
+      ? { dist0: Math.max(0.5, Math.hypot(pt.x - payload.cx, pt.y - payload.cy)) } : {};
+    drag.current = { ...payload, ...extra, start: pt, last: pt, moved: false, touch: e.pointerType !== "mouse" };
     svgRef.current.setPointerCapture?.(e.pointerId);
   }
 
@@ -899,6 +917,25 @@ export default function DrillAnimator() {
     if (d.kind === "aim") {
       const ang = Math.round((Math.atan2(pt.y - d.origin.y, pt.x - d.origin.x) * 180) / Math.PI);
       setAim(d.pkId, d.target, ang);
+      return;
+    }
+    if (d.kind === "resize") {
+      const dist = Math.hypot(pt.x - d.cx, pt.y - d.cy);
+      const size = Math.max(0.4, Math.min(6, (d.size0 || 1) * (dist / d.dist0)));
+      if (d.seg == null) updateById(d.id, { size });
+      else updateSeg(d.id, d.seg, { dsize: size });
+      return;
+    }
+    if (d.kind === "wlabel") {
+      const dx = pt.x - d.last.x, dy = pt.y - d.last.y;
+      d.last = pt;
+      update(p => {
+        if (p.id !== d.id) return p;
+        const path = p.path.slice();
+        const s = path[d.seg];
+        path[d.seg] = { ...s, dox: (s.dox || 0) + dx, doy: (s.doy != null ? s.doy : -5) + dy };
+        return { ...p, path };
+      });
       return;
     }
     if (d.kind === "piece") {
@@ -954,6 +991,8 @@ export default function DrillAnimator() {
       }
     }
     if (d.moved) return;
+    if (d.kind === "wlabel") { setSelectedId(d.id); setPopup({ type: "point", id: d.id, seg: d.seg }); return; }
+    if (d.kind === "resize") return;
     if (d.kind === "aim") { setAim(d.pkId, d.target, null); return; }  // tap to clear the aim
     if (d.kind === "rotate") { setPopup({ type: "piece", id: d.id }); return; }
     if (d.kind === "piece") {
@@ -1122,6 +1161,65 @@ export default function DrillAnimator() {
         </g>
       );
     });
+  }
+
+  // a movable/resizable on-ice text label, drawn undistorted (icon frame) and
+  // held screen-upright. Used for standalone labels and for waypoint
+  // descriptions shown in "label" mode.
+  function labelNode(key, x, y, text, size, color, sel, onDown, resizeDown) {
+    const fx = iconXf({ x, y, a: 0 });
+    const lines = String(text || " ").split("\n");
+    const fs = 3 * (size || 1);
+    const lh = fs * 1.18;
+    const w = Math.max(1, ...lines.map(l => l.length)) * fs * 0.56 + fs * 0.8;
+    const h = lines.length * lh + fs * 0.4;
+    return (
+      <g key={key} transform={fx.t}>
+        <g transform={`rotate(${-fx.th})`}>
+          <rect x={-w / 2} y={-h / 2} width={w} height={h} rx={fs * 0.32}
+            fill="rgba(245,250,253,0.86)" stroke={sel ? "#ffd447" : "rgba(20,32,43,0.22)"}
+            strokeWidth={sel ? 0.5 : 0.3} onPointerDown={onDown}
+            style={{ cursor: onDown ? "grab" : "default" }} />
+          <text textAnchor="middle" fontSize={fs} fontWeight={700} fill={color || "#14202b"}
+            pointerEvents="none" style={{ fontFamily: "system-ui, sans-serif", userSelect: "none" }}>
+            {lines.map((l, k) => (
+              <tspan key={k} x={0} y={(k - (lines.length - 1) / 2) * lh + fs * 0.34}>{l || " "}</tspan>
+            ))}
+          </text>
+          {sel && resizeDown && (
+            <>
+              <rect x={w / 2 - fs * 0.42} y={h / 2 - fs * 0.42} width={fs * 0.84} height={fs * 0.84}
+                rx={fs * 0.15} fill="#ffd447" stroke="#7a5c00" strokeWidth={0.3} pointerEvents="none" />
+              <rect x={w / 2 - fs * 0.7} y={h / 2 - fs * 0.7} width={fs * 1.4} height={fs * 1.4}
+                fill="transparent" style={{ cursor: "nwse-resize" }} onPointerDown={resizeDown} />
+            </>
+          )}
+        </g>
+      </g>
+    );
+  }
+
+  // standalone label pieces + every "label"-mode waypoint description
+  function renderLabels() {
+    const canEdit = editing && tool !== "draw";
+    const els = [];
+    pieces.forEach(p => {
+      if (p.kind === "label") {
+        const sel = canEdit && p.id === selectedId;
+        els.push(labelNode(`lbl-${p.id}`, p.x, p.y, p.text, p.size, p.color, sel,
+          e => pieceDown(e, p.id),
+          canEdit ? e => handleDown(e, { kind: "resize", id: p.id, seg: null, cx: p.x, cy: p.y, size0: p.size || 1 }) : null));
+      }
+      (p.path || []).forEach((s, i) => {
+        if (s.dmode !== "label" || !s.desc) return;
+        const cx = s.x + (s.dox || 0), cy = s.y + (s.doy != null ? s.doy : -5);
+        const sel = canEdit && p.id === selectedId;
+        els.push(labelNode(`wl-${p.id}-${i}`, cx, cy, s.desc, s.dsize, "#14202b", sel,
+          canEdit ? e => handleDown(e, { kind: "wlabel", id: p.id, seg: i }) : undefined,
+          canEdit ? e => handleDown(e, { kind: "resize", id: p.id, seg: i, cx, cy, size0: s.dsize || 1 }) : null));
+      });
+    });
+    return els;
   }
 
   function renderStops(p) {
@@ -1327,15 +1425,44 @@ export default function DrillAnimator() {
           <button className="hd-mini" onClick={() => addPieceAt("bumper", popup.pt)}>▬ Bumper</button>
           <button className="hd-mini" onClick={() => addPieceAt("deker", popup.pt)}>π Deker</button>
           <button className="hd-mini" onClick={() => addPieceAt("passer", popup.pt)}>▭ Passer</button>
+          <button className="hd-mini" onClick={() => addPieceAt("label", popup.pt)}>🇹 Label</button>
         </div>
       );
     } else if (popup.type === "piece") {
       anchorPt = { x: p.x, y: p.y };
       title = p.kind === "player" ? `Player ${p.id}` : p.kind === "puck" ? `Puck ${p.id}`
         : p.kind === "net" ? `Net ${p.id}` : p.kind === "bumper" ? `Bumper ${p.id}`
-        : p.kind === "deker" ? `Deker ${p.id}` : p.kind === "passer" ? `Passer ${p.id}` : `Cone ${p.id}`;
+        : p.kind === "deker" ? `Deker ${p.id}` : p.kind === "passer" ? `Passer ${p.id}`
+        : p.kind === "label" ? `Label ${p.id}` : `Cone ${p.id}`;
       body = (
         <>
+          {p.kind === "label" && (
+            <>
+              <div className="hd-poprow">
+                <span>Text</span>
+                <input className="hd-input" style={{ flex: 1, minWidth: 120 }} value={p.text || ""}
+                  placeholder="Label text" autoFocus
+                  onChange={e => updateById(p.id, { text: e.target.value })} />
+              </div>
+              <div className="hd-poprow">
+                <span>Size</span>
+                <Stepper value={+(p.size || 1).toFixed(2)} onChange={v => updateById(p.id, { size: Math.max(0.4, v) })} step={0.2} min={0.4} suffix="×" />
+                <span style={{ fontSize: 11, color: "#8b99a8" }}>drag to move · corner to resize</span>
+              </div>
+              <div className="hd-poprow">
+                {LABEL_COLORS.map(c => (
+                  <div key={c} className={`hd-swatch${p.color === c ? " on" : ""}`} style={{ background: c }}
+                    onClick={() => updateById(p.id, { color: c })} />
+                ))}
+              </div>
+              <div className="hd-poprow">
+                <button className="hd-mini danger"
+                  onClick={() => { setPieces(ps => ps.filter(q => q.id !== p.id)); setSelectedId(null); setPopup(null); }}>
+                  Delete label
+                </button>
+              </div>
+            </>
+          )}
           {p.kind === "net" && (
             <div className="hd-poprow">
               <button className={`hd-mini${p.goalie ? " on" : ""}`}
@@ -1544,11 +1671,33 @@ export default function DrillAnimator() {
       body = (
         <>
           <div className="hd-poprow">
-            <span>Name</span>
+            <span>Note</span>
             <input className="hd-input" style={{ flex: 1, minWidth: 90 }}
-              value={s.name || ""} placeholder={zoneAt(s.x, s.y) || "waypoint name"}
-              onChange={e => updateSeg(p.id, i, { name: e.target.value || undefined })} />
+              value={s.desc != null ? s.desc : (s.name || "")}
+              placeholder={zoneAt(s.x, s.y) || "describe this spot"}
+              onChange={e => updateSeg(p.id, i, { desc: e.target.value || undefined, name: undefined })} />
           </div>
+          {(s.desc != null ? s.desc : s.name) && (
+            <div className="hd-poprow">
+              <span>Show as</span>
+              {[["auto", "Auto"], ["preso", "Present"], ["label", "Label"]].map(([m, lab]) => (
+                <button key={m} className={`hd-mini${(s.dmode || "auto") === m ? " on" : ""}`}
+                  onClick={() => updateSeg(p.id, i, {
+                    desc: s.desc != null ? s.desc : s.name, name: undefined,   // migrate legacy NAME
+                    ...(m === "label"
+                      ? { dmode: "label", dsize: s.dsize || 1, dox: s.dox || 0, doy: s.doy != null ? s.doy : -5 }
+                      : { dmode: m }),
+                  })}>{lab}</button>
+              ))}
+            </div>
+          )}
+          {s.dmode === "label" && (s.desc != null ? s.desc : s.name) && (
+            <div className="hd-poprow">
+              <span>Label size</span>
+              <Stepper value={+(s.dsize || 1).toFixed(2)} onChange={v => updateSeg(p.id, i, { dsize: Math.max(0.4, v) })} step={0.2} min={0.4} suffix="×" />
+              <span style={{ fontSize: 11, color: "#8b99a8" }}>drag it to move</span>
+            </div>
+          )}
           {next ? (
             <>
               <div className="hd-poprow">
@@ -1914,6 +2063,7 @@ export default function DrillAnimator() {
             {/* nets sit on the ice (bottom); players paint above pucks so a
                carried puck can't steal the grab; rotate ring is drawn last */}
             {!aiPlay && [...pieces]
+              .filter(p => p.kind !== "label")
               .sort((a, b) => {
                 const rank = k => (k === "net" || k === "bumper" || k === "deker" || k === "passer" ? 0 : k === "player" ? 2 : 1);
                 return rank(a.kind) - rank(b.kind);
@@ -1931,6 +2081,7 @@ export default function DrillAnimator() {
             })}
             {selected && renderRotateHandle(selected)}
           {pieces.map(p => <g key={`ca-${p.id}`}>{renderAim(p)}</g>)}
+            {!aiPlay && renderLabels()}
             </g>
           </svg>
           {renderPopout()}
@@ -2092,6 +2243,7 @@ export default function DrillAnimator() {
           <button className="hd-item" onClick={() => { setTool("bumper"); setOpenMenu(null); }}>▬ Bumper</button>
           <button className="hd-item" onClick={() => { setTool("deker"); setOpenMenu(null); }}>π Deker</button>
           <button className="hd-item" onClick={() => { setTool("passer"); setOpenMenu(null); }}>▭ Passer</button>
+          <button className="hd-item" onClick={() => { setTool("label"); setOpenMenu(null); }}>🇹 Label</button>
           <button className="hd-item" onClick={() => { resetAnim(); setPlaying(false); setPopup(null); setTool("draw"); setOpenMenu(null); }}>
             ✎ Draw a route
           </button>
@@ -2114,13 +2266,17 @@ export default function DrillAnimator() {
           </div>
           <div className="hd-note">
             Feet: x 0–200, y 0–85. <b>RINK</b> full|half|quarter ·
-            <b> PIECE</b> id player|puck|cone|net|bumper|deker|passer x y [#color] [label] [speed=1.2] [hand=L] [on=F1]
+            <b> PIECE</b> id player|puck|cone|net|bumper|deker|passer|label x y [#color] [label] [speed=1.2] [hand=L] [on=F1]
             (a <b>bumper</b> is a foam barrier, a <b>deker</b> a stickhandling gate, a <b>passer</b> a rebounder box — all take <code>face=deg</code>)
+            (a <b>label</b> is a movable/resizable text note: <code>PIECE L1 label 100 40 size=1.2 "Regroup here"</code>)
             (a <b>net</b> takes <code>face=deg</code> and <code>goalie</code>; a goalie tracks the puck and
             randomly saves or lets in each shot) ·
             <b> PATH</b> id segments (<b>L</b> x,y · <b>Q</b> cx,cy x,y · <b>C</b> c1x,c1y c2x,c2y x,y).
             Modifiers before a segment: <b>PASS</b>/<b>SHOT</b>, <b>BWD</b>, <b>STOP n</b>, <b>RATE n</b>,
-            <b> NAME word</b> (names that waypoint for presentation text; underscores show as spaces).
+            <b> NAME word</b> (names that waypoint for presentation text; underscores show as spaces),
+            <b> DESC "text"</b> (a waypoint description) with <b>SHOW</b> auto|preso|label — <b>auto</b> names it
+            in the play's captions, <b>preso</b> reads it out during presentation, <b>label</b> pins it on the
+            ice (add <b>SIZE n</b> and <b>OFF dx,dy</b> to resize / move that label).
             <code> on=F1</code> rides that player's blade until the carrier reaches the puck's spot.
             <code> pass=2:F2@3</code> passes at the carrier's point 2 to F2, received at F2's
             point 3 — the receiver's pace auto-syncs (omit <code>@3</code> to lead them instead).

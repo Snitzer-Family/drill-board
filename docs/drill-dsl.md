@@ -75,7 +75,8 @@ Drill name and description (everything to the end of the line). Optional.
 Places a piece. `id` is any unique token (e.g. `F1`, `PK1`, `N2`).
 
 **Kinds:** `player` · `puck` · `cone` · `net` · `bumper` (foam barrier) ·
-`deker` (stickhandling gate) · `passer` (rebounder box).
+`deker` (stickhandling gate) · `passer` (rebounder box) · `label` (a movable,
+resizable on-ice text note).
 
 **Modifiers** (any order):
 
@@ -83,6 +84,8 @@ Places a piece. `id` is any unique token (e.g. `F1`, `PK1`, `N2`).
 |---|---|---|
 | `#RRGGBB` / `#RGB` | any | Colour |
 | *bare word* | player | Jersey label (e.g. `F1`) |
+| `"quoted text"` | label | The label's text (spaces and commas allowed) |
+| `size=<n>` | label | Font scale (1 = default; the label is also resizable by dragging its corner) |
 | `speed=<n>` | player, puck | Pace multiplier (1 = default; players default 1.5) |
 | `hand=L` / `hand=R` | player | Shooting hand |
 | `face=<deg>` | route-less player, net, bumper, deker, passer | Facing angle (0 = +x / toward the right) |
@@ -125,6 +128,21 @@ is the piece's starting spot (so `shoot=0` / `chip=0` releases before skating).
 | `STOP <n>` | Pause `n` seconds at the start of this leg |
 | `RATE <n>` | Speed multiplier for this leg |
 | `NAME <word>` | Name this waypoint (underscores → spaces) for presentation text |
+| `DESC "<text>"` | A free-text description for this waypoint |
+| `SHOW auto\|preso\|label` | How the description is used (see below) — defaults to `auto` |
+| `SIZE <n>` | Font scale for a `SHOW label` description (default 1) |
+| `OFF <dx>,<dy>` | Offset (feet) of a `SHOW label` label from its waypoint (default `0,-5`, i.e. just above) |
+
+A waypoint **description** (`DESC "…"`) can be surfaced three ways via `SHOW`:
+
+- **`auto`** — names the waypoint in the play's generated captions
+  (*"F1 skates to the top of the circle"*). This is the default.
+- **`preso`** — read out verbatim as its own caption during **presentation mode**.
+- **`label`** — pinned on the ice as a text note at that spot; it's movable
+  (drag it, or `OFF dx,dy`) and resizable (drag its corner, or `SIZE n`).
+
+Standalone text notes use the `label` **piece** instead:
+`PIECE L1 label 100 40 size=1.2 "Regroup here"`.
 
 ---
 
