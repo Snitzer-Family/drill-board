@@ -1408,6 +1408,26 @@ export default function DrillAnimator() {
                   </div>
                 );
               })()}
+              {(() => {
+                // collect a hard-rimmed puck here — this player picks it up and the
+                // chain continues (works for a stationary / route-less player too)
+                const rims = pieces.filter(q => q.kind === "puck" && q.rimAt != null
+                  && puckChain(q).slice(-1)[0] !== p.id);
+                if (!rims.length) return null;
+                return (
+                  <div className="hd-poprow">
+                    <span>Collect rim</span>
+                    {rims.map(q => (
+                      <button key={`rcp-${q.id}`} className="hd-mini"
+                        onClick={() => setTransfer(q.id, (q.transfers || []).length,
+                          { at: q.rimAt, to: p.id, recvAt: p.path.length ? p.path.length - 1 : null, kind: "rim",
+                            ...(q.rimAim != null ? { aim: q.rimAim } : {}) })}>
+                        {q.id}
+                      </button>
+                    ))}
+                  </div>
+                );
+              })()}
               {p.path.length > 0 && !p.defense && (
                 <div className="hd-poprow">
                   <button className={`hd-mini${p.holdLine ? " on" : ""}`}
