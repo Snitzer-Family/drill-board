@@ -37,7 +37,7 @@ export function parseDrill(text) {
         let color = kind === "cone" ? "#e0731d" : kind === "puck" ? "#14171a" : kind === "net" ? "#c81e33"
           : kind === "bumper" ? "#4d6fa6" : kind === "deker" ? "#c79a4e" : kind === "passer" ? "#57636f" : "#d7263d";
         let label = kind === "player" ? id : "";
-        let speed = 1, hand = "R", carrier = null, facing = 0, shotAt = null, pickup = null, rimAt = null, chipAt = null, chipAim = null;
+        let speed = 1, hand = "R", carrier = null, facing = 0, shotAt = null, pickup = null, rimAt = null, chipAt = null, chipAim = null, rimAim = null;
         let net = null, holdLine = false, goalie = false, defense = false;
         const transfers = [];
         rest.forEach(r => {
@@ -68,10 +68,10 @@ export function parseDrill(text) {
               // a chip may carry an explicit aim angle as ~<deg>
               const m5 = /^(\d+)(?::([^@\s~]+)(?:@(\d+))?)?(?:~(-?\d+(?:\.\d+)?))?$/.exec(v);
               if (m5) {
-                const aim = key === "chip" && m5[4] != null ? parseFloat(m5[4]) : null;
+                const aim = m5[4] != null ? parseFloat(m5[4]) : null;
                 if (m5[2]) transfers.push({ at: parseInt(m5[1], 10) - 1, to: m5[2],
-                  recvAt: m5[3] ? parseInt(m5[3], 10) - 1 : null, kind: key, ...(aim != null ? { aim } : {}) });
-                else if (key === "rim") rimAt = parseInt(m5[1], 10) - 1;
+                  recvAt: m5[3] ? parseInt(m5[3], 10) - 1 : null, kind: key, ...(key === "chip" && aim != null ? { aim } : {}) });
+                else if (key === "rim") { rimAt = parseInt(m5[1], 10) - 1; rimAim = aim; }
                 else { chipAt = parseInt(m5[1], 10) - 1; chipAim = aim; }
               }
             } else if (key === "pickup") {
@@ -89,7 +89,7 @@ export function parseDrill(text) {
           else if (r === "defense") defense = true;
           else label = r;
         });
-        const p = { id, kind, x, y, color, label, speed, hand, carrier, facing, transfers, shotAt, pickup, rimAt, chipAt, chipAim, net, holdLine, goalie, defense, path: [] };
+        const p = { id, kind, x, y, color, label, speed, hand, carrier, facing, transfers, shotAt, pickup, rimAt, chipAt, chipAim, rimAim, net, holdLine, goalie, defense, path: [] };
         pieces.push(p); byId[id] = p;
       } else if (cmd === "PATH") {
         const id = tok[1];
@@ -152,7 +152,7 @@ export function serializeDrill(rink, pieces, title = "", desc = "") {
       : "";
     const head = p.kind === "puck" && (p.carrier || p.pickup);
     const sht = head && p.shotAt != null ? ` shoot=${p.shotAt + 1}` : "";
-    const rmT = head && p.rimAt != null ? ` rim=${p.rimAt + 1}` : "";
+    const rmT = head && p.rimAt != null ? ` rim=${p.rimAt + 1}${p.rimAim != null ? "~" + f1(p.rimAim) : ""}` : "";
     const chT = head && p.chipAt != null ? ` chip=${p.chipAt + 1}${p.chipAim != null ? "~" + f1(p.chipAim) : ""}` : "";
     const hasShot = p.kind === "puck" && (p.shotAt != null || (p.transfers || []).some(t => t.kind === "shot"));
     const nt = hasShot && p.net ? ` net=${p.net}` : "";

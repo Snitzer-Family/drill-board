@@ -134,11 +134,19 @@ export function rimPath(from, to) {
   return pts;
 }
 
-// polyline that rims `dist` ft around the boards, taking the long way along the
-// nearest board so the entry stays shallow and doesn't cut across a corner
-export function rimAround(from, dist) {
+// polyline that rims `dist` ft around the boards. `aim` (deg) picks which way it
+// rims (the board direction closest to the aim); without it, the long way along
+// the nearest board so the entry stays shallow and doesn't cut across a corner
+export function rimAround(from, dist, aim) {
   const sF = project(from);
-  const dir = roomAhead(sF.s, 1) >= roomAhead(sF.s, -1) ? 1 : -1;  // more straight ahead
+  let dir;
+  if (aim != null) {
+    const ax = Math.cos((aim * Math.PI) / 180), ay = Math.sin((aim * Math.PI) / 180);
+    const p1 = pointAt(sF.s + 4), p2 = pointAt(sF.s - 4);
+    dir = (p1.x - sF.x) * ax + (p1.y - sF.y) * ay >= (p2.x - sF.x) * ax + (p2.y - sF.y) * ay ? 1 : -1;
+  } else {
+    dir = roomAhead(sF.s, 1) >= roomAhead(sF.s, -1) ? 1 : -1;  // more straight ahead
+  }
   const lead = Math.min(leadOf(from, sF), Math.max(0, roomAhead(sF.s, dir) - 1));
   const entryS = sF.s + dir * lead;
   const pts = [{ x: from.x, y: from.y }, pointAt(entryS)];

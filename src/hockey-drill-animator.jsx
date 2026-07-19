@@ -650,7 +650,7 @@ export default function DrillAnimator() {
     const colorIdx = pieces.filter(p => p.kind === "player").length % COLORS.length;
     return {
       id, kind, x: pt.x, y: pt.y, speed: kind === "player" ? 1.5 : 1, hand: "R", carrier: null,
-      facing: kind === "net" && pt.x >= 100 ? 180 : 0, transfers: [], shotAt: null, rimAt: null, chipAt: null, chipAim: null, pickup: null, net: null, holdLine: false, goalie: false, defense: false,
+      facing: kind === "net" && pt.x >= 100 ? 180 : 0, transfers: [], shotAt: null, rimAt: null, chipAt: null, chipAim: null, rimAim: null, pickup: null, net: null, holdLine: false, goalie: false, defense: false,
       color: kind === "player" ? COLORS[colorIdx] : kind === "cone" ? "#e0731d" : kind === "net" ? "#c81e33"
         : kind === "bumper" ? "#4d6fa6" : kind === "deker" ? "#c79a4e" : kind === "passer" ? "#57636f" : "#14171a",
       label: kind === "player" ? id : "", path: [],
@@ -699,11 +699,13 @@ export default function DrillAnimator() {
       return { ...q, shotAt: null, rimAt: null, chipAt: null, ...(on ? {} : { [field]: i }) };
     });
   }
-  // per-chip aim override (deg, or null to follow the player's facing)
-  function setChipAim(pkId, target, deg) {
+  // aim override for a chip or a hard rim (deg, or null to follow facing / auto).
+  // target = { field: "chipAim"|"rimAim" } for a terminal, or { stage } for a
+  // chip transfer.
+  function setAim(pkId, target, deg) {
     update(q => {
       if (q.id !== pkId) return q;
-      if (target.terminal) return { ...q, chipAim: deg };
+      if (target.field) return { ...q, [target.field]: deg };
       const ts = (q.transfers || []).map((t, k) => (k === target.stage ? { ...t, aim: deg == null ? undefined : deg } : t));
       return { ...q, transfers: ts };
     });
@@ -894,9 +896,9 @@ export default function DrillAnimator() {
       });
       return;
     }
-    if (d.kind === "chipaim") {
+    if (d.kind === "aim") {
       const ang = Math.round((Math.atan2(pt.y - d.origin.y, pt.x - d.origin.x) * 180) / Math.PI);
-      setChipAim(d.pkId, d.target, ang);
+      setAim(d.pkId, d.target, ang);
       return;
     }
     if (d.kind === "piece") {
@@ -952,7 +954,7 @@ export default function DrillAnimator() {
       }
     }
     if (d.moved) return;
-    if (d.kind === "chipaim") { setChipAim(d.pkId, d.target, null); return; }  // tap to clear the aim
+    if (d.kind === "aim") { setAim(d.pkId, d.target, null); return; }  // tap to clear the aim
     if (d.kind === "rotate") { setPopup({ type: "piece", id: d.id }); return; }
     if (d.kind === "piece") {
       if (d.line != null) {
@@ -1081,9 +1083,9 @@ export default function DrillAnimator() {
     );
   }
 
-  // draggable aim handle at a chip's release point (route players only): drag to
-  // override the chip direction, tap to clear it back to the player's facing
-  function renderChipAim(p) {
+  // draggable aim handle at a chip's or hard rim's release point (route players
+  // only): drag to aim it, tap to clear back to the player's facing / auto
+  function renderAim(p) {
     if (!editing || tool === "draw" || p.kind !== "player" || !p.path.length) return null;
     const pk = pieces.find(q => q.kind === "puck" && puckChain(q).includes(p.id));
     if (!pk) return null;
@@ -1093,8 +1095,11 @@ export default function DrillAnimator() {
     ts.forEach((tr, s) => {
       if (tr.kind === "chip" && chain[s] === p.id) knobs.push({ at: tr.at, aim: tr.aim, target: { stage: s } });
     });
-    if (pk.chipAt != null && chain[chain.length - 1] === p.id)
-      knobs.push({ at: pk.chipAt, aim: pk.chipAim, target: { terminal: true } });
+    const last = chain.length - 1;
+    if (pk.chipAt != null && chain[last] === p.id)
+      knobs.push({ at: pk.chipAt, aim: pk.chipAim, target: { field: "chipAim" } });
+    if (pk.rimAt != null && chain[last] === p.id)
+      knobs.push({ at: pk.rimAt, aim: pk.rimAim, target: { field: "rimAim" } });
     if (!knobs.length) return null;
     const R = 8;
     return knobs.map((k, idx) => {
@@ -1108,12 +1113,12 @@ export default function DrillAnimator() {
       const custom = k.aim != null;
       const col = custom ? "#3a8dff" : "#9fb4c6";
       return (
-        <g key={`chipaim-${p.id}-${idx}`}>
+        <g key={`aim-${p.id}-${idx}`}>
           <circle cx={here.x} cy={here.y} r={R} fill="none" stroke={col} strokeWidth={0.25} strokeDasharray="1 1" opacity={0.7} pointerEvents="none" />
           <line x1={here.x} y1={here.y} x2={kx} y2={ky} stroke={col} strokeWidth={0.35} opacity={0.75} pointerEvents="none" />
           <circle cx={kx} cy={ky} r={1.6} fill={col} stroke="#12233a" strokeWidth={0.35} pointerEvents="none" />
           <circle cx={kx} cy={ky} r={4.2} fill="transparent" style={{ cursor: "grab" }}
-            onPointerDown={e => handleDown(e, { kind: "chipaim", pkId: pk.id, target: k.target, origin: here })} />
+            onPointerDown={e => handleDown(e, { kind: "aim", pkId: pk.id, target: k.target, origin: here })} />
         </g>
       );
     });
@@ -1668,7 +1673,7 @@ export default function DrillAnimator() {
           )}
           {selected && renderHandles(selected)}
           {selected && renderRotateHandle(selected)}
-          {pieces.map(p => <g key={`ca-${p.id}`}>{renderChipAim(p)}</g>)}
+          {pieces.map(p => <g key={`ca-${p.id}`}>{renderAim(p)}</g>)}
           {pieces.map(p => {
             const dp = displayPos(p);
             return (
@@ -1886,7 +1891,7 @@ export default function DrillAnimator() {
               );
             })}
             {selected && renderRotateHandle(selected)}
-          {pieces.map(p => <g key={`ca-${p.id}`}>{renderChipAim(p)}</g>)}
+          {pieces.map(p => <g key={`ca-${p.id}`}>{renderAim(p)}</g>)}
             </g>
           </svg>
           {renderPopout()}
@@ -2082,7 +2087,8 @@ export default function DrillAnimator() {
             point 3 — the receiver's pace auto-syncs (omit <code>@3</code> to lead them instead).
             Point <b>0</b> is the starting spot (release before skating to point 1).
             <code> shoot=4</code> fires at point 4 (targets the nearest net/passer, or <code>net=N2</code>/<code>net=PS1</code> for a specific one).
-            <code> rim=4</code> hard-rims the puck around the boards (a clear);
+            <code> rim=4</code> hard-rims the puck around the boards (a clear); add <code>~deg</code>
+            (<code>rim=4~90</code>) or drag the aim ring to pick which way it rims.
             <code> rim=4:F2</code> rims it around to F2. A <b>chip</b> always goes to a collector:
             <code> chip=4:F1</code> banks it off the boards for F1 (self or a teammate) and carries as far as
             their collect waypoint (harder for a farther pickup). Aim it with <code>~deg</code>

@@ -330,7 +330,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
         const at = pk.rimAt;
         const launchT = (cur.path.length && at >= 0) ? Math.max(tBase, routeTimeW(cur, warp, Math.min(at, cur.path.length - 1))) : tBase;
         const launch = bladeAt(cur, launchT, warp);
-        const r = pushTravel(boards.rimAround(launch, 65), launchT, vRim(), { by: cur.id, rim: true, easeOut: 26 });
+        const r = pushTravel(boards.rimAround(launch, 65, pk.rimAim), launchT, vRim(), { by: cur.id, rim: true, easeOut: 26 });
         legs.push({ type: "rest", x: r.end.x, y: r.end.y, t0: r.t }); tBase = r.t;
       } else if (pk.chipAt != null && cur) {           // terminal chip into space (bounces)
         const at = pk.chipAt;
