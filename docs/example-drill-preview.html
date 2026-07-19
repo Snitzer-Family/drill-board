@@ -1,4 +1,4 @@
-<title>Chip Off the Boards, Behind the D — DrillBoard drill card</title>
+<title>DrillBoard · live drill card</title>
 <style>
   :root{--ice:#eef5f9;--panel:#fff;--ink:#14202b;--muted:#5c6b78;--line:#d6e2ea;--hair:#e4edf3;--red:#d7263d;--blue:#1f4fa3;--surface:#f6fafd;--mark:#cf3346;--mark-blue:#2f5fb0;--puck:#14171a;--code-bg:#0f1a23;--code-ink:#d9e6f0;--code-dim:#7e93a4;--shadow:0 1px 2px rgba(20,32,43,.06),0 12px 34px -14px rgba(20,32,43,.28);--font-display:800 1em/1 "Helvetica Neue",Helvetica,Arial,sans-serif;--font-body:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;--font-mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace}
   @media (prefers-color-scheme:dark){:root{--ice:#0d151c;--panel:#131f28;--ink:#e8eff5;--muted:#93a4b2;--line:#26343f;--hair:#1c2831;--red:#ff5a6a;--blue:#5f92e2;--surface:#16232d;--mark:#e2475a;--mark-blue:#4f7fd6;--puck:#cdd8e2;--code-bg:#0a1219;--code-ink:#d3e2ee;--code-dim:#6f8496;--shadow:0 1px 2px rgba(0,0,0,.4),0 18px 44px -18px rgba(0,0,0,.7)}}
@@ -22,66 +22,598 @@
   .legend .dot{width:12px;height:12px;border-radius:50%;flex:none}
   .legend .dash{width:20px;height:0;border-top:2px dashed var(--puck);flex:none}
   .legend .solid{width:20px;height:0;border-top:2.5px solid var(--red);flex:none}
-  .src-h{margin:42px 0 0;font:700 13px/1 var(--font-body);letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
-  .src-note{max-width:62ch;margin:10px 0 16px;color:var(--muted);font-size:15px}
-  .src-note code{font-family:var(--font-mono);font-size:.92em;color:var(--ink);background:var(--surface);padding:1px 6px;border-radius:5px;border:1px solid var(--line)}
-  .code{background:var(--code-bg);border-radius:14px;box-shadow:var(--shadow);overflow:hidden;border:1px solid rgba(255,255,255,.04)}
-  .code-bar{display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid rgba(255,255,255,.07)}
-  .code-bar .lang{font:700 11px/1 var(--font-mono);letter-spacing:.1em;text-transform:uppercase;color:#eef5f9;background:var(--red);padding:4px 8px;border-radius:5px}
-  .code-bar .file{font:500 13px/1 var(--font-mono);color:var(--code-dim)}
-  pre{margin:0;padding:18px 20px;overflow-x:auto;font:500 13.5px/1.65 var(--font-mono);color:var(--code-ink);font-variant-numeric:tabular-nums;tab-size:2}
-  pre .cmd{color:#8fd0ff;font-weight:700}
-  pre .meta2{color:#ffd06a}
-  pre .kv{color:#9be6a6}
-  pre .num{color:var(--code-dim)}
-  .foot{margin-top:40px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:14px}
+  .edit{margin-top:42px}
+  .edit-h{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap}
+  .edit-h h2{margin:0;font:700 13px/1 var(--font-body);letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+  .edit-h .hint{font-size:13px;color:var(--muted)}
+  textarea{width:100%;min-height:230px;margin-top:12px;resize:vertical;background:var(--code-bg);color:var(--code-ink);border:1px solid var(--line);border-radius:14px;padding:16px 18px;font:500 13.5px/1.65 var(--font-mono);tab-size:2;box-shadow:var(--shadow)}
+  textarea:focus{outline:2px solid var(--red);outline-offset:2px}
+  .err{margin-top:10px;min-height:1.3em;color:#e2475a;font:500 13px/1.5 var(--font-mono);white-space:pre-wrap}
+  .foot{margin-top:36px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:14px}
   .foot code{font-family:var(--font-mono);color:var(--ink)}</style>
 <div class="wrap">
   <header>
-    <span class="eyebrow"><span class="rule"></span>DrillBoard · Markdown drill card</span>
-    <h1>Chip Off the Boards, Behind the D</h1>
-    <p class="lede">F1 banks a chip off the boards past the standing-up D and picks it up behind him in the neutral zone.</p>
+    <span class="eyebrow"><span class="rule"></span>DrillBoard · Live drill card</span>
+    <h1 id="title">Drill</h1>
+    <p class="lede" id="lede"></p>
   </header>
   <section class="card" aria-label="Rink diagram">
-    <div class="card-head"><span class="t">Full sheet</span><span class="meta">2 skaters · rendered from the DSL</span></div>
-    <div class="rinkbox"><svg class="rink" viewBox="-7 -7 214 99" xmlns="http://www.w3.org/2000/svg" role="img"><defs>
-      <clipPath id="ice"><rect x="0.6" y="0.6" width="198.8" height="83.8" rx="26"/></clipPath>
-      <marker id="arrowR" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="var(--mark,#cf3346)"/></marker>
-      <marker id="arrowP" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="var(--puck,#14171a)"/></marker>
-    </defs>
-    <rect x="0.6" y="0.6" width="198.8" height="83.8" rx="26" fill="var(--surface,#f6fafd)" stroke="var(--ink,#14202b)" stroke-width="1.1"/>
+    <div class="card-head"><span class="t">Full sheet</span><span class="meta" id="meta">rendered from the DSL</span></div>
+    <div class="rinkbox" id="diagram"></div>
+    <div class="legend" id="legend"></div>
+  </section>
+  <section class="edit">
+    <div class="edit-h"><h2>Edit the drill</h2><span class="hint">the rink redraws as you type</span></div>
+    <textarea id="dsl" spellcheck="false" autocomplete="off" autocapitalize="off">RINK full
+TITLE Chip Off the Boards, Behind the D
+DESC F1 banks a chip off the boards past the standing-up D and picks it up behind him in the neutral zone.
+PIECE N2 net 183 42.5 face=180 goalie
+PIECE D1 player 110 20 #1f4fa3 D1 defense
+PIECE F1 player 46 26 F1
+PATH F1 L 80,14 L 100,12 L 120,26
+PIECE PK1 puck 46 26 on=F1 chip=2:F1@3~-60</textarea>
+    <div class="err" id="err"></div>
+  </section>
+  <p class="foot">Drawn live by the DSL-to-SVG renderer (<code>src/drill-svg.js</code>). Paste any <code>drill</code> block above. See <code>docs/drill-dsl.md</code> for the format.</p>
+</div>
+<script>
+const VIEWS = { full:[0,0,200,85], half:[100,0,100,85], quarter:[100,0,100,42.5] };
+
+// Rink boards: a rounded-rectangle boundary the puck can rim along or bounce
+// off. Coordinates are rink feet (x 0..200, y 0..85). The puck-center boundary
+// is inset slightly from the painted board line so the puck rides the boards.
+
+const X0 = 2.5, X1 = 197.5, Y0 = 2.5, Y1 = 82.5, R = 23;
+const cxL = X0 + R, cxR = X1 - R, cyT = Y0 + R, cyB = Y1 - R;
+const HALF = Math.PI / 2;
+const W = cxR - cxL, H = cyB - cyT, A = HALF * R;
+const PERIM = 2 * W + 2 * H + 4 * A;
+
+// perimeter, clockwise from the top-left tangent point
+const S = [];
+let acc = 0;
+const line = (ax, ay, ux, uy, len) => { S.push({ s0: acc, len, kind: "line", ax, ay, ux, uy }); acc += len; };
+const arc = (cx, cy, a0) => { S.push({ s0: acc, len: A, kind: "arc", cx, cy, a0 }); acc += A; };
+line(cxL, Y0, 1, 0, W);      // top
+arc(cxR, cyT, -HALF);        // top-right corner
+line(X1, cyT, 0, 1, H);      // right
+arc(cxR, cyB, 0);            // bottom-right
+line(cxR, Y1, -1, 0, W);     // bottom
+arc(cxL, cyB, HALF);         // bottom-left
+line(X0, cyB, 0, -1, H);     // left
+arc(cxL, cyT, Math.PI);      // top-left
+
+function isInside(x, y) {
+  if (x < X0 || x > X1 || y < Y0 || y > Y1) return false;
+  if (x < cxL && y < cyT) return Math.hypot(x - cxL, y - cyT) <= R;
+  if (x > cxR && y < cyT) return Math.hypot(x - cxR, y - cyT) <= R;
+  if (x > cxR && y > cyB) return Math.hypot(x - cxR, y - cyB) <= R;
+  if (x < cxL && y > cyB) return Math.hypot(x - cxL, y - cyB) <= R;
+  return true;
+}
+
+// nearest boundary point + inward unit normal
+function nearest(x, y) {
+  let cx = null, cy = null;
+  if (x < cxL && y < cyT) { cx = cxL; cy = cyT; }
+  else if (x > cxR && y < cyT) { cx = cxR; cy = cyT; }
+  else if (x > cxR && y > cyB) { cx = cxR; cy = cyB; }
+  else if (x < cxL && y > cyB) { cx = cxL; cy = cyB; }
+  if (cx != null) {
+    const dx = x - cx, dy = y - cy, d = Math.hypot(dx, dy) || 1;
+    return { x: cx + (dx / d) * R, y: cy + (dy / d) * R, nx: -dx / d, ny: -dy / d };
+  }
+  const dTop = y - Y0, dBot = Y1 - y, dLeft = x - X0, dRight = X1 - x;
+  const m = Math.min(dTop, dBot, dLeft, dRight);
+  if (m === dTop) return { x, y: Y0, nx: 0, ny: 1 };
+  if (m === dBot) return { x, y: Y1, nx: 0, ny: -1 };
+  if (m === dLeft) return { x: X0, y, nx: 1, ny: 0 };
+  return { x: X1, y, nx: -1, ny: 0 };
+}
+
+function clampInside(x, y) {
+  if (isInside(x, y)) return { x, y };
+  const n = nearest(x, y);
+  return { x: n.x, y: n.y };
+}
+
+// keep a moving puck inside the boards, reflecting its velocity off them
+function contain(x, y, vx, vy, restitution = 0.7) {
+  if (isInside(x, y)) return { x, y, vx, vy, hit: false };
+  const n = nearest(x, y);
+  const dot = vx * n.nx + vy * n.ny;                 // n is the inward normal
+  if (dot < 0) { vx = (vx - 2 * dot * n.nx) * restitution; vy = (vy - 2 * dot * n.ny) * restitution; }
+  return { x: n.x, y: n.y, vx, vy, hit: true };
+}
+
+// unit tangent along the boards near a point, pointing toward `toward`
+function tangentToward(from, toward) {
+  const s = project(from).s;
+  const a = pointAt(s + 3), b = pointAt(s - 3);
+  const pick = Math.hypot(a.x - toward.x, a.y - toward.y) < Math.hypot(b.x - toward.x, b.y - toward.y) ? a : b;
+  const dx = pick.x - from.x, dy = pick.y - from.y, m = Math.hypot(dx, dy) || 1;
+  return { x: dx / m, y: dy / m };
+}
+
+// distance from a point to the nearest board
+const edgeDist = (x, y) => { const p = project({ x, y }); return Math.hypot(p.x - x, p.y - y); };
+
+function pointAt(s) {
+  s = ((s % PERIM) + PERIM) % PERIM;
+  for (const g of S) {
+    if (s <= g.s0 + g.len + 1e-9) {
+      const local = s - g.s0;
+      if (g.kind === "line") return { x: g.ax + g.ux * local, y: g.ay + g.uy * local };
+      const ang = g.a0 + (local / g.len) * HALF;
+      return { x: g.cx + Math.cos(ang) * R, y: g.cy + Math.sin(ang) * R };
+    }
+  }
+  return { x: S[0].ax, y: S[0].ay };
+}
+
+// nearest boundary location (arc-length s + point) to an arbitrary point
+function project(p) {
+  let best = null;
+  for (const g of S) {
+    let proj, s;
+    if (g.kind === "line") {
+      let t = (p.x - g.ax) * g.ux + (p.y - g.ay) * g.uy;
+      t = Math.max(0, Math.min(g.len, t));
+      proj = { x: g.ax + g.ux * t, y: g.ay + g.uy * t }; s = g.s0 + t;
+    } else {
+      let d = (((Math.atan2(p.y - g.cy, p.x - g.cx) - g.a0) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+      if (d > HALF) d = d - HALF < 2 * Math.PI - d ? HALF : 0;   // clamp onto the quarter
+      const aa = g.a0 + d;
+      proj = { x: g.cx + Math.cos(aa) * R, y: g.cy + Math.sin(aa) * R }; s = g.s0 + (d / HALF) * g.len;
+    }
+    const dist = Math.hypot(p.x - proj.x, p.y - proj.y);
+    if (!best || dist < best.dist) best = { dist, s, x: proj.x, y: proj.y };
+  }
+  return best;
+}
+
+// how far along the boards to aim the entry so the puck meets them at a shallow
+// angle instead of driving straight in and turning 90°
+const leadOf = (from, sF) => Math.min(Math.hypot(from.x - sF.x, from.y - sF.y) * 2.1, 52);
+const segAt = s => { s = ((s % PERIM) + PERIM) % PERIM; for (const g of S) if (s <= g.s0 + g.len + 1e-9) return g; return S[S.length - 1]; };
+// room left on the current straight/arc ahead in direction `dir`
+const roomAhead = (s, dir) => { const g = segAt(s); return dir > 0 ? g.s0 + g.len - s : s - g.s0; };
+
+// polyline that rims from `from` to `to` the short way around the boards
+function rimPath(from, to) {
+  const sF = project(from), sT = project(to);
+  const dPlus = (((sT.s - sF.s) % PERIM) + PERIM) % PERIM;
+  const dir = dPlus <= PERIM - dPlus ? 1 : -1;
+  const origTotal = dir > 0 ? dPlus : PERIM - dPlus;
+  // keep the entry on the same board section as the nearest point (no corner wrap)
+  const lead = Math.min(leadOf(from, sF), origTotal * 0.5, roomAhead(sF.s, dir));
+  const entryS = sF.s + dir * lead;
+  const total = origTotal - lead;
+  const pts = [{ x: from.x, y: from.y }, pointAt(entryS)];
+  for (let d = 3; d < total; d += 3) pts.push(pointAt(entryS + dir * d));
+  pts.push({ x: sT.x, y: sT.y }, { x: to.x, y: to.y });
+  return pts;
+}
+
+// polyline that rims `dist` ft around the boards. `aim` (deg) picks which way it
+// rims (the board direction closest to the aim); without it, the long way along
+// the nearest board so the entry stays shallow and doesn't cut across a corner
+function rimAround(from, dist, aim) {
+  const sF = project(from);
+  let dir;
+  if (aim != null) {
+    const ax = Math.cos((aim * Math.PI) / 180), ay = Math.sin((aim * Math.PI) / 180);
+    const p1 = pointAt(sF.s + 4), p2 = pointAt(sF.s - 4);
+    dir = (p1.x - sF.x) * ax + (p1.y - sF.y) * ay >= (p2.x - sF.x) * ax + (p2.y - sF.y) * ay ? 1 : -1;
+  } else {
+    dir = roomAhead(sF.s, 1) >= roomAhead(sF.s, -1) ? 1 : -1;  // more straight ahead
+  }
+  const lead = Math.min(leadOf(from, sF), Math.max(0, roomAhead(sF.s, dir) - 1));
+  const entryS = sF.s + dir * lead;
+  const pts = [{ x: from.x, y: from.y }, pointAt(entryS)];
+  for (let d = 3; d <= dist; d += 3) pts.push(pointAt(entryS + dir * d));
+  return pts;
+}
+
+// rim along the boards in the `aim` direction and stop at the point nearest a
+// collector's `target` — the aimed hard rim adjusts its distance to the pickup
+function rimTo(from, aim, target, maxDist = 260) {
+  const sF = project(from);
+  const ax = Math.cos((aim * Math.PI) / 180), ay = Math.sin((aim * Math.PI) / 180);
+  const p1 = pointAt(sF.s + 4), p2 = pointAt(sF.s - 4);
+  const dir = (p1.x - sF.x) * ax + (p1.y - sF.y) * ay >= (p2.x - sF.x) * ax + (p2.y - sF.y) * ay ? 1 : -1;
+  const lead = Math.min(leadOf(from, sF), Math.max(0, roomAhead(sF.s, dir) - 1));
+  const entryS = sF.s + dir * lead;
+  const pts = [{ x: from.x, y: from.y }, pointAt(entryS)];
+  let best = { d: Infinity, idx: 1 };
+  for (let d = 3; d <= maxDist; d += 3) {
+    const p = pointAt(entryS + dir * d); pts.push(p);
+    const dist = Math.hypot(p.x - target.x, p.y - target.y);
+    if (dist < best.d) best = { d: dist, idx: pts.length - 1 };
+    else if (dist > best.d + 12) break;   // clearly past the closest approach
+  }
+  const out = pts.slice(0, best.idx + 1);
+  out.push({ x: target.x, y: target.y });
+  return out;
+}
+
+// polyline of a puck sliding `dist` ft from a point, reflecting off the boards
+function slide(x, y, ux, uy, dist) {
+  let m = Math.hypot(ux, uy) || 1; ux /= m; uy /= m;
+  let cx = x, cy = y, rem = dist, guard = 0;
+  const pts = [{ x, y }];
+  while (rem > 0.5 && guard++ < 16) {
+    const tHit = rayHit(cx, cy, ux, uy, rem);
+    if (tHit >= rem) { cx += ux * rem; cy += uy * rem; pts.push({ x: cx, y: cy }); break; }
+    cx += ux * tHit; cy += uy * tHit; pts.push({ x: cx, y: cy });
+    const n = nearest(cx, cy), dot = ux * n.nx + uy * n.ny;   // reflect off the boards
+    ux -= 2 * dot * n.nx; uy -= 2 * dot * n.ny;
+    rem -= Math.max(tHit, 0.5);
+  }
+  return pts;
+}
+function rayHit(x, y, ux, uy, max) {
+  for (let t = 0.5; t <= max; t += 0.5) if (!isInside(x + ux * t, y + uy * t)) return t - 0.5;
+  return max;
+}
+
+// a chip fired along (ux,uy) that banks off the boards and travels only as far
+// as needed to reach `target` — the distance auto-adjusts to the pickup spot,
+// so aiming into the boards banks it there. Returns the polyline (ends at target).
+function slideTo(x, y, ux, uy, target, maxDist = 130) {
+  const v = slide(x, y, ux, uy, maxDist);
+  let best = { d: Infinity, seg: 1 };
+  for (let k = 1; k < v.length; k++) {
+    const a = v[k - 1], b = v[k];
+    const vx = b.x - a.x, vy = b.y - a.y, L2 = vx * vx + vy * vy || 1;
+    const s = Math.max(0, Math.min(1, ((target.x - a.x) * vx + (target.y - a.y) * vy) / L2));
+    const d = Math.hypot(target.x - (a.x + vx * s), target.y - (a.y + vy * s));
+    if (d < best.d) best = { d, seg: k };
+  }
+  const pts = v.slice(0, best.seg);   // bank vertices before the closest approach
+  pts.push({ x: target.x, y: target.y });
+  return pts;
+}
+
+
+const boards = { isInside, clampInside, contain, tangentToward, edgeDist, pointAt, project, rimPath, rimAround, rimTo, slide, slideTo, PERIM };
+
+// Drill text format: parser and serializer. See the DSL spec in App header.
+
+
+/* ---------------- text format ---------------- */
+
+// Pull the drill DSL out of a markdown ```drill fenced block, so a drill pasted
+// from a note or webpage round-trips. Returns the text unchanged if no fence.
+function extractDrill(text) {
+  const m = /```drill[^\n]*\r?\n([\s\S]*?)```/i.exec(text);
+  return m ? m[1].replace(/\s+$/, "") : text;
+}
+
+function parseDrill(text) {
+  const pieces = [];
+  const byId = {};
+  let rink = "full";
+  let title = "", desc = "";
+  const errors = [];
+  text.split(/\r?\n/).forEach((raw, i) => {
+    // TITLE/DESC take the whole rest of the line (may contain spaces or #)
+    const meta = /^\s*(title|desc)\b\s*(.*)$/i.exec(raw);
+    if (meta) { if (meta[1].toLowerCase() === "title") title = meta[2].trim(); else desc = meta[2].trim(); return; }
+    const line = raw.replace(/#(?!([0-9a-fA-F]{3}){1,2}\b).*$/, "").trim();
+    if (!line) return;
+    const tok = line.split(/[\s,]+/);
+    const cmd = tok[0].toUpperCase();
+    try {
+      if (cmd === "RINK") {
+        const m = (tok[1] || "").toLowerCase();
+        if (!VIEWS[m]) throw new Error(`unknown rink "${tok[1]}"`);
+        rink = m;
+      } else if (cmd === "PIECE") {
+        const [, id, kind, xs, ys, ...rest] = tok;
+        const x = parseFloat(xs), y = parseFloat(ys);
+        if (!id || !["player", "puck", "cone", "net", "bumper", "deker", "passer"].includes(kind) || isNaN(x) || isNaN(y))
+          throw new Error("PIECE needs: id kind x y");
+        let color = kind === "cone" ? "#e0731d" : kind === "puck" ? "#14171a" : kind === "net" ? "#c81e33"
+          : kind === "bumper" ? "#4d6fa6" : kind === "deker" ? "#c79a4e" : kind === "passer" ? "#57636f" : "#d7263d";
+        let label = kind === "player" ? id : "";
+        let speed = 1, hand = "R", carrier = null, facing = 0, shotAt = null, pickup = null, rimAt = null, chipAt = null, chipAim = null, rimAim = null;
+        let net = null, holdLine = false, goalie = false, defense = false;
+        const transfers = [];
+        rest.forEach(r => {
+          if (r.startsWith("#")) color = r;
+          else if (r.includes("=")) {
+            const [k, v] = r.split("=");
+            const key = k.toLowerCase();
+            if (key === "speed") {
+              const n = parseFloat(v);
+              if (!isNaN(n) && n > 0) speed = n;
+            } else if (key === "hand") hand = v.toUpperCase() === "L" ? "L" : "R";
+            else if (key === "on") carrier = v;
+            else if (key === "pass") {
+              const m2 = /^(\d+):([^@\s]+)(?:@(\d+))?$/.exec(v);
+              if (m2) transfers.push({ at: parseInt(m2[1], 10) - 1, to: m2[2],
+                recvAt: m2[3] ? parseInt(m2[3], 10) - 1 : null, kind: "pass" });
+            } else if (key === "rebound") {
+              // shot whose carom is collected by a player: shoot at <pt>, they
+              // gather at their @<pt> (else route end / where they stand)
+              const m4 = /^(\d+):([^@\s]+)(?:@(\d+))?$/.exec(v);
+              if (m4) transfers.push({ at: parseInt(m4[1], 10) - 1, to: m4[2],
+                recvAt: m4[3] ? parseInt(m4[3], 10) - 1 : null, kind: "shot" });
+            } else if (key === "shoot") {
+              const n = parseInt(v, 10);
+              if (!isNaN(n)) shotAt = n - 1;
+            } else if (key === "rim" || key === "chip") {
+              // rim=<pt> / chip=<pt> is terminal; rim=<pt>:<player>[@<pt>] hands off;
+              // a chip may carry an explicit aim angle as ~<deg>
+              const m5 = /^(\d+)(?::([^@\s~]+)(?:@(\d+))?)?(?:~(-?\d+(?:\.\d+)?))?$/.exec(v);
+              if (m5) {
+                const aim = m5[4] != null ? parseFloat(m5[4]) : null;
+                if (m5[2]) transfers.push({ at: parseInt(m5[1], 10) - 1, to: m5[2],
+                  recvAt: m5[3] ? parseInt(m5[3], 10) - 1 : null, kind: key, ...((key === "chip" || key === "rim") && aim != null ? { aim } : {}) });
+                else if (key === "rim") { rimAt = parseInt(m5[1], 10) - 1; rimAim = aim; }
+                else { chipAt = parseInt(m5[1], 10) - 1; chipAim = aim; }
+              }
+            } else if (key === "pickup") {
+              const m3 = /^([^@\s]+)@(\d+)$/.exec(v);
+              if (m3) pickup = { to: m3[1], at: parseInt(m3[2], 10) - 1 };
+            } else if (key === "net") {
+              net = v;                                   // a net piece id (or left/right for legacy)
+            } else if (key === "hold") {
+              if (v.toLowerCase() === "line") holdLine = true;
+            } else if (key === "face") {
+              const n = parseFloat(v);
+              if (!isNaN(n)) facing = n;
+            }
+          } else if (r === "goalie") goalie = true;
+          else if (r === "defense") defense = true;
+          else label = r;
+        });
+        const p = { id, kind, x, y, color, label, speed, hand, carrier, facing, transfers, shotAt, pickup, rimAt, chipAt, chipAim, rimAim, net, holdLine, goalie, defense, path: [] };
+        pieces.push(p); byId[id] = p;
+      } else if (cmd === "PATH") {
+        const id = tok[1];
+        const p = byId[id];
+        if (!p) throw new Error(`PATH for unknown piece "${id}"`);
+        let j = 2, mode = "carry", dir = "fwd", stop = 0, rate = 1, name = null;
+        const num = () => { const v = parseFloat(tok[j++]); if (isNaN(v)) throw new Error("bad number in PATH"); return v; };
+        const push = seg => {
+          p.path.push({ ...seg, mode, dir, stop, rate, ...(name ? { name } : {}) });
+          mode = "carry"; dir = "fwd"; stop = 0; rate = 1; name = null;
+        };
+        while (j < tok.length) {
+          const t = tok[j++].toUpperCase();
+          if (t === "CARRY" || t === "PASS" || t === "SHOT") { mode = t.toLowerCase(); continue; }
+          if (t === "FWD" || t === "BWD") { dir = t.toLowerCase(); continue; }
+          if (t === "STOP") { stop = num(); continue; }
+          if (t === "RATE") { rate = Math.max(0.1, num()); continue; }
+          if (t === "NAME") { name = (tok[j++] || "").replace(/_/g, " ").trim() || null; continue; }
+          if (t === "L") push({ type: "L", x: num(), y: num() });
+          else if (t === "Q") push({ type: "Q", cx: num(), cy: num(), x: num(), y: num() });
+          else if (t === "C") push({ type: "C", c1x: num(), c1y: num(), c2x: num(), c2y: num(), x: num(), y: num() });
+          else throw new Error(`unknown token "${t}" (use L Q C, PASS SHOT CARRY, FWD BWD, STOP n, RATE n)`);
+        }
+      } else throw new Error(`unknown command "${tok[0]}"`);
+    } catch (e) { errors.push(`line ${i + 1}: ${e.message}`); }
+  });
+  return { rink, pieces, errors, title, desc };
+}
+
+const f1 = n => (Math.round(n * 10) / 10).toString();
+const f2 = n => (Math.round(n * 100) / 100).toString();
+
+function segToStr(s) {
+  let pre = "";
+  if (s.name) pre += `NAME ${String(s.name).trim().replace(/\s+/g, "_")} `;
+  if (s.stop > 0) pre += `STOP ${f1(s.stop)} `;
+  if (s.rate && s.rate !== 1) pre += `RATE ${f2(s.rate)} `;
+  if (s.dir === "bwd") pre += "BWD ";
+  if (s.mode && s.mode !== "carry") pre += s.mode.toUpperCase() + " ";
+  if (s.type === "L") return `${pre}L ${f1(s.x)},${f1(s.y)}`;
+  if (s.type === "Q") return `${pre}Q ${f1(s.cx)},${f1(s.cy)} ${f1(s.x)},${f1(s.y)}`;
+  return `${pre}C ${f1(s.c1x)},${f1(s.c1y)} ${f1(s.c2x)},${f1(s.c2y)} ${f1(s.x)},${f1(s.y)}`;
+}
+
+function serializeDrill(rink, pieces, title = "", desc = "") {
+  const out = [`RINK ${rink}`];
+  if (title && title.trim()) out.push(`TITLE ${title.trim()}`);
+  if (desc && desc.trim()) out.push(`DESC ${desc.trim()}`);
+  out.push("");
+  pieces.forEach(p => {
+    const lbl = p.kind === "player" && p.label ? " " + p.label : "";
+    const spd = p.speed && p.speed !== 1 ? ` speed=${f2(p.speed)}` : "";
+    const hnd = p.kind === "player" && p.hand === "L" ? " hand=L" : "";
+    const car = p.kind === "puck" && p.carrier ? ` on=${p.carrier}` : "";
+    const gp = p.kind === "puck" && !p.carrier && p.pickup ? ` pickup=${p.pickup.to}@${p.pickup.at + 1}` : "";
+    // chain transfers in order: pass= passes, rebound= shot handoffs, rim=/chip= board plays
+    const kw = t => t.kind === "shot" ? "rebound" : t.kind === "rim" ? "rim" : t.kind === "chip" ? "chip" : "pass";
+    const pas = p.kind === "puck" && (p.carrier || p.pickup) && p.transfers && p.transfers.length
+      ? p.transfers.map(t => ` ${kw(t)}=${t.at + 1}:${t.to}${t.recvAt != null ? "@" + (t.recvAt + 1) : ""}${(t.kind === "chip" || t.kind === "rim") && t.aim != null ? "~" + f1(t.aim) : ""}`).join("")
+      : "";
+    const head = p.kind === "puck" && (p.carrier || p.pickup);
+    const sht = head && p.shotAt != null ? ` shoot=${p.shotAt + 1}` : "";
+    const rmT = head && p.rimAt != null ? ` rim=${p.rimAt + 1}${p.rimAim != null ? "~" + f1(p.rimAim) : ""}` : "";
+    const chT = head && p.chipAt != null ? ` chip=${p.chipAt + 1}${p.chipAim != null ? "~" + f1(p.chipAim) : ""}` : "";
+    const hasShot = p.kind === "puck" && (p.shotAt != null || (p.transfers || []).some(t => t.kind === "shot"));
+    const nt = hasShot && p.net ? ` net=${p.net}` : "";
+    const rotatable = p.kind === "net" || p.kind === "bumper" || p.kind === "deker" || p.kind === "passer" || (p.kind === "player" && !p.path.length);
+    const fac = rotatable && p.facing ? ` face=${f1(p.facing)}` : "";
+    const hld = p.kind === "player" && p.holdLine ? " hold=line" : "";
+    const gl = p.kind === "net" && p.goalie ? " goalie" : "";
+    const df = p.kind === "player" && p.defense ? " defense" : "";
+    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${car}${gp}${pas}${sht}${rmT}${chT}${nt}${hld}${fac}${gl}${df}${spd}`);
+    if (p.path.length) out.push(`PATH ${p.id} ${p.path.map(segToStr).join(" ")}`);
+  });
+  return out.join("\n") + "\n";
+}
+
+
+
+// Render a drill (DSL text) to a standalone SVG string: the rink markings,
+// every piece, each route, and the whole puck chain (passes, shots, rims,
+// chips) — using the real boards geometry so rim/chip banks are accurate.
+// Colours use CSS custom properties (with fallbacks) so a host page can theme
+// it; pieces use their own DSL colours.
+
+
+
+const NET_L = { x: 17, y: 42.5 }, NET_R = { x: 183, y: 42.5 };
+const f = n => Math.round(n * 100) / 100;
+const V = (name, fb) => `var(--${name},${fb})`;
+
+const routePoint = (p, idx) => {
+  if (!p.path.length || idx < 0) return { x: p.x, y: p.y };
+  const s = p.path[Math.min(idx, p.path.length - 1)];
+  return { x: s.x, y: s.y };
+};
+// outgoing heading at a route index (matches how a chip reads the facing)
+function heading(p, idx) {
+  const here = routePoint(p, idx);
+  const nxt = p.path[idx + 1] ? routePoint(p, idx + 1) : null;
+  const a = nxt || here, b = nxt ? here : (idx - 1 < 0 ? { x: p.x, y: p.y } : routePoint(p, idx - 1));
+  const dx = a.x - b.x, dy = a.y - b.y, m = Math.hypot(dx, dy) || 1;
+  return { x: dx / m, y: dy / m };
+}
+const aimVec = deg => ({ x: Math.cos((deg * Math.PI) / 180), y: Math.sin((deg * Math.PI) / 180) });
+const polyPts = pts => pts.map(p => `${f(p.x)},${f(p.y)}`).join(" ");
+
+/* ------------------------------------------------------------------ */
+/* rink markings (clipped to the rounded boards)                       */
+function rink() {
+  const mk = V("mark", "#cf3346"), mkb = V("mark-blue", "#2f5fb0");
+  const dot = (x, y, r = 1, c = mk) => `<circle cx="${x}" cy="${y}" r="${r}" fill="${c}"/>`;
+  const fo = (x, y, c) => `<circle cx="${x}" cy="${y}" r="15" fill="none" stroke="${c}" stroke-width="0.45" opacity="0.9"/>`;
+  return `
+    <rect x="0.6" y="0.6" width="198.8" height="83.8" rx="26" fill="${V("surface", "#f6fafd")}" stroke="${V("ink", "#14202b")}" stroke-width="1.1"/>
     <g clip-path="url(#ice)">
       <g stroke-linecap="round">
-        <line x1="17" y1="0" x2="17" y2="85" stroke="var(--mark,#cf3346)" stroke-width="0.45"/>
-        <line x1="183" y1="0" x2="183" y2="85" stroke="var(--mark,#cf3346)" stroke-width="0.45"/>
-        <line x1="75" y1="0" x2="75" y2="85" stroke="var(--mark-blue,#2f5fb0)" stroke-width="1.1"/>
-        <line x1="125" y1="0" x2="125" y2="85" stroke="var(--mark-blue,#2f5fb0)" stroke-width="1.1"/>
-        <line x1="100" y1="0" x2="100" y2="85" stroke="var(--mark,#cf3346)" stroke-width="1.1"/>
-        <path d="M 17 36.5 A 6 6 0 0 1 17 48.5" fill="#d3e9f7" stroke="var(--mark,#cf3346)" stroke-width="0.35" opacity="0.85"/>
-        <path d="M 183 36.5 A 6 6 0 0 0 183 48.5" fill="#d3e9f7" stroke="var(--mark,#cf3346)" stroke-width="0.35" opacity="0.85"/>
+        <line x1="17" y1="0" x2="17" y2="85" stroke="${mk}" stroke-width="0.45"/>
+        <line x1="183" y1="0" x2="183" y2="85" stroke="${mk}" stroke-width="0.45"/>
+        <line x1="75" y1="0" x2="75" y2="85" stroke="${mkb}" stroke-width="1.1"/>
+        <line x1="125" y1="0" x2="125" y2="85" stroke="${mkb}" stroke-width="1.1"/>
+        <line x1="100" y1="0" x2="100" y2="85" stroke="${mk}" stroke-width="1.1"/>
+        <path d="M 17 36.5 A 6 6 0 0 1 17 48.5" fill="#d3e9f7" stroke="${mk}" stroke-width="0.35" opacity="0.85"/>
+        <path d="M 183 36.5 A 6 6 0 0 0 183 48.5" fill="#d3e9f7" stroke="${mk}" stroke-width="0.35" opacity="0.85"/>
       </g>
-      <circle cx="100" cy="42.5" r="15" fill="none" stroke="var(--mark-blue,#2f5fb0)" stroke-width="0.45" opacity="0.9"/><circle cx="45" cy="20.5" r="15" fill="none" stroke="var(--mark,#cf3346)" stroke-width="0.45" opacity="0.9"/><circle cx="45" cy="64.5" r="15" fill="none" stroke="var(--mark,#cf3346)" stroke-width="0.45" opacity="0.9"/><circle cx="155" cy="20.5" r="15" fill="none" stroke="var(--mark,#cf3346)" stroke-width="0.45" opacity="0.9"/><circle cx="155" cy="64.5" r="15" fill="none" stroke="var(--mark,#cf3346)" stroke-width="0.45" opacity="0.9"/>
-      <circle cx="100" cy="42.5" r="0.9" fill="var(--mark-blue,#2f5fb0)"/><circle cx="45" cy="20.5" r="1" fill="var(--mark,#cf3346)"/><circle cx="45" cy="64.5" r="1" fill="var(--mark,#cf3346)"/><circle cx="155" cy="20.5" r="1" fill="var(--mark,#cf3346)"/><circle cx="155" cy="64.5" r="1" fill="var(--mark,#cf3346)"/>
-      <circle cx="80" cy="20.5" r="1" fill="var(--mark,#cf3346)"/><circle cx="80" cy="64.5" r="1" fill="var(--mark,#cf3346)"/><circle cx="120" cy="20.5" r="1" fill="var(--mark,#cf3346)"/><circle cx="120" cy="64.5" r="1" fill="var(--mark,#cf3346)"/>
+      ${fo(100, 42.5, mkb)}${fo(45, 20.5, mk)}${fo(45, 64.5, mk)}${fo(155, 20.5, mk)}${fo(155, 64.5, mk)}
+      ${dot(100, 42.5, 0.9, mkb)}${dot(45, 20.5)}${dot(45, 64.5)}${dot(155, 20.5)}${dot(155, 64.5)}
+      ${dot(80, 20.5)}${dot(80, 64.5)}${dot(120, 20.5)}${dot(120, 64.5)}
       <g fill="none" stroke="#c81e33" stroke-width="0.55" stroke-linejoin="round" opacity="0.9">
         <path d="M 17 39 L 12.6 39.7 L 12.6 45.3 L 17 46"/>
         <path d="M 183 39 L 187.4 39.7 L 187.4 45.3 L 183 46"/>
       </g>
-    </g><path d="M 46 26 L 80 14 L 100 12 L 120 26" fill="none" stroke="#d7263d" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round" opacity="0.9" marker-end="url(#arrowR)"/><circle cx="80" cy="14" r="2" fill="var(--panel,#fff)" stroke="#d7263d" stroke-width="0.5"/><text x="80" y="14.9" font-size="2.6" font-weight="700" text-anchor="middle" fill="#d7263d">1</text><circle cx="100" cy="12" r="2" fill="var(--panel,#fff)" stroke="#d7263d" stroke-width="0.5"/><text x="100" y="12.9" font-size="2.6" font-weight="700" text-anchor="middle" fill="#d7263d">2</text><circle cx="120" cy="26" r="2" fill="var(--panel,#fff)" stroke="#d7263d" stroke-width="0.5"/><text x="120" y="26.9" font-size="2.6" font-weight="700" text-anchor="middle" fill="#d7263d">3</text><polyline points="100,12 105.25,2.91 120,26" fill="none" stroke="var(--puck,#14171a)" stroke-width="0.9" stroke-dasharray="2.4 2" stroke-linecap="round" stroke-linejoin="round" opacity="0.85" marker-end="url(#arrowP)"/><g transform="translate(183 42.5) rotate(180)"><path d="M 0 -3.75 L -4.6 -3 L -4.6 3 L 0 3.75 Z" fill="rgba(210,225,240,0.16)" stroke="#c81e33" stroke-width="0.5" stroke-linejoin="round"/><circle cx="0" cy="-3.75" r="0.7" fill="#c81e33"/><circle cx="0" cy="3.75" r="0.7" fill="#c81e33"/><rect x="-1.6" y="-2.4" width="2.4" height="4.8" rx="1.1" fill="#2f9e57" stroke="#fff" stroke-width="0.3"/></g><circle cx="46" cy="26" r="1.5" fill="var(--puck,#14171a)" stroke="var(--surface,#fff)" stroke-width="0.4"/><g><circle cx="110" cy="20" r="3.4" fill="#1f4fa3" stroke="#fff" stroke-width="0.5"/><text x="110" y="21.05" font-weight="800" font-size="3" text-anchor="middle" fill="#fff">D1</text></g><g><circle cx="46" cy="26" r="3.4" fill="#d7263d" stroke="#fff" stroke-width="0.5"/><text x="46" y="27.05" font-weight="800" font-size="3" text-anchor="middle" fill="#fff">F1</text></g></svg></div>
-    <div class="legend"><span><span class="dot" style="background:#1f4fa3"></span>D1 — auto-D</span><span><span class="dot" style="background:#d7263d"></span>F1</span><span><span class="dot" style="background:#2f9e57"></span>N2 — net + goalie</span><span><span class="solid"></span>skating route</span><span><span class="dash"></span>puck path</span></div>
-  </section>
-  <h2 class="src-h">The source</h2>
-  <p class="src-note">The rink above is drawn automatically from this fenced <code>drill</code> block by <code>src/drill-svg.js</code>. Paste the block into DrillBoard (<b>☰ → Text editor → Apply</b>) or <b>Load</b> the file and it plays.</p>
-  <div class="code">
-    <div class="code-bar"><span class="lang">drill</span><span class="file">example-drill.md</span></div>
-    <pre><code><span class="cmd">RINK</span> full
-<span class="meta2">TITLE</span> Chip Off the Boards, Behind the D
-<span class="meta2">DESC</span> F1 banks a chip off the boards past the standing-up D and picks it up behind him in the neutral zone.
-<span class="cmd">PIECE</span> N2 net <span class="num">183</span> <span class="num">42.5</span> <span class="kv">face=180</span> goalie
-<span class="cmd">PIECE</span> D1 player <span class="num">110</span> <span class="num">20</span> <span class="kv">#1f4fa3</span> D1 defense
-<span class="cmd">PIECE</span> F1 player <span class="num">46</span> <span class="num">26</span> F1
-<span class="cmd">PATH</span> F1 L <span class="num">80,14</span> L <span class="num">100,12</span> L <span class="num">120,26</span>
-<span class="cmd">PIECE</span> PK1 puck <span class="num">46</span> <span class="num">26</span> <span class="kv">on=F1</span> <span class="kv">chip=2:F1@3~-60</span></code></pre>
-  </div>
-  <p class="foot">Diagram generated by the DSL-to-SVG renderer — change the drill text and re-run <code>scripts/build-drill-preview.mjs</code> to redraw. See <code>docs/drill-dsl.md</code> for the format.</p>
-</div>
+    </g>`;
+}
+
+/* ------------------------------------------------------------------ */
+/* piece icons                                                         */
+function piece(p) {
+  const rot = (a = p.facing || 0) => `translate(${f(p.x)} ${f(p.y)}) rotate(${f(a)})`;
+  if (p.kind === "player")
+    return `<g><circle cx="${f(p.x)}" cy="${f(p.y)}" r="3.4" fill="${p.color}" stroke="#fff" stroke-width="0.5"/>`
+      + `<text x="${f(p.x)}" y="${f(p.y) + 1.05}" font-weight="800" font-size="3" text-anchor="middle" fill="#fff">${p.label || ""}</text></g>`;
+  if (p.kind === "puck")
+    return `<circle cx="${f(p.x)}" cy="${f(p.y)}" r="1.5" fill="${V("puck", "#14171a")}" stroke="${V("surface", "#fff")}" stroke-width="0.4"/>`;
+  if (p.kind === "cone")
+    return `<path transform="${rot()}" d="M 0 -2.4 L 2.2 1.8 L -2.2 1.8 Z" fill="${p.color}" stroke="#fff" stroke-width="0.35" stroke-linejoin="round"/>`;
+  if (p.kind === "net")
+    return `<g transform="${rot()}"><path d="M 0 -3.75 L -4.6 -3 L -4.6 3 L 0 3.75 Z" fill="rgba(210,225,240,0.16)" stroke="${p.color}" stroke-width="0.5" stroke-linejoin="round"/>`
+      + `<circle cx="0" cy="-3.75" r="0.7" fill="${p.color}"/><circle cx="0" cy="3.75" r="0.7" fill="${p.color}"/>`
+      + (p.goalie ? `<rect x="-1.6" y="-2.4" width="2.4" height="4.8" rx="1.1" fill="#2f9e57" stroke="#fff" stroke-width="0.3"/>` : "") + `</g>`;
+  if (p.kind === "bumper")
+    return `<g transform="${rot()}"><rect x="-7" y="-0.95" width="14" height="1.9" rx="0.95" fill="${p.color}" stroke="#fff" stroke-width="0.3"/>`
+      + `<path d="M -3.5 -0.75 L -3.5 0.75 M 0 -0.75 L 0 0.75 M 3.5 -0.75 L 3.5 0.75" stroke="#fff" stroke-width="0.18" opacity="0.4"/></g>`;
+  if (p.kind === "deker")
+    return `<g transform="${rot()}"><line x1="-2.6" y1="0" x2="2.6" y2="0" stroke="#1d2126" stroke-width="0.22" opacity="0.32" stroke-dasharray="0.6 0.5"/>`
+      + `<circle cx="0" cy="-1.6" r="0.55" fill="#e0731d" stroke="#fff" stroke-width="0.2"/><circle cx="0" cy="1.6" r="0.55" fill="#e0731d" stroke="#fff" stroke-width="0.2"/>`
+      + `<rect x="-0.32" y="-2.6" width="0.64" height="5.2" rx="0.32" fill="${p.color}" stroke="#5a4420" stroke-width="0.2"/></g>`;
+  if (p.kind === "passer")
+    return `<g transform="${rot()}"><rect x="-1.6" y="-2.6" width="3.2" height="5.2" rx="0.5" fill="rgba(210,225,240,0.14)" stroke="${p.color}" stroke-width="0.5"/>`
+      + `<rect x="0.85" y="-2.6" width="0.75" height="5.2" rx="0.3" fill="${p.color}"/></g>`;
+  return "";
+}
+
+/* ------------------------------------------------------------------ */
+/* routes + chain                                                      */
+function routePath(p) {
+  if (!p.path.length) return "";
+  let d = `M ${f(p.x)} ${f(p.y)}`;
+  p.path.forEach(s => {
+    if (s.type === "L") d += ` L ${f(s.x)} ${f(s.y)}`;
+    else if (s.type === "Q") d += ` Q ${f(s.cx)} ${f(s.cy)} ${f(s.x)} ${f(s.y)}`;
+    else d += ` C ${f(s.c1x)} ${f(s.c1y)} ${f(s.c2x)} ${f(s.c2y)} ${f(s.x)} ${f(s.y)}`;
+  });
+  const dots = p.path.map((s, i) =>
+    `<circle cx="${f(s.x)}" cy="${f(s.y)}" r="2" fill="${V("panel", "#fff")}" stroke="${p.color}" stroke-width="0.5"/>`
+    + `<text x="${f(s.x)}" y="${f(s.y) + 0.9}" font-size="2.6" font-weight="700" text-anchor="middle" fill="${p.color}">${i + 1}</text>`).join("");
+  return `<path d="${d}" fill="none" stroke="${p.color}" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round" opacity="0.9" marker-end="url(#arrowR)"/>${dots}`;
+}
+
+const chainLine = (pts, solid) =>
+  `<polyline points="${polyPts(pts)}" fill="none" stroke="${V("puck", "#14171a")}" stroke-width="${solid ? 1.1 : 0.9}"`
+  + `${solid ? "" : ' stroke-dasharray="2.4 2"'} stroke-linecap="round" stroke-linejoin="round" opacity="0.85" marker-end="url(#arrowP)"/>`;
+
+function chain(pk, byId, pieces) {
+  let cur = pk.carrier ? byId(pk.carrier) : (pk.pickup && byId(pk.pickup.to));
+  if (!cur) return "";
+  const nets = pieces.filter(q => q.kind === "net" || q.kind === "passer");
+  const shotNet = launch => {
+    if (pk.net) { const n = nets.find(x => x.id === pk.net); if (n) return { x: n.x, y: n.y }; }
+    if (nets.length) return nets.reduce((a, b) => (Math.hypot(b.x - launch.x, b.y - launch.y) < Math.hypot(a.x - launch.x, a.y - launch.y) ? b : a));
+    return launch.x < 100 ? NET_L : NET_R;
+  };
+  const out = [];
+  const rimPoly = (launch, aim, anchor) => (aim != null ? boards.rimTo(launch, aim, anchor) : boards.rimPath(launch, anchor));
+  (pk.transfers || []).forEach(tr => {
+    const rec = byId(tr.to); if (!rec) return;
+    const launch = routePoint(cur, tr.at);
+    const anchor = routePoint(rec, tr.recvAt == null ? rec.path.length - 1 : tr.recvAt);
+    if (tr.kind === "shot") out.push(chainLine([launch, shotNet(launch)], true), chainLine([shotNet(launch), anchor], false));
+    else if (tr.kind === "rim") out.push(chainLine(rimPoly(launch, tr.aim, anchor), false));
+    else if (tr.kind === "chip") { const h = tr.aim != null ? aimVec(tr.aim) : heading(cur, tr.at); out.push(chainLine(boards.slideTo(launch.x, launch.y, h.x, h.y, anchor), false)); }
+    else out.push(chainLine([launch, anchor], false));   // pass
+    cur = rec;
+  });
+  if (pk.shotAt != null) { const l = routePoint(cur, pk.shotAt); out.push(chainLine([l, shotNet(l)], true)); }
+  else if (pk.rimAt != null) { const l = routePoint(cur, pk.rimAt); out.push(chainLine(boards.rimAround(l, 65, pk.rimAim), false)); }
+  else if (pk.chipAt != null) { const l = routePoint(cur, pk.chipAt); const h = pk.chipAim != null ? aimVec(pk.chipAim) : heading(cur, pk.chipAt); out.push(chainLine(boards.slide(l.x, l.y, h.x, h.y, 16), false)); }
+  return out.join("");
+}
+
+/* ------------------------------------------------------------------ */
+function drillSvg(dsl, opts = {}) {
+  const { pieces } = parseDrill(dsl);
+  const byId = id => pieces.find(p => p.id === id);
+  const rank = k => (k === "net" || k === "bumper" || k === "deker" || k === "passer" ? 0 : k === "player" ? 2 : 1);
+  const defs = `<defs>
+      <clipPath id="ice"><rect x="0.6" y="0.6" width="198.8" height="83.8" rx="26"/></clipPath>
+      <marker id="arrowR" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="${V("mark", "#cf3346")}"/></marker>
+      <marker id="arrowP" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="${V("puck", "#14171a")}"/></marker>
+    </defs>`;
+  const routes = pieces.map(routePath).join("");
+  const chains = pieces.filter(p => p.kind === "puck").map(pk => chain(pk, byId, pieces)).join("");
+  const icons = [...pieces].sort((a, b) => rank(a.kind) - rank(b.kind)).map(piece).join("");
+  const wattr = opts.width ? ` width="${opts.width}"` : "";
+  return `<svg class="rink" viewBox="-7 -7 214 99"${wattr} xmlns="http://www.w3.org/2000/svg" role="img">${defs}${rink()}${routes}${chains}${icons}</svg>`;
+}
+
+(function(){
+  var ta=document.getElementById('dsl'),dia=document.getElementById('diagram'),err=document.getElementById('err'),
+      title=document.getElementById('title'),lede=document.getElementById('lede'),leg=document.getElementById('legend'),meta=document.getElementById('meta');
+  function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+  function render(){
+    var dsl=extractDrill(ta.value),r;
+    try{ r=parseDrill(dsl); dia.innerHTML=drillSvg(dsl); }
+    catch(e){ err.textContent=String(e&&e.message||e); return; }
+    err.textContent=r.errors.length?r.errors.join('  \u00b7  '):'';
+    title.textContent=r.title||'Drill'; lede.textContent=r.desc||'';
+    var players=r.pieces.filter(function(p){return p.kind==='player';});
+    var L=players.map(function(p){return '<span><span class="dot" style="background:'+p.color+'"></span>'+esc(p.id)+(p.defense?' \u2014 auto-D':'')+'</span>';});
+    r.pieces.filter(function(p){return p.kind==='net';}).forEach(function(p){L.push('<span><span class="dot" style="background:'+(p.goalie?'#2f9e57':p.color)+'"></span>'+esc(p.id)+(p.goalie?' \u2014 net + goalie':' \u2014 net')+'</span>');});
+    L.push('<span><span class="solid"></span>skating route</span>','<span><span class="dash"></span>puck path</span>');
+    leg.innerHTML=L.join('');
+    meta.textContent=players.length+' skater'+(players.length===1?'':'s')+' \u00b7 live';
+  }
+  ta.addEventListener('input',render); render();
+})();
+</script>
