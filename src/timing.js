@@ -101,6 +101,17 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
         }
         return { t, end: prev };
       };
+      // subdivide a polyline into ~step-ft segments so a per-leg speed ramp
+      // (ease-out) reads smoothly instead of jumping between sparse vertices
+      const densify = (poly, step = 2.5) => {
+        const out = [poly[0]];
+        for (let k = 1; k < poly.length; k++) {
+          const a = poly[k - 1], b = poly[k];
+          const n = Math.max(1, Math.round(Math.hypot(b.x - a.x, b.y - a.y) / step));
+          for (let j = 1; j <= n; j++) out.push({ x: a.x + (b.x - a.x) * (j / n), y: a.y + (b.y - a.y) * (j / n) });
+        }
+        return out;
+      };
       // the direction the player is facing at time t — the exact angle its icon
       // shows (facing for a stationary player, the movement/tangent for a route
       // player), so a chip goes the way they're pointed
@@ -233,16 +244,17 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
           // carrier's facing/aim, banks off the boards, and travels exactly as
           // far as it takes to reach the collector's spot — a harder chip for a
           // farther pickup, softer for a nearer one
-          let poly, speed;
+          let poly, speed, ease = 0;
           if (tr.kind === "rim") { poly = boards.rimPath(launch, anchor); speed = vRim(); }
           else {
             const h = chipHeading(cur, launchT, tr.aim);
-            poly = boards.slideTo(launch.x, launch.y, h.x, h.y, anchor);
+            poly = densify(boards.slideTo(launch.x, launch.y, h.x, h.y, anchor));
             let len = 0;
             for (let k = 1; k < poly.length; k++) len += Math.hypot(poly[k].x - poly[k - 1].x, poly[k].y - poly[k - 1].y);
             speed = vChip() + (vRim() - vChip()) * Math.min(1, Math.max(0, (len - 18) / 40));  // hard vs soft
+            ease = Math.min(len * 0.5, 15);                                                     // glide to a settle
           }
-          const r = pushTravel(poly, launchT, speed, { by: cur.id, rim: tr.kind === "rim", chip: tr.kind === "chip" });
+          const r = pushTravel(poly, launchT, speed, { by: cur.id, rim: tr.kind === "rim", chip: tr.kind === "chip", easeOut: ease });
           // the puck lands loose and waits at the spot until the collector's route
           // reaches its collect waypoint (pick it up like a rebound)
           const gatherT = gj >= 0 ? Math.max(r.t, routeTimeW(rec, warp, gj)) : r.t;
