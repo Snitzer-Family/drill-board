@@ -154,6 +154,28 @@ export function rimAround(from, dist, aim) {
   return pts;
 }
 
+// rim along the boards in the `aim` direction and stop at the point nearest a
+// collector's `target` — the aimed hard rim adjusts its distance to the pickup
+export function rimTo(from, aim, target, maxDist = 260) {
+  const sF = project(from);
+  const ax = Math.cos((aim * Math.PI) / 180), ay = Math.sin((aim * Math.PI) / 180);
+  const p1 = pointAt(sF.s + 4), p2 = pointAt(sF.s - 4);
+  const dir = (p1.x - sF.x) * ax + (p1.y - sF.y) * ay >= (p2.x - sF.x) * ax + (p2.y - sF.y) * ay ? 1 : -1;
+  const lead = Math.min(leadOf(from, sF), Math.max(0, roomAhead(sF.s, dir) - 1));
+  const entryS = sF.s + dir * lead;
+  const pts = [{ x: from.x, y: from.y }, pointAt(entryS)];
+  let best = { d: Infinity, idx: 1 };
+  for (let d = 3; d <= maxDist; d += 3) {
+    const p = pointAt(entryS + dir * d); pts.push(p);
+    const dist = Math.hypot(p.x - target.x, p.y - target.y);
+    if (dist < best.d) best = { d: dist, idx: pts.length - 1 };
+    else if (dist > best.d + 12) break;   // clearly past the closest approach
+  }
+  const out = pts.slice(0, best.idx + 1);
+  out.push({ x: target.x, y: target.y });
+  return out;
+}
+
 // polyline of a puck sliding `dist` ft from a point, reflecting off the boards
 export function slide(x, y, ux, uy, dist) {
   let m = Math.hypot(ux, uy) || 1; ux /= m; uy /= m;

@@ -245,8 +245,10 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
           // far as it takes to reach the collector's spot — a harder chip for a
           // farther pickup, softer for a nearer one
           let poly, speed, ease = 0;
-          if (tr.kind === "rim") { poly = boards.rimPath(launch, anchor); speed = vRim(); }
-          else {
+          if (tr.kind === "rim") {
+            poly = densify(tr.aim != null ? boards.rimTo(launch, tr.aim, anchor) : boards.rimPath(launch, anchor));
+            speed = vRim(); ease = 14;                                                    // settle at the collector
+          } else {
             const h = chipHeading(cur, launchT, tr.aim);
             poly = densify(boards.slideTo(launch.x, launch.y, h.x, h.y, anchor));
             let len = 0;

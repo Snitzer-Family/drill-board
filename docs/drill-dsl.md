@@ -99,8 +99,8 @@ Places a piece. `id` is any unique token (e.g. `F1`, `PK1`, `N2`).
 | `pass=<pt>:<to>[@<recv>]` | Pass at point `pt` to player `to`, caught at their point `recv` |
 | `rebound=<pt>:<to>[@<recv>]` | Shoot at `pt`; the carom is collected by `to` at their point `recv` |
 | `shoot=<pt>` | Terminal shot at point `pt` |
-| `rim=<pt>` | Terminal hard rim around the boards (a clear) |
-| `rim=<pt>:<to>[@<recv>]` | Rim around the boards to player `to` |
+| `rim=<pt>[~<deg>]` | Hard rim around the boards; `~<deg>` (or the aim ring) picks which way. A rimmed puck lands loose — a player can **collect** it at a later waypoint (which turns it into the row below). |
+| `rim=<pt>:<to>[@<recv>][~<deg>]` | Rim to player `to`, who collects it at their point `recv`. Follows the boards the short way, or in the `~<deg>` direction, and settles at the collector. |
 | `chip=<pt>:<to>[@<recv>][~<deg>]` | Chip to `to` (self or a teammate): fires along the chipper's facing (or `~<deg>` aim), banks off the boards, and carries exactly as far as `to`'s pickup point `recv` — a harder chip for a farther pickup. Aim it into the boards for a bank-off-the-glass to yourself. Always goes to a collector; never ends possession. |
 | `pickup=<to>@<pt>` | A loose puck hops onto player `to`'s blade at their point `pt` |
 

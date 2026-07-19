@@ -70,7 +70,7 @@ export function parseDrill(text) {
               if (m5) {
                 const aim = m5[4] != null ? parseFloat(m5[4]) : null;
                 if (m5[2]) transfers.push({ at: parseInt(m5[1], 10) - 1, to: m5[2],
-                  recvAt: m5[3] ? parseInt(m5[3], 10) - 1 : null, kind: key, ...(key === "chip" && aim != null ? { aim } : {}) });
+                  recvAt: m5[3] ? parseInt(m5[3], 10) - 1 : null, kind: key, ...((key === "chip" || key === "rim") && aim != null ? { aim } : {}) });
                 else if (key === "rim") { rimAt = parseInt(m5[1], 10) - 1; rimAim = aim; }
                 else { chipAt = parseInt(m5[1], 10) - 1; chipAim = aim; }
               }
@@ -148,7 +148,7 @@ export function serializeDrill(rink, pieces, title = "", desc = "") {
     // chain transfers in order: pass= passes, rebound= shot handoffs, rim=/chip= board plays
     const kw = t => t.kind === "shot" ? "rebound" : t.kind === "rim" ? "rim" : t.kind === "chip" ? "chip" : "pass";
     const pas = p.kind === "puck" && (p.carrier || p.pickup) && p.transfers && p.transfers.length
-      ? p.transfers.map(t => ` ${kw(t)}=${t.at + 1}:${t.to}${t.recvAt != null ? "@" + (t.recvAt + 1) : ""}${t.kind === "chip" && t.aim != null ? "~" + f1(t.aim) : ""}`).join("")
+      ? p.transfers.map(t => ` ${kw(t)}=${t.at + 1}:${t.to}${t.recvAt != null ? "@" + (t.recvAt + 1) : ""}${(t.kind === "chip" || t.kind === "rim") && t.aim != null ? "~" + f1(t.aim) : ""}`).join("")
       : "";
     const head = p.kind === "puck" && (p.carrier || p.pickup);
     const sht = head && p.shotAt != null ? ` shoot=${p.shotAt + 1}` : "";

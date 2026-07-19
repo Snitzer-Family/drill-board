@@ -688,7 +688,7 @@ export default function DrillAnimator() {
       if (q.id !== pkId) return q;
       const ts = (q.transfers || []).slice(0, stage);
       if (tr) ts[stage] = tr;
-      return { ...q, transfers: ts, shotAt: null, rimAt: null, chipAt: null };
+      return { ...q, transfers: ts, shotAt: null, rimAt: null, chipAt: null, rimAim: null, chipAim: null };
     });
   }
   // terminal actions (shoot / hard rim / chip into space) are mutually exclusive
@@ -1093,7 +1093,7 @@ export default function DrillAnimator() {
     const ts = pk.transfers || [];
     const knobs = [];
     ts.forEach((tr, s) => {
-      if (tr.kind === "chip" && chain[s] === p.id) knobs.push({ at: tr.at, aim: tr.aim, target: { stage: s } });
+      if ((tr.kind === "chip" || tr.kind === "rim") && chain[s] === p.id) knobs.push({ at: tr.at, aim: tr.aim, target: { stage: s } });
     });
     const last = chain.length - 1;
     if (pk.chipAt != null && chain[last] === p.id)
@@ -1593,6 +1593,25 @@ export default function DrillAnimator() {
               </div>
             );
           })()}
+          {p.kind === "player" && (() => {
+            // a hard-rimmed puck lands loose — let this player collect it here,
+            // continuing the chain (converts the terminal rim to a rim to them)
+            const rims = pieces.filter(q => q.kind === "puck" && q.rimAt != null
+              && !(puckChain(q).slice(-1)[0] === p.id && i <= q.rimAt));
+            if (!rims.length) return null;
+            return (
+              <div className="hd-poprow">
+                <span>Collect rim</span>
+                {rims.map(q => (
+                  <button key={`rc-${q.id}`} className="hd-mini"
+                    onClick={() => setTransfer(q.id, (q.transfers || []).length,
+                      { at: q.rimAt, to: p.id, recvAt: i, kind: "rim", ...(q.rimAim != null ? { aim: q.rimAim } : {}) })}>
+                    {q.id}
+                  </button>
+                ))}
+              </div>
+            );
+          })()}
           {p.kind === "player" && chainControls(p, i)}
           <div className="hd-poprow">
             <button className="hd-mini danger" onClick={() => deleteSeg(p.id, i)}>Delete point</button>
@@ -2087,9 +2106,10 @@ export default function DrillAnimator() {
             point 3 — the receiver's pace auto-syncs (omit <code>@3</code> to lead them instead).
             Point <b>0</b> is the starting spot (release before skating to point 1).
             <code> shoot=4</code> fires at point 4 (targets the nearest net/passer, or <code>net=N2</code>/<code>net=PS1</code> for a specific one).
-            <code> rim=4</code> hard-rims the puck around the boards (a clear); add <code>~deg</code>
-            (<code>rim=4~90</code>) or drag the aim ring to pick which way it rims.
-            <code> rim=4:F2</code> rims it around to F2. A <b>chip</b> always goes to a collector:
+            <code> rim=4</code> hard-rims the puck around the boards; add <code>~deg</code>
+            (<code>rim=4~90</code>) or drag the aim ring to pick which way it rims. A rimmed puck can be
+            picked up — a player uses <b>Collect rim</b> at a waypoint, or write <code>rim=4:F2~90</code>
+            to rim it to F2. A <b>chip</b> always goes to a collector:
             <code> chip=4:F1</code> banks it off the boards for F1 (self or a teammate) and carries as far as
             their collect waypoint (harder for a farther pickup). Aim it with <code>~deg</code>
             (e.g. <code>chip=4:F1~-60</code> for a bank off the glass) or drag the on-ice aim ring.
