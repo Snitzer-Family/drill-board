@@ -1,0 +1,87 @@
+<title>Chip Off the Boards, Behind the D — DrillBoard drill card</title>
+<style>
+  :root{--ice:#eef5f9;--panel:#fff;--ink:#14202b;--muted:#5c6b78;--line:#d6e2ea;--hair:#e4edf3;--red:#d7263d;--blue:#1f4fa3;--surface:#f6fafd;--mark:#cf3346;--mark-blue:#2f5fb0;--puck:#14171a;--code-bg:#0f1a23;--code-ink:#d9e6f0;--code-dim:#7e93a4;--shadow:0 1px 2px rgba(20,32,43,.06),0 12px 34px -14px rgba(20,32,43,.28);--font-display:800 1em/1 "Helvetica Neue",Helvetica,Arial,sans-serif;--font-body:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;--font-mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace}
+  @media (prefers-color-scheme:dark){:root{--ice:#0d151c;--panel:#131f28;--ink:#e8eff5;--muted:#93a4b2;--line:#26343f;--hair:#1c2831;--red:#ff5a6a;--blue:#5f92e2;--surface:#16232d;--mark:#e2475a;--mark-blue:#4f7fd6;--puck:#cdd8e2;--code-bg:#0a1219;--code-ink:#d3e2ee;--code-dim:#6f8496;--shadow:0 1px 2px rgba(0,0,0,.4),0 18px 44px -18px rgba(0,0,0,.7)}}
+  :root[data-theme="light"]{--ice:#eef5f9;--panel:#fff;--ink:#14202b;--muted:#5c6b78;--line:#d6e2ea;--hair:#e4edf3;--red:#d7263d;--blue:#1f4fa3;--surface:#f6fafd;--mark:#cf3346;--mark-blue:#2f5fb0;--puck:#14171a;--code-bg:#0f1a23;--code-ink:#d9e6f0;--code-dim:#7e93a4;--shadow:0 1px 2px rgba(20,32,43,.06),0 12px 34px -14px rgba(20,32,43,.28)}
+  :root[data-theme="dark"]{--ice:#0d151c;--panel:#131f28;--ink:#e8eff5;--muted:#93a4b2;--line:#26343f;--hair:#1c2831;--red:#ff5a6a;--blue:#5f92e2;--surface:#16232d;--mark:#e2475a;--mark-blue:#4f7fd6;--puck:#cdd8e2;--code-bg:#0a1219;--code-ink:#d3e2ee;--code-dim:#6f8496;--shadow:0 1px 2px rgba(0,0,0,.4),0 18px 44px -18px rgba(0,0,0,.7)}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ice);color:var(--ink);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:940px;margin:0 auto;padding:clamp(28px,5vw,64px) clamp(18px,4vw,40px) 80px}
+  .eyebrow{display:inline-flex;align-items:center;gap:8px;font:700 12px/1 var(--font-body);letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+  .eyebrow .rule{width:26px;height:2px;background:var(--red);border-radius:2px}
+  h1{font:var(--font-display);font-size:clamp(32px,6vw,56px);letter-spacing:-.01em;text-transform:uppercase;text-wrap:balance;margin:16px 0 0;line-height:1}
+  .lede{max-width:62ch;margin:14px 0 0;font-size:clamp(16px,2.4vw,19px)}
+  .card{margin-top:clamp(26px,4vw,40px);background:var(--panel);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);overflow:hidden}
+  .card-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:16px 20px;border-bottom:1px solid var(--hair)}
+  .card-head .t{font:700 13px/1 var(--font-body);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+  .card-head .meta{font:500 13px/1 var(--font-mono);color:var(--muted);font-variant-numeric:tabular-nums}
+  .rinkbox{padding:clamp(14px,3vw,26px)}
+  svg.rink{display:block;width:100%;height:auto}
+  .legend{display:flex;flex-wrap:wrap;gap:8px 20px;padding:4px 22px 20px;font:500 13px/1.2 var(--font-body);color:var(--muted)}
+  .legend span{display:inline-flex;align-items:center;gap:8px}
+  .legend .dot{width:12px;height:12px;border-radius:50%;flex:none}
+  .legend .dash{width:20px;height:0;border-top:2px dashed var(--puck);flex:none}
+  .legend .solid{width:20px;height:0;border-top:2.5px solid var(--red);flex:none}
+  .src-h{margin:42px 0 0;font:700 13px/1 var(--font-body);letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+  .src-note{max-width:62ch;margin:10px 0 16px;color:var(--muted);font-size:15px}
+  .src-note code{font-family:var(--font-mono);font-size:.92em;color:var(--ink);background:var(--surface);padding:1px 6px;border-radius:5px;border:1px solid var(--line)}
+  .code{background:var(--code-bg);border-radius:14px;box-shadow:var(--shadow);overflow:hidden;border:1px solid rgba(255,255,255,.04)}
+  .code-bar{display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid rgba(255,255,255,.07)}
+  .code-bar .lang{font:700 11px/1 var(--font-mono);letter-spacing:.1em;text-transform:uppercase;color:#eef5f9;background:var(--red);padding:4px 8px;border-radius:5px}
+  .code-bar .file{font:500 13px/1 var(--font-mono);color:var(--code-dim)}
+  pre{margin:0;padding:18px 20px;overflow-x:auto;font:500 13.5px/1.65 var(--font-mono);color:var(--code-ink);font-variant-numeric:tabular-nums;tab-size:2}
+  pre .cmd{color:#8fd0ff;font-weight:700}
+  pre .meta2{color:#ffd06a}
+  pre .kv{color:#9be6a6}
+  pre .num{color:var(--code-dim)}
+  .foot{margin-top:40px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:14px}
+  .foot code{font-family:var(--font-mono);color:var(--ink)}</style>
+<div class="wrap">
+  <header>
+    <span class="eyebrow"><span class="rule"></span>DrillBoard · Markdown drill card</span>
+    <h1>Chip Off the Boards, Behind the D</h1>
+    <p class="lede">F1 banks a chip off the boards past the standing-up D and picks it up behind him in the neutral zone.</p>
+  </header>
+  <section class="card" aria-label="Rink diagram">
+    <div class="card-head"><span class="t">Full sheet</span><span class="meta">2 skaters · rendered from the DSL</span></div>
+    <div class="rinkbox"><svg class="rink" viewBox="-7 -7 214 99" xmlns="http://www.w3.org/2000/svg" role="img"><defs>
+      <clipPath id="ice"><rect x="0.6" y="0.6" width="198.8" height="83.8" rx="26"/></clipPath>
+      <marker id="arrowR" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="var(--mark,#cf3346)"/></marker>
+      <marker id="arrowP" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="var(--puck,#14171a)"/></marker>
+    </defs>
+    <rect x="0.6" y="0.6" width="198.8" height="83.8" rx="26" fill="var(--surface,#f6fafd)" stroke="var(--ink,#14202b)" stroke-width="1.1"/>
+    <g clip-path="url(#ice)">
+      <g stroke-linecap="round">
+        <line x1="17" y1="0" x2="17" y2="85" stroke="var(--mark,#cf3346)" stroke-width="0.45"/>
+        <line x1="183" y1="0" x2="183" y2="85" stroke="var(--mark,#cf3346)" stroke-width="0.45"/>
+        <line x1="75" y1="0" x2="75" y2="85" stroke="var(--mark-blue,#2f5fb0)" stroke-width="1.1"/>
+        <line x1="125" y1="0" x2="125" y2="85" stroke="var(--mark-blue,#2f5fb0)" stroke-width="1.1"/>
+        <line x1="100" y1="0" x2="100" y2="85" stroke="var(--mark,#cf3346)" stroke-width="1.1"/>
+        <path d="M 17 36.5 A 6 6 0 0 1 17 48.5" fill="#d3e9f7" stroke="var(--mark,#cf3346)" stroke-width="0.35" opacity="0.85"/>
+        <path d="M 183 36.5 A 6 6 0 0 0 183 48.5" fill="#d3e9f7" stroke="var(--mark,#cf3346)" stroke-width="0.35" opacity="0.85"/>
+      </g>
+      <circle cx="100" cy="42.5" r="15" fill="none" stroke="var(--mark-blue,#2f5fb0)" stroke-width="0.45" opacity="0.9"/><circle cx="45" cy="20.5" r="15" fill="none" stroke="var(--mark,#cf3346)" stroke-width="0.45" opacity="0.9"/><circle cx="45" cy="64.5" r="15" fill="none" stroke="var(--mark,#cf3346)" stroke-width="0.45" opacity="0.9"/><circle cx="155" cy="20.5" r="15" fill="none" stroke="var(--mark,#cf3346)" stroke-width="0.45" opacity="0.9"/><circle cx="155" cy="64.5" r="15" fill="none" stroke="var(--mark,#cf3346)" stroke-width="0.45" opacity="0.9"/>
+      <circle cx="100" cy="42.5" r="0.9" fill="var(--mark-blue,#2f5fb0)"/><circle cx="45" cy="20.5" r="1" fill="var(--mark,#cf3346)"/><circle cx="45" cy="64.5" r="1" fill="var(--mark,#cf3346)"/><circle cx="155" cy="20.5" r="1" fill="var(--mark,#cf3346)"/><circle cx="155" cy="64.5" r="1" fill="var(--mark,#cf3346)"/>
+      <circle cx="80" cy="20.5" r="1" fill="var(--mark,#cf3346)"/><circle cx="80" cy="64.5" r="1" fill="var(--mark,#cf3346)"/><circle cx="120" cy="20.5" r="1" fill="var(--mark,#cf3346)"/><circle cx="120" cy="64.5" r="1" fill="var(--mark,#cf3346)"/>
+      <g fill="none" stroke="#c81e33" stroke-width="0.55" stroke-linejoin="round" opacity="0.9">
+        <path d="M 17 39 L 12.6 39.7 L 12.6 45.3 L 17 46"/>
+        <path d="M 183 39 L 187.4 39.7 L 187.4 45.3 L 183 46"/>
+      </g>
+    </g><path d="M 46 26 L 80 14 L 100 12 L 120 26" fill="none" stroke="#d7263d" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round" opacity="0.9" marker-end="url(#arrowR)"/><circle cx="80" cy="14" r="2" fill="var(--panel,#fff)" stroke="#d7263d" stroke-width="0.5"/><text x="80" y="14.9" font-size="2.6" font-weight="700" text-anchor="middle" fill="#d7263d">1</text><circle cx="100" cy="12" r="2" fill="var(--panel,#fff)" stroke="#d7263d" stroke-width="0.5"/><text x="100" y="12.9" font-size="2.6" font-weight="700" text-anchor="middle" fill="#d7263d">2</text><circle cx="120" cy="26" r="2" fill="var(--panel,#fff)" stroke="#d7263d" stroke-width="0.5"/><text x="120" y="26.9" font-size="2.6" font-weight="700" text-anchor="middle" fill="#d7263d">3</text><polyline points="100,12 105.25,2.91 120,26" fill="none" stroke="var(--puck,#14171a)" stroke-width="0.9" stroke-dasharray="2.4 2" stroke-linecap="round" stroke-linejoin="round" opacity="0.85" marker-end="url(#arrowP)"/><g transform="translate(183 42.5) rotate(180)"><path d="M 0 -3.75 L -4.6 -3 L -4.6 3 L 0 3.75 Z" fill="rgba(210,225,240,0.16)" stroke="#c81e33" stroke-width="0.5" stroke-linejoin="round"/><circle cx="0" cy="-3.75" r="0.7" fill="#c81e33"/><circle cx="0" cy="3.75" r="0.7" fill="#c81e33"/><rect x="-1.6" y="-2.4" width="2.4" height="4.8" rx="1.1" fill="#2f9e57" stroke="#fff" stroke-width="0.3"/></g><circle cx="46" cy="26" r="1.5" fill="var(--puck,#14171a)" stroke="var(--surface,#fff)" stroke-width="0.4"/><g><circle cx="110" cy="20" r="3.4" fill="#1f4fa3" stroke="#fff" stroke-width="0.5"/><text x="110" y="21.05" font-weight="800" font-size="3" text-anchor="middle" fill="#fff">D1</text></g><g><circle cx="46" cy="26" r="3.4" fill="#d7263d" stroke="#fff" stroke-width="0.5"/><text x="46" y="27.05" font-weight="800" font-size="3" text-anchor="middle" fill="#fff">F1</text></g></svg></div>
+    <div class="legend"><span><span class="dot" style="background:#1f4fa3"></span>D1 — auto-D</span><span><span class="dot" style="background:#d7263d"></span>F1</span><span><span class="dot" style="background:#2f9e57"></span>N2 — net + goalie</span><span><span class="solid"></span>skating route</span><span><span class="dash"></span>puck path</span></div>
+  </section>
+  <h2 class="src-h">The source</h2>
+  <p class="src-note">The rink above is drawn automatically from this fenced <code>drill</code> block by <code>src/drill-svg.js</code>. Paste the block into DrillBoard (<b>☰ → Text editor → Apply</b>) or <b>Load</b> the file and it plays.</p>
+  <div class="code">
+    <div class="code-bar"><span class="lang">drill</span><span class="file">example-drill.md</span></div>
+    <pre><code><span class="cmd">RINK</span> full
+<span class="meta2">TITLE</span> Chip Off the Boards, Behind the D
+<span class="meta2">DESC</span> F1 banks a chip off the boards past the standing-up D and picks it up behind him in the neutral zone.
+<span class="cmd">PIECE</span> N2 net <span class="num">183</span> <span class="num">42.5</span> <span class="kv">face=180</span> goalie
+<span class="cmd">PIECE</span> D1 player <span class="num">110</span> <span class="num">20</span> <span class="kv">#1f4fa3</span> D1 defense
+<span class="cmd">PIECE</span> F1 player <span class="num">46</span> <span class="num">26</span> F1
+<span class="cmd">PATH</span> F1 L <span class="num">80,14</span> L <span class="num">100,12</span> L <span class="num">120,26</span>
+<span class="cmd">PIECE</span> PK1 puck <span class="num">46</span> <span class="num">26</span> <span class="kv">on=F1</span> <span class="kv">chip=2:F1@3~-60</span></code></pre>
+  </div>
+  <p class="foot">Diagram generated by the DSL-to-SVG renderer — change the drill text and re-run <code>scripts/build-drill-preview.mjs</code> to redraw. See <code>docs/drill-dsl.md</code> for the format.</p>
+</div>
