@@ -20,10 +20,12 @@ function labelSvg(x, y, text, size, color) {
   const h = lines.length * lh + fs * 0.34;
   const tspans = lines.map((l, k) =>
     `<tspan x="${f(x)}" y="${f(y + (k - (lines.length - 1) / 2) * lh + fs * 0.34)}">${esc(l || " ")}</tspan>`).join("");
+  // a label is a light "sticky note" in BOTH themes — the fill/text are fixed
+  // (not themed), so dark ink never lands on a dark panel in dark mode
   return `<g><rect x="${f(x - w / 2)}" y="${f(y - h / 2)}" width="${f(w)}" height="${f(h)}" rx="${f(fs * 0.28)}"`
-    + ` fill="${V("panel", "#fff")}" stroke="${V("line", "#d6e2ea")}" stroke-width="0.4"/>`
-    + `<text font-size="${f(fs)}" font-weight="800" text-anchor="middle" fill="${color || V("ink", "#14202b")}"`
-    + ` font-family="system-ui,sans-serif">${tspans}</text></g>`;
+    + ` fill="#f7fbfd" stroke="rgba(20,32,43,0.4)" stroke-width="0.4"/>`
+    + `<text font-size="${f(fs)}" font-weight="800" text-anchor="middle" fill="${color || "#14202b"}"`
+    + ` font-family="system-ui,sans-serif" paint-order="stroke" stroke="#f7fbfd" stroke-width="${f(fs * 0.06)}">${tspans}</text></g>`;
 }
 
 const routePoint = (p, idx) => {
