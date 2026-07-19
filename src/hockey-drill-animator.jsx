@@ -1169,19 +1169,22 @@ export default function DrillAnimator() {
   function labelNode(key, x, y, text, size, color, sel, onDown, resizeDown) {
     const fx = iconXf({ x, y, a: 0 });
     const lines = String(text || " ").split("\n");
-    const fs = 3 * (size || 1);
-    const lh = fs * 1.18;
-    const w = Math.max(1, ...lines.map(l => l.length)) * fs * 0.56 + fs * 0.8;
-    const h = lines.length * lh + fs * 0.4;
+    // the icon frame bakes in ICON_SCALE (0.8), so on-ice height ≈ fs·0.8;
+    // fs≈6.5 → ~5 ft tall at size 1 (readable as words on a full-sheet phone)
+    const fs = 6.5 * (size || 1) / ICON_SCALE;
+    const lh = fs * 1.16;
+    const w = Math.max(1, ...lines.map(l => l.length)) * fs * 0.56 + fs * 0.7;
+    const h = lines.length * lh + fs * 0.34;
     return (
       <g key={key} transform={fx.t}>
         <g transform={`rotate(${-fx.th})`}>
-          <rect x={-w / 2} y={-h / 2} width={w} height={h} rx={fs * 0.32}
-            fill="rgba(245,250,253,0.86)" stroke={sel ? "#ffd447" : "rgba(20,32,43,0.22)"}
-            strokeWidth={sel ? 0.5 : 0.3} onPointerDown={onDown}
+          <rect x={-w / 2} y={-h / 2} width={w} height={h} rx={fs * 0.28}
+            fill="rgba(246,251,253,0.95)" stroke={sel ? "#ffd447" : "rgba(20,32,43,0.35)"}
+            strokeWidth={sel ? 0.7 : 0.4} onPointerDown={onDown}
             style={{ cursor: onDown ? "grab" : "default" }} />
-          <text textAnchor="middle" fontSize={fs} fontWeight={700} fill={color || "#14202b"}
-            pointerEvents="none" style={{ fontFamily: "system-ui, sans-serif", userSelect: "none" }}>
+          <text textAnchor="middle" fontSize={fs} fontWeight={800} fill={color || "#14202b"}
+            pointerEvents="none" style={{ fontFamily: "system-ui, sans-serif", userSelect: "none",
+              paintOrder: "stroke", stroke: "rgba(246,251,253,0.9)", strokeWidth: fs * 0.06 }}>
             {lines.map((l, k) => (
               <tspan key={k} x={0} y={(k - (lines.length - 1) / 2) * lh + fs * 0.34}>{l || " "}</tspan>
             ))}

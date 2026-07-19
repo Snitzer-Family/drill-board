@@ -16,7 +16,7 @@ DESC F1 banks a chip off the boards past the standing-up D and picks it up behin
 PIECE N2 net 183 42.5 face=180 goalie
 PIECE D1 player 110 20 #1f4fa3 D1 defense
 PIECE F1 player 46 26 F1
-PATH F1 L 80,14 DESC "chip off the glass" SHOW label OFF 0,-8 L 100,12 DESC "pick up behind the D" SHOW label OFF 6,7 L 120,26
-PIECE L1 label 100 74 size=1.1 "Neutral-zone regroup"
+PATH F1 L 80,14 DESC "Chip off glass" SHOW label OFF -22,16 L 100,12 DESC "Pickup behind D" SHOW label OFF 8,13 L 120,26
+PIECE L1 label 100 73 "Neutral-zone regroup"
 PIECE PK1 puck 46 26 on=F1 chip=2:F1@3~-60
 ```

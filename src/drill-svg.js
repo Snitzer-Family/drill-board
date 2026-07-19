@@ -15,14 +15,14 @@ const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(
 // waypoint description). No stretch here, so it's drawn upright at (x, y).
 function labelSvg(x, y, text, size, color) {
   const lines = String(text || " ").split("\n");
-  const fs = 3 * (size || 1), lh = fs * 1.18;
-  const w = Math.max(1, ...lines.map(l => l.length)) * fs * 0.56 + fs * 0.8;
-  const h = lines.length * lh + fs * 0.4;
+  const fs = 6.5 * (size || 1), lh = fs * 1.16;   // ~6.5 ft tall — matches the app
+  const w = Math.max(1, ...lines.map(l => l.length)) * fs * 0.56 + fs * 0.7;
+  const h = lines.length * lh + fs * 0.34;
   const tspans = lines.map((l, k) =>
     `<tspan x="${f(x)}" y="${f(y + (k - (lines.length - 1) / 2) * lh + fs * 0.34)}">${esc(l || " ")}</tspan>`).join("");
-  return `<g><rect x="${f(x - w / 2)}" y="${f(y - h / 2)}" width="${f(w)}" height="${f(h)}" rx="${f(fs * 0.32)}"`
-    + ` fill="${V("panel", "#fff")}" stroke="${V("line", "#d6e2ea")}" stroke-width="0.3"/>`
-    + `<text font-size="${f(fs)}" font-weight="700" text-anchor="middle" fill="${color || V("ink", "#14202b")}"`
+  return `<g><rect x="${f(x - w / 2)}" y="${f(y - h / 2)}" width="${f(w)}" height="${f(h)}" rx="${f(fs * 0.28)}"`
+    + ` fill="${V("panel", "#fff")}" stroke="${V("line", "#d6e2ea")}" stroke-width="0.4"/>`
+    + `<text font-size="${f(fs)}" font-weight="800" text-anchor="middle" fill="${color || V("ink", "#14202b")}"`
     + ` font-family="system-ui,sans-serif">${tspans}</text></g>`;
 }
 
