@@ -127,9 +127,17 @@ function routePath(p) {
   return `<path d="${d}" fill="none" stroke="${p.color}" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round" opacity="0.9" marker-end="url(#arrowR)"/>${dots}`;
 }
 
-const chainLine = (pts, solid) =>
-  `<polyline points="${polyPts(pts)}" fill="none" stroke="${V("puck", "#14171a")}" stroke-width="${solid ? 1.1 : 0.9}"`
-  + `${solid ? "" : ' stroke-dasharray="2.4 2"'} stroke-linecap="round" stroke-linejoin="round" opacity="0.85" marker-end="url(#arrowP)"/>`;
+// puck flow lines. mode: "shot" solid dark · "rebound" dotted + distinct colour
+// (so it reads apart from the shot it overlaps) · else dashed pass/rim/chip
+const REBOUND_COLOR = "#e8892b";
+const chainLine = (pts, mode) => {
+  const rebound = mode === "rebound", shot = mode === "shot";
+  const color = rebound ? REBOUND_COLOR : V("puck", "#14171a");
+  const dash = shot ? "" : rebound ? ' stroke-dasharray="0.1 1.9"' : ' stroke-dasharray="2.4 2"';
+  const marker = rebound ? "arrowRB" : "arrowP";
+  return `<polyline points="${polyPts(pts)}" fill="none" stroke="${color}" stroke-width="${shot ? 1.1 : 0.9}"`
+    + `${dash} stroke-linecap="round" stroke-linejoin="round" opacity="0.9" marker-end="url(#${marker})"/>`;
+};
 
 function chain(pk, byId, pieces) {
   let cur = pk.carrier ? byId(pk.carrier) : (pk.pickup && byId(pk.pickup.to));
@@ -146,15 +154,15 @@ function chain(pk, byId, pieces) {
     const rec = byId(tr.to); if (!rec) return;
     const launch = routePoint(cur, tr.at);
     const anchor = routePoint(rec, tr.recvAt == null ? rec.path.length - 1 : tr.recvAt);
-    if (tr.kind === "shot") out.push(chainLine([launch, shotNet(launch)], true), chainLine([shotNet(launch), anchor], false));
-    else if (tr.kind === "rim") out.push(chainLine(rimPoly(launch, tr.aim, anchor), false));
-    else if (tr.kind === "chip") { const h = tr.aim != null ? aimVec(tr.aim) : heading(cur, tr.at); out.push(chainLine(boards.slideTo(launch.x, launch.y, h.x, h.y, anchor), false)); }
-    else out.push(chainLine([launch, anchor], false));   // pass
+    if (tr.kind === "shot") out.push(chainLine([launch, shotNet(launch)], "shot"), chainLine([shotNet(launch), anchor], "rebound"));
+    else if (tr.kind === "rim") out.push(chainLine(rimPoly(launch, tr.aim, anchor), "pass"));
+    else if (tr.kind === "chip") { const h = tr.aim != null ? aimVec(tr.aim) : heading(cur, tr.at); out.push(chainLine(boards.slideTo(launch.x, launch.y, h.x, h.y, anchor), "pass")); }
+    else out.push(chainLine([launch, anchor], "pass"));   // pass
     cur = rec;
   });
-  if (pk.shotAt != null) { const l = routePoint(cur, pk.shotAt); out.push(chainLine([l, shotNet(l)], true)); }
-  else if (pk.rimAt != null) { const l = routePoint(cur, pk.rimAt); out.push(chainLine(boards.rimAround(l, pk.rimDist != null ? pk.rimDist : 65, pk.rimAim), false)); }
-  else if (pk.chipAt != null) { const l = routePoint(cur, pk.chipAt); const h = pk.chipAim != null ? aimVec(pk.chipAim) : heading(cur, pk.chipAt); out.push(chainLine(boards.slide(l.x, l.y, h.x, h.y, pk.chipDist != null ? pk.chipDist : 26), false)); }
+  if (pk.shotAt != null) { const l = routePoint(cur, pk.shotAt); out.push(chainLine([l, shotNet(l)], "shot")); }
+  else if (pk.rimAt != null) { const l = routePoint(cur, pk.rimAt); out.push(chainLine(boards.rimAround(l, pk.rimDist != null ? pk.rimDist : 65, pk.rimAim), "pass")); }
+  else if (pk.chipAt != null) { const l = routePoint(cur, pk.chipAt); const h = pk.chipAim != null ? aimVec(pk.chipAim) : heading(cur, pk.chipAt); out.push(chainLine(boards.slide(l.x, l.y, h.x, h.y, pk.chipDist != null ? pk.chipDist : 26), "pass")); }
   return out.join("");
 }
 
@@ -167,6 +175,7 @@ export function drillSvg(dsl, opts = {}) {
       <clipPath id="ice"><rect x="0.6" y="0.6" width="198.8" height="83.8" rx="26"/></clipPath>
       <marker id="arrowR" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="${V("mark", "#cf3346")}"/></marker>
       <marker id="arrowP" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="${V("puck", "#14171a")}"/></marker>
+      <marker id="arrowRB" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="${REBOUND_COLOR}"/></marker>
     </defs>`;
   const routes = pieces.map(routePath).join("");
   const chains = pieces.filter(p => p.kind === "puck").map(pk => chain(pk, byId, pieces)).join("");
@@ -176,5 +185,7 @@ export function drillSvg(dsl, opts = {}) {
     + pieces.flatMap(p => (p.path || []).filter(s => s.dmode === "label" && s.desc)
         .map(s => labelSvg(s.x + (s.dox || 0), s.y + (s.doy != null ? s.doy : -5), s.desc, s.dsize, "#14202b"))).join("");
   const wattr = opts.width ? ` width="${opts.width}"` : "";
-  return `<svg class="rink" viewBox="-7 -7 214 99"${wattr} xmlns="http://www.w3.org/2000/svg" role="img">${defs}${rink()}${routes}${chains}${icons}${labels}</svg>`;
+  // puck chains paint above the icons so pass/shot arrowheads aren't buried
+  // under a player circle; text labels stay on top
+  return `<svg class="rink" viewBox="-7 -7 214 99"${wattr} xmlns="http://www.w3.org/2000/svg" role="img">${defs}${rink()}${routes}${icons}${chains}${labels}</svg>`;
 }
