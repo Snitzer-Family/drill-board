@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useLayoutEffect } from "react";
 import { VIEWS, COLORS, vb, APP_VERSION, ICON_SCALE, BUILD_STAMP, DEFAULT_TEXT } from "./constants.js";
 import { parseDrill, serializeDrill, extractDrill } from "./drill-format.js";
+import { drillSvg } from "./drill-svg.js";
 import { clampX, clampY, segEnd, segD, nearestT, splitSeg, zigzagPoints, convertSeg, fitRoute, evalSeg } from "./geometry.js";
 import * as boards from "./boards.js";
 import { netShapes, detourRoute } from "./net-collide.js";
@@ -1370,6 +1371,30 @@ export default function DrillAnimator() {
   }
   function exportTxt() { download(`${slug()}.txt`, serializeDrill(rink, pieces, drillTitle, drillDesc), "text/plain"); }
   function exportMd() { download(`${slug()}.md`, toMarkdown(), "text/markdown"); }
+  // render the drill (via the DSL→SVG renderer) and rasterise it to a PNG
+  function exportImage() {
+    const dsl = serializeDrill(rink, pieces, drillTitle, drillDesc);
+    const W = 1800, H = Math.round((W * 99) / 214);                 // viewBox is "-7 -7 214 99"
+    const svg = drillSvg(dsl).replace("<svg ", `<svg width="${W}" height="${H}" `);
+    const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml;charset=utf-8" }));
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = W; canvas.height = H;
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#eef5f9"; ctx.fillRect(0, 0, W, H);         // ice surround (var fallback theme)
+      ctx.drawImage(img, 0, 0, W, H);
+      URL.revokeObjectURL(url);
+      canvas.toBlob(b => {
+        if (!b) { flash("Image export failed"); return; }
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(b); a.download = `${slug()}.png`; a.click();
+        URL.revokeObjectURL(a.href);
+      }, "image/png");
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); flash("Image export failed"); };
+    img.src = url;
+  }
   function copyMd() {
     navigator.clipboard?.writeText(toMarkdown());
     setToast("Markdown copied"); setTimeout(() => setToast(""), 1400);
@@ -2555,6 +2580,7 @@ export default function DrillAnimator() {
           <button className="hd-item" onClick={openText}>⌨ Text editor</button>
           <button className="hd-item" onClick={() => { exportTxt(); setOpenMenu(null); }}>⇩ Export .txt</button>
           <button className="hd-item" onClick={() => { exportMd(); setOpenMenu(null); }}>⬇ Export .md</button>
+          <button className="hd-item" onClick={() => { exportImage(); setOpenMenu(null); }}>🖼 Export image</button>
           <button className="hd-item" onClick={() => { copyMd(); setOpenMenu(null); }}>⧉ Copy markdown</button>
           <button className="hd-item" onClick={() => fileRef.current?.click()}>⇧ Load .txt / .md</button>
           <button className="hd-item danger"
@@ -2662,9 +2688,14 @@ export default function DrillAnimator() {
             <button className="hd-btn" title="Copy text" aria-label="Copy text" onClick={copyText}>⧉</button>
             <button className="hd-btn" title="Erase text" onClick={() => setTextDraft("")}>Erase</button>
             <button className="hd-btn" title="Share drill" onClick={shareDrill}>Share</button>
-            <button className="hd-btn" onClick={exportTxt}>Export</button>
             <button className="hd-btn" onClick={() => fileRef.current?.click()}>Load</button>
             <button className="hd-btn" onClick={() => setOpenMenu(null)}>Close</button>
+          </div>
+          <div className="hd-row" style={{ alignItems: "center" }}>
+            <span style={{ fontSize: 12, color: "#8b99a8" }}>Export</span>
+            <button className="hd-btn" onClick={exportTxt}>.txt</button>
+            <button className="hd-btn" onClick={exportMd}>.md</button>
+            <button className="hd-btn" onClick={exportImage}>Image</button>
           </div>
           <div className="hd-note">
             Feet: x 0–200, y 0–85. <b>RINK</b> full|half|quarter ·
