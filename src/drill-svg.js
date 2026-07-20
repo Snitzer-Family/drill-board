@@ -36,6 +36,26 @@ function carrySegsOf(p, pieces) {
   return set;
 }
 const segCmd = s => s.type === "L" ? `L ${f(s.x)} ${f(s.y)}` : s.type === "Q" ? `Q ${f(s.cx)} ${f(s.cy)} ${f(s.x)} ${f(s.y)}` : `C ${f(s.c1x)} ${f(s.c1y)} ${f(s.c2x)} ${f(s.c2y)} ${f(s.x)} ${f(s.y)}`;
+// path indices where an event happens on player p's route (a pass/shot/rim/chip,
+// a received pass, a collect) → renumbered 1..N. Shaping-only waypoints get no dot.
+function eventWps(p, pieces) {
+  const idx = new Set();
+  const chainOf = pk => [pk.carrier || (pk.pickup && pk.pickup.to) || null, ...(pk.transfers || []).map(t => t.to)].filter(Boolean);
+  for (const pk of pieces) {
+    if (pk.kind !== "puck") continue;
+    const chain = chainOf(pk), ts = pk.transfers || [];
+    const termAt = pk.shotAt != null ? pk.shotAt : pk.rimAt != null ? pk.rimAt : pk.chipAt != null ? pk.chipAt : null;
+    ts.forEach((t, s) => {
+      if (chain[s] === p.id && t.at >= 0) idx.add(t.at);
+      if (t.to === p.id && t.recvAt != null && t.recvAt >= 0) idx.add(t.recvAt);
+    });
+    if (chain[chain.length - 1] === p.id && termAt != null && termAt >= 0) idx.add(termAt);
+    if (pk.pickup && pk.pickup.to === p.id && pk.pickup.at >= 0) idx.add(pk.pickup.at);
+  }
+  const map = new Map();
+  [...idx].sort((a, b) => a - b).forEach((wi, n) => map.set(wi, n + 1));
+  return map;
+}
 
 // pull a polyline's end back by `d` ft along its final heading so an arrowhead
 // points AT the target instead of landing on top of it
@@ -235,9 +255,14 @@ function routePath(p, pieces) {
     else
       lines += `<path d="M ${f(segPrev.x)} ${f(segPrev.y)} ${segCmd(s)}" ${stroke}${arrow}/>`;
   });
-  const dots = p.path.map((s, i) =>
-    `<circle cx="${f(s.x)}" cy="${f(s.y)}" r="2" fill="${V("panel", "#fff")}" stroke="${p.color}" stroke-width="0.5"/>`
-    + `<text x="${f(s.x)}" y="${f(s.y) + 0.9}" font-size="2.6" font-weight="700" text-anchor="middle" fill="${p.color}">${i + 1}</text>`).join("");
+  // number only the waypoints where something happens; shaping points get no dot
+  const ev = pieces ? eventWps(p, pieces) : null;
+  const dots = p.path.map((s, i) => {
+    const n = ev ? ev.get(i) : i + 1;
+    if (!n) return "";
+    return `<circle cx="${f(s.x)}" cy="${f(s.y)}" r="2" fill="${V("panel", "#fff")}" stroke="${p.color}" stroke-width="0.5"/>`
+      + `<text x="${f(s.x)}" y="${f(s.y) + 0.9}" font-size="2.6" font-weight="700" text-anchor="middle" fill="${p.color}">${n}</text>`;
+  }).join("");
   return `${lines}${dots}`;
 }
 

@@ -669,6 +669,27 @@ function carrySegsOf(p, pieces) {
   return set;
 }
 const segCmd = s => s.type === "L" ? `L ${f(s.x)} ${f(s.y)}` : s.type === "Q" ? `Q ${f(s.cx)} ${f(s.cy)} ${f(s.x)} ${f(s.y)}` : `C ${f(s.c1x)} ${f(s.c1y)} ${f(s.c2x)} ${f(s.c2y)} ${f(s.x)} ${f(s.y)}`;
+// path indices where SOMETHING happens on player p's route (a pass/shot/rim/chip
+// they make, a pass they receive, a collect) → renumbered 1..N. Pure shaping
+// waypoints (used only to bend the skate line) aren't events and get no dot.
+function eventWps(p, pieces) {
+  const idx = new Set();
+  const chainOf = pk => [pk.carrier || (pk.pickup && pk.pickup.to) || null, ...(pk.transfers || []).map(t => t.to)].filter(Boolean);
+  for (const pk of pieces) {
+    if (pk.kind !== "puck") continue;
+    const chain = chainOf(pk), ts = pk.transfers || [];
+    const termAt = pk.shotAt != null ? pk.shotAt : pk.rimAt != null ? pk.rimAt : pk.chipAt != null ? pk.chipAt : null;
+    ts.forEach((t, s) => {
+      if (chain[s] === p.id && t.at >= 0) idx.add(t.at);
+      if (t.to === p.id && t.recvAt != null && t.recvAt >= 0) idx.add(t.recvAt);
+    });
+    if (chain[chain.length - 1] === p.id && termAt != null && termAt >= 0) idx.add(termAt);
+    if (pk.pickup && pk.pickup.to === p.id && pk.pickup.at >= 0) idx.add(pk.pickup.at);
+  }
+  const map = new Map();
+  [...idx].sort((a, b) => a - b).forEach((wi, n) => map.set(wi, n + 1));
+  return map;
+}
 // evaluate a path segment at t (for arc-length arrow trimming)
 function evalSeg(prev, s, t) {
   const u = 1 - t;
@@ -752,9 +773,15 @@ function routePath(p, pieces) {
     if (carry.has(i)) lines += `<polyline points="${wigglePoints(segPrev, s)}" ${stroke}${arrow}/>`;
     else lines += `<path d="M ${f(segPrev.x)} ${f(segPrev.y)} ${segCmd(s)}" ${stroke}${arrow}/>`;
   });
-  const dots = p.path.map((s, i) =>
-    `<circle cx="${f(s.x)}" cy="${f(s.y)}" r="2" fill="${V("panel", "#fff")}" stroke="${p.color}" stroke-width="0.5"/>`
-    + `<text x="${f(s.x)}" y="${f(s.y) + 0.9}" font-size="2.6" font-weight="700" text-anchor="middle" fill="${p.color}">${i + 1}</text>`).join("");
+  // only number the waypoints where something happens; pure shaping points get
+  // no dot (the curve just flows through them)
+  const ev = pieces ? eventWps(p, pieces) : null;
+  const dots = p.path.map((s, i) => {
+    const n = ev ? ev.get(i) : i + 1;
+    if (!n) return "";
+    return `<circle cx="${f(s.x)}" cy="${f(s.y)}" r="2" fill="${V("panel", "#fff")}" stroke="${p.color}" stroke-width="0.5"/>`
+      + `<text x="${f(s.x)}" y="${f(s.y) + 0.9}" font-size="2.6" font-weight="700" text-anchor="middle" fill="${p.color}">${n}</text>`;
+  }).join("");
   return `${lines}${dots}`;
 }
 
@@ -826,6 +853,15 @@ function drillSteps(pieces) {
     (pl.path || []).forEach((s, wi) => { if (wi > a && wi <= b && s.desc && s.dmode !== "label") r.push(s.desc); });
     return r;
   };
+  // designate the numbered waypoint a step happens at, so the recipe's own
+  // numbering isn't mistaken for waypoint numbers
+  const wpMaps = {};
+  const wpRef = (pid, at) => {
+    if (at == null || at < 0) return "";
+    if (!wpMaps[pid]) { const pl = pieces.find(q => q.id === pid); wpMaps[pid] = pl ? eventWps(pl, pieces) : new Map(); }
+    const n = wpMaps[pid].get(at);
+    return n ? ` (at waypoint ${n})` : "";
+  };
   const pucks = pieces.filter(p => p.kind === "puck");
   const inChain = new Set();
   pucks.forEach(pk => {
@@ -844,17 +880,17 @@ function drillSteps(pieces) {
         descsBetween(carrier, startWp, relAt).forEach(d => out.push({ text: d, custom: true }));
       }
       if (s < ts.length) {
-        const t = ts[s], actor = nameOf(chain[s]), to = nameOf(t.to);
-        out.push({ text: t.kind === "pass" ? `${actor} passes to ${to}`
+        const t = ts[s], actor = nameOf(chain[s]), to = nameOf(t.to), wp = wpRef(chain[s], t.at);
+        out.push({ text: (t.kind === "pass" ? `${actor} passes to ${to}`
           : t.kind === "shot" ? `${actor} shoots — ${to} is there for the rebound`
           : t.kind === "rim" ? `${actor} rims it around to ${to}`
-          : t.kind === "chip" ? `${actor} chips it to ${to}` : `${actor} moves it to ${to}` });
+          : t.kind === "chip" ? `${actor} chips it to ${to}` : `${actor} moves it to ${to}`) + wp });
         if (carrier) prevRel[carrier.id] = t.at;
       } else {
-        const last = nameOf(chain[s]);
-        if (pk.shotAt != null) out.push({ text: `${last} shoots on ${pk.net || "net"}` });
-        else if (pk.rimAt != null) out.push({ text: `${last} rims the puck` });
-        else if (pk.chipAt != null) out.push({ text: `${last} chips the puck` });
+        const last = nameOf(chain[s]), wp = wpRef(chain[s], termAt);
+        if (pk.shotAt != null) out.push({ text: `${last} shoots on ${pk.net || "net"}${wp}` });
+        else if (pk.rimAt != null) out.push({ text: `${last} rims the puck${wp}` });
+        else if (pk.chipAt != null) out.push({ text: `${last} chips the puck${wp}` });
       }
     }
   });
