@@ -1697,12 +1697,13 @@ export default function DrillAnimator() {
     return els;
   }
 
-  // Save!/Goal! splash over the net at the instant a shot arrives, held ~1.4s.
-  // Positioned at the shot's hit point, nudged toward centre-ice and up so it
-  // clears the cage; stretch-cancelled via the icon frame like a label.
+  // Save!/Goal! splash for each net's latest shot. It parks in an open area near
+  // the net (clear of players/routes) and, once the animation settles at the
+  // end, holds the final result at full strength so a last-instant goal isn't
+  // cut off. Stretch-cancelled via the icon frame like a label.
   function renderResultSplash() {
     if (!showResult || aiPlay || animT <= 0) return null;
-    const DUR = 1.5, e = animT * totalTime;
+    const DUR = 1.5, e = animT * totalTime, finished = animT >= 1;
     const { plans } = getPlan();
     // gather every shot result, grouped by which net it hit (left vs right)
     const byNet = new Map();
@@ -1719,19 +1720,34 @@ export default function DrillAnimator() {
         if (L.t1 <= e && (!cur || L.t1 > cur.L.t1)) byNet.set(side, { L, key: `${q.id}-${i}` });
       });
     }
+    if (!byNet.size) return null;
+    // drill markers to keep clear of: players, their route waypoints, and pucks
+    const obst = [];
+    pieces.forEach(p => {
+      if (p.kind === "player") { obst.push({ x: p.x, y: p.y }); (p.path || []).forEach(s => obst.push({ x: s.x, y: s.y })); }
+      else if (p.kind === "puck") obst.push({ x: p.x, y: p.y });
+    });
+    const clearOf = (x, y) => obst.reduce((m, o) => Math.min(m, Math.hypot(o.x - x, o.y - y)), Infinity);
+    // pick the emptier of the high/low lane beside the net
+    const spot = side => {
+      const nx = side === "L" ? 17 : 183, dir = side === "L" ? 1 : -1, x = nx + dir * 12;
+      const cands = [{ x, y: 13 }, { x, y: 72 }];
+      return cands.reduce((b, c) => (clearOf(c.x, c.y) > clearOf(b.x, b.y) ? c : b));
+    };
     const els = [];
-    for (const { L, key } of byNet.values()) {
+    for (const [side, { L, key }] of byNet) {
       const dt = e - L.t1;
-      if (dt < 0 || dt > DUR) continue;                     // faded, with no newer shot to replace it
+      if (!finished && (dt < 0 || dt > DUR)) continue;      // faded, no newer shot to replace it
       const goal = !!L.goal;
-      const sx = L.x1 + (L.x1 < 100 ? 15 : -15);            // toward centre ice
-      const sy = Math.max(10, L.y1 - 13);                   // above the mouth
-      // pop in, hold, fade out
-      const inT = 0.16, outT = DUR - 0.4;
+      const s = spot(side);
+      // pop in, hold, fade out — but once settled at the end, hold full
       let op = 1, pop = 1;
-      if (dt < inT) { const f = dt / inT; op = f; pop = 0.55 + 0.45 * f + 0.18 * Math.sin(f * Math.PI); }
-      else if (dt > outT) { const f = (dt - outT) / (DUR - outT); op = 1 - f; pop = 1 + 0.12 * f; }
-      const fx = iconXf({ x: sx, y: sy, a: 0 });
+      if (!finished) {
+        const inT = 0.16, outT = DUR - 0.4;
+        if (dt < inT) { const f = dt / inT; op = f; pop = 0.55 + 0.45 * f + 0.18 * Math.sin(f * Math.PI); }
+        else if (dt > outT) { const f = (dt - outT) / (DUR - outT); op = 1 - f; pop = 1 + 0.12 * f; }
+      }
+      const fx = iconXf({ x: s.x, y: s.y, a: 0 });
       const text = goal ? "GOAL!" : "SAVE!";
       const fs = 7 * pop / ICON_SCALE;
       const w = text.length * fs * 0.6 + fs * 0.8, h = fs * 1.5;
