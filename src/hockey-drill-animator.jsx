@@ -895,15 +895,16 @@ export default function DrillAnimator() {
   /* ----- edits ----- */
   const update = fn => setPieces(ps => ps.map(fn));
   const updateById = (id, patch) => update(p => (p.id === id ? { ...p, ...patch } : p));
-  // drop every puck reference to a removed player so no dangling carrier / pickup
-  // / transfer is left behind (which otherwise strands the chain on a survivor)
+  const looseFields = { carrier: null, pickup: null, transfers: [], shotAt: null, rimAt: null, chipAt: null, rimAim: null, chipAim: null };
+  // when a player is removed, auto-delete every chain action it influenced: if it
+  // starts the chain (carrier/pickup) the whole chain goes; if it's a transfer
+  // target, that action and everything downstream (incl. the terminal) is dropped
   const scrubRefs = (list, goneId) => list.map(q => {
     if (q.kind !== "puck") return q;
-    const carrier = q.carrier === goneId ? null : q.carrier;
-    const pickup = q.pickup && q.pickup.to === goneId ? null : q.pickup;
-    const transfers = (q.transfers || []).filter(t => t.to !== goneId);
-    return carrier === q.carrier && pickup === q.pickup && transfers.length === (q.transfers || []).length
-      ? q : { ...q, carrier, pickup, transfers };
+    if (q.carrier === goneId || (q.pickup && q.pickup.to === goneId)) return { ...q, ...looseFields };
+    const idx = (q.transfers || []).findIndex(t => t.to === goneId);
+    if (idx >= 0) return { ...q, transfers: q.transfers.slice(0, idx), shotAt: null, rimAt: null, chipAt: null, rimAim: null, chipAim: null };
+    return q;
   });
   // remove a piece and clean up any references to it
   const deletePiece = id => {
@@ -1001,6 +1002,30 @@ export default function DrillAnimator() {
   function puckChain(pk) {
     const head = pk.carrier || (pk.pickup && pk.pickup.to) || null;
     return [head, ...(pk.transfers || []).map(t => t.to)].filter(Boolean);
+  }
+  const nameOf = id => { const q = pieces.find(x => x.id === id); return (q && q.label) || id; };
+  const makeLoose = pkId => updateById(pkId, { carrier: null, pickup: null, transfers: [], shotAt: null, rimAt: null, chipAt: null, rimAim: null, chipAim: null });
+  const clearTerminal = pkId => updateById(pkId, { shotAt: null, rimAt: null, chipAt: null, rimAim: null, chipAim: null });
+  // the ordered, human-readable list of actions in a puck's chain. Each carries a
+  // `del` that removes it — a transfer drops itself + everything downstream (the
+  // chain is sequential), the head clears the whole chain, a terminal clears it.
+  function chainEvents(pk) {
+    const chain = puckChain(pk), ts = pk.transfers || [], evs = [];
+    if (pk.pickup) evs.push({ desc: `${nameOf(pk.pickup.to)} collects ${pk.id}`, del: () => makeLoose(pk.id) });
+    else if (pk.carrier) evs.push({ desc: `${nameOf(pk.carrier)} carries ${pk.id}`, del: () => makeLoose(pk.id) });
+    ts.forEach((t, s) => {
+      const actor = nameOf(chain[s] || pk.carrier), to = nameOf(t.to);
+      const verb = t.kind === "pass" ? `passes to ${to}`
+        : t.kind === "shot" ? `shoots — ${to} takes the rebound`
+        : t.kind === "rim" ? `rims to ${to}`
+        : t.kind === "chip" ? `chips to ${to}` : `→ ${to}`;
+      evs.push({ desc: `${actor} ${verb}`, del: () => setTransfer(pk.id, s, null) });
+    });
+    const last = nameOf(chain[chain.length - 1] || pk.carrier);
+    if (pk.shotAt != null) evs.push({ desc: `${last} shoots at ${pk.net || "nearest net"}`, del: () => clearTerminal(pk.id) });
+    else if (pk.rimAt != null) evs.push({ desc: `${last} hard rims`, del: () => clearTerminal(pk.id) });
+    else if (pk.chipAt != null) evs.push({ desc: `${last} chips`, del: () => clearTerminal(pk.id) });
+    return evs;
   }
   function setTransfer(pkId, stage, tr) {
     update(q => {
@@ -2118,6 +2143,27 @@ export default function DrillAnimator() {
                   );
                 })()}
               </div>
+              {/* readable, numbered chain of events this player is part of, with
+                  per-action delete — disambiguates passes/shots/rebounds that
+                  pile up on one spot */}
+              {(() => {
+                const chainPucks = pieces.filter(q => q.kind === "puck" && puckChain(q).includes(p.id));
+                const blocks = chainPucks.map(pk => ({ pk, evs: chainEvents(pk) })).filter(b => b.evs.length);
+                if (!blocks.length) return null;
+                return blocks.map(({ pk, evs }) => (
+                  <div key={`chain-${pk.id}`} style={{ margin: "4px 0", padding: "6px 8px", background: "rgba(120,140,160,0.1)", borderRadius: 8 }}>
+                    <div className="hd-mh" style={{ marginBottom: 4 }}>{pk.id} — chain of events</div>
+                    {evs.map((ev, n) => (
+                      <div key={n} style={{ display: "flex", alignItems: "center", gap: 8, padding: "2px 0" }}>
+                        <span style={{ minWidth: 16, textAlign: "right", fontWeight: 700, color: "#8b99a8", fontVariantNumeric: "tabular-nums" }}>{n + 1}</span>
+                        <span style={{ flex: 1, fontSize: 12.5 }}>{ev.desc}</span>
+                        <button className="hd-mini danger" style={{ padding: "2px 7px", minHeight: 0 }}
+                          title="Delete this action (and any that follow it)" onClick={ev.del}>✕</button>
+                      </div>
+                    ))}
+                  </div>
+                ));
+              })()}
               {p.path.length > 0 && !p.defense && (
                 <div className="hd-poprow">
                   <button className={`hd-mini${p.holdLine ? " on" : ""}`}
