@@ -167,6 +167,13 @@ function segCircleHitProj(p, cx, cy, R) {
   return { x: cx + Math.cos(ang) * R, y: cy + Math.sin(ang) * R, ang };
 }
 
+// does segment a→b cross any net's solid cage (sides/back)? Used to flag a
+// rebound whose collection spot sits behind/through a net — it can't get there.
+export function segCrossesNet(a, b, shapes) {
+  for (const sh of shapes || []) for (const [c, d] of sh.solid) if (segInt(a, b, c, d)) return true;
+  return false;
+}
+
 // segment a→b vs segment c→d intersection; returns { t, x, y } (t along a→b) or null
 function segInt(a, b, c, d) {
   const r = { x: b.x - a.x, y: b.y - a.y }, s = { x: d.x - c.x, y: d.y - c.y };

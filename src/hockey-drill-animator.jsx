@@ -685,13 +685,15 @@ export default function DrillAnimator() {
       .map(net => { const g = goaliePos(net, displayPosRaw); return { cx: g.x, cy: g.y, r: GOALIE_R }; });
     return _goalieDiscs;
   };
-  // obstacles a given piece's route should detour around (nets + parked players,
-  // minus itself)
+  // obstacles a given piece's route should detour around (nets + parked players
+  // + the goalie, minus itself) — so the line arcs smoothly around each instead
+  // of the skater snapping off it
   const detourObstaclesFor = id => {
     const self = pieces.find(q => q.id === id);
     const mine = self && !self.path.length ? [{ cx: self.x, cy: self.y }] : [];
     const discs = stationaryDiscs.filter(d => !mine.some(m => m.cx === d.cx && m.cy === d.cy));
-    return netObstacles.length || discs.length ? [...netObstacles, ...discs] : [];
+    const all = [...netObstacles, ...discs, ...goalieDiscs()];
+    return all.length ? all : [];
   };
   // A route sampled then re-routed to arc smoothly around any net it crosses.
   // Returns { pts, origLen } (origLen = the straight-sampled length, for mapping
@@ -780,11 +782,13 @@ export default function DrillAnimator() {
           if (d < MIN && d > 1e-3) { const push = (MIN - d) * 0.5; x += (dx / d) * push; y += (dy / d) * push; }
         }
       }
-      // the goalie is solid: a skater deviates around it (e.g. on a wrap-around)
+      // the goalie is solid too — it's part of the route detour (above) so the
+      // skater curves around it; a soft nudge only catches residual overlap as
+      // the goalie slides, so there's no abrupt snap
       const gDiscs = goalieDiscs();
       if (p.path.length) for (const gd of gDiscs) {
         const dx = x - gd.cx, dy = y - gd.cy, d = Math.hypot(dx, dy), MIN = PLAYER_R + gd.r;
-        if (d < MIN && d > 1e-3) { const push = (MIN - d) * 0.75; x += (dx / d) * push; y += (dy / d) * push; }
+        if (d < MIN && d > 1e-3) { const push = (MIN - d) * 0.25; x += (dx / d) * push; y += (dy / d) * push; }
       }
       // open the body to shield a carried puck from a net, goalie, or another player
       const carries = pieces.some(q => q.kind === "puck"

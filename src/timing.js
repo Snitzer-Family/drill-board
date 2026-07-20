@@ -4,7 +4,7 @@
 import { SPEED, ICON_SCALE, SAVE_PROB } from "./constants.js";
 import { clampX, clampY, segEnd, segTangentAngle } from "./geometry.js";
 import * as boards from "./boards.js";
-import { netShapes, reflectPath } from "./net-collide.js";
+import { netShapes, reflectPath, segCrossesNet } from "./net-collide.js";
 
 const GOALIE_DEPTH = 2.5; // how far out front of the net the goalie plays
 
@@ -81,6 +81,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
       const legs = [];
       let cur = null;
       let tBase = 0;
+      let chainBlocked = false;   // a rebound that can't reach its collector (thru a net)
       // lay a moving polyline (rim / chip travel) down as a chain of fly legs.
       // flag.easeOut (ft) ramps the speed down over the final stretch so the puck
       // glides to a stop instead of halting abruptly.
@@ -205,7 +206,17 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
         const onNet = !!(netPiece && netPiece.kind === "net");
         const scored = onNet && !goalie && !aimPt;
         const saved = goalie || (onNet && !!aimPt);
-        legs.push({ type: "fly", shot: true, save: saved, goal: scored, by: cur.id, x0: launch.x, y0: launch.y, x1: hit.x, y1: hit.y, t0: launchT, t1: tArr });
+        const flyLeg = { type: "fly", shot: true, save: saved, goal: scored, by: cur.id, x0: launch.x, y0: launch.y, x1: hit.x, y1: hit.y, t0: launchT, t1: tArr };
+        legs.push(flyLeg);
+        // a designated rebound whose collection spot sits behind/through the net
+        // can never get there — stop the puck dead at the net and break the chain
+        // (the collector never receives it) instead of zooming it through the cage
+        if (aimPt && segCrossesNet(hit, { x: clampX(aimPt.x), y: clampY(aimPt.y) }, netSh)) {
+          flyLeg.blockedRebound = true;
+          legs.push({ type: "rest", x: hit.x, y: hit.y, t0: tArr });
+          tBase = tArr; chainBlocked = true;
+          return hit;
+        }
         // rebound: to the collector's gather spot, else a damped carom. A passer
         // reflects the shot off its face (normal = its facing); a net without a
         // goalie just kicks it back toward the slot.
@@ -238,6 +249,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
       // gather spot, and that collector takes possession and carries on — so
       // the normal pass/shoot options resume from the collection point.
       (pk.transfers || []).forEach(tr => {
+        if (chainBlocked) return;                             // a prior rebound died at the net
         const rec = pieces.find(q => q.id === tr.to && q.kind === "player");
         if (!rec) return;
         if (tr.kind === "pass" && rec.id === cur.id) return;  // no plain pass to yourself
@@ -285,6 +297,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
             aim = { x: rec.x, y: rec.y };
           }
           doShot(tr.at, aim);                            // carom rolls to the collector
+          if (chainBlocked) return;                      // rebound died at the net — no collect
           const tGather = gi >= 0 ? Math.max(tBase, routeTimeW(rec, warp, gi)) : tBase;
           legs.push({ type: "ride", id: rec.id, t0: tGather, catch: true });
           cur = rec;
@@ -338,7 +351,8 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
         cur = rec;
         tBase = tArr;
       });
-      if (pk.shotAt != null && cur) doShot(pk.shotAt); // terminal shot (no collector)
+      if (chainBlocked) { /* chain died at a net — no terminal action */ }
+      else if (pk.shotAt != null && cur) doShot(pk.shotAt); // terminal shot (no collector)
       else if (pk.rimAt != null && cur) {              // terminal hard rim around the boards
         const at = pk.rimAt;
         const launchT = (cur.path.length && at >= 0) ? Math.max(tBase, routeTimeW(cur, warp, Math.min(at, cur.path.length - 1))) : tBase;

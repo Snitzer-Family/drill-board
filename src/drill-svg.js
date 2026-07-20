@@ -5,6 +5,7 @@
 // it; pieces use their own DSL colours.
 import { parseDrill } from "./drill-format.js";
 import { evalSeg } from "./geometry.js";
+import { netShapes, segCrossesNet } from "./net-collide.js";
 import * as boards from "./boards.js";
 
 // pull a polyline's end back by `d` ft along its final heading so an arrowhead
@@ -174,15 +175,17 @@ function routePath(p) {
 // puck flow lines. mode: "shot" solid dark · "rebound" dotted + distinct colour
 // (so it reads apart from the shot it overlaps) · else dashed pass/rim/chip
 const REBOUND_COLOR = "#e8892b";
+const BLOCKED_COLOR = "#e01f2b";      // a rebound that can't reach its collector (thru a net)
 // how far to hold the arrowhead off each kind of target (net vs player vs point)
-const CHAIN_TRIM = { shot: 4.6, rebound: 3, pass: 4 };
+const CHAIN_TRIM = { shot: 4.6, rebound: 3, "rebound-x": 3, pass: 4 };
 const chainLine = (pts, mode) => {
-  const rebound = mode === "rebound", shot = mode === "shot";
-  const color = rebound ? REBOUND_COLOR : V("puck", "#14171a");
-  const dash = shot ? "" : rebound ? ' stroke-dasharray="0.1 1.9"' : ' stroke-dasharray="2.4 2"';
-  const marker = rebound ? "arrowRB" : "arrowP";
+  const rebound = mode === "rebound", blocked = mode === "rebound-x", shot = mode === "shot";
+  const dotted = rebound || blocked;
+  const color = blocked ? BLOCKED_COLOR : rebound ? REBOUND_COLOR : V("puck", "#14171a");
+  const dash = shot ? "" : dotted ? ' stroke-dasharray="0.1 1.9"' : ' stroke-dasharray="2.4 2"';
+  const marker = blocked ? "arrowRX" : rebound ? "arrowRB" : "arrowP";
   const line = trimEnd(pts, CHAIN_TRIM[mode] != null ? CHAIN_TRIM[mode] : 3.5);
-  return `<polyline points="${polyPts(line)}" fill="none" stroke="${color}" stroke-width="${shot ? 1.1 : 0.9}"`
+  return `<polyline points="${polyPts(line)}" fill="none" stroke="${color}" stroke-width="${shot ? 1.1 : blocked ? 1.1 : 0.9}"`
     + `${dash} stroke-linecap="round" stroke-linejoin="round" opacity="0.9" marker-end="url(#${marker})"/>`;
 };
 
@@ -190,6 +193,7 @@ function chain(pk, byId, pieces) {
   let cur = pk.carrier ? byId(pk.carrier) : (pk.pickup && byId(pk.pickup.to));
   if (!cur) return "";
   const nets = pieces.filter(q => q.kind === "net" || q.kind === "passer");
+  const netSh = netShapes(pieces);
   const shotNet = launch => {
     if (pk.net) { const n = nets.find(x => x.id === pk.net); if (n) return { x: n.x, y: n.y }; }
     if (nets.length) return nets.reduce((a, b) => (Math.hypot(b.x - launch.x, b.y - launch.y) < Math.hypot(a.x - launch.x, a.y - launch.y) ? b : a));
@@ -201,7 +205,13 @@ function chain(pk, byId, pieces) {
     const rec = byId(tr.to); if (!rec) return;
     const launch = routePoint(cur, tr.at);
     const anchor = routePoint(rec, tr.recvAt == null ? rec.path.length - 1 : tr.recvAt);
-    if (tr.kind === "shot") out.push(chainLine([launch, shotNet(launch)], "shot"), chainLine([shotNet(launch), anchor], "rebound"));
+    if (tr.kind === "shot") {
+      const net = shotNet(launch);
+      // if the carom to the collector would pass through a net, it can't get
+      // there — flag that rebound red instead of drawing it as a clean carom
+      const rbMode = segCrossesNet(net, anchor, netSh) ? "rebound-x" : "rebound";
+      out.push(chainLine([launch, net], "shot"), chainLine([net, anchor], rbMode));
+    }
     else if (tr.kind === "rim") out.push(chainLine(rimPoly(launch, tr.aim, anchor), "pass"));
     else if (tr.kind === "chip") { const h = tr.aim != null ? aimVec(tr.aim) : heading(cur, tr.at); out.push(chainLine(boards.slideTo(launch.x, launch.y, h.x, h.y, anchor), "pass")); }
     else out.push(chainLine([launch, anchor], "pass"));   // pass
@@ -223,6 +233,7 @@ export function drillSvg(dsl, opts = {}) {
       <marker id="arrowR" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="${V("mark", "#cf3346")}"/></marker>
       <marker id="arrowP" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="${V("puck", "#14171a")}"/></marker>
       <marker id="arrowRB" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="${REBOUND_COLOR}"/></marker>
+      <marker id="arrowRX" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="${BLOCKED_COLOR}"/></marker>
     </defs>`;
   const routes = pieces.map(routePath).join("");
   const chains = pieces.filter(p => p.kind === "puck").map(pk => chain(pk, byId, pieces)).join("");
