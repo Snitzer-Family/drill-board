@@ -684,13 +684,25 @@ export default function DrillAnimator() {
     };
   }
 
+  // append a new waypoint after the route's end, continuing in its heading, and
+  // open the new point so it can be dragged/edited right away
   function addSegment(id, type) {
+    const piece = pieces.find(q => q.id === id);
+    if (!piece) return;
+    const newIdx = piece.path.length;
     update(p => {
       if (p.id !== id) return p;
-      const prev = segEnd(p, p.path.length - 1);
-      const seg = convertSeg({ type, x: clampX(prev.x + 22), y: prev.y }, prev);
+      const n = p.path.length;
+      const prev = n ? segEnd(p, n - 1) : { x: p.x, y: p.y };
+      const before = n >= 2 ? segEnd(p, n - 2) : { x: p.x, y: p.y };
+      let dx = prev.x - before.x, dy = prev.y - before.y;
+      const m = Math.hypot(dx, dy);
+      if (m < 0.5) { dx = 22; dy = 0; } else { dx = (dx / m) * 22; dy = (dy / m) * 22; }
+      const seg = convertSeg({ type, x: clampX(prev.x + dx), y: clampY(prev.y + dy) }, prev);
       return { ...p, path: [...p.path, seg] };
     });
+    setSelectedId(id);
+    setPopup({ type: "point", id, seg: newIdx });
   }
   function changeSegType(id, i, type) {
     update(p => {
@@ -1847,6 +1859,14 @@ export default function DrillAnimator() {
                 </div>
               )}
             </>
+          ) : (p.kind === "player" || p.kind === "puck") && !p.defense ? (
+            <div className="hd-poprow">
+              <span>Extend route</span>
+              <button className="hd-mini" onClick={() => addSegment(p.id, "L")}>⎯</button>
+              <button className="hd-mini" onClick={() => addSegment(p.id, "Q")}>⌒</button>
+              <button className="hd-mini" onClick={() => addSegment(p.id, "C")}>∿</button>
+              <span style={{ fontSize: 11, color: "#8b99a8" }}>adds a waypoint after the end</span>
+            </div>
           ) : (
             <div className="hd-poprow" style={{ color: "#8b99a8", fontSize: 12 }}>End of route</div>
           )}
