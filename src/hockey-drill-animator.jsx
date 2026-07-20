@@ -1600,16 +1600,23 @@ export default function DrillAnimator() {
     const n = p.path.length;
     if (!n) return null;
     const last = p.path[n - 1];
-    const from = n >= 2 ? segEnd(p, n - 2) : { x: p.x, y: p.y };
-    const tail = last.type === "Q" ? { x: last.cx, y: last.cy }
-      : last.type === "C" ? { x: last.c2x, y: last.c2y } : from;
-    const dx = last.x - tail.x, dy = last.y - tail.y;
-    if (!dx && !dy) return null;
-    const ang = (Math.atan2(dy, dx) * 180) / Math.PI;
-    // pull the arrow back off the waypoint so its tip points AT the point instead
-    // of sitting on top of the waypoint symbol / anchor handle
-    const mag = Math.hypot(dx, dy) || 1, back = 2.6;
-    const fx = iconXf({ x: last.x - (dx / mag) * back, y: last.y - (dy / mag) * back, a: ang });
+    const prev = n >= 2 ? segEnd(p, n - 2) : { x: p.x, y: p.y };
+    // sample the final segment along its TRUE curve, then sit the arrow a little
+    // back by arc length so its tip stays on the route line (a straight offset
+    // detaches it from a curved leg) and points along the local tangent
+    const N = 24, pts = [];
+    for (let k = 0; k <= N; k++) pts.push(evalSeg(prev, last, k / N));
+    const cum = [0];
+    for (let k = 1; k <= N; k++) cum.push(cum[k - 1] + Math.hypot(pts[k].x - pts[k - 1].x, pts[k].y - pts[k - 1].y));
+    const total = cum[N];
+    if (total < 1e-3) return null;
+    const target = Math.max(0, total - Math.min(2.4, total * 0.5));
+    let k = 1; while (k < N && cum[k] < target) k++;
+    const t = (target - cum[k - 1]) / ((cum[k] - cum[k - 1]) || 1);
+    const pos = { x: pts[k - 1].x + (pts[k].x - pts[k - 1].x) * t, y: pts[k - 1].y + (pts[k].y - pts[k - 1].y) * t };
+    const a2 = pts[Math.min(N, k + 1)], b2 = pts[Math.max(0, k - 2)];
+    const ang = (Math.atan2(a2.y - b2.y, a2.x - b2.x) * 180) / Math.PI;
+    const fx = iconXf({ x: pos.x, y: pos.y, a: ang });
     return (
       <g key={`arw-${p.id}`} transform={fx.t} pointerEvents="none">
         <path d="M 0 0 L -2.7 -1.5 L -1.9 0 L -2.7 1.5 Z" fill={p.color} opacity={0.85} />
@@ -1619,6 +1626,10 @@ export default function DrillAnimator() {
 
   function renderHandles(p) {
     if (!editing || p.id !== selectedId || tool === "draw") return null;
+    // the "selected waypoint" is the leg/point whose popup is open (tapping the
+    // line opens a "line" popup, tapping the anchor a "point" popup — both carry
+    // its seg); its curve-shaping handles show only for it, not every waypoint
+    const activeSeg = popup && (popup.type === "line" || popup.type === "point") && popup.id === p.id ? popup.seg : null;
     const els = [];
     const ctrlPt = (key, cx, cy, kind, i) => {
       els.push(<circle key={key} cx={cx} cy={cy} r={1.5} fill="#fff" stroke="#5b7d9e" strokeWidth={0.4} pointerEvents="none" />);
@@ -1627,21 +1638,30 @@ export default function DrillAnimator() {
     };
     p.path.forEach((s, i) => {
       const prev = segEnd(p, i - 1);
-      if (s.type === "Q") {
+      const active = i === activeSeg;                 // show control handles only for the selected leg
+      if (active && s.type === "Q") {
         els.push(<line key={`ql1${i}`} x1={prev.x} y1={prev.y} x2={s.cx} y2={s.cy} stroke="#8fa3b5" strokeWidth={0.25} strokeDasharray="1 1" />);
         els.push(<line key={`ql2${i}`} x1={s.x} y1={s.y} x2={s.cx} y2={s.cy} stroke="#8fa3b5" strokeWidth={0.25} strokeDasharray="1 1" />);
         ctrlPt(`qc${i}`, s.cx, s.cy, "q", i);
       }
-      if (s.type === "C") {
+      if (active && s.type === "C") {
         els.push(<line key={`cl1${i}`} x1={prev.x} y1={prev.y} x2={s.c1x} y2={s.c1y} stroke="#8fa3b5" strokeWidth={0.25} strokeDasharray="1 1" />);
         els.push(<line key={`cl2${i}`} x1={s.x} y1={s.y} x2={s.c2x} y2={s.c2y} stroke="#8fa3b5" strokeWidth={0.25} strokeDasharray="1 1" />);
         ctrlPt(`cc1${i}`, s.c1x, s.c1y, "c1", i);
         ctrlPt(`cc2${i}`, s.c2x, s.c2y, "c2", i);
       }
-      els.push(<rect key={`a${i}`} x={s.x - 1.4} y={s.y - 1.4} width={2.8} height={2.8}
-        fill="#ffd447" stroke="#7a5c00" strokeWidth={0.35} pointerEvents="none" />);
-      els.push(<circle key={`ah${i}`} cx={s.x} cy={s.y} r={4} fill="transparent" style={{ cursor: "grab" }}
-        onPointerDown={e => handleDown(e, { kind: "anchor", id: p.id, seg: i })} />);
+      // the selected waypoint gets the full grab square; every other waypoint is
+      // just a small dot (still grabbable) so the route isn't buried in handles
+      if (active) {
+        els.push(<rect key={`a${i}`} x={s.x - 1.4} y={s.y - 1.4} width={2.8} height={2.8}
+          fill="#ffd447" stroke="#7a5c00" strokeWidth={0.35} pointerEvents="none" />);
+        els.push(<circle key={`ah${i}`} cx={s.x} cy={s.y} r={4} fill="transparent" style={{ cursor: "grab" }}
+          onPointerDown={e => handleDown(e, { kind: "anchor", id: p.id, seg: i })} />);
+      } else {
+        els.push(<circle key={`am${i}`} cx={s.x} cy={s.y} r={0.9} fill="#ffd447" stroke="#7a5c00" strokeWidth={0.3} pointerEvents="none" />);
+        els.push(<circle key={`amh${i}`} cx={s.x} cy={s.y} r={3.5} fill="transparent" style={{ cursor: "grab" }}
+          onPointerDown={e => handleDown(e, { kind: "anchor", id: p.id, seg: i })} />);
+      }
     });
     return <g>{els}</g>;
   }
