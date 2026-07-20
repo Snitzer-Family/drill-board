@@ -1704,40 +1704,49 @@ export default function DrillAnimator() {
     if (!showResult || aiPlay || animT <= 0) return null;
     const DUR = 1.5, e = animT * totalTime;
     const { plans } = getPlan();
-    const els = [];
+    // gather every shot result, grouped by which net it hit (left vs right)
+    const byNet = new Map();
     for (const q of pieces) {
       if (q.kind !== "puck") continue;
       const plan = plans[q.id];
       if (!plan) continue;
       plan.legs.forEach((L, i) => {
         if (L.type !== "fly" || !L.shot || (!L.goal && !L.save)) return;
-        const dt = e - L.t1;
-        if (dt < 0 || dt > DUR) return;
-        const goal = !!L.goal;
-        const sx = L.x1 + (L.x1 < 100 ? 15 : -15);          // toward centre ice
-        const sy = Math.max(10, L.y1 - 13);                 // above the mouth
-        // pop in, hold, fade out
-        const inT = 0.16, outT = DUR - 0.4;
-        let op = 1, pop = 1;
-        if (dt < inT) { const f = dt / inT; op = f; pop = 0.55 + 0.45 * f + 0.18 * Math.sin(f * Math.PI); }
-        else if (dt > outT) { const f = (dt - outT) / (DUR - outT); op = 1 - f; pop = 1 + 0.12 * f; }
-        const fx = iconXf({ x: sx, y: sy, a: 0 });
-        const text = goal ? "GOAL!" : "SAVE!";
-        const fs = 7 * pop / ICON_SCALE;
-        const w = text.length * fs * 0.6 + fs * 0.8, h = fs * 1.5;
-        els.push(
-          <g key={`rs-${q.id}-${i}`} transform={fx.t} opacity={op} pointerEvents="none">
-            <g transform={`rotate(${-fx.th})`}>
-              <rect x={-w / 2} y={-h / 2} width={w} height={h} rx={h * 0.28}
-                fill={goal ? "#ff3b52" : "#2b8cff"} stroke="rgba(255,255,255,0.9)" strokeWidth={0.6} />
-              <text textAnchor="middle" y={fs * 0.36} fontSize={fs} fontWeight={900} fill="#fff"
-                style={{ fontFamily: "system-ui, sans-serif", userSelect: "none", letterSpacing: fs * 0.02 }}>
-                {text}
-              </text>
-            </g>
-          </g>
-        );
+        const side = L.x1 < 100 ? "L" : "R";
+        const cur = byNet.get(side);
+        // keep only the latest shot on this net that has already arrived, so a
+        // rebound goal instantly supersedes the earlier save (no overlap)
+        if (L.t1 <= e && (!cur || L.t1 > cur.t1)) byNet.set(side, { L, key: `${q.id}-${i}` });
       });
+    }
+    const els = [];
+    for (const { L, key } of byNet.values()) {
+      const dt = e - L.t1;
+      if (dt < 0 || dt > DUR) continue;                     // faded, with no newer shot to replace it
+      const goal = !!L.goal;
+      const sx = L.x1 + (L.x1 < 100 ? 15 : -15);            // toward centre ice
+      const sy = Math.max(10, L.y1 - 13);                   // above the mouth
+      // pop in, hold, fade out
+      const inT = 0.16, outT = DUR - 0.4;
+      let op = 1, pop = 1;
+      if (dt < inT) { const f = dt / inT; op = f; pop = 0.55 + 0.45 * f + 0.18 * Math.sin(f * Math.PI); }
+      else if (dt > outT) { const f = (dt - outT) / (DUR - outT); op = 1 - f; pop = 1 + 0.12 * f; }
+      const fx = iconXf({ x: sx, y: sy, a: 0 });
+      const text = goal ? "GOAL!" : "SAVE!";
+      const fs = 7 * pop / ICON_SCALE;
+      const w = text.length * fs * 0.6 + fs * 0.8, h = fs * 1.5;
+      els.push(
+        <g key={`rs-${key}`} transform={fx.t} opacity={op} pointerEvents="none">
+          <g transform={`rotate(${-fx.th})`}>
+            <rect x={-w / 2} y={-h / 2} width={w} height={h} rx={h * 0.28}
+              fill={goal ? "#ff3b52" : "#2b8cff"} stroke="rgba(255,255,255,0.9)" strokeWidth={0.6} />
+            <text textAnchor="middle" y={fs * 0.36} fontSize={fs} fontWeight={900} fill="#fff"
+              style={{ fontFamily: "system-ui, sans-serif", userSelect: "none", letterSpacing: fs * 0.02 }}>
+              {text}
+            </text>
+          </g>
+        </g>
+      );
     }
     return els;
   }
