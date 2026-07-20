@@ -690,9 +690,9 @@ function routePath(p) {
   const startPt = startTrim ? startTrim.start : { x: p.x, y: p.y };
   let d = `M ${f(startPt.x)} ${f(startPt.y)}`;
   p.path.forEach((s0, i) => {
-    const prevPt = i === 0 ? startPt : { x: p.path[i - 1].x, y: p.path[i - 1].y };
+    // the end arrow sits AT the last waypoint (pointing the way the route
+    // finishes — toward the net/target); only the START lifts off the player
     let s = i === 0 && startTrim ? startTrim.seg : s0;
-    if (i === last) s = trimSeg(prevPt, s, 2.7);
     if (s.type === "L") d += ` L ${f(s.x)} ${f(s.y)}`;
     else if (s.type === "Q") d += ` Q ${f(s.cx)} ${f(s.cy)} ${f(s.x)} ${f(s.y)}`;
     else d += ` C ${f(s.c1x)} ${f(s.c1y)} ${f(s.c2x)} ${f(s.c2y)} ${f(s.x)} ${f(s.y)}`;
