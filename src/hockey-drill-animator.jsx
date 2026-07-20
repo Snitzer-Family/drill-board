@@ -516,6 +516,9 @@ export default function DrillAnimator() {
   }, [playing]); // eslint-disable-line
 
   function resetAnim() { animRef.current = 0; setAnimT(0); holdRef.current = 0; loopPendingRef.current = false; nextStepRef.current = 0; setHoldStep(null); }
+  // editing while the animation is paused/finished snaps the pieces back to their
+  // start positions first — returns true if it consumed the interaction
+  function wakeEdit() { if (!playing && animT > 0) { resetAnim(); return true; } return false; }
   function skipHold() { holdRef.current = 0; setHoldStep(null); }
 
   // "Let AI play" — a self-contained 5v5 sim loop, independent of the scripted timeline
@@ -1107,6 +1110,7 @@ export default function DrillAnimator() {
 
   function onSvgDown(e) {
     if (playing || pinchRef.current) return;
+    if (wakeEdit()) return;                    // paused/finished → snap back to start first
     setOpenMenu(null);
     const pt = svgPt(e);
     if (tool === "draw") { setPopup(null); beginDraw(e); return; }
@@ -1179,7 +1183,7 @@ export default function DrillAnimator() {
     e.stopPropagation();
     setOpenMenu(null);
     if (tool === "draw") { setSelectedId(id); setPopup(null); beginDraw(e, id); return; }
-    if (animT > 0) return;
+    if (wakeEdit()) return;
     setSelectedId(id);
     const pt = svgPt(e);
     drag.current = { kind: "piece", id, start: pt, last: pt, moved: false, touch: e.pointerType !== "mouse" };
@@ -1191,7 +1195,7 @@ export default function DrillAnimator() {
     e.stopPropagation();
     setOpenMenu(null);
     if (tool === "draw") { setSelectedId(id); setPopup(null); beginDraw(e, id); return; }
-    if (animT > 0) return;
+    if (wakeEdit()) return;
     setSelectedId(id);
     const pt = svgPt(e);
     drag.current = { kind: "piece", id, line: segIdx, tapPt: pt, start: pt, last: pt, moved: false, touch: e.pointerType !== "mouse" };
@@ -1201,6 +1205,7 @@ export default function DrillAnimator() {
   function handleDown(e, payload) {
     if (!editing || pinchRef.current) return;
     e.stopPropagation();
+    if (wakeEdit()) return;
     setOpenMenu(null);
     if (payload.id) setSelectedId(payload.id);
     const pt = svgPt(e);
@@ -1216,7 +1221,8 @@ export default function DrillAnimator() {
   // own angular offset from the body is subtracted so the blade tracks
   // the pointer exactly instead of jumping on grab
   function stickDown(e, p) {
-    if (playing || animT > 0 || pinchRef.current) return;
+    if (playing || pinchRef.current) return;
+    if (wakeEdit()) return;
     e.stopPropagation();
     setOpenMenu(null);
     setSelectedId(p.id);
