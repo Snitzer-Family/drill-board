@@ -626,7 +626,8 @@ export default function DrillAnimator() {
     // threat = the nearest puck's live position (carried puck ≈ the puck carrier)
     const pucks = pieces.filter(q => q.kind === "puck");
     let threat = null, best = Infinity;
-    pucks.forEach(pk => { const d = displayPos(pk); const dist = Math.hypot(d.x - net.x, d.y - net.y); if (dist < best) { best = dist; threat = d; } });
+    // use the raw puck spot (not displayPos) so the D↔puck↔carrier chain can't recurse
+    pucks.forEach(pk => { const d = displayPosRaw(pk); const dist = Math.hypot(d.x - net.x, d.y - net.y); if (dist < best) { best = dist; threat = d; } });
     if (!threat) return { x: home.x, y: home.y, a: p.facing || 0 };
     const cx = threat.x, cy = threat.y;                   // puck carrier
     const behind = (cx - net.x) * fwd <= 0;               // carrier is behind the net
@@ -652,14 +653,31 @@ export default function DrillAnimator() {
   // solid net footprints — players and pucks are kept out (routed around) so a
   // route or a loose puck never sits inside the sides/back of a net
   const netObstacles = netShapes(pieces);
+  // players are solid too: keep-out radius (feet) around each skater
+  const PLAYER_R = 2.9;
+  // stationary players (no route) act like static obstacles — routes arc around
+  // them just like nets. Moving players are handled per-frame in displayPos.
+  const stationaryDiscs = pieces
+    .filter(q => q.kind === "player" && !q.path.length && !q.defense)
+    .map(q => ({ cx: q.x, cy: q.y, r: PLAYER_R }));
+  // obstacles a given piece's route should detour around (nets + parked players,
+  // minus itself)
+  const detourObstaclesFor = id => {
+    const self = pieces.find(q => q.id === id);
+    const mine = self && !self.path.length ? [{ cx: self.x, cy: self.y }] : [];
+    const discs = stationaryDiscs.filter(d => !mine.some(m => m.cx === d.cx && m.cy === d.cy));
+    return netObstacles.length || discs.length ? [...netObstacles, ...discs] : [];
+  };
   // A route sampled then re-routed to arc smoothly around any net it crosses.
   // Returns { pts, origLen } (origLen = the straight-sampled length, for mapping
   // animation progress onto the detour) or null if no net is in the way. Cached
   // per render so the line and the animation share one detour.
   const detourCache = new Map();
   function routeDetour(p) {
-    if (!netObstacles.length || !p.path.length || (p.kind !== "player" && p.kind !== "puck")) return null;
+    if (!p.path.length || (p.kind !== "player" && p.kind !== "puck")) return null;
     if (detourCache.has(p.id)) return detourCache.get(p.id);
+    const obstacles = detourObstaclesFor(p.id);
+    if (!obstacles.length) { detourCache.set(p.id, null); return null; }
     const pts = [{ x: p.x, y: p.y }];
     let prev = { x: p.x, y: p.y }, origLen = 0;
     for (const s of p.path) {
@@ -667,7 +685,7 @@ export default function DrillAnimator() {
       for (let k = 1; k <= n; k++) { const q = evalSeg(prev, s, k / n); const last = pts[pts.length - 1]; origLen += Math.hypot(q.x - last.x, q.y - last.y); pts.push(q); }
       prev = { x: s.x, y: s.y };
     }
-    const det = detourRoute(pts, netObstacles);
+    const det = detourRoute(pts, obstacles);
     const out = det !== pts ? { pts: det, origLen } : null;
     detourCache.set(p.id, out);
     return out;
@@ -694,11 +712,11 @@ export default function DrillAnimator() {
   // how much (deg) a puck-carrier opens their body to shield the puck when its
   // strong-side blade would run into a net's keep-out (whole icon rotates, so
   // nothing detaches; 0 when clear). `side` = strong side (R:+1 / L:-1)
-  function shieldDelta(x, y, aDeg, side) {
-    if (!netObstacles.length) return 0;
+  function shieldDelta(x, y, aDeg, side, obstacles) {
+    if (!obstacles.length) return 0;
     const b = bladeAtWorld(x, y, aDeg, TIP_FWD, TIP_LAT, side);
     let w = 0, near = null, bd = Infinity;
-    for (const sh of netObstacles) {
+    for (const sh of obstacles) {
       const d = Math.hypot(b.x - sh.cx, b.y - sh.cy), R = sh.r + 3;
       if (d < R) { const t = Math.min(1, (R - d) / 4.5); w = Math.max(w, t * t * (3 - 2 * t)); }
       if (d < bd) { bd = d; near = sh; }
@@ -714,8 +732,9 @@ export default function DrillAnimator() {
   }
   function displayPos(p) {
     const res = displayPosRaw(p);
-    if (animT <= 0 || !netObstacles.length) return res;
-    // players follow the arc-detour around a net (loose pucks carom via reflection)
+    if (animT <= 0) return res;
+    // players arc around nets/parked players (via the route detour) and deviate
+    // around other MOVING players per-frame so skaters never pass through each other
     if (p.kind === "player") {
       const rd = routeDetour(p);
       let x = res.x, y = res.y, a = res.a;
@@ -724,11 +743,22 @@ export default function DrillAnimator() {
         const s = samplePoly(rd.pts, f);
         x = s.x; y = s.y; a = p.path.some(sg => sg.dir === "bwd") ? res.a : s.a;
       }
-      // open the body to shield a carried puck from a net
       const side = p.hand === "L" ? -1 : 1;
+      const others = [];                                   // other skaters (for shield + push)
+      for (const q of pieces) {
+        if (q.kind !== "player" || q.id === p.id) continue;
+        const rq = displayPosRaw(q);
+        others.push({ cx: rq.x, cy: rq.y, r: PLAYER_R });
+        // deviate around a moving/reactive player (parked ones are in the detour)
+        if (p.path.length && (q.path.length || q.defense)) {
+          const dx = x - rq.x, dy = y - rq.y, d = Math.hypot(dx, dy), MIN = PLAYER_R * 2;
+          if (d < MIN && d > 1e-3) { const push = (MIN - d) * 0.5; x += (dx / d) * push; y += (dy / d) * push; }
+        }
+      }
+      // open the body to shield a carried puck from a net or another player
       const carries = pieces.some(q => q.kind === "puck"
         && Math.hypot(displayPosRaw(q).x - x, displayPosRaw(q).y - y) < 5.5);
-      if (carries) a += shieldDelta(x, y, a, side);
+      if (carries) a += shieldDelta(x, y, a, side, [...netObstacles, ...others]);
       return { ...res, x, y, a };
     }
     // a carried puck sits on its carrier's blade tip (so it stays on the stick
