@@ -177,7 +177,7 @@ export function serializeDrill(rink, pieces, title = "", desc = "") {
       out.push(`PIECE ${p.id} label ${f1(p.x)} ${f1(p.y)} ${p.color}${sz} ${qesc(p.text || "")}`);
       return;
     }
-    const lbl = p.kind === "player" && p.label ? " " + p.label : "";
+    const lbl = p.label ? " " + String(p.label).replace(/[\s,]+/g, "_") : "";
     const spd = p.speed && p.speed !== 1 ? ` speed=${f2(p.speed)}` : "";
     const hnd = p.kind === "player" && p.hand === "L" ? " hand=L" : "";
     const car = p.kind === "puck" && p.carrier ? ` on=${p.carrier}` : "";

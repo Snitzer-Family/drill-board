@@ -1144,6 +1144,26 @@ export default function DrillAnimator() {
     setSelectedId(np.id);
     setPopup({ type: "piece", id: np.id });
   }
+  // copy a piece (with its route/props) to a fresh id, offset so it's visible
+  function duplicatePiece(id) {
+    const src = pieces.find(p => p.id === id);
+    if (!src) return;
+    const off = 9, nid = nextId(src.kind);
+    const copy = JSON.parse(JSON.stringify(src));
+    copy.id = nid;
+    copy.x = clampX(src.x + off); copy.y = clampY(src.y + off);
+    if (Array.isArray(copy.path)) copy.path = copy.path.map(s => {
+      const t = { ...s };
+      for (const k of ["x", "cx", "c1x", "c2x"]) if (t[k] != null) t[k] = clampX(t[k] + off);
+      for (const k of ["y", "cy", "c1y", "c2y"]) if (t[k] != null) t[k] = clampY(t[k] + off);
+      return t;
+    });
+    // a duplicated puck starts loose (avoid two pucks glued to one carrier)
+    if (copy.kind === "puck") { copy.carrier = null; copy.transfers = []; copy.shotAt = copy.rimAt = copy.chipAt = null; copy.pickup = null; }
+    setPieces(ps => [...ps, copy]);
+    setSelectedId(nid);
+    setPopup({ type: "piece", id: nid });
+  }
 
   function addPlayerWithPuck(pt, showPopup) {
     const pl = makePiece("player", pt);
@@ -1653,6 +1673,10 @@ export default function DrillAnimator() {
         els.push(labelNode(`lbl-${p.id}`, p.x, p.y, p.text, p.size, p.color, sel,
           e => pieceDown(e, p.id),
           canEdit ? e => handleDown(e, { kind: "resize", id: p.id, seg: null, cx: p.x, cy: p.y, size0: p.size || 1 }) : null));
+      } else if (p.label && p.kind !== "player") {
+        // a name tag under any named prop/piece (players show their jersey instead)
+        const off = p.kind === "net" ? 6.5 : 5;
+        els.push(labelNode(`nm-${p.id}`, p.x, p.y + off, p.label, 0.5, "#33414f", false, null, null));
       }
       (p.path || []).forEach((s, i) => {
         if (s.dmode !== "label" || !s.desc) return;
@@ -1902,12 +1926,6 @@ export default function DrillAnimator() {
                     onClick={() => updateById(p.id, { color: c })} />
                 ))}
               </div>
-              <div className="hd-poprow">
-                <button className="hd-mini danger"
-                  onClick={() => { setPieces(ps => ps.filter(q => q.id !== p.id)); setSelectedId(null); setPopup(null); }}>
-                  Delete label
-                </button>
-              </div>
             </>
           )}
           {p.kind === "net" && (
@@ -1937,12 +1955,6 @@ export default function DrillAnimator() {
                 <button className={`hd-mini${(p.size || 1) < 0.8 ? " on" : ""}`}
                   onClick={() => updateById(p.id, { size: 0.55 })}>Small</button>
                 <span style={{ fontSize: 11, color: "#8b99a8" }}>drag to move</span>
-              </div>
-              <div className="hd-poprow">
-                <button className="hd-mini danger"
-                  onClick={() => { setPieces(ps => ps.filter(q => q.id !== p.id)); setSelectedId(null); setPopup(null); }}>
-                  Delete tire
-                </button>
               </div>
             </>
           )}
@@ -2071,10 +2083,18 @@ export default function DrillAnimator() {
               <button className="hd-mini" onClick={() => addSegment(p.id, "C")}>∿</button>
             </div>
           )}
+          {p.kind !== "player" && p.kind !== "label" && (
+            <div className="hd-poprow">
+              <span>Name</span>
+              <input className="hd-input" style={{ flex: 1, minWidth: 90 }} value={p.label || ""} placeholder={p.id}
+                onChange={e => updateById(p.id, { label: e.target.value.replace(/[\s,]+/g, "_") })} />
+            </div>
+          )}
           <div className="hd-poprow">
             {p.path.length > 0 && (
               <button className="hd-mini" onClick={() => { updateById(p.id, { path: [] }); setPopup(null); }}>Clear route</button>
             )}
+            <button className="hd-mini" onClick={() => duplicatePiece(p.id)}>⧉ Duplicate</button>
             <button className="hd-mini danger"
               onClick={() => {
                 setPieces(ps => ps.filter(q => q.id !== p.id)
