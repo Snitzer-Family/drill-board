@@ -224,8 +224,12 @@ function chain(pk, byId, pieces) {
 }
 
 /* ------------------------------------------------------------------ */
+// rink view boxes (rink feet): the DSL RINK mode crops the diagram to half /
+// quarter ice, matching the editor's views
+const VIEWS = { full: [0, 0, 200, 85], half: [100, 0, 100, 85], quarter: [100, 0, 100, 42.5] };
+
 export function drillSvg(dsl, opts = {}) {
-  const { pieces } = parseDrill(dsl);
+  const { pieces, rink: rinkMode } = parseDrill(dsl);
   const byId = id => pieces.find(p => p.id === id);
   const rank = k => (k === "net" || k === "bumper" || k === "deker" || k === "passer" || k === "tire" ? 0 : k === "player" ? 2 : 1);
   const defs = `<defs>
@@ -250,7 +254,10 @@ export function drillSvg(dsl, opts = {}) {
     + pieces.flatMap(p => (p.path || []).filter(s => s.dmode === "label" && s.desc)
         .map(s => labelSvg(s.x + (s.dox || 0), s.y + (s.doy != null ? s.doy : -5), s.desc, s.dsize, "#14202b"))).join("");
   const wattr = opts.width ? ` width="${opts.width}"` : "";
+  // crop to the drill's rink mode (full / half / quarter) with a 7 ft margin
+  const [vx, vy, vw, vh] = VIEWS[rinkMode] || VIEWS.full, PAD = 7;
+  const viewBox = `${vx - PAD} ${vy - PAD} ${vw + 2 * PAD} ${vh + 2 * PAD}`;
   // icons paint over the chain lines; arrowheads are trimmed back so they point
   // at their target instead of vanishing under a circle. Labels stay on top.
-  return `<svg class="rink" viewBox="-7 -7 214 99"${wattr} xmlns="http://www.w3.org/2000/svg" role="img">${defs}${rink()}${routes}${chains}${icons}${labels}</svg>`;
+  return `<svg class="rink" viewBox="${viewBox}"${wattr} xmlns="http://www.w3.org/2000/svg" role="img">${defs}${rink()}${routes}${chains}${icons}${labels}</svg>`;
 }

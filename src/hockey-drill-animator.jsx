@@ -1520,7 +1520,10 @@ export default function DrillAnimator() {
   // render the drill (via the DSL→SVG renderer) and rasterise it to a PNG
   function exportImage() {
     const dsl = serializeDrill(rink, pieces, drillTitle, drillDesc);
-    const W = 1800, H = Math.round((W * 99) / 214);                 // viewBox is "-7 -7 214 99"
+    // size the raster to the drill's rink mode (full / half / quarter) so the
+    // image is cropped to the same view the diagram uses (PAD = 7 ft margin)
+    const [, , vw, vh] = VIEWS[rink] || VIEWS.full, PAD = 7;
+    const W = 1800, H = Math.round((W * (vh + 2 * PAD)) / (vw + 2 * PAD));
     const svg = drillSvg(dsl).replace("<svg ", `<svg width="${W}" height="${H}" `);
     const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml;charset=utf-8" }));
     const img = new Image();
