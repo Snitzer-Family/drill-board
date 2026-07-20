@@ -603,18 +603,19 @@ export default function DrillAnimator() {
   const HARD_AT = 2.0;      // ×base pace: full-out aggressive stride
   const PLANT_DEG = 55;     // deg the body pivots sideways in a hockey stop
   function displaySwing(p) {
+    return p.kind === "player" && animT > 0 ? stickSwing(p.id, animT * totalTime) : 0;
+  }
+  // stick-blade reach (degrees) toward a puck pulled across the body to protect
+  // it from a net — pivots the stick only (not the arms), so it reads as
+  // stickhandling. Requires the player to actually be carrying a puck.
+  function stickReach(p) {
     if (p.kind !== "player" || animT <= 0) return 0;
-    let s = stickSwing(p.id, animT * totalTime);
-    // reach the stick across the body toward a puck being pulled off the strong
-    // side to protect it from a net, so it reads as stickhandling
     const sw = carriedSwing(p);
-    if (sw) {
-      const rp = displayPosRaw(p);
-      const carries = pieces.some(q => q.kind === "puck"
-        && Math.hypot(displayPosRaw(q).x - rp.x, displayPosRaw(q).y - rp.y) < 5.5);
-      if (carries) s += -sw.w * 48 * sw.side;
-    }
-    return s;
+    if (!sw) return 0;
+    const rp = displayPosRaw(p);
+    const carries = pieces.some(q => q.kind === "puck"
+      && Math.hypot(displayPosRaw(q).x - rp.x, displayPosRaw(q).y - rp.y) < 5.5);
+    return carries ? -sw.w * 55 * sw.side : 0;
   }
   // an auto-reacting defenseman: hold the middle / front of the defended net,
   // stay goal-side of the puck (keep the attacker in front), gap up toward it.
@@ -2384,7 +2385,7 @@ export default function DrillAnimator() {
               const fx = iconXf(dp);
               return (
                 <PieceIcon key={p.id} p={p} pos={dp} xf={fx.t} thDeg={fx.th}
-                  selected={p.id === selectedId} swing={displaySwing(p)}
+                  selected={p.id === selectedId} swing={displaySwing(p)} reach={stickReach(p)}
                   dim={animT > 0} onDown={e => pieceDown(e, p.id)}
                   onStickDown={editing && tool !== "draw" && p.kind === "player" && !p.path.length
                     ? e => stickDown(e, p) : undefined} />

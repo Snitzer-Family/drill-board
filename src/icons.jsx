@@ -51,7 +51,7 @@ export function DiagPanel() {
 
 /* ---------------- piece icon ---------------- */
 
-export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStickDown, swing = 0 }) {
+export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStickDown, swing = 0, reach = 0 }) {
   const frame = xf || `translate(${pos.x} ${pos.y}) rotate(${pos.a || 0}) scale(${ICON_SCALE})`;
   let body;
   if (p.kind === "puck")
@@ -150,10 +150,14 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
         <g transform={`${p.hand === "L" ? "scale(1 -1) " : ""}${swing ? `rotate(${swing} 1 0)` : ""}`.trim() || undefined}>
           <path d="M -0.3 -2.5 C 0.7 -2.3 1.4 -1.4 1.7 -0.5" fill="none" stroke={p.color} strokeWidth={1.05} strokeLinecap="round" />
           <path d="M -0.3 2.5 C 0.9 2.4 1.9 2.0 2.6 1.5" fill="none" stroke={p.color} strokeWidth={1.05} strokeLinecap="round" />
-          <path d="M 1.75 -0.35 L 4.35 2.75" stroke={dark} strokeWidth={0.4} strokeLinecap="round" />
-          <path d="M 4.2 2.6 L 5.6 2.45" stroke={dark} strokeWidth={0.8} strokeLinecap="round" />
           <circle cx={1.8} cy={-0.3} r={0.75} fill={dark} />
-          <circle cx={2.7} cy={1.55} r={0.75} fill={dark} />
+          {/* the stick (shaft + blade + lower hand) pivots around the top hand
+             for a stickhandle reach; the arms stay put so nothing detaches */}
+          <g transform={reach ? `rotate(${reach} 1.8 -0.3)` : undefined}>
+            <path d="M 1.75 -0.35 L 4.35 2.75" stroke={dark} strokeWidth={0.4} strokeLinecap="round" />
+            <path d="M 4.2 2.6 L 5.6 2.45" stroke={dark} strokeWidth={0.8} strokeLinecap="round" />
+            <circle cx={2.7} cy={1.55} r={0.75} fill={dark} />
+          </g>
         </g>
         <circle cx={0.85} cy={0} r={1.55} fill={p.color} />
         <circle cx={0.85} cy={0} r={1.55} fill="#000" opacity={0.45} />
