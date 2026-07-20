@@ -2108,10 +2108,8 @@ export default function DrillAnimator() {
           hit = { pk: q, kind: "tr", stage: s, tr: t }; break;
         }
       }
-      const hasLoose = pieces.some(q => q.kind === "puck"
-        && (q.shotAt != null || q.rimAt != null || q.chipAt != null || (!q.carrier && !q.pickup && !(q.transfers || []).length))
-        && puckChain(q).slice(-1)[0] !== p.id);
-      if (!hit && !hasLoose) return null;
+      // Collect is always offered (a default action at every spot); if there's
+      // no loose puck here, clicking just reports that there's nothing to grab
       const undo = () => {
         if (hit.kind === "pickup") { updateById(hit.pk.id, { pickup: null }); return; }
         const tr = hit.tr, field = tr.kind === "rim" ? "rimAt" : tr.kind === "chip" ? "chipAt" : "shotAt";
