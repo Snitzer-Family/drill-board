@@ -18,8 +18,8 @@ export function RinkMarkings({ yFix = 1 }) {
     <g clipPath="url(#boards)">
       <rect x={0} y={0} width={200} height={85} fill="#f5fafd" />
       {/* keep the goalie crease; the goal itself is shown by the net sprite */}
-      <path d={`M 17 36.5 A ${cr} 6 0 0 1 17 48.5 Z`} fill="#a3d0ee" stroke="#d7263d" strokeWidth={0.3} />
-      <path d={`M 183 36.5 A ${cr} 6 0 0 0 183 48.5 Z`} fill="#a3d0ee" stroke="#d7263d" strokeWidth={0.3} />
+      <path d={`M 17 36.5 A ${cr} 6 0 0 1 17 48.5 Z`} fill="#7cbce4" stroke="#d7263d" strokeWidth={0.3} />
+      <path d={`M 183 36.5 A ${cr} 6 0 0 0 183 48.5 Z`} fill="#7cbce4" stroke="#d7263d" strokeWidth={0.3} />
       <line x1={17} y1={0} x2={17} y2={85} stroke="#d7263d" strokeWidth={0.4} />
       <line x1={183} y1={0} x2={183} y2={85} stroke="#d7263d" strokeWidth={0.4} />
       <line x1={75} y1={0} x2={75} y2={85} stroke="#1f4fa3" strokeWidth={1} />

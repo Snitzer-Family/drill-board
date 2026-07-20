@@ -570,8 +570,8 @@ function rink() {
         <line x1="75" y1="0" x2="75" y2="85" stroke="${mkb}" stroke-width="1.1"/>
         <line x1="125" y1="0" x2="125" y2="85" stroke="${mkb}" stroke-width="1.1"/>
         <line x1="100" y1="0" x2="100" y2="85" stroke="${mk}" stroke-width="1.1"/>
-        <path d="M 17 36.5 A 6 6 0 0 1 17 48.5" fill="#a3d0ee" stroke="${mk}" stroke-width="0.35" opacity="0.9"/>
-        <path d="M 183 36.5 A 6 6 0 0 0 183 48.5" fill="#a3d0ee" stroke="${mk}" stroke-width="0.35" opacity="0.9"/>
+        <path d="M 17 36.5 A 6 6 0 0 1 17 48.5" fill="#7cbce4" stroke="${mk}" stroke-width="0.35" opacity="0.9"/>
+        <path d="M 183 36.5 A 6 6 0 0 0 183 48.5" fill="#7cbce4" stroke="${mk}" stroke-width="0.35" opacity="0.9"/>
       </g>
       ${fo(100, 42.5, mkb)}${fo(45, 20.5, mk)}${fo(45, 64.5, mk)}${fo(155, 20.5, mk)}${fo(155, 64.5, mk)}
       ${dot(100, 42.5, 0.9, mkb)}${dot(45, 20.5)}${dot(45, 64.5)}${dot(155, 20.5)}${dot(155, 64.5)}
@@ -743,7 +743,7 @@ function routePath(p, pieces) {
   const carry = pieces ? carrySegsOf(p, pieces) : new Set();
   const startTrim = trimSegStart({ x: p.x, y: p.y }, p.path[0], 3.6);
   const startPt = startTrim ? startTrim.start : { x: p.x, y: p.y };
-  const stroke = `fill="none" stroke="${p.color}" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"`;
+  const stroke = `fill="none" stroke="${p.color}" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"`;
   let lines = "";
   p.path.forEach((s0, i) => {
     const segPrev = i === 0 ? startPt : { x: p.path[i - 1].x, y: p.path[i - 1].y };
@@ -770,7 +770,7 @@ const chainLine = (pts, mode) => {
   const dash = shot ? "" : rebound ? ' stroke-dasharray="0.1 1.9"' : ' stroke-dasharray="2.4 2"';
   const marker = rebound ? "arrowRB" : "arrowP";
   const line = trimLine(pts, CHAIN_START[mode] != null ? CHAIN_START[mode] : 3.5, CHAIN_TRIM[mode] != null ? CHAIN_TRIM[mode] : 3.5);
-  return `<polyline points="${polyPts(line)}" fill="none" stroke="${color}" stroke-width="${shot ? 1.1 : 0.9}"`
+  return `<polyline points="${polyPts(line)}" fill="none" stroke="${color}" stroke-width="${shot ? 0.85 : 0.7}"`
     + `${dash} stroke-linecap="round" stroke-linejoin="round" opacity="0.9" marker-end="url(#${marker})"/>`;
 };
 
