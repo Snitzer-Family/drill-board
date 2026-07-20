@@ -109,6 +109,12 @@ export default function DrillAnimator() {
   const pinchRef = useRef(null);
   const segRefs = useRef({});
   const drag = useRef(null);
+  // undo history: coalesced snapshots of `pieces` (a drag = one entry)
+  const undoStack = useRef([]);
+  const prevPiecesRef = useRef();
+  const lastSnapRef = useRef(0);
+  const undoingRef = useRef(false);
+  const [undoCount, setUndoCount] = useState(0);
   const drawRaw = useRef([]);
   const drawTarget = useRef(null);
   const fileRef = useRef(null);
@@ -821,6 +827,30 @@ export default function DrillAnimator() {
   /* ----- edits ----- */
   const update = fn => setPieces(ps => ps.map(fn));
   const updateById = (id, patch) => update(p => (p.id === id ? { ...p, ...patch } : p));
+
+  // record a coalesced undo snapshot whenever `pieces` changes; rapid changes
+  // (a drag's frames) fold into a single entry, and an undo doesn't re-record
+  useEffect(() => {
+    const prev = prevPiecesRef.current;
+    prevPiecesRef.current = pieces;
+    if (undoingRef.current) { undoingRef.current = false; return; }
+    if (prev === undefined || prev === pieces) return;
+    const now = performance.now();
+    if (now - lastSnapRef.current > 130) {
+      undoStack.current.push(prev);
+      if (undoStack.current.length > 60) undoStack.current.shift();
+      setUndoCount(undoStack.current.length);
+    }
+    lastSnapRef.current = now;
+  }, [pieces]);
+  function undoLast() {
+    if (!undoStack.current.length) return;
+    const prev = undoStack.current.pop();
+    undoingRef.current = true;
+    setPieces(prev);
+    setSelectedId(null); setPopup(null); setOpenMenu(null);
+    setUndoCount(undoStack.current.length);
+  }
   const updateSeg = (id, i, patch) =>
     update(p => {
       if (p.id !== id) return p;
@@ -2455,6 +2485,8 @@ export default function DrillAnimator() {
         </button>
         <button className={`hd-barbtn${tool === "draw" ? " draw-on" : openMenu === "tools" ? " on" : ""}`}
           onClick={() => setOpenMenu(m => (m === "tools" ? null : "tools"))}>✎</button>
+        <button className="hd-barbtn" title="Undo last change" disabled={!undoCount}
+          onClick={undoLast} style={undoCount ? undefined : { opacity: 0.4 }}>↶</button>
         {/* play controls live in the bar on desktop (hidden on mobile via CSS) */}
         {!aiPlay && <>
           <button className={`hd-barbtn hd-barplay${loopMode ? " on" : ""}`} title="Loop"
