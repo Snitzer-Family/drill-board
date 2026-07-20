@@ -20,7 +20,10 @@ export function netShape(n) {
   // solid edges = consecutive pts[0..7]; the mouth edge pts[7]→pts[0] is open
   const solid = [];
   for (let i = 0; i < pts.length - 1; i++) solid.push([pts[i], pts[i + 1]]);
-  return { pts, solid, mouth: [pts[pts.length - 1], pts[0]], toWorld, toLocal, s };
+  // a keep-out disc (centroid + radius) that players arc smoothly around
+  let cx = 0, cy = 0; for (const p of pts) { cx += p.x; cy += p.y; } cx /= pts.length; cy /= pts.length;
+  let r = 0; for (const p of pts) r = Math.max(r, Math.hypot(p.x - cx, p.y - cy));
+  return { pts, solid, mouth: [pts[pts.length - 1], pts[0]], toWorld, toLocal, s, cx, cy, r };
 }
 
 export function netShapes(pieces) {
@@ -45,19 +48,16 @@ function nearestOnSeg(a, b, x, y) {
   return { x: a.x + dx * t, y: a.y + dy * t, dx, dy };
 }
 
-// If (x,y) is inside a net, slide it out the NEARER SIDE (in the net's local
-// frame) so a route that crosses the net skates around a side instead of popping
-// out the front or back. margin (feet) keeps a small skating gap.
-export function avoidNets(shapes, x, y, margin = 1.8) {
+// If (x,y) is within a net's keep-out disc, project it radially out to the disc
+// boundary, so a route crossing the net traces a smooth ARC around it (no sharp
+// V). margin (feet) is the skating gap kept off the net.
+export function avoidNets(shapes, x, y, margin = 1.2) {
   for (const sh of shapes) {
-    const { lx, ly } = sh.toLocal(x, y);
-    if (lx > -0.05 || lx < -4.3) continue;               // in front of the mouth / past the back
-    // cage half-width at this depth (full near the mouth, tapering to the back)
-    const half = lx > -1.7 ? 3.75 : Math.max(1.4, 3.75 * (lx + 4.15) / 2.45);
-    if (Math.abs(ly) >= half) continue;                  // already outside a side
-    const side = ly >= 0 ? 1 : -1;
-    const w = sh.toWorld(lx, side * (half + margin / sh.s));
-    x = w.x; y = w.y;
+    const R = sh.r + margin;
+    const dx = x - sh.cx, dy = y - sh.cy, d = Math.hypot(dx, dy);
+    if (d >= R) continue;
+    if (d < 1e-3) { x = sh.cx + R; y = sh.cy; }          // dead centre → nudge off
+    else { x = sh.cx + (dx / d) * R; y = sh.cy + (dy / d) * R; }
   }
   return { x, y };
 }
