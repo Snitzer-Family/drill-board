@@ -1130,8 +1130,11 @@ export default function DrillAnimator() {
       });
       const downstream = s => (s > blockStage ? "won't happen — an earlier step is blocked" : null);
       ts.forEach((t, s) => {
-        if (t.to === p.id && t.recvAt === i)
-          steps.push({ ord: s + 0.5, text: t.kind === "shot" ? `Collect rebound from ${nameOf(chain[s])}` : `Receive pass from ${nameOf(chain[s])}`, warn: downstream(s), del: () => setRecvAt(pk.id, s, null) });
+        // the receiver shows their side of the action too (at the designated
+        // receive waypoint, else at their standing spot i=-1)
+        const rSpot = t.recvAt != null ? t.recvAt : -1;
+        if (t.to === p.id && chain[s] !== p.id && rSpot === i)
+          steps.push({ ord: s + 0.5, text: t.kind === "shot" ? `Collect rebound from ${nameOf(chain[s])}` : `Receive pass from ${nameOf(chain[s])}`, warn: downstream(s), del: () => setTransfer(pk.id, s, null) });
         if (chain[s] === p.id && t.at === i) {
           const to = nameOf(t.to);
           const txt = t.kind === "pass" ? `Pass ${pk.id} to ${to}` : t.kind === "shot" ? `Shoot ${pk.id} — rebound to ${to}` : t.kind === "rim" ? `Hard rim to ${to}` : `Chip to ${to}`;
@@ -2149,6 +2152,23 @@ export default function DrillAnimator() {
               ))}
             </div>
           )}
+          {/* the passer designates WHICH waypoint the receiver catches it at, so a
+              multi-waypoint route doesn't grab a nearby pass by accident */}
+          {from && from.kind === "pass" && from.at === i && (() => {
+            const rec = pieces.find(q => q.id === from.to && q.kind === "player");
+            if (!rec || rec.path.length < 2) return null;
+            return (
+              <div className="hd-poprow">
+                <span>Receive at</span>
+                <button className={`hd-mini${from.recvAt == null ? " on" : ""}`}
+                  onClick={() => setRecvAt(pk.id, stage, null)}>auto</button>
+                {rec.path.map((s, wi) => (
+                  <button key={wi} className={`hd-mini${from.recvAt === wi ? " on" : ""}`}
+                    onClick={() => setRecvAt(pk.id, stage, from.recvAt === wi ? null : wi)}>{wi + 1}</button>
+                ))}
+              </div>
+            );
+          })()}
           {stage === (pk.transfers || []).length && (
             <div className="hd-poprow">
               <button className={`hd-mini${pk.shotAt === i ? " on" : ""}`}
