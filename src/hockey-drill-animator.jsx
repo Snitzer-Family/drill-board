@@ -1169,7 +1169,7 @@ export default function DrillAnimator() {
     if (!steps.length) return null;
     return (
       <div style={{ margin: "4px 0", padding: "6px 8px", background: "rgba(120,140,160,0.12)", borderRadius: 8 }}>
-        <div className="hd-mh" style={{ marginBottom: 4 }}>Steps here</div>
+        <div className="hd-mh" style={{ marginBottom: 4 }}>Waypoint {i < 0 ? 1 : i + 2} — steps</div>
         {steps.map((st, n) => (
           <div key={n} style={{ display: "flex", alignItems: "center", gap: 8, padding: "2px 0" }}>
             <span style={{ minWidth: 16, textAlign: "right", fontWeight: 700, color: "#8b99a8", fontVariantNumeric: "tabular-nums" }}>{n + 1}</span>
@@ -2185,7 +2185,7 @@ export default function DrillAnimator() {
                 <button className={`hd-mini${from.recvAt == null ? " on" : ""}`} onClick={() => setRecvAt(pk.id, stage, null)}>auto</button>
                 {rec.path.map((s, wi) => (
                   <button key={wi} className={`hd-mini${from.recvAt === wi ? " on" : ""}`}
-                    onClick={() => setRecvAt(pk.id, stage, from.recvAt === wi ? null : wi)}>{wi + 1}</button>
+                    onClick={() => setRecvAt(pk.id, stage, from.recvAt === wi ? null : wi)}>{wi + 2}</button>
                 ))}
               </div>
             );
@@ -2460,7 +2460,7 @@ export default function DrillAnimator() {
       if (!s) return null;
       anchorPt = { x: s.x, y: s.y };
       const next = p.path[i + 1];
-      title = `Point ${i + 1} of ${p.path.length}`;
+      title = `Waypoint ${i + 2} of ${p.path.length + 1}`;
       const goSeg = j => { setSelectedId(p.id); setPopup({ type: "point", id: p.id, seg: j }); };
       body = (
         <>
@@ -2468,7 +2468,7 @@ export default function DrillAnimator() {
             <div className="hd-poprow">
               <button className="hd-mini" disabled={i <= 0} style={{ opacity: i <= 0 ? 0.4 : 1 }}
                 onClick={() => goSeg(i - 1)}>‹ Prev</button>
-              <span style={{ fontSize: 11, color: "#8b99a8" }}>waypoint {i + 1} / {p.path.length}</span>
+              <span style={{ fontSize: 11, color: "#8b99a8" }}>waypoint {i + 2} / {p.path.length + 1}</span>
               <button className="hd-mini" disabled={i >= p.path.length - 1} style={{ opacity: i >= p.path.length - 1 ? 0.4 : 1 }}
                 onClick={() => goSeg(i + 1)}>Next ›</button>
             </div>

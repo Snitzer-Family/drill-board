@@ -53,7 +53,7 @@ function eventWps(p, pieces) {
     if (pk.pickup && pk.pickup.to === p.id && pk.pickup.at >= 0) idx.add(pk.pickup.at);
   }
   const map = new Map();
-  [...idx].sort((a, b) => a - b).forEach((wi, n) => map.set(wi, n + 1));
+  [...idx].forEach(wi => map.set(wi, wi + 2));   // start = waypoint 1, path[i] = i+2
   return map;
 }
 

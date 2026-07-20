@@ -695,7 +695,7 @@ function eventWps(p, pieces) {
     if (pk.pickup && pk.pickup.to === p.id && pk.pickup.at >= 0) idx.add(pk.pickup.at);
   }
   const map = new Map();
-  [...idx].sort((a, b) => a - b).forEach((wi, n) => map.set(wi, n + 1));
+  [...idx].forEach(wi => map.set(wi, wi + 2));   // start = waypoint 1, path[i] = i+2
   return map;
 }
 // evaluate a path segment at t (for arc-length arrow trimming)
@@ -882,12 +882,16 @@ function buildAnim(pieces) {
   // shows more stickhandle; fast skating or a sharp turn pushes it further ahead.
   const bladeOf = (id, t) => {
     const dt = 0.06, a = playerAt(id, t), b = playerAt(id, t + dt), c = playerAt(id, t - dt);
-    let hx = b.x - a.x, hy = b.y - a.y, hd = Math.hypot(hx, hy) || 1e-3; const speed = hd / dt; hx /= hd; hy /= hd;
+    let hx = b.x - a.x, hy = b.y - a.y, hd = Math.hypot(hx, hy); const speed = hd / dt;
+    if (hd < 1e-4) { hx = 1; hy = 0; hd = 1; } hx /= hd; hy /= hd;
     let ix = a.x - c.x, iy = a.y - c.y, il = Math.hypot(ix, iy) || 1; ix /= il; iy /= il;
-    const turn = Math.acos(Math.max(-1, Math.min(1, ix * hx + iy * hy)));
-    const stickAmp = Math.max(0, 2.2 - speed * 0.05 - turn * 2.6);
-    const fwd = 3.4 + 1 + Math.min(2.4, speed * 0.06 + turn * 3);
-    const lat = Math.sin(t * 6.5) * stickAmp, px = -hy, py = hx;
+    const turn = Math.acos(Math.max(-1, Math.min(1, ix * hx + iy * hy)));   // 0..pi
+    const fast = Math.min(1, speed / 26), bend = Math.min(1, turn / 0.45);
+    // big, obvious stickhandle when slow/straight; pushed forward + calmer lateral
+    // when skating fast or cutting a turn
+    const stickAmp = 3 * (1 - 0.55 * fast) * (1 - 0.7 * bend);
+    const fwd = 3.2 + 2.6 * fast + 2.8 * bend;
+    const lat = Math.sin(t * 7.5) * stickAmp, px = -hy, py = hx;
     return { x: a.x + hx * fwd + px * lat, y: a.y + hy * fwd + py * lat };
   };
   const shotNet = (pk, launch) => {
@@ -976,7 +980,8 @@ function drillSteps(pieces) {
   // numbering isn't mistaken for waypoint numbers
   const wpMaps = {};
   const wpRef = (pid, at) => {
-    if (at == null || at < 0) return "";
+    if (at == null) return "";
+    if (at < 0) return " (at waypoint 1)";          // the player's start / standing spot
     if (!wpMaps[pid]) { const pl = pieces.find(q => q.id === pid); wpMaps[pid] = pl ? eventWps(pl, pieces) : new Map(); }
     const n = wpMaps[pid].get(at);
     return n ? ` (at waypoint ${n})` : "";
