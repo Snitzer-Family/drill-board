@@ -1172,35 +1172,40 @@ export default function DrillAnimator() {
     if (d.kind === "piece") {
       const dx = pt.x - d.last.x, dy = pt.y - d.last.y;
       d.last = pt;
+      const ci = (x, y) => boards.clampInside(x, y);    // clamp to the rounded boards
       update(p => {
         if (p.id !== d.id) return p;
         if (d.line == null) {
           // dragging the piece itself moves only the route's start point —
           // the piece is waypoint zero; the rest of the route stays anchored
-          return { ...p, x: clampX(p.x + dx), y: clampY(p.y + dy) };
+          const np = ci(p.x + dx, p.y + dy);
+          return { ...p, x: np.x, y: np.y };
         }
         // dragging a route line slides the whole piece + route together
         const mv = s => {
-          const s2 = { ...s, x: clampX(s.x + dx), y: clampY(s.y + dy) };
-          if (s.type === "Q") { s2.cx = clampX(s.cx + dx); s2.cy = clampY(s.cy + dy); }
+          const q = ci(s.x + dx, s.y + dy);
+          const s2 = { ...s, x: q.x, y: q.y };
+          if (s.type === "Q") { const c = ci(s.cx + dx, s.cy + dy); s2.cx = c.x; s2.cy = c.y; }
           if (s.type === "C") {
-            s2.c1x = clampX(s.c1x + dx); s2.c1y = clampY(s.c1y + dy);
-            s2.c2x = clampX(s.c2x + dx); s2.c2y = clampY(s.c2y + dy);
+            const c1 = ci(s.c1x + dx, s.c1y + dy); s2.c1x = c1.x; s2.c1y = c1.y;
+            const c2 = ci(s.c2x + dx, s.c2y + dy); s2.c2x = c2.x; s2.c2y = c2.y;
           }
           return s2;
         };
-        return { ...p, x: clampX(p.x + dx), y: clampY(p.y + dy), path: p.path.map(mv) };
+        const np = ci(p.x + dx, p.y + dy);
+        return { ...p, x: np.x, y: np.y, path: p.path.map(mv) };
       });
       return;
     }
+    const cp = boards.clampInside(pt.x, pt.y);          // keep the handle inside the boards
     update(p => {
       if (p.id !== d.id) return p;
       const path = p.path.slice();
       const s = { ...path[d.seg] };
-      if (d.kind === "anchor") { s.x = pt.x; s.y = pt.y; }
-      if (d.kind === "q") { s.cx = pt.x; s.cy = pt.y; }
-      if (d.kind === "c1") { s.c1x = pt.x; s.c1y = pt.y; }
-      if (d.kind === "c2") { s.c2x = pt.x; s.c2y = pt.y; }
+      if (d.kind === "anchor") { s.x = cp.x; s.y = cp.y; }
+      if (d.kind === "q") { s.cx = cp.x; s.cy = cp.y; }
+      if (d.kind === "c1") { s.c1x = cp.x; s.c1y = cp.y; }
+      if (d.kind === "c2") { s.c2x = cp.x; s.c2y = cp.y; }
       path[d.seg] = s;
       return { ...p, path };
     });
