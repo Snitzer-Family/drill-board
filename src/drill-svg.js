@@ -60,6 +60,24 @@ function trimSeg(prev, s, d) {
   for (let k = 1; k < arc.length; k++) if (arc[k].l >= target) { const a = arc[k - 1], b = arc[k]; t = a.t + (b.t - a.t) * (target - a.l) / ((b.l - a.l) || 1); break; }
   return subSeg(prev, s, t);
 }
+// de Casteljau: the sub-segment of `s` covering [t, 1] (its new start point + seg)
+function subSegFrom(prev, s, t) {
+  const L = (a, b) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+  if (s.type === "L") { const st = L(prev, { x: s.x, y: s.y }); return { start: st, seg: { type: "L", x: s.x, y: s.y } }; }
+  if (s.type === "Q") { const a = L(prev, { x: s.cx, y: s.cy }), b = L({ x: s.cx, y: s.cy }, { x: s.x, y: s.y }), st = L(a, b); return { start: st, seg: { type: "Q", cx: b.x, cy: b.y, x: s.x, y: s.y } }; }
+  const c1 = { x: s.c1x, y: s.c1y }, c2 = { x: s.c2x, y: s.c2y }, p1 = { x: s.x, y: s.y };
+  const a = L(prev, c1), b = L(c1, c2), c = L(c2, p1), d = L(a, b), e = L(b, c), ff = L(d, e);
+  return { start: ff, seg: { type: "C", c1x: e.x, c1y: e.y, c2x: c.x, c2y: c.y, x: p1.x, y: p1.y } };
+}
+// shorten the first segment's START by `d` ft so the line lifts off the player
+function trimSegStart(prev, s, d) {
+  const N = 40; let len = 0, last = evalSeg(prev, s, 0); const arc = [{ t: 0, l: 0 }];
+  for (let k = 1; k <= N; k++) { const t = k / N, q = evalSeg(prev, s, t); len += Math.hypot(q.x - last.x, q.y - last.y); arc.push({ t, l: len }); last = q; }
+  if (d >= len - 0.5) return null;                   // too short to trim
+  let t = 0;
+  for (let k = 1; k < arc.length; k++) if (arc[k].l >= d) { const a = arc[k - 1], b = arc[k]; t = a.t + (b.t - a.t) * (d - a.l) / ((b.l - a.l) || 1); break; }
+  return subSegFrom(prev, s, t);
+}
 
 const NET_L = { x: 17, y: 42.5 }, NET_R = { x: 183, y: 42.5 };
 const f = n => Math.round(n * 100) / 100;
@@ -170,12 +188,16 @@ function piece(p) {
 /* routes + chain                                                      */
 function routePath(p) {
   if (!p.path.length) return "";
-  // trim the final segment so the arrow points at the last waypoint, not onto it
+  // trim the START off the player and the END off the last waypoint so the line
+  // isn't drawn on top of either icon
   const last = p.path.length - 1;
-  const prevOfLast = last === 0 ? { x: p.x, y: p.y } : { x: p.path[last - 1].x, y: p.path[last - 1].y };
-  let d = `M ${f(p.x)} ${f(p.y)}`;
+  const startTrim = trimSegStart({ x: p.x, y: p.y }, p.path[0], 3.6);
+  const startPt = startTrim ? startTrim.start : { x: p.x, y: p.y };
+  let d = `M ${f(startPt.x)} ${f(startPt.y)}`;
   p.path.forEach((s0, i) => {
-    const s = i === last ? trimSeg(prevOfLast, s0, 2.7) : s0;
+    const prevPt = i === 0 ? startPt : { x: p.path[i - 1].x, y: p.path[i - 1].y };
+    let s = i === 0 && startTrim ? startTrim.seg : s0;
+    if (i === last) s = trimSeg(prevPt, s, 2.7);
     if (s.type === "L") d += ` L ${f(s.x)} ${f(s.y)}`;
     else if (s.type === "Q") d += ` Q ${f(s.cx)} ${f(s.cy)} ${f(s.x)} ${f(s.y)}`;
     else d += ` C ${f(s.c1x)} ${f(s.c1y)} ${f(s.c2x)} ${f(s.c2y)} ${f(s.x)} ${f(s.y)}`;
