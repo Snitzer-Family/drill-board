@@ -48,16 +48,23 @@ function nearestOnSeg(a, b, x, y) {
   return { x: a.x + dx * t, y: a.y + dy * t, dx, dy };
 }
 
-// If (x,y) is within a net's keep-out disc, project it radially out to the disc
-// boundary, so a route crossing the net traces a smooth ARC around it (no sharp
-// V). margin (feet) is the skating gap kept off the net.
-export function avoidNets(shapes, x, y, margin = 1.2) {
+// Slide a point out the nearer SIDE of a net (in the net's local frame), with
+// the clearance ramped smoothly over a buffer in front of and behind the cage so
+// the detour rounds into an ARC (no sharp V) — and only the net footprint itself
+// pushes hard, so a player placed behind the net isn't disturbed. margin (feet).
+export function avoidNets(shapes, x, y, margin = 1.1) {
   for (const sh of shapes) {
-    const R = sh.r + margin;
-    const dx = x - sh.cx, dy = y - sh.cy, d = Math.hypot(dx, dy);
-    if (d >= R) continue;
-    if (d < 1e-3) { x = sh.cx + R; y = sh.cy; }          // dead centre → nudge off
-    else { x = sh.cx + (dx / d) * R; y = sh.cy + (dy / d) * R; }
+    const { lx, ly } = sh.toLocal(x, y);       // lx: 0 mouth → -4.15 back
+    const front = 0, back = -4.15, buf = 2.6;
+    if (lx > front + buf || lx < back - buf) continue;
+    // depth factor: 1 across the cage, easing to 0 over the front/back buffers
+    let f = lx <= front && lx >= back ? 1 : lx > front ? 1 - (lx - front) / buf : 1 - (back - lx) / buf;
+    f = Math.max(0, Math.min(1, f));
+    f = f * f * (3 - 2 * f);                    // smoothstep → rounded shoulders
+    const bound = (3.75 + margin / sh.s) * f;   // lateral clearance at this depth
+    if (Math.abs(ly) >= bound) continue;
+    const w = sh.toWorld(lx, (ly >= 0 ? 1 : -1) * bound);
+    x = w.x; y = w.y;
   }
   return { x, y };
 }
