@@ -685,15 +685,15 @@ export default function DrillAnimator() {
       .map(net => { const g = goaliePos(net, displayPosRaw); return { cx: g.x, cy: g.y, r: GOALIE_R }; });
     return _goalieDiscs;
   };
-  // obstacles a given piece's route should detour around (nets + parked players
-  // + the goalie, minus itself) — so the line arcs smoothly around each instead
-  // of the skater snapping off it
+  // obstacles a given piece's route should detour around (nets + parked players,
+  // minus itself). The goalie is intentionally NOT here: its disc overlaps the
+  // net's and the two together destabilise the multi-disc detour into cutting
+  // through the cage — the goalie is handled by a smooth per-frame push instead.
   const detourObstaclesFor = id => {
     const self = pieces.find(q => q.id === id);
     const mine = self && !self.path.length ? [{ cx: self.x, cy: self.y }] : [];
     const discs = stationaryDiscs.filter(d => !mine.some(m => m.cx === d.cx && m.cy === d.cy));
-    const all = [...netObstacles, ...discs, ...goalieDiscs()];
-    return all.length ? all : [];
+    return netObstacles.length || discs.length ? [...netObstacles, ...discs] : [];
   };
   // A route sampled then re-routed to arc smoothly around any net it crosses.
   // Returns { pts, origLen } (origLen = the straight-sampled length, for mapping
@@ -782,13 +782,24 @@ export default function DrillAnimator() {
           if (d < MIN && d > 1e-3) { const push = (MIN - d) * 0.5; x += (dx / d) * push; y += (dy / d) * push; }
         }
       }
-      // the goalie is solid too — it's part of the route detour (above) so the
-      // skater curves around it; a soft nudge only catches residual overlap as
-      // the goalie slides, so there's no abrupt snap
+      // the goalie is solid: deflect the skater around it with a SMOOTH push that
+      // eases in over a buffer (smoothstep) plus a tangential slide so the path
+      // curves past instead of snapping. Kept out of the net detour on purpose
+      // (see detourObstaclesFor) so it can't push the route through the cage.
       const gDiscs = goalieDiscs();
       if (p.path.length) for (const gd of gDiscs) {
-        const dx = x - gd.cx, dy = y - gd.cy, d = Math.hypot(dx, dy), MIN = PLAYER_R + gd.r;
-        if (d < MIN && d > 1e-3) { const push = (MIN - d) * 0.25; x += (dx / d) * push; y += (dy / d) * push; }
+        const dx = x - gd.cx, dy = y - gd.cy, d = Math.hypot(dx, dy) || 1e-3;
+        const MIN = PLAYER_R + gd.r, BUF = MIN + 3.5;      // start easing 3.5 ft out
+        if (d < BUF) {
+          let t = (BUF - d) / BUF; t = t * t * (3 - 2 * t); // smoothstep ramp
+          const nx = dx / d, ny = dy / d, tx = -ny, ty = nx;
+          const dir = (a * Math.PI) / 180;
+          const side = Math.cos(dir) * tx + Math.sin(dir) * ty >= 0 ? 1 : -1;
+          const radial = Math.max(0, MIN - d);              // firm keep-out inside contact
+          const slide = t * 1.4;                            // eased tangential curve-around
+          x += nx * radial + tx * side * slide;
+          y += ny * radial + ty * side * slide;
+        }
       }
       // open the body to shield a carried puck from a net, goalie, or another player
       const carries = pieces.some(q => q.kind === "puck"
@@ -1011,21 +1022,48 @@ export default function DrillAnimator() {
   // chain is sequential), the head clears the whole chain, a terminal clears it.
   function chainEvents(pk) {
     const chain = puckChain(pk), ts = pk.transfers || [], evs = [];
-    if (pk.pickup) evs.push({ desc: `${nameOf(pk.pickup.to)} collects ${pk.id}`, del: () => makeLoose(pk.id) });
-    else if (pk.carrier) evs.push({ desc: `${nameOf(pk.carrier)} carries ${pk.id}`, del: () => makeLoose(pk.id) });
+    // `actor` is the player id performing the action; `desc` is the full-chain
+    // wording, `self` the wording for that actor's own per-player list
+    if (pk.pickup) evs.push({ actor: pk.pickup.to, desc: `${nameOf(pk.pickup.to)} collects ${pk.id}`, self: `Collect ${pk.id}`, del: () => makeLoose(pk.id) });
+    else if (pk.carrier) evs.push({ actor: pk.carrier, desc: `${nameOf(pk.carrier)} carries ${pk.id}`, self: `Start with ${pk.id}`, del: () => makeLoose(pk.id) });
     ts.forEach((t, s) => {
-      const actor = nameOf(chain[s] || pk.carrier), to = nameOf(t.to);
+      const actor = chain[s] || pk.carrier, to = nameOf(t.to);
       const verb = t.kind === "pass" ? `passes to ${to}`
         : t.kind === "shot" ? `shoots — ${to} takes the rebound`
         : t.kind === "rim" ? `rims to ${to}`
         : t.kind === "chip" ? `chips to ${to}` : `→ ${to}`;
-      evs.push({ desc: `${actor} ${verb}`, del: () => setTransfer(pk.id, s, null) });
+      const self = t.kind === "pass" ? `Pass to ${to}`
+        : t.kind === "shot" ? `Shoot (rebound to ${to})`
+        : t.kind === "rim" ? `Rim to ${to}` : t.kind === "chip" ? `Chip to ${to}` : `→ ${to}`;
+      evs.push({ actor, desc: `${nameOf(actor)} ${verb}`, self, del: () => setTransfer(pk.id, s, null) });
     });
-    const last = nameOf(chain[chain.length - 1] || pk.carrier);
-    if (pk.shotAt != null) evs.push({ desc: `${last} shoots at ${pk.net || "nearest net"}`, del: () => clearTerminal(pk.id) });
-    else if (pk.rimAt != null) evs.push({ desc: `${last} hard rims`, del: () => clearTerminal(pk.id) });
-    else if (pk.chipAt != null) evs.push({ desc: `${last} chips`, del: () => clearTerminal(pk.id) });
+    const last = chain[chain.length - 1] || pk.carrier;
+    if (pk.shotAt != null) evs.push({ actor: last, desc: `${nameOf(last)} shoots at ${pk.net || "nearest net"}`, self: `Shoot at ${pk.net || "nearest net"}`, del: () => clearTerminal(pk.id) });
+    else if (pk.rimAt != null) evs.push({ actor: last, desc: `${nameOf(last)} hard rims`, self: "Hard rim", del: () => clearTerminal(pk.id) });
+    else if (pk.chipAt != null) evs.push({ actor: last, desc: `${nameOf(last)} chips`, self: "Chip", del: () => clearTerminal(pk.id) });
     return evs;
+  }
+  // small numbered event list used by both the puck popup (full chain, `desc`)
+  // and each player popup (only that player's own actions, `self`)
+  function chainList(pk, forPlayer) {
+    let evs = chainEvents(pk);
+    if (forPlayer) evs = evs.filter(ev => ev.actor === forPlayer);
+    if (!evs.length) return null;
+    return (
+      <div key={`chain-${pk.id}`} style={{ margin: "4px 0", padding: "6px 8px", background: "rgba(120,140,160,0.1)", borderRadius: 8 }}>
+        <div className="hd-mh" style={{ marginBottom: 4 }}>
+          {forPlayer ? `${nameOf(forPlayer)} — actions on ${pk.id}` : `${pk.id} — chain of events`}
+        </div>
+        {evs.map((ev, n) => (
+          <div key={n} style={{ display: "flex", alignItems: "center", gap: 8, padding: "2px 0" }}>
+            <span style={{ minWidth: 16, textAlign: "right", fontWeight: 700, color: "#8b99a8", fontVariantNumeric: "tabular-nums" }}>{n + 1}</span>
+            <span style={{ flex: 1, fontSize: 12.5 }}>{forPlayer ? ev.self : ev.desc}</span>
+            <button className="hd-mini danger" style={{ padding: "2px 7px", minHeight: 0 }}
+              title="Delete this action (and any that follow it)" onClick={ev.del}>✕</button>
+          </div>
+        ))}
+      </div>
+    );
   }
   function setTransfer(pkId, stage, tr) {
     update(q => {
@@ -2143,27 +2181,11 @@ export default function DrillAnimator() {
                   );
                 })()}
               </div>
-              {/* readable, numbered chain of events this player is part of, with
-                  per-action delete — disambiguates passes/shots/rebounds that
-                  pile up on one spot */}
-              {(() => {
-                const chainPucks = pieces.filter(q => q.kind === "puck" && puckChain(q).includes(p.id));
-                const blocks = chainPucks.map(pk => ({ pk, evs: chainEvents(pk) })).filter(b => b.evs.length);
-                if (!blocks.length) return null;
-                return blocks.map(({ pk, evs }) => (
-                  <div key={`chain-${pk.id}`} style={{ margin: "4px 0", padding: "6px 8px", background: "rgba(120,140,160,0.1)", borderRadius: 8 }}>
-                    <div className="hd-mh" style={{ marginBottom: 4 }}>{pk.id} — chain of events</div>
-                    {evs.map((ev, n) => (
-                      <div key={n} style={{ display: "flex", alignItems: "center", gap: 8, padding: "2px 0" }}>
-                        <span style={{ minWidth: 16, textAlign: "right", fontWeight: 700, color: "#8b99a8", fontVariantNumeric: "tabular-nums" }}>{n + 1}</span>
-                        <span style={{ flex: 1, fontSize: 12.5 }}>{ev.desc}</span>
-                        <button className="hd-mini danger" style={{ padding: "2px 7px", minHeight: 0 }}
-                          title="Delete this action (and any that follow it)" onClick={ev.del}>✕</button>
-                      </div>
-                    ))}
-                  </div>
-                ));
-              })()}
+              {/* just THIS player's own actions in each puck chain, numbered,
+                  with per-action delete — disambiguates passes/shots/rebounds
+                  that pile up on one spot */}
+              {pieces.filter(q => q.kind === "puck" && puckChain(q).includes(p.id))
+                .map(pk => chainList(pk, p.id))}
               {p.path.length > 0 && !p.defense && (
                 <div className="hd-poprow">
                   <button className={`hd-mini${p.holdLine ? " on" : ""}`}
@@ -2192,6 +2214,7 @@ export default function DrillAnimator() {
                 && chainControls(p, -1)}
             </>
           )}
+          {p.kind === "puck" && chainEvents(p).length > 0 && chainList(p, null)}
           {p.kind === "puck" && pieces.some(q => q.kind === "player") && (
             <>
               <div className="hd-poprow">
