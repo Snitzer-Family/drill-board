@@ -1613,22 +1613,19 @@ export default function DrillAnimator() {
     if (!n) return null;
     const last = p.path[n - 1];
     const prev = n >= 2 ? segEnd(p, n - 2) : { x: p.x, y: p.y };
-    // sample the final segment along its TRUE curve, then sit the arrow a little
-    // back by arc length so its tip stays on the route line (a straight offset
-    // detaches it from a curved leg) and points along the local tangent
-    const N = 24, pts = [];
-    for (let k = 0; k <= N; k++) pts.push(evalSeg(prev, last, k / N));
-    const cum = [0];
-    for (let k = 1; k <= N; k++) cum.push(cum[k - 1] + Math.hypot(pts[k].x - pts[k - 1].x, pts[k].y - pts[k - 1].y));
-    const total = cum[N];
-    if (total < 1e-3) return null;
-    const target = Math.max(0, total - Math.min(2.4, total * 0.5));
-    let k = 1; while (k < N && cum[k] < target) k++;
-    const t = (target - cum[k - 1]) / ((cum[k] - cum[k - 1]) || 1);
-    const pos = { x: pts[k - 1].x + (pts[k].x - pts[k - 1].x) * t, y: pts[k - 1].y + (pts[k].y - pts[k - 1].y) * t };
-    const a2 = pts[Math.min(N, k + 1)], b2 = pts[Math.max(0, k - 2)];
-    const ang = (Math.atan2(a2.y - b2.y, a2.x - b2.x) * 180) / Math.PI;
-    const fx = iconXf({ x: pos.x, y: pos.y, a: ang });
+    // anchor the arrow tip AT the end of the curve and point it along the true
+    // end tangent (from a point just before the end), so it reads as arriving at
+    // the endpoint heading the way the route finishes — not shifted up the curve
+    const near = evalSeg(prev, last, 0.9);
+    let tx = last.x - near.x, ty = last.y - near.y;
+    if (Math.hypot(tx, ty) < 1e-4) {                 // degenerate (control on the endpoint)
+      if (last.type === "C") { tx = last.x - last.c2x; ty = last.y - last.c2y; }
+      else if (last.type === "Q") { tx = last.x - last.cx; ty = last.y - last.cy; }
+      else { tx = last.x - prev.x; ty = last.y - prev.y; }
+    }
+    if (!tx && !ty) return null;
+    const ang = (Math.atan2(ty, tx) * 180) / Math.PI;
+    const fx = iconXf({ x: last.x, y: last.y, a: ang });
     return (
       <g key={`arw-${p.id}`} transform={fx.t} pointerEvents="none">
         <path d="M 0 0 L -2.7 -1.5 L -1.9 0 L -2.7 1.5 Z" fill={p.color} opacity={0.85} />
