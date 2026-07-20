@@ -1566,6 +1566,16 @@ export default function DrillAnimator() {
       flash("Markdown copied");
     }
   }
+  // build a link to the standalone preview page with the current drill encoded in
+  // the URL hash (matches the preview page's #d= URL-safe base64 format)
+  function previewLink() {
+    const dsl = serializeDrill(rink, pieces, drillTitle, drillDesc);
+    const enc = btoa(unescape(encodeURIComponent(dsl)))
+      .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    const url = new URL("drill-preview.html", window.location.href).href + "#d=" + enc;
+    if (navigator.share) navigator.share({ title: (drillTitle || "Drill").trim(), url }).catch(() => {});
+    else { navigator.clipboard?.writeText(url); flash("Preview link copied"); }
+  }
   function importTxt(e) {
     const f = e.target.files?.[0];
     if (!f) return;
@@ -2834,6 +2844,7 @@ export default function DrillAnimator() {
           <button className="hd-item" onClick={() => { exportMd(); setOpenMenu(null); }}>⬇ Export .md</button>
           <button className="hd-item" onClick={() => { exportImage(); setOpenMenu(null); }}>🖼 Export image</button>
           <button className="hd-item" onClick={() => { copyMd(); setOpenMenu(null); }}>⧉ Copy markdown</button>
+          <button className="hd-item" onClick={() => { previewLink(); setOpenMenu(null); }}>🔗 Share preview link</button>
           <button className="hd-item" onClick={() => fileRef.current?.click()}>⇧ Load .txt / .md</button>
           <button className="hd-item danger"
             onClick={() => {
