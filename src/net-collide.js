@@ -184,6 +184,16 @@ function segInt(a, b, c, d) {
 // polyline of the same total length; unchanged if it never hits a net.
 export function reflectPath(poly, shapes) {
   if (!shapes.length || poly.length < 2) return poly;
+  // drop consecutive duplicate points (boards.slide can emit a zero-length first
+  // segment when the release is right on the boards) — a zero-length leg would
+  // give a (0,0) heading and swallow the whole path
+  const dedup = [poly[0]];
+  for (let i = 1; i < poly.length; i++) {
+    const p = dedup[dedup.length - 1];
+    if (Math.hypot(poly[i].x - p.x, poly[i].y - p.y) > 1e-4) dedup.push(poly[i]);
+  }
+  if (dedup.length < 2) return poly;
+  poly = dedup;
   const out = [poly[0]];
   let cur = poly[0];
   // remaining length still to travel along the original polyline

@@ -238,7 +238,8 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
         if (tr.kind === "rim" || tr.kind === "chip") {        // rim the boards / chip (to self ok)
           const launchT = (cur.path.length && tr.at >= 0)
             ? Math.max(tBase, routeTimeW(cur, warp, Math.min(tr.at, cur.path.length - 1))) : tBase;
-          const launch = bladeAt(cur, launchT, warp);
+          const lb = bladeAt(cur, launchT, warp);
+          const launch = boards.clampInside(lb.x, lb.y);       // a blade past the boards → no path
           let anchor, gj = -1;
           if (rec.path.length) {
             gj = tr.recvAt == null ? rec.path.length - 1 : Math.max(0, Math.min(tr.recvAt, rec.path.length - 1));
@@ -335,14 +336,16 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
       else if (pk.rimAt != null && cur) {              // terminal hard rim around the boards
         const at = pk.rimAt;
         const launchT = (cur.path.length && at >= 0) ? Math.max(tBase, routeTimeW(cur, warp, Math.min(at, cur.path.length - 1))) : tBase;
-        const launch = bladeAt(cur, launchT, warp);
+        const lb = bladeAt(cur, launchT, warp);
+        const launch = boards.clampInside(lb.x, lb.y);           // a blade past the boards → no path
         const dist = pk.rimDist != null ? pk.rimDist : 65;       // handle-set travel distance
         const r = pushTravel(densify(reflectPath(boards.rimAround(launch, dist, pk.rimAim), netSh)), launchT, vRim(), { by: cur.id, rim: true, easeOut: Math.min(55, dist * 0.6) });
         legs.push({ type: "rest", x: r.end.x, y: r.end.y, t0: r.t }); tBase = r.t;
       } else if (pk.chipAt != null && cur) {           // terminal chip into space (bounces)
         const at = pk.chipAt;
         const launchT = (cur.path.length && at >= 0) ? Math.max(tBase, routeTimeW(cur, warp, Math.min(at, cur.path.length - 1))) : tBase;
-        const launch = bladeAt(cur, launchT, warp);
+        const lb = bladeAt(cur, launchT, warp);
+        const launch = boards.clampInside(lb.x, lb.y);           // a blade past the boards → no path
         const h = chipHeading(cur, launchT, pk.chipAim);
         const dist = pk.chipDist != null ? pk.chipDist : 26;     // handle-set travel distance
         const r = pushTravel(densify(reflectPath(boards.slide(launch.x, launch.y, h.x, h.y, dist), netSh)), launchT, vChip(), { by: cur.id, chip: true, easeOut: Math.min(28, dist * 0.6) });
