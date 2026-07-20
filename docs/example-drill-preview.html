@@ -635,6 +635,18 @@ function trimEnd(pts, d) {
   }
   return out;
 }
+// pull a polyline's start forward by `d` ft so it lifts off its source icon
+function trimStart(pts, d) {
+  if (!pts || pts.length < 2 || d <= 0) return pts;
+  return trimEnd([...pts].reverse(), d).reverse();
+}
+const polyLen = a => { let L = 0; for (let i = 1; i < a.length; i++) L += Math.hypot(a[i].x - a[i - 1].x, a[i].y - a[i - 1].y); return L; };
+function trimLine(pts, startD, endD) {
+  const total = polyLen(pts);
+  let s = startD, e = endD;
+  if (s + e > total - 2) { const k = Math.max(0, total - 2) / (s + e || 1); s *= k; e *= k; }
+  return trimStart(trimEnd(pts, e), s);
+}
 function subSeg(prev, s, t) {
   const L = (a, b) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
   if (s.type === "L") { const e = L(prev, { x: s.x, y: s.y }); return { type: "L", x: e.x, y: e.y }; }
@@ -676,12 +688,13 @@ function routePath(p) {
 // target (net / player / point) instead of sitting on top of the icon.
 const REBOUND_COLOR = "#e8892b";
 const CHAIN_TRIM = { shot: 4.6, rebound: 3, pass: 4 };
+const CHAIN_START = { shot: 4, rebound: 3, pass: 4 };
 const chainLine = (pts, mode) => {
   const rebound = mode === "rebound", shot = mode === "shot";
   const color = rebound ? REBOUND_COLOR : V("puck", "#14171a");
   const dash = shot ? "" : rebound ? ' stroke-dasharray="0.1 1.9"' : ' stroke-dasharray="2.4 2"';
   const marker = rebound ? "arrowRB" : "arrowP";
-  const line = trimEnd(pts, CHAIN_TRIM[mode] != null ? CHAIN_TRIM[mode] : 3.5);
+  const line = trimLine(pts, CHAIN_START[mode] != null ? CHAIN_START[mode] : 3.5, CHAIN_TRIM[mode] != null ? CHAIN_TRIM[mode] : 3.5);
   return `<polyline points="${polyPts(line)}" fill="none" stroke="${color}" stroke-width="${shot ? 1.1 : 0.9}"`
     + `${dash} stroke-linecap="round" stroke-linejoin="round" opacity="0.9" marker-end="url(#${marker})"/>`;
 };

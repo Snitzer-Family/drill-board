@@ -22,6 +22,20 @@ function trimEnd(pts, d) {
   }
   return out;
 }
+// pull a polyline's start forward by `d` ft so it lifts off its source icon
+function trimStart(pts, d) {
+  if (!pts || pts.length < 2 || d <= 0) return pts;
+  return trimEnd([...pts].reverse(), d).reverse();
+}
+const polyLen = a => { let L = 0; for (let i = 1; i < a.length; i++) L += Math.hypot(a[i].x - a[i - 1].x, a[i].y - a[i - 1].y); return L; };
+// trim both ends of a puck-flow line off its source/target, scaling the trims
+// down on short lines so at least ~2 ft of line always remains visible
+function trimLine(pts, startD, endD) {
+  const total = polyLen(pts);
+  let s = startD, e = endD;
+  if (s + e > total - 2) { const k = Math.max(0, total - 2) / (s + e || 1); s *= k; e *= k; }
+  return trimStart(trimEnd(pts, e), s);
+}
 
 // de Casteljau: the sub-segment of `s` (starting at prev) covering [0, t]
 function subSeg(prev, s, t) {
@@ -176,15 +190,16 @@ function routePath(p) {
 // (so it reads apart from the shot it overlaps) · else dashed pass/rim/chip
 const REBOUND_COLOR = "#e8892b";
 const BLOCKED_COLOR = "#e01f2b";      // a rebound that can't reach its collector (thru a net)
-// how far to hold the arrowhead off each kind of target (net vs player vs point)
+// how far to hold each END (arrowhead) and START off its icon (net/player/point)
 const CHAIN_TRIM = { shot: 4.6, rebound: 3, "rebound-x": 3, pass: 4 };
+const CHAIN_START = { shot: 4, rebound: 3, "rebound-x": 3, pass: 4 };
 const chainLine = (pts, mode) => {
   const rebound = mode === "rebound", blocked = mode === "rebound-x", shot = mode === "shot";
   const dotted = rebound || blocked;
   const color = blocked ? BLOCKED_COLOR : rebound ? REBOUND_COLOR : V("puck", "#14171a");
   const dash = shot ? "" : dotted ? ' stroke-dasharray="0.1 1.9"' : ' stroke-dasharray="2.4 2"';
   const marker = blocked ? "arrowRX" : rebound ? "arrowRB" : "arrowP";
-  const line = trimEnd(pts, CHAIN_TRIM[mode] != null ? CHAIN_TRIM[mode] : 3.5);
+  const line = trimLine(pts, CHAIN_START[mode] != null ? CHAIN_START[mode] : 3.5, CHAIN_TRIM[mode] != null ? CHAIN_TRIM[mode] : 3.5);
   return `<polyline points="${polyPts(line)}" fill="none" stroke="${color}" stroke-width="${shot ? 1.1 : blocked ? 1.1 : 0.9}"`
     + `${dash} stroke-linecap="round" stroke-linejoin="round" opacity="0.9" marker-end="url(#${marker})"/>`;
 };
