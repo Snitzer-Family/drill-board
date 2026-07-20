@@ -622,15 +622,25 @@ export default function DrillAnimator() {
     let threat = null, best = Infinity;
     pucks.forEach(pk => { const d = displayPos(pk); const dist = Math.hypot(d.x - net.x, d.y - net.y); if (dist < best) { best = dist; threat = d; } });
     if (!threat) return { x: home.x, y: home.y, a: p.facing || 0 };
-    const dx = threat.x - net.x, dy = threat.y - net.y;
-    const dist = Math.hypot(dx, dy) || 1;
-    const inFront = dx * fwd > 0;                          // puck on the ice-side of the net
-    const gap = Math.max(7, Math.min(20, dist * 0.42));   // gap up with the threat, capped in the slot
+    const cx = threat.x, cy = threat.y;                   // puck carrier
+    const behind = (cx - net.x) * fwd <= 0;               // carrier is behind the net
     let tx, ty;
-    if (inFront) { tx = net.x + (dx / dist) * gap; ty = net.y + (dy / dist) * gap; }
-    else { tx = net.x + fwd * 13; ty = net.y; }           // puck behind → hold net-front
-    ty = ty + (42.5 - ty) * 0.3;                          // bias to the middle of the ice
-    return { x: clampX(tx), y: clampY(ty), a: (Math.atan2(threat.y - ty, threat.x - tx) * 180) / Math.PI };
+    if (behind) {
+      // contain from the net front, shading toward the carrier's side
+      tx = net.x + fwd * 12;
+      ty = net.y + Math.max(-9, Math.min(9, cy - net.y)) * 0.55;
+    } else {
+      // stay goal-side of the carrier on the line to the net, holding a gap that
+      // tightens as the carrier drives in — but never collapse onto the net (≥5 ft
+      // off) so the D plays the man, not a second goalie
+      const toNet = { x: net.x - cx, y: net.y - cy };
+      const dN = Math.hypot(toNet.x, toNet.y) || 1;
+      const gap = Math.max(6, Math.min(16, dN * 0.45));   // gap up; close it near the net
+      const along = Math.min(gap, Math.max(0, dN - 5));
+      tx = cx + (toNet.x / dN) * along;
+      ty = cy + (toNet.y / dN) * along;
+    }
+    return { x: clampX(tx), y: clampY(ty), a: (Math.atan2(cy - ty, cx - tx) * 180) / Math.PI };
   }
 
   // solid net footprints — players and pucks are kept out (routed around) so a
