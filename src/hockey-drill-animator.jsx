@@ -1723,7 +1723,7 @@ export default function DrillAnimator() {
         else if (dt > outT) { const f = (dt - outT) / (DUR - outT); op = 1 - f; pop = 1 + 0.12 * f; }
         const fx = iconXf({ x: sx, y: sy, a: 0 });
         const text = goal ? "GOAL!" : "SAVE!";
-        const fs = 9 * pop / ICON_SCALE;
+        const fs = 7 * pop / ICON_SCALE;
         const w = text.length * fs * 0.6 + fs * 0.8, h = fs * 1.5;
         els.push(
           <g key={`rs-${q.id}-${i}`} transform={fx.t} opacity={op} pointerEvents="none">
