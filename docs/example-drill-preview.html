@@ -36,7 +36,12 @@
   textarea:focus{outline:2px solid var(--red);outline-offset:2px}
   .err{margin-top:10px;min-height:1.3em;color:#e2475a;font:500 13px/1.5 var(--font-mono);white-space:pre-wrap}
   .foot{margin-top:36px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:14px}
-  .foot code{font-family:var(--font-mono);color:var(--ink)}</style>
+  .foot code{font-family:var(--font-mono);color:var(--ink)}
+  .steps-list{margin:0;padding:16px 24px 22px 48px;display:flex;flex-direction:column;gap:10px;font-size:15.5px;line-height:1.5}
+  .steps-list li{padding-left:4px}
+  .steps-list li::marker{color:var(--red);font-weight:800;font-variant-numeric:tabular-nums}
+  .steps-list li.note{color:var(--muted);font-style:italic}
+  .steps-list:empty::after{content:"Add a puck chain (on=, pass=, shoot=…) to see the steps.";color:var(--muted);font-size:14px;font-style:italic;padding-left:-24px}</style>
 <div class="wrap">
   <header>
     <div class="topbar">
@@ -53,6 +58,10 @@
     <div class="card-head"><span class="t" id="sheet">Full sheet</span><span class="meta" id="meta">rendered from the DSL</span></div>
     <div class="rinkbox" id="diagram"></div>
     <div class="legend" id="legend"></div>
+  </section>
+  <section class="card" aria-label="Drill steps">
+    <div class="card-head"><span class="t">The drill, step by step</span><span class="meta" id="stepmeta"></span></div>
+    <ol class="steps-list" id="steps"></ol>
   </section>
   <section class="edit">
     <div class="edit-h"><h2>Edit the drill</h2><span class="hint">the rink redraws as you type</span></div>
@@ -807,6 +816,54 @@ function chain(pk, byId, pieces) {
   return out.join("");
 }
 
+// a recipe-style, play-ordered list of what happens in the drill. Coach-written
+// waypoint descriptions are used verbatim; everything else is auto-described.
+function drillSteps(pieces) {
+  const nameOf = id => { const q = pieces.find(x => x.id === id); return (q && q.label) || id; };
+  const out = [];
+  const descsBetween = (pl, a, b) => {
+    const r = [];
+    (pl.path || []).forEach((s, wi) => { if (wi > a && wi <= b && s.desc && s.dmode !== "label") r.push(s.desc); });
+    return r;
+  };
+  const pucks = pieces.filter(p => p.kind === "puck");
+  const inChain = new Set();
+  pucks.forEach(pk => {
+    const chain = [pk.carrier || (pk.pickup && pk.pickup.to) || null, ...(pk.transfers || []).map(t => t.to)].filter(Boolean);
+    if (!chain.length) return;
+    chain.forEach(id => inChain.add(id));
+    const ts = pk.transfers || [];
+    const termAt = pk.shotAt != null ? pk.shotAt : pk.rimAt != null ? pk.rimAt : pk.chipAt != null ? pk.chipAt : null;
+    out.push({ text: `${nameOf(chain[0])} ${pk.carrier ? "starts with the puck" : "picks up the puck"}` });
+    const prevRel = {};
+    for (let s = 0; s < chain.length; s++) {
+      const carrier = pieces.find(q => q.id === chain[s]);
+      const relAt = s < ts.length ? ts[s].at : (termAt != null ? termAt : (carrier && carrier.path ? carrier.path.length - 1 : -1));
+      if (carrier && carrier.path) {
+        const startWp = s === 0 ? -1 : (prevRel[carrier.id] != null ? prevRel[carrier.id] : -1);
+        descsBetween(carrier, startWp, relAt).forEach(d => out.push({ text: d, custom: true }));
+      }
+      if (s < ts.length) {
+        const t = ts[s], actor = nameOf(chain[s]), to = nameOf(t.to);
+        out.push({ text: t.kind === "pass" ? `${actor} passes to ${to}`
+          : t.kind === "shot" ? `${actor} shoots — ${to} is there for the rebound`
+          : t.kind === "rim" ? `${actor} rims it around to ${to}`
+          : t.kind === "chip" ? `${actor} chips it to ${to}` : `${actor} moves it to ${to}` });
+        if (carrier) prevRel[carrier.id] = t.at;
+      } else {
+        const last = nameOf(chain[s]);
+        if (pk.shotAt != null) out.push({ text: `${last} shoots on ${pk.net || "net"}` });
+        else if (pk.rimAt != null) out.push({ text: `${last} rims the puck` });
+        else if (pk.chipAt != null) out.push({ text: `${last} chips the puck` });
+      }
+    }
+  });
+  pieces.filter(p => p.kind === "player" && !inChain.has(p.id)).forEach(p => {
+    (p.path || []).forEach(s => { if (s.desc && s.dmode !== "label") out.push({ text: `${nameOf(p.id)}: ${s.desc}`, custom: true }); });
+  });
+  return out;
+}
+
 /* ------------------------------------------------------------------ */
 function drillSvg(dsl, opts = {}) {
   const { pieces, rink: rinkMode } = parseDrill(dsl);
@@ -842,7 +899,7 @@ function drillSvg(dsl, opts = {}) {
 (function(){
   var ta=document.getElementById('dsl'),dia=document.getElementById('diagram'),err=document.getElementById('err'),
       title=document.getElementById('title'),lede=document.getElementById('lede'),leg=document.getElementById('legend'),meta=document.getElementById('meta'),
-      sheet=document.getElementById('sheet'),copy=document.getElementById('copy');
+      sheet=document.getElementById('sheet'),steps=document.getElementById('steps'),stepmeta=document.getElementById('stepmeta'),copy=document.getElementById('copy');
   var SHEET_LABEL={full:'Full sheet',half:'Half ice',quarter:'Quarter ice'};
   function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
   // URL-safe base64 of UTF-8 text, for sharing the current drill in the link.
@@ -862,6 +919,9 @@ function drillSvg(dsl, opts = {}) {
     L.push('<span><span class="solid"></span>skating route</span>','<span><span class="dash"></span>puck path</span>');
     leg.innerHTML=L.join('');
     meta.textContent=players.length+' skater'+(players.length===1?'':'s')+' \u00b7 live';
+    var st=drillSteps(r.pieces);
+    steps.innerHTML=st.map(function(s){return '<li'+(s.custom?' class="note"':'')+'>'+esc(s.text)+'</li>';}).join('');
+    stepmeta.textContent=st.length?st.length+' step'+(st.length===1?'':'s'):'';
     syncHash();
   }
   // A shared link carries the drill in #d=… — prefer it over the built-in default.
