@@ -4,7 +4,47 @@
 // Colours use CSS custom properties (with fallbacks) so a host page can theme
 // it; pieces use their own DSL colours.
 import { parseDrill } from "./drill-format.js";
+import { evalSeg } from "./geometry.js";
 import * as boards from "./boards.js";
+
+// pull a polyline's end back by `d` ft along its final heading so an arrowhead
+// points AT the target instead of landing on top of it
+function trimEnd(pts, d) {
+  if (!pts || pts.length < 2 || d <= 0) return pts;
+  const out = pts.map(p => ({ x: p.x, y: p.y }));
+  let rem = d;
+  while (out.length >= 2) {
+    const b = out[out.length - 1], a = out[out.length - 2];
+    const seg = Math.hypot(b.x - a.x, b.y - a.y);
+    if (seg > rem) { const g = (seg - rem) / seg; out[out.length - 1] = { x: a.x + (b.x - a.x) * g, y: a.y + (b.y - a.y) * g }; break; }
+    rem -= seg; out.pop();
+  }
+  return out;
+}
+
+// de Casteljau: the sub-segment of `s` (starting at prev) covering [0, t]
+function subSeg(prev, s, t) {
+  const L = (a, b) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+  if (s.type === "L") { const e = L(prev, { x: s.x, y: s.y }); return { type: "L", x: e.x, y: e.y }; }
+  if (s.type === "Q") {
+    const a = L(prev, { x: s.cx, y: s.cy }), b = L({ x: s.cx, y: s.cy }, { x: s.x, y: s.y }), e = L(a, b);
+    return { type: "Q", cx: a.x, cy: a.y, x: e.x, y: e.y };
+  }
+  const c1 = { x: s.c1x, y: s.c1y }, c2 = { x: s.c2x, y: s.c2y }, p1 = { x: s.x, y: s.y };
+  const a = L(prev, c1), b = L(c1, c2), c = L(c2, p1), d = L(a, b), e = L(b, c), f = L(d, e);
+  return { type: "C", c1x: a.x, c1y: a.y, c2x: d.x, c2y: d.y, x: f.x, y: f.y };
+}
+
+// shorten the final route segment so its arrowhead points at the last waypoint
+function trimSeg(prev, s, d) {
+  const N = 40; let len = 0, last = evalSeg(prev, s, 0); const arc = [{ t: 0, l: 0 }];
+  for (let k = 1; k <= N; k++) { const t = k / N, q = evalSeg(prev, s, t); len += Math.hypot(q.x - last.x, q.y - last.y); arc.push({ t, l: len }); last = q; }
+  const target = len - d;
+  if (target <= 0.5) return s;                       // too short to trim — leave it
+  let t = 1;
+  for (let k = 1; k < arc.length; k++) if (arc[k].l >= target) { const a = arc[k - 1], b = arc[k]; t = a.t + (b.t - a.t) * (target - a.l) / ((b.l - a.l) || 1); break; }
+  return subSeg(prev, s, t);
+}
 
 const NET_L = { x: 17, y: 42.5 }, NET_R = { x: 183, y: 42.5 };
 const f = n => Math.round(n * 100) / 100;
@@ -115,8 +155,12 @@ function piece(p) {
 /* routes + chain                                                      */
 function routePath(p) {
   if (!p.path.length) return "";
+  // trim the final segment so the arrow points at the last waypoint, not onto it
+  const last = p.path.length - 1;
+  const prevOfLast = last === 0 ? { x: p.x, y: p.y } : { x: p.path[last - 1].x, y: p.path[last - 1].y };
   let d = `M ${f(p.x)} ${f(p.y)}`;
-  p.path.forEach(s => {
+  p.path.forEach((s0, i) => {
+    const s = i === last ? trimSeg(prevOfLast, s0, 2.7) : s0;
     if (s.type === "L") d += ` L ${f(s.x)} ${f(s.y)}`;
     else if (s.type === "Q") d += ` Q ${f(s.cx)} ${f(s.cy)} ${f(s.x)} ${f(s.y)}`;
     else d += ` C ${f(s.c1x)} ${f(s.c1y)} ${f(s.c2x)} ${f(s.c2y)} ${f(s.x)} ${f(s.y)}`;
@@ -130,12 +174,15 @@ function routePath(p) {
 // puck flow lines. mode: "shot" solid dark · "rebound" dotted + distinct colour
 // (so it reads apart from the shot it overlaps) · else dashed pass/rim/chip
 const REBOUND_COLOR = "#e8892b";
+// how far to hold the arrowhead off each kind of target (net vs player vs point)
+const CHAIN_TRIM = { shot: 4.6, rebound: 3, pass: 4 };
 const chainLine = (pts, mode) => {
   const rebound = mode === "rebound", shot = mode === "shot";
   const color = rebound ? REBOUND_COLOR : V("puck", "#14171a");
   const dash = shot ? "" : rebound ? ' stroke-dasharray="0.1 1.9"' : ' stroke-dasharray="2.4 2"';
   const marker = rebound ? "arrowRB" : "arrowP";
-  return `<polyline points="${polyPts(pts)}" fill="none" stroke="${color}" stroke-width="${shot ? 1.1 : 0.9}"`
+  const line = trimEnd(pts, CHAIN_TRIM[mode] != null ? CHAIN_TRIM[mode] : 3.5);
+  return `<polyline points="${polyPts(line)}" fill="none" stroke="${color}" stroke-width="${shot ? 1.1 : 0.9}"`
     + `${dash} stroke-linecap="round" stroke-linejoin="round" opacity="0.9" marker-end="url(#${marker})"/>`;
 };
 
@@ -179,13 +226,20 @@ export function drillSvg(dsl, opts = {}) {
     </defs>`;
   const routes = pieces.map(routePath).join("");
   const chains = pieces.filter(p => p.kind === "puck").map(pk => chain(pk, byId, pieces)).join("");
-  const icons = [...pieces].sort((a, b) => rank(a.kind) - rank(b.kind)).map(piece).join("");
+  // a carried puck draws close to its player, not at its loose stored spot
+  const drawPos = p => {
+    if (p.kind !== "puck" || !p.carrier) return p;
+    const c = byId(p.carrier); if (!c) return p;
+    const dx = p.x - c.x, dy = p.y - c.y, dd = Math.hypot(dx, dy) || 1, off = 4.2;
+    return { ...p, x: c.x + dx / dd * off, y: c.y + dy / dd * off };
+  };
+  const icons = [...pieces].sort((a, b) => rank(a.kind) - rank(b.kind)).map(p => piece(drawPos(p))).join("");
   // text labels paint on top: standalone label pieces + "label"-mode waypoints
   const labels = pieces.filter(p => p.kind === "label").map(p => labelSvg(p.x, p.y, p.text, p.size, p.color)).join("")
     + pieces.flatMap(p => (p.path || []).filter(s => s.dmode === "label" && s.desc)
         .map(s => labelSvg(s.x + (s.dox || 0), s.y + (s.doy != null ? s.doy : -5), s.desc, s.dsize, "#14202b"))).join("");
   const wattr = opts.width ? ` width="${opts.width}"` : "";
-  // puck chains paint above the icons so pass/shot arrowheads aren't buried
-  // under a player circle; text labels stay on top
-  return `<svg class="rink" viewBox="-7 -7 214 99"${wattr} xmlns="http://www.w3.org/2000/svg" role="img">${defs}${rink()}${routes}${icons}${chains}${labels}</svg>`;
+  // icons paint over the chain lines; arrowheads are trimmed back so they point
+  // at their target instead of vanishing under a circle. Labels stay on top.
+  return `<svg class="rink" viewBox="-7 -7 214 99"${wattr} xmlns="http://www.w3.org/2000/svg" role="img">${defs}${rink()}${routes}${chains}${icons}${labels}</svg>`;
 }
