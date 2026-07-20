@@ -1606,7 +1606,10 @@ export default function DrillAnimator() {
     const dx = last.x - tail.x, dy = last.y - tail.y;
     if (!dx && !dy) return null;
     const ang = (Math.atan2(dy, dx) * 180) / Math.PI;
-    const fx = iconXf({ x: last.x, y: last.y, a: ang });
+    // pull the arrow back off the waypoint so its tip points AT the point instead
+    // of sitting on top of the waypoint symbol / anchor handle
+    const mag = Math.hypot(dx, dy) || 1, back = 2.6;
+    const fx = iconXf({ x: last.x - (dx / mag) * back, y: last.y - (dy / mag) * back, a: ang });
     return (
       <g key={`arw-${p.id}`} transform={fx.t} pointerEvents="none">
         <path d="M 0 0 L -2.7 -1.5 L -1.9 0 L -2.7 1.5 Z" fill={p.color} opacity={0.85} />
@@ -1670,6 +1673,8 @@ export default function DrillAnimator() {
     if (!editing || tool === "draw" || p.kind !== "player") return null;
     const pk = pieces.find(q => q.kind === "puck" && puckChain(q).includes(p.id));
     if (!pk) return null;
+    // only show the release/aim handle when this player (or its puck) is selected
+    if (p.id !== selectedId && pk.id !== selectedId) return null;
     const chain = puckChain(pk);
     const ts = pk.transfers || [];
     const last = chain.length - 1;
@@ -1993,7 +1998,7 @@ export default function DrillAnimator() {
                 <button key={o.id} className={`hd-mini${isPass(o.id) ? " on" : ""}`}
                   onClick={() => setTransfer(pk.id, stage,
                     isPass(o.id) ? null : { at: i, to: o.id, recvAt: null, kind: "pass" })}>
-                  {o.id}
+                  {nameOf(o.id)}
                 </button>
               ))}
             </div>
@@ -2233,7 +2238,7 @@ export default function DrillAnimator() {
                 {pieces.filter(q => q.kind === "player").map(pl => (
                   <button key={pl.id} className={`hd-mini${p.carrier === pl.id ? " on" : ""}`}
                     onClick={() => updateById(p.id, { carrier: p.carrier === pl.id ? null : pl.id })}>
-                    {pl.id}
+                    {nameOf(pl.id)}
                   </button>
                 ))}
               </div>
