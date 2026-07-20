@@ -679,13 +679,35 @@ export default function DrillAnimator() {
   }
   function displayPos(p) {
     const res = displayPosRaw(p);
-    // players follow the arc-detour around a net (pucks carom via flight reflection)
-    if (animT > 0 && p.kind === "player") {
+    if (animT <= 0 || !netObstacles.length) return res;
+    // players follow the arc-detour around a net (loose pucks carom via reflection)
+    if (p.kind === "player") {
       const rd = routeDetour(p);
       if (rd) {
         const f = rd.origLen > 0 ? (res.dist || 0) / rd.origLen : 0;
         const s = samplePoly(rd.pts, f);
         return { ...res, x: s.x, y: s.y, a: p.path.some(sg => sg.dir === "bwd") ? res.a : s.a };
+      }
+      return res;
+    }
+    // a carried puck rides its carrier's blade — shift it by the carrier's detour
+    if (p.kind === "puck") {
+      let best = null, bd = 5.5;
+      for (const q of pieces) {
+        if (q.kind !== "player" || q.defense) continue;   // (defense never carries; also avoids recursion)
+        const rq = displayPosRaw(q);
+        const d = Math.hypot(rq.x - res.x, rq.y - res.y);
+        if (d < bd) { bd = d; best = q; }
+      }
+      if (best) {
+        const rd = routeDetour(best);
+        if (rd) {
+          const raw = displayPosRaw(best);
+          const f = rd.origLen > 0 ? (raw.dist || 0) / rd.origLen : 0;
+          const s = samplePoly(rd.pts, f);
+          const dx = s.x - raw.x, dy = s.y - raw.y;
+          if (dx || dy) return { ...res, x: res.x + dx, y: res.y + dy };
+        }
       }
     }
     return res;
