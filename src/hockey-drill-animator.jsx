@@ -82,6 +82,7 @@ export default function DrillAnimator() {
   const [stepNotes, setStepNotes] = useState({});      // key -> hand-edited text
   const [holdStep, setHoldStep] = useState(null);      // step currently being read
   const [minorDesc, setMinorDesc] = useState(false);   // describe zones skated through
+  const [showResult, setShowResult] = useState(true);  // Save!/Goal! splash on shots
   const [showZones, setShowZones] = useState(false);   // named ice-area overlay
   const [playSeed, setPlaySeed] = useState(0);         // bumps each play → new save/goal rolls
   const [loopMode, setLoopMode] = useState(false);     // replay the routine continuously
@@ -1696,6 +1697,51 @@ export default function DrillAnimator() {
     return els;
   }
 
+  // Save!/Goal! splash over the net at the instant a shot arrives, held ~1.4s.
+  // Positioned at the shot's hit point, nudged toward centre-ice and up so it
+  // clears the cage; stretch-cancelled via the icon frame like a label.
+  function renderResultSplash() {
+    if (!showResult || aiPlay || animT <= 0) return null;
+    const DUR = 1.5, e = animT * totalTime;
+    const { plans } = getPlan();
+    const els = [];
+    for (const q of pieces) {
+      if (q.kind !== "puck") continue;
+      const plan = plans[q.id];
+      if (!plan) continue;
+      plan.legs.forEach((L, i) => {
+        if (L.type !== "fly" || !L.shot || (!L.goal && !L.save)) return;
+        const dt = e - L.t1;
+        if (dt < 0 || dt > DUR) return;
+        const goal = !!L.goal;
+        const sx = L.x1 + (L.x1 < 100 ? 15 : -15);          // toward centre ice
+        const sy = Math.max(10, L.y1 - 13);                 // above the mouth
+        // pop in, hold, fade out
+        const inT = 0.16, outT = DUR - 0.4;
+        let op = 1, pop = 1;
+        if (dt < inT) { const f = dt / inT; op = f; pop = 0.55 + 0.45 * f + 0.18 * Math.sin(f * Math.PI); }
+        else if (dt > outT) { const f = (dt - outT) / (DUR - outT); op = 1 - f; pop = 1 + 0.12 * f; }
+        const fx = iconXf({ x: sx, y: sy, a: 0 });
+        const text = goal ? "GOAL!" : "SAVE!";
+        const fs = 9 * pop / ICON_SCALE;
+        const w = text.length * fs * 0.6 + fs * 0.8, h = fs * 1.5;
+        els.push(
+          <g key={`rs-${q.id}-${i}`} transform={fx.t} opacity={op} pointerEvents="none">
+            <g transform={`rotate(${-fx.th})`}>
+              <rect x={-w / 2} y={-h / 2} width={w} height={h} rx={h * 0.28}
+                fill={goal ? "#ff3b52" : "#2b8cff"} stroke="rgba(255,255,255,0.9)" strokeWidth={0.6} />
+              <text textAnchor="middle" y={fs * 0.36} fontSize={fs} fontWeight={900} fill="#fff"
+                style={{ fontFamily: "system-ui, sans-serif", userSelect: "none", letterSpacing: fs * 0.02 }}>
+                {text}
+              </text>
+            </g>
+          </g>
+        );
+      });
+    }
+    return els;
+  }
+
   function renderStops(p) {
     const els = [];
     p.path.forEach((s, i) => {
@@ -2527,6 +2573,7 @@ export default function DrillAnimator() {
             {selected && renderRotateHandle(selected)}
           {pieces.map(p => <g key={`ca-${p.id}`}>{renderAim(p)}</g>)}
             {!aiPlay && renderLabels()}
+            {renderResultSplash()}
             </g>
             </g>
           </svg>
@@ -2661,6 +2708,11 @@ export default function DrillAnimator() {
             <button className={`hd-mini${minorDesc ? " on" : ""}`}
               onClick={() => setMinorDesc(v => !v)}>{minorDesc ? "✓ Minor steps" : "Minor steps"}</button>
             <span style={{ fontSize: 11, color: "#8b99a8" }}>describe areas skated through</span>
+          </div>
+          <div className="hd-poprow">
+            <button className={`hd-mini${showResult ? " on" : ""}`}
+              onClick={() => setShowResult(v => !v)}>{showResult ? "✓ Save/Goal calls" : "Save/Goal calls"}</button>
+            <span style={{ fontSize: 11, color: "#8b99a8" }}>splash the result over the net</span>
           </div>
           <div className="hd-poprow">
             <button className="hd-mini" onClick={() => setOpenMenu("steps")}>✎ Edit steps</button>
