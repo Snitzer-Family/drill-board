@@ -1141,8 +1141,13 @@ export default function DrillAnimator() {
         // the receiver shows their side of the action too (at the designated
         // receive waypoint, else at their standing spot i=-1)
         const rSpot = t.recvAt != null ? t.recvAt : -1;
-        if (t.to === p.id && actor !== p.id && rSpot === i)
-          steps.push({ ord: s + 0.5, text: t.kind === "shot" ? `Collect rebound from ${nameOf(actor)}` : `Receive pass from ${nameOf(actor)}`, warn: flag(s), del: () => setTransfer(pk.id, s, null) });
+        if (t.to === p.id && actor !== p.id && rSpot === i) {
+          const rtext = t.kind === "shot" ? `Collect rebound from ${nameOf(actor)}`
+            : t.kind === "rim" ? `Collect ${nameOf(actor)}'s rim`
+            : t.kind === "chip" ? `Collect ${nameOf(actor)}'s chip`
+            : `Receive pass from ${nameOf(actor)}`;
+          steps.push({ ord: s + 0.5, text: rtext, warn: flag(s), del: () => setTransfer(pk.id, s, null) });
+        }
         if (actor === p.id && t.at === i) {
           const to = nameOf(t.to);
           const txt = t.kind === "pass" ? `Pass ${pk.id} to ${to}` : t.kind === "shot" ? `Shoot ${pk.id} — rebound to ${to}` : t.kind === "rim" ? `Hard rim to ${to}` : `Chip to ${to}`;
@@ -1237,8 +1242,11 @@ export default function DrillAnimator() {
   function collectPuckAt(playerId, at) {
     const player = pieces.find(q => q.id === playerId);
     if (!player) return;
-    const spot = at < 0 || !player.path.length ? { x: player.x, y: player.y }
-      : segEnd(player, Math.min(at, player.path.length - 1));
+    // a routed player collecting from their standing spot (at = -1) actually
+    // gathers it at the END of their route — where they skate to the puck
+    const cAt = at < 0 && player.path.length ? player.path.length - 1 : at;
+    const spot = cAt < 0 || !player.path.length ? { x: player.x, y: player.y }
+      : segEnd(player, Math.min(cAt, player.path.length - 1));
     const relPoint = pk => {
       const ch = puckChain(pk);
       const who = pieces.find(x => x.id === ch[ch.length - 1]);
@@ -1270,9 +1278,9 @@ export default function DrillAnimator() {
       const kind = field === "shotAt" ? "shot" : field === "rimAt" ? "rim" : "chip";
       const aim = field === "rimAt" ? target.rimAim : field === "chipAt" ? target.chipAim : null;
       setTransfer(target.id, (target.transfers || []).length,
-        { at: target[field], to: playerId, recvAt: at < 0 ? null : at, kind, ...(aim != null ? { aim } : {}) });
+        { at: target[field], to: playerId, recvAt: cAt < 0 ? null : cAt, kind, ...(aim != null ? { aim } : {}) });
     } else {
-      updateById(target.id, { pickup: { to: playerId, at: at < 0 ? 0 : at } });
+      updateById(target.id, { pickup: { to: playerId, at: cAt < 0 ? 0 : cAt } });
     }
     setSelectedId(playerId);
   }
@@ -2097,14 +2105,18 @@ export default function DrillAnimator() {
     // Unified "Collect puck" toggle for player p at point i (-1 = standing).
     // Grabs the nearest loose puck; toggling off reverts it to a release.
     const collectRow = (p, i) => {
+      // a collect from the standing spot (i = -1) of a routed player lands at
+      // their route end, so match that here too
+      const endAt = p.path.length ? p.path.length - 1 : 0;
+      const spotHit = a => a === i || (i < 0 && (a == null || a === 0 || a === endAt));
       let hit = null;
       for (const q of pieces) {
         if (q.kind !== "puck") continue;
-        if (q.pickup && q.pickup.to === p.id && q.pickup.at === (i < 0 ? 0 : i)) { hit = { pk: q, kind: "pickup" }; break; }
+        if (q.pickup && q.pickup.to === p.id && spotHit(q.pickup.at)) { hit = { pk: q, kind: "pickup" }; break; }
         const ts = q.transfers || [];
         const s = ts.length - 1;
         const t = ts[s];
-        if (t && t.to === p.id && (t.recvAt === i || (i < 0 && t.recvAt == null)) && (t.kind === "rim" || t.kind === "chip" || t.kind === "shot")) {
+        if (t && t.to === p.id && spotHit(t.recvAt) && (t.kind === "rim" || t.kind === "chip" || t.kind === "shot")) {
           hit = { pk: q, kind: "tr", stage: s, tr: t }; break;
         }
       }
