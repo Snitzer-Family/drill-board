@@ -1374,6 +1374,22 @@ export default function DrillAnimator() {
     navigator.clipboard?.writeText(toMarkdown());
     setToast("Markdown copied"); setTimeout(() => setToast(""), 1400);
   }
+  const flash = msg => { setToast(msg); setTimeout(() => setToast(""), 1400); };
+  // copy the drill text from the editor to the clipboard
+  function copyText() {
+    navigator.clipboard?.writeText(textDraft);
+    flash("Text copied");
+  }
+  // share the drill (native share sheet where available, else copy the markdown)
+  function shareDrill() {
+    const md = toMarkdown();
+    if (navigator.share) {
+      navigator.share({ title: (drillTitle || "Drill").trim(), text: md }).catch(() => {});
+    } else {
+      navigator.clipboard?.writeText(md);
+      flash("Markdown copied");
+    }
+  }
   function importTxt(e) {
     const f = e.target.files?.[0];
     if (!f) return;
@@ -2643,9 +2659,12 @@ export default function DrillAnimator() {
           {textError && <div className="hd-err">{textError}</div>}
           <div className="hd-row">
             <button className="hd-btn primary" onClick={applyText}>Apply</button>
-            <button className="hd-btn" onClick={() => setOpenMenu(null)}>Close</button>
+            <button className="hd-btn" title="Copy text" aria-label="Copy text" onClick={copyText}>⧉</button>
+            <button className="hd-btn" title="Erase text" onClick={() => setTextDraft("")}>Erase</button>
+            <button className="hd-btn" title="Share drill" onClick={shareDrill}>Share</button>
             <button className="hd-btn" onClick={exportTxt}>Export</button>
             <button className="hd-btn" onClick={() => fileRef.current?.click()}>Load</button>
+            <button className="hd-btn" onClick={() => setOpenMenu(null)}>Close</button>
           </div>
           <div className="hd-note">
             Feet: x 0–200, y 0–85. <b>RINK</b> full|half|quarter ·
