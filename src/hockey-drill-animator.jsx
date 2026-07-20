@@ -603,7 +603,18 @@ export default function DrillAnimator() {
   const HARD_AT = 2.0;      // ×base pace: full-out aggressive stride
   const PLANT_DEG = 55;     // deg the body pivots sideways in a hockey stop
   function displaySwing(p) {
-    return p.kind === "player" && animT > 0 ? stickSwing(p.id, animT * totalTime) : 0;
+    if (p.kind !== "player" || animT <= 0) return 0;
+    let s = stickSwing(p.id, animT * totalTime);
+    // reach the stick across the body toward a puck being pulled off the strong
+    // side to protect it from a net, so it reads as stickhandling
+    const sw = carriedSwing(p);
+    if (sw) {
+      const rp = displayPosRaw(p);
+      const carries = pieces.some(q => q.kind === "puck"
+        && Math.hypot(displayPosRaw(q).x - rp.x, displayPosRaw(q).y - rp.y) < 5.5);
+      if (carries) s += -sw.w * 48 * sw.side;
+    }
+    return s;
   }
   // an auto-reacting defenseman: hold the middle / front of the defended net,
   // stay goal-side of the puck (keep the attacker in front), gap up toward it.
@@ -677,6 +688,23 @@ export default function DrillAnimator() {
     const t = Math.max(0, Math.min(1, (target - cum[i - 1]) / seg));
     return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, a: (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI };
   }
+  // ICON_SCALE-based blade offset a carried puck rides at (forward + strong side)
+  const BLADE_FWD = 4.9 * ICON_SCALE, BLADE_LAT = 2.55 * ICON_SCALE;
+  // How far (0..1) a carried puck should be swept across the body to protect it
+  // from a net: rises as the player's strong-side blade nears a net's keep-out.
+  function carriedSwing(player) {
+    if (!netObstacles.length) return null;
+    const pd = displayPos(player);
+    const side = player.hand === "L" ? -1 : 1;
+    const a = ((pd.a || 0) * Math.PI) / 180, px = -Math.sin(a), py = Math.cos(a);
+    const bx = pd.x + px * BLADE_LAT * side, by = pd.y + py * BLADE_LAT * side;  // strong-side blade
+    let w = 0;
+    for (const sh of netObstacles) {
+      const d = Math.hypot(bx - sh.cx, by - sh.cy), R = sh.r + 3.5;
+      if (d < R) { const t = Math.min(1, (R - d) / 4.5); w = Math.max(w, t * t * (3 - 2 * t)); }
+    }
+    return w > 0 ? { w, side, px, py } : null;
+  }
   function displayPos(p) {
     const res = displayPosRaw(p);
     if (animT <= 0 || !netObstacles.length) return res;
@@ -690,7 +718,8 @@ export default function DrillAnimator() {
       }
       return res;
     }
-    // a carried puck rides its carrier's blade — shift it by the carrier's detour
+    // a carried puck rides its carrier's blade — follow the carrier's detour, then
+    // sweep across the body (to the weak side and back) to protect it from a net
     if (p.kind === "puck") {
       let best = null, bd = 5.5;
       for (const q of pieces) {
@@ -700,14 +729,17 @@ export default function DrillAnimator() {
         if (d < bd) { bd = d; best = q; }
       }
       if (best) {
+        let x = res.x, y = res.y;
         const rd = routeDetour(best);
         if (rd) {
           const raw = displayPosRaw(best);
           const f = rd.origLen > 0 ? (raw.dist || 0) / rd.origLen : 0;
           const s = samplePoly(rd.pts, f);
-          const dx = s.x - raw.x, dy = s.y - raw.y;
-          if (dx || dy) return { ...res, x: res.x + dx, y: res.y + dy };
+          x += s.x - raw.x; y += s.y - raw.y;
         }
+        const sw = carriedSwing(best);
+        if (sw) { const shift = -sw.w * 2.7 * BLADE_LAT * sw.side; x += sw.px * shift; y += sw.py * shift; }
+        if (x !== res.x || y !== res.y) return { ...res, x, y };
       }
     }
     return res;
