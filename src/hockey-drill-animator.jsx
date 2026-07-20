@@ -4,7 +4,7 @@ import { parseDrill, serializeDrill, extractDrill } from "./drill-format.js";
 import { drillSvg } from "./drill-svg.js";
 import { clampX, clampY, segEnd, segD, nearestT, splitSeg, zigzagPoints, convertSeg, fitRoute, evalSeg } from "./geometry.js";
 import * as boards from "./boards.js";
-import { netShapes, detourRoute } from "./net-collide.js";
+import { netShapes, detourRoute, segCrossesNet } from "./net-collide.js";
 import { RinkMarkings } from "./rink.jsx";
 import { ZONES, zoneAt } from "./zones.js";
 import { PieceIcon, Stepper, DiagPanel } from "./icons.jsx";
@@ -1072,6 +1072,77 @@ export default function DrillAnimator() {
               title="Delete this action (and any that follow it)" onClick={ev.del}>✕</button>
           </div>
         ))}
+      </div>
+    );
+  }
+  // the ordered actions happening at ONE spot (player p at waypoint i; i=-1 = the
+  // start / standing spot) as numbered steps. Anything the chain can't actually
+  // pull off — a rebound that must pass through a net, or a step downstream of one
+  // — is flagged "won't complete" so the user sees it plainly.
+  function stepsAt(p, i) {
+    const shapes = netShapes(pieces);
+    const nets = pieces.filter(q => q.kind === "net" || q.kind === "passer");
+    const steps = [];
+    for (const pk of pieces) {
+      if (pk.kind !== "puck") continue;
+      const chain = puckChain(pk);
+      if (!chain.includes(p.id)) continue;
+      const ts = pk.transfers || [];
+      // which shot transfer (if any) is blocked — a rebound whose carom to the
+      // collector crosses a net can't get there; everything after it is dead too
+      let blockStage = Infinity;
+      ts.forEach((t, s) => {
+        if (t.kind !== "shot") return;
+        const carrier = pieces.find(q => q.id === chain[s]), rec = pieces.find(q => q.id === t.to);
+        if (!carrier || !rec) return;
+        const launch = t.at < 0 || !carrier.path.length ? { x: carrier.x, y: carrier.y } : segEnd(carrier, Math.min(t.at, carrier.path.length - 1));
+        const net = pk.net ? (nets.find(x => x.id === pk.net) || null) : (nets.length ? nets.reduce((a, b) => Math.hypot(b.x - launch.x, b.y - launch.y) < Math.hypot(a.x - launch.x, a.y - launch.y) ? b : a) : null);
+        const nPt = net ? { x: net.x, y: net.y } : (launch.x < 100 ? { x: 17, y: 42.5 } : { x: 183, y: 42.5 });
+        const anchor = t.recvAt != null && rec.path.length ? segEnd(rec, Math.min(t.recvAt, rec.path.length - 1)) : { x: rec.x, y: rec.y };
+        if (segCrossesNet(nPt, anchor, shapes)) blockStage = Math.min(blockStage, s);
+      });
+      const downstream = s => (s > blockStage ? "won't happen — an earlier step is blocked" : null);
+      ts.forEach((t, s) => {
+        if (t.to === p.id && t.recvAt === i)
+          steps.push({ ord: s + 0.5, text: t.kind === "shot" ? `Collect rebound from ${nameOf(chain[s])}` : `Receive pass from ${nameOf(chain[s])}`, warn: downstream(s), del: () => setRecvAt(pk.id, s, null) });
+        if (chain[s] === p.id && t.at === i) {
+          const to = nameOf(t.to);
+          const txt = t.kind === "pass" ? `Pass ${pk.id} to ${to}` : t.kind === "shot" ? `Shoot ${pk.id} — rebound to ${to}` : t.kind === "rim" ? `Hard rim to ${to}` : `Chip to ${to}`;
+          steps.push({ ord: s + 1, text: txt, warn: s === blockStage ? "rebound can't reach the collector — a net is in the way" : downstream(s), del: () => setTransfer(pk.id, s, null) });
+        }
+      });
+      if (chain[chain.length - 1] === p.id) {
+        const wt = blockStage < Infinity ? "won't happen — an earlier step is blocked" : null;
+        if (pk.shotAt === i) steps.push({ ord: 900, text: `Shoot ${pk.id} at ${pk.net || "nearest net"}`, warn: wt, del: () => clearTerminal(pk.id) });
+        else if (pk.rimAt === i) steps.push({ ord: 900, text: `Hard rim ${pk.id}`, warn: wt, del: () => clearTerminal(pk.id) });
+        else if (pk.chipAt === i) steps.push({ ord: 900, text: `Chip ${pk.id}`, warn: wt, del: () => clearTerminal(pk.id) });
+      }
+      if (pk.pickup && pk.pickup.to === p.id && pk.pickup.at === (i < 0 ? 0 : i))
+        steps.push({ ord: -1, text: `Collect ${pk.id}`, warn: null, del: () => updateById(pk.id, { pickup: null }) });
+    }
+    steps.sort((a, b) => a.ord - b.ord);
+    return steps;
+  }
+  // numbered "Steps here" panel for a spot — sits under the action buttons
+  function stepsPanel(p, i) {
+    const steps = stepsAt(p, i);
+    if (!steps.length) return null;
+    return (
+      <div style={{ margin: "4px 0", padding: "6px 8px", background: "rgba(120,140,160,0.12)", borderRadius: 8 }}>
+        <div className="hd-mh" style={{ marginBottom: 4 }}>Steps here</div>
+        {steps.map((st, n) => (
+          <div key={n} style={{ display: "flex", alignItems: "center", gap: 8, padding: "2px 0" }}>
+            <span style={{ minWidth: 16, textAlign: "right", fontWeight: 700, color: "#8b99a8", fontVariantNumeric: "tabular-nums" }}>{n + 1}</span>
+            <span title={st.warn || undefined} style={{ flex: 1, fontSize: 12.5,
+              textDecoration: st.warn ? "line-through" : "none", color: st.warn ? "#c98a2b" : undefined }}>
+              {st.warn ? "⚠ " : ""}{st.text}
+            </span>
+            <button className="hd-mini danger" style={{ padding: "2px 7px", minHeight: 0 }} title="Delete this step" onClick={st.del}>✕</button>
+          </div>
+        ))}
+        {steps.some(s => s.warn) && (
+          <div style={{ fontSize: 10.5, color: "#c98a2b", marginTop: 3 }}>⚠ crossed-out steps won't complete in the animation</div>
+        )}
       </div>
     );
   }
@@ -2276,6 +2347,7 @@ export default function DrillAnimator() {
                 || pieces.some(q => q.kind === "puck"
                   && (q.carrier === p.id || (q.pickup && q.pickup.to === p.id))))
                 && chainControls(p, -1)}
+              {stepsPanel(p, -1)}
             </>
           )}
           {p.kind === "puck" && chainEvents(p).length > 0 && chainList(p, null)}
@@ -2451,6 +2523,7 @@ export default function DrillAnimator() {
           )}
           {p.kind === "player" && collectRow(p, i)}
           {p.kind === "player" && chainControls(p, i)}
+          {p.kind === "player" && stepsPanel(p, i)}
           <div className="hd-poprow">
             <button className="hd-mini danger" onClick={() => deleteSeg(p.id, i)}>Delete point</button>
           </div>
