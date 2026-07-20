@@ -83,6 +83,7 @@ export default function DrillAnimator() {
   const [holdStep, setHoldStep] = useState(null);      // step currently being read
   const [minorDesc, setMinorDesc] = useState(false);   // describe zones skated through
   const [showResult, setShowResult] = useState(true);  // Save!/Goal! splash on shots
+  const [collisions, setCollisions] = useState(true);  // route avoidance (nets/goalie/players)
   const [showZones, setShowZones] = useState(false);   // named ice-area overlay
   const [playSeed, setPlaySeed] = useState(0);         // bumps each play → new save/goal rolls
   const [loopMode, setLoopMode] = useState(false);     // replay the routine continuously
@@ -720,6 +721,7 @@ export default function DrillAnimator() {
   // per render so the line and the animation share one detour.
   const detourCache = new Map();
   function routeDetour(p) {
+    if (!collisions) return null;                    // avoidance off — draw routes exactly as authored
     if (!p.path.length || (p.kind !== "player" && p.kind !== "puck")) return null;
     if (detourCache.has(p.id)) return detourCache.get(p.id);
     const obstacles = detourObstaclesFor(p.id);
@@ -796,7 +798,7 @@ export default function DrillAnimator() {
         const rq = displayPosRaw(q);
         others.push({ cx: rq.x, cy: rq.y, r: PLAYER_R });
         // deviate around a moving/reactive player (parked ones are in the detour)
-        if (p.path.length && (q.path.length || q.defense)) {
+        if (collisions && p.path.length && (q.path.length || q.defense)) {
           const dx = x - rq.x, dy = y - rq.y, d = Math.hypot(dx, dy), MIN = PLAYER_R * 2;
           if (d < MIN && d > 1e-3) { const push = (MIN - d) * 0.5; x += (dx / d) * push; y += (dy / d) * push; }
         }
@@ -805,12 +807,12 @@ export default function DrillAnimator() {
       // the skater curves smoothly around it; a soft radial nudge only catches
       // residual overlap as the goalie slides frame-to-frame.
       const gDiscs = goalieDiscs();
-      if (p.path.length) for (const gd of gDiscs) {
+      if (collisions && p.path.length) for (const gd of gDiscs) {
         const dx = x - gd.cx, dy = y - gd.cy, d = Math.hypot(dx, dy), MIN = PLAYER_R + gd.r;
         if (d < MIN && d > 1e-3) { const push = (MIN - d) * 0.3; x += (dx / d) * push; y += (dy / d) * push; }
       }
       // open the body to shield a carried puck from a net, goalie, or another player
-      const carries = pieces.some(q => q.kind === "puck"
+      const carries = collisions && pieces.some(q => q.kind === "puck"
         && Math.hypot(displayPosRaw(q).x - x, displayPosRaw(q).y - y) < 5.5);
       if (carries) a += shieldDelta(x, y, a, side, [...netObstacles, ...others, ...gDiscs]);
       return { ...res, x, y, a };
@@ -2881,6 +2883,11 @@ export default function DrillAnimator() {
             <button className={`hd-mini${showResult ? " on" : ""}`}
               onClick={() => setShowResult(v => !v)}>{showResult ? "✓ Save/Goal calls" : "Save/Goal calls"}</button>
             <span style={{ fontSize: 11, color: "#8b99a8" }}>splash the result over the net</span>
+          </div>
+          <div className="hd-poprow">
+            <button className={`hd-mini${collisions ? " on" : ""}`}
+              onClick={() => setCollisions(v => !v)}>{collisions ? "✓ Route avoidance" : "Route avoidance"}</button>
+            <span style={{ fontSize: 11, color: "#8b99a8" }}>curve around nets/goalie/players — off = draw straight</span>
           </div>
           <div className="hd-poprow">
             <button className="hd-mini" onClick={() => setOpenMenu("steps")}>✎ Edit steps</button>
