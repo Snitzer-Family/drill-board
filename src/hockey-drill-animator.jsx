@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useLayoutEffect } from "react";
 import { VIEWS, COLORS, vb, APP_VERSION, ICON_SCALE, BUILD_STAMP, DEFAULT_TEXT } from "./constants.js";
 import { parseDrill, serializeDrill, extractDrill } from "./drill-format.js";
 import { drillSvg } from "./drill-svg.js";
-import { clampX, clampY, segEnd, segD, nearestT, splitSeg, zigzagPoints, convertSeg, fitRoute, evalSeg } from "./geometry.js";
+import { clampX, clampY, segEnd, segD, nearestT, splitSeg, zigzagPoints, wigglePoints, convertSeg, fitRoute, evalSeg } from "./geometry.js";
 import * as boards from "./boards.js";
 import { netShapes, detourRoute, segCrossesNet } from "./net-collide.js";
 import { RinkMarkings } from "./rink.jsx";
@@ -1025,6 +1025,30 @@ export default function DrillAnimator() {
     return [head, ...(pk.transfers || []).map(t => t.to)].filter(Boolean);
   }
   const nameOf = id => { const q = pieces.find(x => x.id === id); return (q && q.label) || id; };
+  // which of player p's route segments are skated WITH the puck (→ wiggle line).
+  // A carrier holds it from where they get it (reception waypoint, or the start
+  // if they're the head) to where they release it (their pass/shot waypoint).
+  function carrySegs(p) {
+    const set = new Set();
+    if (!p.path || !p.path.length) return set;
+    for (const pk of pieces) {
+      if (pk.kind !== "puck") continue;
+      const chain = puckChain(pk);
+      if (!chain.includes(p.id)) continue;
+      const ts = pk.transfers || [];
+      const termAt = pk.shotAt != null ? pk.shotAt : pk.rimAt != null ? pk.rimAt : pk.chipAt != null ? pk.chipAt : null;
+      let prevRelease = -1;                        // where p last gave the puck (give-and-go)
+      for (let s = 0; s < chain.length; s++) {
+        if (chain[s] !== p.id) continue;
+        const inc = s > 0 ? ts[s - 1] : null;
+        const R = s === 0 ? -1 : (inc && inc.recvAt != null ? inc.recvAt : prevRelease);
+        const L = s < ts.length ? ts[s].at : (termAt != null ? termAt : p.path.length - 1);
+        for (let i = Math.max(0, R + 1); i <= Math.min(L, p.path.length - 1); i++) set.add(i);
+        prevRelease = s < ts.length ? ts[s].at : L;
+      }
+    }
+    return set;
+  }
   const makeLoose = pkId => updateById(pkId, { carrier: null, pickup: null, transfers: [], shotAt: null, rimAt: null, chipAt: null, rimAim: null, chipAim: null });
   const clearTerminal = pkId => updateById(pkId, { shotAt: null, rimAt: null, chipAt: null, rimAim: null, chipAim: null });
   // the ordered, human-readable list of actions in a puck's chain. Each carries a
@@ -2748,6 +2772,7 @@ export default function DrillAnimator() {
             {!aiPlay && pieces.map(p => {
               const rd = showRoutes ? routeDetour(p) : null;   // arc detour around a crossed net
               const bent = rd && rd.pts;
+              const carry = p.kind === "player" ? carrySegs(p) : null;   // segments skated with the puck
               let prev = { x: p.x, y: p.y };
               return (
                 <g key={`rt-${p.id}`}>
@@ -2757,13 +2782,19 @@ export default function DrillAnimator() {
                     prev = { x: s.x, y: s.y };
                     const isLast = i === p.path.length - 1;
                     const style = segStroke(p, s, isLast);
+                    // line style: zigzag skating backward · wiggle with the puck ·
+                    // straight otherwise (hockey diagram convention)
+                    const bwd = p.kind === "player" && s.dir === "bwd";
+                    const wig = !bwd && carry && carry.has(i);
                     return (
                       <g key={`${p.id}/${i}`}>
                         {/* invisible ref path is always present — timing measures it */}
                         <path d={d} fill="none" stroke="none"
                           ref={el => { if (el) segRefs.current[`${p.id}/${i}`] = el; }} />
-                        {showRoutes && !bent && (p.kind === "player" && s.dir === "bwd"
+                        {showRoutes && !bent && (bwd
                           ? <polyline points={zigzagPoints(from, s, strokeAR)} {...style} strokeLinejoin="round" pointerEvents="none" />
+                          : wig
+                          ? <polyline points={wigglePoints(from, s, strokeAR)} {...style} strokeLinejoin="round" pointerEvents="none" />
                           : <path d={d} {...style} pointerEvents="none" />)}
                         {showRoutes && (
                           <path d={d} fill="none" stroke="transparent" strokeWidth={4}

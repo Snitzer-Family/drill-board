@@ -4,9 +4,36 @@
 // Colours use CSS custom properties (with fallbacks) so a host page can theme
 // it; pieces use their own DSL colours.
 import { parseDrill } from "./drill-format.js";
-import { evalSeg } from "./geometry.js";
+import { evalSeg, wigglePoints } from "./geometry.js";
 import { netShapes, segCrossesNet } from "./net-collide.js";
 import * as boards from "./boards.js";
+
+// which of player p's route segments are skated WITH the puck (→ wiggle line):
+// held from where they get it (reception waypoint, or the start if head) to
+// where they release it (pass/shot waypoint).
+function carrySegsOf(p, pieces) {
+  const set = new Set();
+  if (!p.path || !p.path.length) return set;
+  const chainOf = pk => [pk.carrier || (pk.pickup && pk.pickup.to) || null, ...(pk.transfers || []).map(t => t.to)].filter(Boolean);
+  for (const pk of pieces) {
+    if (pk.kind !== "puck") continue;
+    const chain = chainOf(pk);
+    if (!chain.includes(p.id)) continue;
+    const ts = pk.transfers || [];
+    const termAt = pk.shotAt != null ? pk.shotAt : pk.rimAt != null ? pk.rimAt : pk.chipAt != null ? pk.chipAt : null;
+    let prevRelease = -1;
+    for (let s = 0; s < chain.length; s++) {
+      if (chain[s] !== p.id) continue;
+      const inc = s > 0 ? ts[s - 1] : null;
+      const R = s === 0 ? -1 : (inc && inc.recvAt != null ? inc.recvAt : prevRelease);
+      const L = s < ts.length ? ts[s].at : (termAt != null ? termAt : p.path.length - 1);
+      for (let i = Math.max(0, R + 1); i <= Math.min(L, p.path.length - 1); i++) set.add(i);
+      prevRelease = s < ts.length ? ts[s].at : L;
+    }
+  }
+  return set;
+}
+const segCmd = s => s.type === "L" ? `L ${f(s.x)} ${f(s.y)}` : s.type === "Q" ? `Q ${f(s.cx)} ${f(s.cy)} ${f(s.x)} ${f(s.y)}` : `C ${f(s.c1x)} ${f(s.c1y)} ${f(s.c2x)} ${f(s.c2y)} ${f(s.x)} ${f(s.y)}`;
 
 // pull a polyline's end back by `d` ft along its final heading so an arrowhead
 // points AT the target instead of landing on top of it
@@ -186,26 +213,30 @@ function piece(p) {
 
 /* ------------------------------------------------------------------ */
 /* routes + chain                                                      */
-function routePath(p) {
+function routePath(p, pieces) {
   if (!p.path.length) return "";
-  // trim the START off the player and the END off the last waypoint so the line
-  // isn't drawn on top of either icon
+  // the START lifts off the player; the end arrow sits AT the last waypoint.
+  // Each segment draws in the hockey-diagram style for how it's skated: WITH the
+  // puck = wiggle, backward = zigzag, otherwise a straight/curved line.
   const last = p.path.length - 1;
+  const carry = pieces ? carrySegsOf(p, pieces) : new Set();
   const startTrim = trimSegStart({ x: p.x, y: p.y }, p.path[0], 3.6);
   const startPt = startTrim ? startTrim.start : { x: p.x, y: p.y };
-  let d = `M ${f(startPt.x)} ${f(startPt.y)}`;
+  const stroke = `fill="none" stroke="${p.color}" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"`;
+  let lines = "";
   p.path.forEach((s0, i) => {
-    // the end arrow sits AT the last waypoint (pointing the way the route
-    // finishes — toward the net/target); only the START lifts off the player
-    let s = i === 0 && startTrim ? startTrim.seg : s0;
-    if (s.type === "L") d += ` L ${f(s.x)} ${f(s.y)}`;
-    else if (s.type === "Q") d += ` Q ${f(s.cx)} ${f(s.cy)} ${f(s.x)} ${f(s.y)}`;
-    else d += ` C ${f(s.c1x)} ${f(s.c1y)} ${f(s.c2x)} ${f(s.c2y)} ${f(s.x)} ${f(s.y)}`;
+    const segPrev = i === 0 ? startPt : { x: p.path[i - 1].x, y: p.path[i - 1].y };
+    const s = i === 0 && startTrim ? startTrim.seg : s0;
+    const arrow = i === last ? ' marker-end="url(#arrowR)"' : "";
+    if (carry.has(i))
+      lines += `<polyline points="${wigglePoints(segPrev, s)}" ${stroke}${arrow}/>`;
+    else
+      lines += `<path d="M ${f(segPrev.x)} ${f(segPrev.y)} ${segCmd(s)}" ${stroke}${arrow}/>`;
   });
   const dots = p.path.map((s, i) =>
     `<circle cx="${f(s.x)}" cy="${f(s.y)}" r="2" fill="${V("panel", "#fff")}" stroke="${p.color}" stroke-width="0.5"/>`
     + `<text x="${f(s.x)}" y="${f(s.y) + 0.9}" font-size="2.6" font-weight="700" text-anchor="middle" fill="${p.color}">${i + 1}</text>`).join("");
-  return `<path d="${d}" fill="none" stroke="${p.color}" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round" opacity="0.9" marker-end="url(#arrowR)"/>${dots}`;
+  return `${lines}${dots}`;
 }
 
 // puck flow lines. mode: "shot" solid dark · "rebound" dotted + distinct colour
@@ -292,7 +323,7 @@ export function drillSvg(dsl, opts = {}) {
       <marker id="arrowRB" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="${REBOUND_COLOR}"/></marker>
       <marker id="arrowRX" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="${BLOCKED_COLOR}"/></marker>
     </defs>`;
-  const routes = pieces.map(routePath).join("");
+  const routes = pieces.map(p => routePath(p, pieces)).join("");
   const chains = pieces.filter(p => p.kind === "puck").map(pk => chain(pk, byId, pieces)).join("");
   // a carried puck draws close to its player, not at its loose stored spot
   const drawPos = p => {

@@ -75,6 +75,32 @@ export function splitSeg(prev, s, t) {
 // `ar` is the rink→screen aspect ratio (Sx/Sy). The zigzag's bump direction and
 // spacing are computed in stretched "screen" space so the pattern still reads as
 // even, upright squiggles after the fill-mode stretch (ar=1 → no correction).
+// a smooth sine "wiggle" along a segment — the hockey convention for skating
+// WITH the puck. Whole cycles so it starts/ends on the line (connects cleanly).
+export function wigglePoints(prev, s, ar = 1) {
+  const wlen = (ax, ay, bx, by) => Math.hypot((bx - ax) * ar, by - ay);
+  const approx =
+    s.type === "L" ? wlen(prev.x, prev.y, s.x, s.y)
+    : s.type === "Q" ? wlen(prev.x, prev.y, s.cx, s.cy) + wlen(s.cx, s.cy, s.x, s.y)
+    : wlen(prev.x, prev.y, s.c1x, s.c1y) + wlen(s.c1x, s.c1y, s.c2x, s.c2y) + wlen(s.c2x, s.c2y, s.x, s.y);
+  const cycles = Math.max(1, Math.round(approx / 3.4));   // ~3.4 screen units per wave
+  const n = Math.max(14, cycles * 10), A = 0.85;          // amplitude in screen units
+  const pts = [];
+  let cum = 0, prevPt = evalSeg(prev, s, 0);
+  for (let i = 0; i <= n; i++) {
+    const t = i / n, pt = evalSeg(prev, s, t);
+    if (i > 0) cum += wlen(prevPt.x, prevPt.y, pt.x, pt.y);
+    prevPt = pt;
+    if (i === 0 || i === n) { pts.push(pt); continue; }
+    const ahead = evalSeg(prev, s, Math.min(1, t + 0.005));
+    const tx = (ahead.x - pt.x) * ar, ty = ahead.y - pt.y;   // screen-space tangent
+    const px = -ty, py = tx, l = Math.hypot(px, py) || 1;    // screen-space normal
+    const a = Math.sin((cum / (approx || 1)) * cycles * 2 * Math.PI) * A;
+    pts.push({ x: pt.x + (px / l) * a / ar, y: pt.y + (py / l) * a });
+  }
+  return pts.map(q => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" ");
+}
+
 export function zigzagPoints(prev, s, ar = 1) {
   // arc length measured in aspect-weighted space (x scaled by ar) so bump
   // spacing stays uniform on screen regardless of the segment's direction
