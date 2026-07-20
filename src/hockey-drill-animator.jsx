@@ -1628,8 +1628,13 @@ export default function DrillAnimator() {
     if (!editing || p.id !== selectedId || tool === "draw") return null;
     // the "selected waypoint" is the leg/point whose popup is open (tapping the
     // line opens a "line" popup, tapping the anchor a "point" popup — both carry
-    // its seg); its curve-shaping handles show only for it, not every waypoint
-    const activeSeg = popup && (popup.type === "line" || popup.type === "point") && popup.id === p.id ? popup.seg : null;
+    // its seg); its curve-shaping handles show only for it, not every waypoint.
+    // A handle actively being dragged stays active too, so it never collapses to
+    // a dot mid-drag.
+    const d = drag.current;
+    const dragSeg = d && d.id === p.id ? (d.seg != null ? d.seg : d.line != null ? d.line : null) : null;
+    const activeSeg = dragSeg != null ? dragSeg
+      : popup && (popup.type === "line" || popup.type === "point") && popup.id === p.id ? popup.seg : null;
     const els = [];
     const ctrlPt = (key, cx, cy, kind, i) => {
       els.push(<circle key={key} cx={cx} cy={cy} r={1.5} fill="#fff" stroke="#5b7d9e" strokeWidth={0.4} pointerEvents="none" />);
