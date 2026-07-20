@@ -2488,8 +2488,18 @@ export default function DrillAnimator() {
       anchorPt = { x: s.x, y: s.y };
       const next = p.path[i + 1];
       title = `Point ${i + 1} of ${p.path.length}`;
+      const goSeg = j => { setSelectedId(p.id); setPopup({ type: "point", id: p.id, seg: j }); };
       body = (
         <>
+          {p.path.length > 1 && (
+            <div className="hd-poprow">
+              <button className="hd-mini" disabled={i <= 0} style={{ opacity: i <= 0 ? 0.4 : 1 }}
+                onClick={() => goSeg(i - 1)}>‹ Prev</button>
+              <span style={{ fontSize: 11, color: "#8b99a8" }}>waypoint {i + 1} / {p.path.length}</span>
+              <button className="hd-mini" disabled={i >= p.path.length - 1} style={{ opacity: i >= p.path.length - 1 ? 0.4 : 1 }}
+                onClick={() => goSeg(i + 1)}>Next ›</button>
+            </div>
+          )}
           <div className="hd-poprow">
             <span>Note</span>
             <input className="hd-input" style={{ flex: 1, minWidth: 90 }}
