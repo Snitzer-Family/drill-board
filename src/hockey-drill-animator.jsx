@@ -674,6 +674,17 @@ export default function DrillAnimator() {
   const stationaryDiscs = pieces
     .filter(q => q.kind === "player" && !q.path.length && !q.defense)
     .map(q => ({ cx: q.x, cy: q.y, r: PLAYER_R }));
+  // the goalie is solid too — a keep-out disc at its current crease position.
+  // Uses displayPosRaw for puck tracking so it never recurses back into a
+  // carrier's displayPos. Cached for the render pass.
+  const GOALIE_R = 2.7;
+  let _goalieDiscs = null;
+  const goalieDiscs = () => {
+    if (_goalieDiscs) return _goalieDiscs;
+    _goalieDiscs = pieces.filter(q => q.kind === "net" && q.goalie)
+      .map(net => { const g = goaliePos(net, displayPosRaw); return { cx: g.x, cy: g.y, r: GOALIE_R }; });
+    return _goalieDiscs;
+  };
   // obstacles a given piece's route should detour around (nets + parked players,
   // minus itself)
   const detourObstaclesFor = id => {
@@ -769,10 +780,16 @@ export default function DrillAnimator() {
           if (d < MIN && d > 1e-3) { const push = (MIN - d) * 0.5; x += (dx / d) * push; y += (dy / d) * push; }
         }
       }
-      // open the body to shield a carried puck from a net or another player
+      // the goalie is solid: a skater deviates around it (e.g. on a wrap-around)
+      const gDiscs = goalieDiscs();
+      if (p.path.length) for (const gd of gDiscs) {
+        const dx = x - gd.cx, dy = y - gd.cy, d = Math.hypot(dx, dy), MIN = PLAYER_R + gd.r;
+        if (d < MIN && d > 1e-3) { const push = (MIN - d) * 0.75; x += (dx / d) * push; y += (dy / d) * push; }
+      }
+      // open the body to shield a carried puck from a net, goalie, or another player
       const carries = pieces.some(q => q.kind === "puck"
         && Math.hypot(displayPosRaw(q).x - x, displayPosRaw(q).y - y) < 5.5);
-      if (carries) a += shieldDelta(x, y, a, side, [...netObstacles, ...others]);
+      if (carries) a += shieldDelta(x, y, a, side, [...netObstacles, ...others, ...gDiscs]);
       return { ...res, x, y, a };
     }
     // a carried puck sits on its carrier's blade tip (so it stays on the stick
@@ -816,9 +833,16 @@ export default function DrillAnimator() {
   // goalie plays the angle: it slides across the front to cover the puck, comes
   // out to challenge when the puck is far, and backs to the goal line as the
   // play nears. Clamped to the net's front hemisphere so it stays in the crease.
-  function goaliePos(net) {
+  function goaliePos(net, posFn = displayPos) {
     const f = ((net.facing || 0) * Math.PI) / 180;    // net mouth opens this way
     const e = animT <= 0 ? 0 : animT * totalTime;
+    const MAXREL = (82 * Math.PI) / 180;               // post-to-post; never behind the net
+    const onArc = (ang, R) => {                         // clamp an aim angle to the front hemisphere
+      let rel = ang - f; rel = Math.atan2(Math.sin(rel), Math.cos(rel));
+      rel = Math.max(-MAXREL, Math.min(MAXREL, rel));
+      const a = f + rel;
+      return { x: net.x + Math.cos(a) * R, y: net.y + Math.sin(a) * R, a: (a * 180) / Math.PI };
+    };
     // freeze on a shot: once a shot at this net is released, the goalie sets and
     // holds — on a save the puck stops right at it, a corner goal beats it clean
     const { plans } = getPlan();
@@ -829,15 +853,16 @@ export default function DrillAnimator() {
         && (!shot || leg.t0 > shot.t0)) shot = leg;
     }
     if (shot) {
-      const dx = shot.x0 - net.x, dy = shot.y0 - net.y;
-      const m = Math.hypot(dx, dy) || 1;
+      // slide across the crease toward the shot's origin, but stay in front of
+      // the net (post-to-post) — a wrap-around shooter must not drag the goalie
+      // around behind or through the cage
       const R = shot.save ? 2.5 : 2;                   // save depth matches the puck's stop point
-      return { x: net.x + (dx / m) * R, y: net.y + (dy / m) * R, a: (Math.atan2(dy, dx) * 180) / Math.PI };
+      return onArc(Math.atan2(shot.y0 - net.y, shot.x0 - net.x), R);
     }
     const pucks = pieces.filter(q => q.kind === "puck");
     let aim = { x: net.x + Math.cos(f) * 20, y: net.y + Math.sin(f) * 20 }, best = Infinity;
     pucks.forEach(pk => {
-      const dp = displayPos(pk);
+      const dp = posFn(pk);
       const d = Math.hypot(dp.x - net.x, dp.y - net.y);
       if (d < best) { best = d; aim = dp; }
     });
@@ -846,13 +871,8 @@ export default function DrillAnimator() {
     const D_NEAR = 9, D_FAR = 45, R_MIN = 0.6, R_MAX = 6;
     const u = Math.max(0, Math.min(1, (dist - D_NEAR) / (D_FAR - D_NEAR)));
     const R = R_MIN + (R_MAX - R_MIN) * (u * u * (3 - 2 * u)); // smoothstep
-    // angle: track the puck aggressively, clamped so we never back into the net
-    let rel = Math.atan2(aim.y - net.y, aim.x - net.x) - f;
-    rel = Math.atan2(Math.sin(rel), Math.cos(rel));    // normalize to −π..π
-    const MAXREL = (78 * Math.PI) / 180;
-    rel = Math.max(-MAXREL, Math.min(MAXREL, rel));
-    const a = f + rel;
-    return { x: net.x + Math.cos(a) * R, y: net.y + Math.sin(a) * R, a: (a * 180) / Math.PI };
+    // track the puck aggressively, clamped to the front hemisphere (never behind)
+    return onArc(Math.atan2(aim.y - net.y, aim.x - net.x), R);
   }
 
   /* ----- coords ----- */
@@ -871,6 +891,21 @@ export default function DrillAnimator() {
   /* ----- edits ----- */
   const update = fn => setPieces(ps => ps.map(fn));
   const updateById = (id, patch) => update(p => (p.id === id ? { ...p, ...patch } : p));
+  // drop every puck reference to a removed player so no dangling carrier / pickup
+  // / transfer is left behind (which otherwise strands the chain on a survivor)
+  const scrubRefs = (list, goneId) => list.map(q => {
+    if (q.kind !== "puck") return q;
+    const carrier = q.carrier === goneId ? null : q.carrier;
+    const pickup = q.pickup && q.pickup.to === goneId ? null : q.pickup;
+    const transfers = (q.transfers || []).filter(t => t.to !== goneId);
+    return carrier === q.carrier && pickup === q.pickup && transfers.length === (q.transfers || []).length
+      ? q : { ...q, carrier, pickup, transfers };
+  });
+  // remove a piece and clean up any references to it
+  const deletePiece = id => {
+    setPieces(ps => scrubRefs(ps.filter(q => q.id !== id), id));
+    setSelectedId(null); setPopup(null);
+  };
 
   // record a coalesced undo snapshot whenever `pieces` changes; rapid changes
   // (a drag's frames) fold into a single entry, and an undo doesn't re-record
@@ -2172,12 +2207,7 @@ export default function DrillAnimator() {
               <button className="hd-mini" onClick={() => { updateById(p.id, { path: [] }); setPopup(null); }}>Clear route</button>
             )}
             <button className="hd-mini" onClick={() => duplicatePiece(p.id)}>⧉ Duplicate</button>
-            <button className="hd-mini danger"
-              onClick={() => {
-                setPieces(ps => ps.filter(q => q.id !== p.id)
-                  .map(q => (q.carrier === p.id ? { ...q, carrier: null } : q)));
-                setSelectedId(null); setPopup(null);
-              }}>
+            <button className="hd-mini danger" onClick={() => deletePiece(p.id)}>
               Delete
             </button>
           </div>
