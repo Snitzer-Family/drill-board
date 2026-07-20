@@ -338,7 +338,7 @@ function parseDrill(text) {
           : kind === "label" ? "#14202b" : "#d7263d";
         let label = kind === "player" ? id : "";
         let text = "", size = 1;                          // label piece: text + font scale
-        let speed = 1, hand = "R", carrier = null, facing = 0, shotAt = null, pickup = null, rimAt = null, chipAt = null, chipAim = null, rimAim = null;
+        let speed = 1, hand = "R", carrier = null, facing = 0, shotAt = null, pickup = null, rimAt = null, chipAt = null, chipAim = null, rimAim = null, chipDist = null, rimDist = null;
         let net = null, holdLine = false, goalie = false, defense = false;
         const transfers = [];
         rest.forEach(r => {
@@ -369,15 +369,17 @@ function parseDrill(text) {
               const n = parseInt(v, 10);
               if (!isNaN(n)) shotAt = n - 1;
             } else if (key === "rim" || key === "chip") {
-              // rim=<pt> / chip=<pt> is terminal; rim=<pt>:<player>[@<pt>] hands off;
-              // a chip may carry an explicit aim angle as ~<deg>
-              const m5 = /^(\d+)(?::([^@\s~]+)(?:@(\d+))?)?(?:~(-?\d+(?:\.\d+)?))?$/.exec(v);
+              // rim=<pt> / chip=<pt> is a terminal release into space; a handle
+              // sets its direction (~<deg>) and distance (*<ft>). The player-handoff
+              // form rim=<pt>:<player>[@<pt>] carries to a collector instead.
+              const m5 = /^(\d+)(?::([^@\s~*]+)(?:@(\d+))?)?(?:~(-?\d+(?:\.\d+)?))?(?:\*(\d+(?:\.\d+)?))?$/.exec(v);
               if (m5) {
                 const aim = m5[4] != null ? parseFloat(m5[4]) : null;
+                const dist = m5[5] != null ? parseFloat(m5[5]) : null;
                 if (m5[2]) transfers.push({ at: parseInt(m5[1], 10) - 1, to: m5[2],
-                  recvAt: m5[3] ? parseInt(m5[3], 10) - 1 : null, kind: key, ...((key === "chip" || key === "rim") && aim != null ? { aim } : {}) });
-                else if (key === "rim") { rimAt = parseInt(m5[1], 10) - 1; rimAim = aim; }
-                else { chipAt = parseInt(m5[1], 10) - 1; chipAim = aim; }
+                  recvAt: m5[3] ? parseInt(m5[3], 10) - 1 : null, kind: key, ...(aim != null ? { aim } : {}) });
+                else if (key === "rim") { rimAt = parseInt(m5[1], 10) - 1; rimAim = aim; rimDist = dist; }
+                else { chipAt = parseInt(m5[1], 10) - 1; chipAim = aim; chipDist = dist; }
               }
             } else if (key === "pickup") {
               const m3 = /^([^@\s]+)@(\d+)$/.exec(v);
@@ -394,7 +396,7 @@ function parseDrill(text) {
           else if (r === "defense") defense = true;
           else label = r;
         });
-        const p = { id, kind, x, y, color, label, text, size, speed, hand, carrier, facing, transfers, shotAt, pickup, rimAt, chipAt, chipAim, rimAim, net, holdLine, goalie, defense, path: [] };
+        const p = { id, kind, x, y, color, label, text, size, speed, hand, carrier, facing, transfers, shotAt, pickup, rimAt, chipAt, chipAim, rimAim, chipDist, rimDist, net, holdLine, goalie, defense, path: [] };
         pieces.push(p); byId[id] = p;
       } else if (cmd === "PATH") {
         const id = tok[1];
@@ -480,8 +482,8 @@ function serializeDrill(rink, pieces, title = "", desc = "") {
       : "";
     const head = p.kind === "puck" && (p.carrier || p.pickup);
     const sht = head && p.shotAt != null ? ` shoot=${p.shotAt + 1}` : "";
-    const rmT = head && p.rimAt != null ? ` rim=${p.rimAt + 1}${p.rimAim != null ? "~" + f1(p.rimAim) : ""}` : "";
-    const chT = head && p.chipAt != null ? ` chip=${p.chipAt + 1}${p.chipAim != null ? "~" + f1(p.chipAim) : ""}` : "";
+    const rmT = head && p.rimAt != null ? ` rim=${p.rimAt + 1}${p.rimAim != null ? "~" + f1(p.rimAim) : ""}${p.rimDist != null ? "*" + f1(p.rimDist) : ""}` : "";
+    const chT = head && p.chipAt != null ? ` chip=${p.chipAt + 1}${p.chipAim != null ? "~" + f1(p.chipAim) : ""}${p.chipDist != null ? "*" + f1(p.chipDist) : ""}` : "";
     const hasShot = p.kind === "puck" && (p.shotAt != null || (p.transfers || []).some(t => t.kind === "shot"));
     const nt = hasShot && p.net ? ` net=${p.net}` : "";
     const rotatable = p.kind === "net" || p.kind === "bumper" || p.kind === "deker" || p.kind === "passer" || (p.kind === "player" && !p.path.length);
@@ -641,8 +643,8 @@ function chain(pk, byId, pieces) {
     cur = rec;
   });
   if (pk.shotAt != null) { const l = routePoint(cur, pk.shotAt); out.push(chainLine([l, shotNet(l)], true)); }
-  else if (pk.rimAt != null) { const l = routePoint(cur, pk.rimAt); out.push(chainLine(boards.rimAround(l, 65, pk.rimAim), false)); }
-  else if (pk.chipAt != null) { const l = routePoint(cur, pk.chipAt); const h = pk.chipAim != null ? aimVec(pk.chipAim) : heading(cur, pk.chipAt); out.push(chainLine(boards.slide(l.x, l.y, h.x, h.y, 16), false)); }
+  else if (pk.rimAt != null) { const l = routePoint(cur, pk.rimAt); out.push(chainLine(boards.rimAround(l, pk.rimDist != null ? pk.rimDist : 65, pk.rimAim), false)); }
+  else if (pk.chipAt != null) { const l = routePoint(cur, pk.chipAt); const h = pk.chipAim != null ? aimVec(pk.chipAim) : heading(cur, pk.chipAt); out.push(chainLine(boards.slide(l.x, l.y, h.x, h.y, pk.chipDist != null ? pk.chipDist : 26), false)); }
   return out.join("");
 }
 

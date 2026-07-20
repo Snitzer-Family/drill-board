@@ -332,14 +332,16 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
         const at = pk.rimAt;
         const launchT = (cur.path.length && at >= 0) ? Math.max(tBase, routeTimeW(cur, warp, Math.min(at, cur.path.length - 1))) : tBase;
         const launch = bladeAt(cur, launchT, warp);
-        const r = pushTravel(boards.rimAround(launch, 65, pk.rimAim), launchT, vRim(), { by: cur.id, rim: true, easeOut: 26 });
+        const dist = pk.rimDist != null ? pk.rimDist : 65;       // handle-set travel distance
+        const r = pushTravel(boards.rimAround(launch, dist, pk.rimAim), launchT, vRim(), { by: cur.id, rim: true, easeOut: Math.min(26, dist * 0.4) });
         legs.push({ type: "rest", x: r.end.x, y: r.end.y, t0: r.t }); tBase = r.t;
       } else if (pk.chipAt != null && cur) {           // terminal chip into space (bounces)
         const at = pk.chipAt;
         const launchT = (cur.path.length && at >= 0) ? Math.max(tBase, routeTimeW(cur, warp, Math.min(at, cur.path.length - 1))) : tBase;
         const launch = bladeAt(cur, launchT, warp);
         const h = chipHeading(cur, launchT, pk.chipAim);
-        const r = pushTravel(boards.slide(launch.x, launch.y, h.x, h.y, 16), launchT, vChip(), { by: cur.id, chip: true });
+        const dist = pk.chipDist != null ? pk.chipDist : 26;     // handle-set travel distance
+        const r = pushTravel(boards.slide(launch.x, launch.y, h.x, h.y, dist), launchT, vChip(), { by: cur.id, chip: true, easeOut: Math.min(12, dist * 0.4) });
         legs.push({ type: "rest", x: r.end.x, y: r.end.y, t0: r.t }); tBase = r.t;
       }
       let relT = Infinity;

@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useLayoutEffect } from "react";
 import { VIEWS, COLORS, vb, APP_VERSION, ICON_SCALE, BUILD_STAMP, DEFAULT_TEXT } from "./constants.js";
 import { parseDrill, serializeDrill, extractDrill } from "./drill-format.js";
 import { clampX, clampY, segEnd, segD, nearestT, splitSeg, zigzagPoints, convertSeg, fitRoute } from "./geometry.js";
+import * as boards from "./boards.js";
 import { RinkMarkings } from "./rink.jsx";
 import { ZONES, zoneAt } from "./zones.js";
 import { PieceIcon, Stepper, DiagPanel } from "./icons.jsx";
@@ -662,7 +663,7 @@ export default function DrillAnimator() {
     const colorIdx = pieces.filter(p => p.kind === "player").length % COLORS.length;
     return {
       id, kind, x: pt.x, y: pt.y, speed: kind === "player" ? 1.5 : 1, hand: "R", carrier: null,
-      facing: kind === "net" && pt.x >= 100 ? 180 : 0, transfers: [], shotAt: null, rimAt: null, chipAt: null, chipAim: null, rimAim: null, pickup: null, net: null, holdLine: false, goalie: false, defense: false,
+      facing: kind === "net" && pt.x >= 100 ? 180 : 0, transfers: [], shotAt: null, rimAt: null, chipAt: null, chipAim: null, rimAim: null, chipDist: null, rimDist: null, pickup: null, net: null, holdLine: false, goalie: false, defense: false,
       color: kind === "player" ? COLORS[colorIdx] : kind === "cone" ? "#e0731d" : kind === "net" ? "#c81e33"
         : kind === "bumper" ? "#4d6fa6" : kind === "deker" ? "#c79a4e" : kind === "passer" ? "#57636f"
         : kind === "label" ? "#14202b" : "#14171a",
@@ -704,12 +705,19 @@ export default function DrillAnimator() {
       return { ...q, transfers: ts, shotAt: null, rimAt: null, chipAt: null, rimAim: null, chipAim: null };
     });
   }
-  // terminal actions (shoot / hard rim / chip into space) are mutually exclusive
+  // default travel distance (feet) for a fresh terminal release
+  const REL_DEFAULT = { rimAt: 65, chipAt: 26 };
+  // terminal actions (shoot / hard rim / chip into space) are mutually exclusive;
+  // a rim/chip release gets a default distance so its handle appears immediately
   function setTerminal(pkId, field, i) {
     update(q => {
       if (q.id !== pkId) return q;
       const on = q[field] === i;
-      return { ...q, shotAt: null, rimAt: null, chipAt: null, ...(on ? {} : { [field]: i }) };
+      const base = { shotAt: null, rimAt: null, chipAt: null };
+      if (on) return { ...q, ...base };
+      const dist = field === "rimAt" ? { rimDist: q.rimDist || REL_DEFAULT.rimAt }
+        : field === "chipAt" ? { chipDist: q.chipDist || REL_DEFAULT.chipAt } : {};
+      return { ...q, ...base, [field]: i, ...dist };
     });
   }
   // aim override for a chip or a hard rim (deg, or null to follow facing / auto).
@@ -722,6 +730,57 @@ export default function DrillAnimator() {
       const ts = (q.transfers || []).map((t, k) => (k === target.stage ? { ...t, aim: deg == null ? undefined : deg } : t));
       return { ...q, transfers: ts };
     });
+  }
+  // a terminal release handle sets BOTH direction (deg) and travel distance (ft)
+  function setRelease(pkId, aimField, distField, deg, dist) {
+    update(q => (q.id === pkId ? { ...q, [aimField]: deg, [distField]: dist } : q));
+  }
+
+  // Unified "Collect puck": the player grabs the nearest available loose puck at
+  // this spot (waypoint index `at`, or -1 = their standing position). A loose
+  // puck is a released chip / hard rim / shot, or a puck placed loose. Wires it
+  // with the existing chain (release → collector) / pickup machinery.
+  function collectPuckAt(playerId, at) {
+    const player = pieces.find(q => q.id === playerId);
+    if (!player) return;
+    const spot = at < 0 || !player.path.length ? { x: player.x, y: player.y }
+      : segEnd(player, Math.min(at, player.path.length - 1));
+    const relPoint = pk => {
+      const ch = puckChain(pk);
+      const who = pieces.find(x => x.id === ch[ch.length - 1]);
+      const a = pk.shotAt != null ? pk.shotAt : pk.rimAt != null ? pk.rimAt : pk.chipAt;
+      if (!who) return { x: pk.x, y: pk.y };
+      return (a == null || a < 0 || !who.path.length) ? { x: who.x, y: who.y } : segEnd(who, Math.min(a, who.path.length - 1));
+    };
+    const landing = pk => {
+      const rp = relPoint(pk);
+      try {
+        if (pk.chipAt != null) { const ang = pk.chipAim != null ? (pk.chipAim * Math.PI) / 180 : 0; const path = boards.slide(rp.x, rp.y, Math.cos(ang), Math.sin(ang), pk.chipDist || REL_DEFAULT.chipAt); return path[path.length - 1] || rp; }
+        if (pk.rimAt != null) { const path = boards.rimAround(rp, pk.rimDist || REL_DEFAULT.rimAt, pk.rimAim); return path[path.length - 1] || rp; }
+      } catch { /* fall through */ }
+      return rp;
+    };
+    const cands = pieces.filter(q => {
+      if (q.kind !== "puck") return false;
+      const released = q.shotAt != null || q.rimAt != null || q.chipAt != null;
+      const loose = !q.carrier && !q.pickup && !(q.transfers || []).length && !released;
+      if (!(released || loose)) return false;
+      const ch = puckChain(q);
+      return !(released && ch[ch.length - 1] === playerId);       // can't collect your own release
+    });
+    if (!cands.length) { setToast("No loose puck to collect"); setTimeout(() => setToast(""), 1500); return; }
+    const near = q => { const L = landing(q); return Math.hypot(L.x - spot.x, L.y - spot.y); };
+    const target = cands.reduce((b, q) => (near(q) < near(b) ? q : b));
+    if (target.shotAt != null || target.rimAt != null || target.chipAt != null) {
+      const field = target.shotAt != null ? "shotAt" : target.rimAt != null ? "rimAt" : "chipAt";
+      const kind = field === "shotAt" ? "shot" : field === "rimAt" ? "rim" : "chip";
+      const aim = field === "rimAt" ? target.rimAim : field === "chipAt" ? target.chipAim : null;
+      setTransfer(target.id, (target.transfers || []).length,
+        { at: target[field], to: playerId, recvAt: at < 0 ? null : at, kind, ...(aim != null ? { aim } : {}) });
+    } else {
+      updateById(target.id, { pickup: { to: playerId, at: at < 0 ? 0 : at } });
+    }
+    setSelectedId(playerId);
   }
   function setRecvAt(pkId, trIdx, idx) {
     update(q => {
@@ -919,6 +978,14 @@ export default function DrillAnimator() {
       setAim(d.pkId, d.target, ang);
       return;
     }
+    if (d.kind === "release") {
+      const ang = Math.round((Math.atan2(pt.y - d.origin.y, pt.x - d.origin.x) * 180) / Math.PI);
+      const raw = Math.hypot(pt.x - d.origin.x, pt.y - d.origin.y);
+      const lo = d.relKind === "chip" ? 6 : 10, hi = d.relKind === "chip" ? 90 : 170;
+      const dist = Math.round(Math.max(lo, Math.min(hi, raw)));
+      setRelease(d.pkId, d.aimField, d.distField, ang, dist);
+      return;
+    }
     if (d.kind === "resize") {
       const dist = Math.hypot(pt.x - d.cx, pt.y - d.cy);
       const size = Math.max(0.4, Math.min(6, (d.size0 || 1) * (dist / d.dist0)));
@@ -994,6 +1061,7 @@ export default function DrillAnimator() {
     if (d.kind === "wlabel") { setSelectedId(d.id); setPopup({ type: "point", id: d.id, seg: d.seg }); return; }
     if (d.kind === "resize") return;
     if (d.kind === "aim") { setAim(d.pkId, d.target, null); return; }  // tap to clear the aim
+    if (d.kind === "release") { setAim(d.pkId, { field: d.aimField }, null); return; }  // tap clears direction back to auto
     if (d.kind === "rotate") { setPopup({ type: "piece", id: d.id }); return; }
     if (d.kind === "piece") {
       if (d.line != null) {
@@ -1122,45 +1190,75 @@ export default function DrillAnimator() {
     );
   }
 
-  // draggable aim handle at a chip's or hard rim's release point (route players
-  // only): drag to aim it, tap to clear back to the player's facing / auto
+  // Release handles for a hard rim / chip. A terminal release shows a handle
+  // sitting at the puck's landing point: drag it to set BOTH the direction and
+  // the distance of the release; the dashed path previews where the puck goes.
+  // (Legacy rim/chip transfers keep a simple direction-only aim ring.)
   function renderAim(p) {
     if (!editing || tool === "draw" || p.kind !== "player" || !p.path.length) return null;
     const pk = pieces.find(q => q.kind === "puck" && puckChain(q).includes(p.id));
     if (!pk) return null;
     const chain = puckChain(pk);
     const ts = pk.transfers || [];
-    const knobs = [];
-    ts.forEach((tr, s) => {
-      if ((tr.kind === "chip" || tr.kind === "rim") && chain[s] === p.id) knobs.push({ at: tr.at, aim: tr.aim, target: { stage: s } });
-    });
     const last = chain.length - 1;
-    if (pk.chipAt != null && chain[last] === p.id)
-      knobs.push({ at: pk.chipAt, aim: pk.chipAim, target: { field: "chipAim" } });
-    if (pk.rimAt != null && chain[last] === p.id)
-      knobs.push({ at: pk.rimAt, aim: pk.rimAim, target: { field: "rimAim" } });
-    if (!knobs.length) return null;
-    const R = 8;
-    return knobs.map((k, idx) => {
-      const here = k.at < 0 ? { x: p.x, y: p.y } : segEnd(p, k.at);
-      const nextPt = p.path[k.at + 1] ? segEnd(p, k.at + 1) : null;
-      const defDir = nextPt
+    const out = [];
+
+    const defDirAt = at => {
+      const here = at < 0 ? { x: p.x, y: p.y } : segEnd(p, at);
+      const nextPt = p.path[at + 1] ? segEnd(p, at + 1) : null;
+      return nextPt
         ? Math.atan2(nextPt.y - here.y, nextPt.x - here.x)
-        : (() => { const pv = k.at - 1 < 0 ? { x: p.x, y: p.y } : segEnd(p, k.at - 1); return Math.atan2(here.y - pv.y, here.x - pv.x); })();
-      const a = k.aim != null ? (k.aim * Math.PI) / 180 : defDir;
+        : (() => { const pv = at - 1 < 0 ? { x: p.x, y: p.y } : segEnd(p, at - 1); return Math.atan2(here.y - pv.y, here.x - pv.x); })();
+    };
+
+    // terminal release handle (dir + distance) for chip / hard rim
+    const release = (at, kind, aim, dist, aimField, distField) => {
+      const here = at < 0 ? { x: p.x, y: p.y } : segEnd(p, at);
+      const ang = aim != null ? (aim * Math.PI) / 180 : defDirAt(at);
+      let path;
+      try {
+        path = kind === "chip"
+          ? boards.slide(here.x, here.y, Math.cos(ang), Math.sin(ang), dist)
+          : boards.rimAround(here, dist, aim);
+      } catch { path = [here]; }
+      const end = path[path.length - 1] || here;
+      const col = "#3a8dff";
+      out.push(
+        <g key={`rel-${p.id}-${aimField}`}>
+          <polyline points={path.map(q => `${q.x},${q.y}`).join(" ")} fill="none" stroke={col}
+            strokeWidth={0.4} strokeDasharray="2 1.4" opacity={0.7} pointerEvents="none" />
+          <line x1={here.x} y1={here.y} x2={end.x} y2={end.y} stroke={col} strokeWidth={0.25} opacity={0.4} strokeDasharray="1 1" pointerEvents="none" />
+          <circle cx={here.x} cy={here.y} r={1} fill={col} opacity={0.8} pointerEvents="none" />
+          <circle cx={end.x} cy={end.y} r={1.9} fill={col} stroke="#fff" strokeWidth={0.4} pointerEvents="none" />
+          <circle cx={end.x} cy={end.y} r={5} fill="transparent" style={{ cursor: "grab" }}
+            onPointerDown={e => handleDown(e, { kind: "release", pkId: pk.id, origin: here, aimField, distField, relKind: kind })} />
+        </g>
+      );
+    };
+    if (pk.chipAt != null && chain[last] === p.id)
+      release(pk.chipAt, "chip", pk.chipAim, pk.chipDist != null ? pk.chipDist : REL_DEFAULT.chipAt, "chipAim", "chipDist");
+    if (pk.rimAt != null && chain[last] === p.id)
+      release(pk.rimAt, "rim", pk.rimAim, pk.rimDist != null ? pk.rimDist : REL_DEFAULT.rimAt, "rimAim", "rimDist");
+
+    // legacy transfer chip/rim: direction-only aim ring
+    const R = 8;
+    ts.forEach((tr, s) => {
+      if (!((tr.kind === "chip" || tr.kind === "rim") && chain[s] === p.id)) return;
+      const here = tr.at < 0 ? { x: p.x, y: p.y } : segEnd(p, tr.at);
+      const a = tr.aim != null ? (tr.aim * Math.PI) / 180 : defDirAt(tr.at);
       const kx = here.x + Math.cos(a) * R, ky = here.y + Math.sin(a) * R;
-      const custom = k.aim != null;
-      const col = custom ? "#3a8dff" : "#9fb4c6";
-      return (
-        <g key={`aim-${p.id}-${idx}`}>
+      const col = tr.aim != null ? "#3a8dff" : "#9fb4c6";
+      out.push(
+        <g key={`aim-${p.id}-${s}`}>
           <circle cx={here.x} cy={here.y} r={R} fill="none" stroke={col} strokeWidth={0.25} strokeDasharray="1 1" opacity={0.7} pointerEvents="none" />
           <line x1={here.x} y1={here.y} x2={kx} y2={ky} stroke={col} strokeWidth={0.35} opacity={0.75} pointerEvents="none" />
           <circle cx={kx} cy={ky} r={1.6} fill={col} stroke="#12233a" strokeWidth={0.35} pointerEvents="none" />
           <circle cx={kx} cy={ky} r={4.2} fill="transparent" style={{ cursor: "grab" }}
-            onPointerDown={e => handleDown(e, { kind: "aim", pkId: pk.id, target: k.target, origin: here })} />
+            onPointerDown={e => handleDown(e, { kind: "aim", pkId: pk.id, target: { stage: s }, origin: here })} />
         </g>
       );
     });
+    return out.length ? out : null;
   }
 
   // a movable/resizable on-ice text label, drawn undistorted (icon frame) and
@@ -1270,6 +1368,40 @@ export default function DrillAnimator() {
         </div>
       );
     };
+    // Unified "Collect puck" toggle for player p at point i (-1 = standing).
+    // Grabs the nearest loose puck; toggling off reverts it to a release.
+    const collectRow = (p, i) => {
+      let hit = null;
+      for (const q of pieces) {
+        if (q.kind !== "puck") continue;
+        if (q.pickup && q.pickup.to === p.id && q.pickup.at === (i < 0 ? 0 : i)) { hit = { pk: q, kind: "pickup" }; break; }
+        const ts = q.transfers || [];
+        const s = ts.length - 1;
+        const t = ts[s];
+        if (t && t.to === p.id && (t.recvAt === i || (i < 0 && t.recvAt == null)) && (t.kind === "rim" || t.kind === "chip" || t.kind === "shot")) {
+          hit = { pk: q, kind: "tr", stage: s, tr: t }; break;
+        }
+      }
+      const hasLoose = pieces.some(q => q.kind === "puck"
+        && (q.shotAt != null || q.rimAt != null || q.chipAt != null || (!q.carrier && !q.pickup && !(q.transfers || []).length))
+        && puckChain(q).slice(-1)[0] !== p.id);
+      if (!hit && !hasLoose) return null;
+      const undo = () => {
+        if (hit.kind === "pickup") { updateById(hit.pk.id, { pickup: null }); return; }
+        const tr = hit.tr, field = tr.kind === "rim" ? "rimAt" : tr.kind === "chip" ? "chipAt" : "shotAt";
+        update(q => q.id !== hit.pk.id ? q : { ...q, transfers: (q.transfers || []).slice(0, hit.stage),
+          [field]: tr.at, ...(tr.kind === "rim" ? { rimAim: tr.aim != null ? tr.aim : null } : tr.kind === "chip" ? { chipAim: tr.aim != null ? tr.aim : null } : {}) });
+      };
+      return (
+        <div className="hd-poprow">
+          <button className={`hd-mini${hit ? " on" : ""}`}
+            onClick={() => (hit ? undo() : collectPuckAt(p.id, i))}>
+            {hit ? "✓ Collecting puck" : "⊕ Collect puck"}
+          </button>
+          <span style={{ fontSize: 11, color: "#8b99a8" }}>grabs the nearest loose puck here</span>
+        </div>
+      );
+    };
     // pass/shoot/collect controls for player p at possession point i. Used at
     // route points (point popup) and, with i=0, in a stationary player's popup
     // (a route-less carrier releases immediately, so its "point" is just 0).
@@ -1309,47 +1441,6 @@ export default function DrillAnimator() {
               ))}
             </div>
           )}
-          {canAct && (
-            <div className="hd-poprow">
-              <span>Shoot, rebound to</span>
-              {[p, ...others].map(o => (
-                <button key={o.id} className={`hd-mini${isShot(o.id) ? " on" : ""}`}
-                  onClick={() => setTransfer(pk.id, stage,
-                    isShot(o.id) ? null : { at: i, to: o.id, recvAt: null, kind: "shot" })}>
-                  {o.id === p.id ? "self" : o.id}
-                </button>
-              ))}
-            </div>
-          )}
-          {canAct && (
-            <div className="hd-poprow">
-              <span>Chip to</span>
-              {[p, ...others].map(o => {
-                const self = o.id === p.id;
-                const on = from && from.kind === "chip" && from.at === i && from.to === o.id;
-                return (
-                  <button key={`chip-${o.id}`} className={`hd-mini${on ? " on" : ""}`}
-                    onClick={() => setTransfer(pk.id, stage, on ? null : { at: i, to: o.id, recvAt: null, kind: "chip" })}>
-                    {self ? "self" : o.id}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-          {canAct && others.length > 0 && (
-            <div className="hd-poprow">
-              <span>Rim to</span>
-              {others.map(o => {
-                const on = from && from.kind === "rim" && from.at === i && from.to === o.id;
-                return (
-                  <button key={`rim-${o.id}`} className={`hd-mini${on ? " on" : ""}`}
-                    onClick={() => setTransfer(pk.id, stage, on ? null : { at: i, to: o.id, recvAt: null, kind: "rim" })}>
-                    {o.id}
-                  </button>
-                );
-              })}
-            </div>
-          )}
           {stage === (pk.transfers || []).length && (
             <div className="hd-poprow">
               <button className={`hd-mini${pk.shotAt === i ? " on" : ""}`}
@@ -1360,18 +1451,25 @@ export default function DrillAnimator() {
                 onClick={() => setTerminal(pk.id, "rimAt", i)}>
                 {pk.rimAt === i ? "✓ Hard rim" : "Hard rim"}
               </button>
+              <button className={`hd-mini${pk.chipAt === i ? " on" : ""}`}
+                onClick={() => setTerminal(pk.id, "chipAt", i)}>
+                {pk.chipAt === i ? "✓ Chip" : "Chip"}
+              </button>
+            </div>
+          )}
+          {(pk.rimAt === i || pk.chipAt === i) && (
+            <div className="hd-poprow">
+              <span style={{ fontSize: 11, color: "#8b99a8" }}>drag the handle on the ice to aim &amp; set distance</span>
             </div>
           )}
           {(pk.shotAt === i || (from && from.kind === "shot" && from.at === i)) && netRow(pk)}
-          {incoming && (
+          {incoming && incoming.kind === "pass" && (
             <div className="hd-poprow">
               <button className={`hd-mini${incoming.recvAt === i ? " on" : ""}`}
                 onClick={() => setRecvAt(pk.id, stage - 1, incoming.recvAt === i ? null : i)}>
-                {incoming.kind === "pass"
-                  ? (incoming.recvAt === i ? "✓ Receiving here" : "Receive pass here")
-                  : (incoming.recvAt === i ? "✓ Collecting loose puck" : "Collect loose puck")}
+                {incoming.recvAt === i ? "✓ Receiving here" : "Receive pass here"}
               </button>
-              {incoming.recvAt === i && incoming.kind !== "shot" && p.path.length > 0 && (
+              {incoming.recvAt === i && p.path.length > 0 && (
                 <span style={{ fontSize: 11, color: "#8b99a8" }}>
                   {pk.shotAt === i ? "one-timer — pace auto-syncs" : "pace auto-syncs"}
                 </span>
@@ -1386,13 +1484,11 @@ export default function DrillAnimator() {
             const inc = ts[finalStage - 1];               // the pass that returns the puck
             return (
               <>
-                {inc && (
+                {inc && inc.kind === "pass" && (
                   <div className="hd-poprow">
                     <button className={`hd-mini${inc.recvAt === i ? " on" : ""}`}
                       onClick={() => setRecvAt(pk.id, finalStage - 1, inc.recvAt === i ? null : i)}>
-                      {inc.kind === "pass"
-                        ? (inc.recvAt === i ? "✓ Receiving here" : "Receive pass here")
-                        : (inc.recvAt === i ? "✓ Collecting loose puck" : "Collect loose puck")}
+                      {inc.recvAt === i ? "✓ Receiving here" : "Receive pass here"}
                     </button>
                   </div>
                 )}
@@ -1404,6 +1500,10 @@ export default function DrillAnimator() {
                   <button className={`hd-mini${pk.rimAt === i ? " on" : ""}`}
                     onClick={() => setTerminal(pk.id, "rimAt", i)}>
                     {pk.rimAt === i ? "✓ Hard rim" : "Hard rim"}
+                  </button>
+                  <button className={`hd-mini${pk.chipAt === i ? " on" : ""}`}
+                    onClick={() => setTerminal(pk.id, "chipAt", i)}>
+                    {pk.chipAt === i ? "✓ Chip" : "Chip"}
                   </button>
                 </div>
                 {pk.shotAt === i && netRow(pk)}
@@ -1519,45 +1619,6 @@ export default function DrillAnimator() {
                   );
                 })()}
               </div>
-              {(() => {
-                // assign a loose puck for this player to gather — works for a
-                // stationary player (e.g. parked by the net for a rebound) too
-                const loose = pieces.filter(q => q.kind === "puck" && !q.carrier
-                  && !(q.pickup && q.pickup.to === p.id));
-                if (!loose.length) return null;
-                return (
-                  <div className="hd-poprow">
-                    <span>Pick up</span>
-                    {loose.map(q => (
-                      <button key={q.id} className="hd-mini"
-                        onClick={() => updateById(q.id, { carrier: null,
-                          pickup: { to: p.id, at: Math.max(0, p.path.length - 1) } })}>
-                        {q.id}
-                      </button>
-                    ))}
-                  </div>
-                );
-              })()}
-              {(() => {
-                // collect a hard-rimmed puck here — this player picks it up and the
-                // chain continues (works for a stationary / route-less player too)
-                const rims = pieces.filter(q => q.kind === "puck" && q.rimAt != null
-                  && puckChain(q).slice(-1)[0] !== p.id);
-                if (!rims.length) return null;
-                return (
-                  <div className="hd-poprow">
-                    <span>Collect rim</span>
-                    {rims.map(q => (
-                      <button key={`rcp-${q.id}`} className="hd-mini"
-                        onClick={() => setTransfer(q.id, (q.transfers || []).length,
-                          { at: q.rimAt, to: p.id, recvAt: p.path.length ? p.path.length - 1 : null, kind: "rim",
-                            ...(q.rimAim != null ? { aim: q.rimAim } : {}) })}>
-                        {q.id}
-                      </button>
-                    ))}
-                  </div>
-                );
-              })()}
               {p.path.length > 0 && !p.defense && (
                 <div className="hd-poprow">
                   <button className={`hd-mini${p.holdLine ? " on" : ""}`}
@@ -1574,6 +1635,8 @@ export default function DrillAnimator() {
                 </button>
                 <span style={{ fontSize: 11, color: "#8b99a8" }}>holds the slot, tracks the puck goal-side</span>
               </div>
+              {/* collect a loose puck at the player's standing spot */}
+              {collectRow(p, -1)}
               {/* host the chain (pass / shoot / rebound) on the player itself
                   for a route-less player, and for any puck head so the option
                   stays put after a route is added — i=-1 releases from the
@@ -1743,47 +1806,7 @@ export default function DrillAnimator() {
           ) : (
             <div className="hd-poprow" style={{ color: "#8b99a8", fontSize: 12 }}>End of route</div>
           )}
-          {p.kind === "player" && (() => {
-            const free = pieces.filter(q => q.kind === "puck" && !q.carrier);
-            if (!free.length) return null;
-            return (
-              <div className="hd-poprow">
-                <span>Get puck</span>
-                {free.map(q => {
-                  const on = q.pickup && q.pickup.to === p.id && q.pickup.at === i;
-                  const same = q.pickup && q.pickup.to === p.id;
-                  return (
-                    <button key={q.id} className={`hd-mini${on ? " on" : ""}`}
-                      onClick={() => updateById(q.id, on
-                        ? { pickup: null, transfers: [], shotAt: null, rimAt: null, chipAt: null }
-                        : { pickup: { to: p.id, at: i },
-                            ...(same ? {} : { transfers: [], shotAt: null, rimAt: null, chipAt: null }) })}>
-                      {q.id}
-                    </button>
-                  );
-                })}
-              </div>
-            );
-          })()}
-          {p.kind === "player" && (() => {
-            // a hard-rimmed puck lands loose — let this player collect it here,
-            // continuing the chain (converts the terminal rim to a rim to them)
-            const rims = pieces.filter(q => q.kind === "puck" && q.rimAt != null
-              && !(puckChain(q).slice(-1)[0] === p.id && i <= q.rimAt));
-            if (!rims.length) return null;
-            return (
-              <div className="hd-poprow">
-                <span>Collect rim</span>
-                {rims.map(q => (
-                  <button key={`rc-${q.id}`} className="hd-mini"
-                    onClick={() => setTransfer(q.id, (q.transfers || []).length,
-                      { at: q.rimAt, to: p.id, recvAt: i, kind: "rim", ...(q.rimAim != null ? { aim: q.rimAim } : {}) })}>
-                    {q.id}
-                  </button>
-                ))}
-              </div>
-            );
-          })()}
+          {p.kind === "player" && collectRow(p, i)}
           {p.kind === "player" && chainControls(p, i)}
           <div className="hd-poprow">
             <button className="hd-mini danger" onClick={() => deleteSeg(p.id, i)}>Delete point</button>
@@ -2284,14 +2307,14 @@ export default function DrillAnimator() {
             <code> pass=2:F2@3</code> passes at the carrier's point 2 to F2, received at F2's
             point 3 — the receiver's pace auto-syncs (omit <code>@3</code> to lead them instead).
             Point <b>0</b> is the starting spot (release before skating to point 1).
-            <code> shoot=4</code> fires at point 4 (targets the nearest net/passer, or <code>net=N2</code>/<code>net=PS1</code> for a specific one).
-            <code> rim=4</code> hard-rims the puck around the boards; add <code>~deg</code>
-            (<code>rim=4~90</code>) or drag the aim ring to pick which way it rims. A rimmed puck can be
-            picked up — a player uses <b>Collect rim</b> at a waypoint, or write <code>rim=4:F2~90</code>
-            to rim it to F2. A <b>chip</b> always goes to a collector:
-            <code> chip=4:F1</code> banks it off the boards for F1 (self or a teammate) and carries as far as
-            their collect waypoint (harder for a farther pickup). Aim it with <code>~deg</code>
-            (e.g. <code>chip=4:F1~-60</code> for a bank off the glass) or drag the on-ice aim ring.
+            <b>Shoot</b>, <b>Hard rim</b>, and <b>Chip</b> are terminal <b>releases</b> — the puck goes
+            into space and lands loose. <code> shoot=4</code> fires at point 4 (targets the nearest
+            net/passer, or <code>net=N2</code>/<code>net=PS1</code>). <code> rim=4~90*80</code> hard-rims around the
+            boards and <code>chip=4~-45*30</code> chips into space; the <code>~deg</code> is the direction and
+            <code>*ft</code> the distance — or just drag the on-ice <b>handle</b> at the end of the release
+            to set both. Any player then uses <b>Collect puck</b> (in their popup, or at a waypoint) to
+            grab the nearest loose puck at that spot. (The handoff forms <code>chip=4:F1</code> /
+            <code>rim=4:F2</code> that carry straight to a collector still load and play.)
             <code> pickup=F2@3</code> — a loose puck hops onto F2's blade at their point 3.
             <code> face=45</code> sets a stationary player's heading (degrees).
             <code> hold=line</code> makes a player wait at the blue line until the puck enters the zone.

@@ -142,8 +142,8 @@ function chain(pk, byId, pieces) {
     cur = rec;
   });
   if (pk.shotAt != null) { const l = routePoint(cur, pk.shotAt); out.push(chainLine([l, shotNet(l)], true)); }
-  else if (pk.rimAt != null) { const l = routePoint(cur, pk.rimAt); out.push(chainLine(boards.rimAround(l, 65, pk.rimAim), false)); }
-  else if (pk.chipAt != null) { const l = routePoint(cur, pk.chipAt); const h = pk.chipAim != null ? aimVec(pk.chipAim) : heading(cur, pk.chipAt); out.push(chainLine(boards.slide(l.x, l.y, h.x, h.y, 16), false)); }
+  else if (pk.rimAt != null) { const l = routePoint(cur, pk.rimAt); out.push(chainLine(boards.rimAround(l, pk.rimDist != null ? pk.rimDist : 65, pk.rimAim), false)); }
+  else if (pk.chipAt != null) { const l = routePoint(cur, pk.chipAt); const h = pk.chipAim != null ? aimVec(pk.chipAim) : heading(cur, pk.chipAt); out.push(chainLine(boards.slide(l.x, l.y, h.x, h.y, pk.chipDist != null ? pk.chipDist : 26), false)); }
   return out.join("");
 }
 

@@ -100,12 +100,24 @@ resizable on-ice text note).
 | Modifier | Meaning |
 |---|---|
 | `pass=<pt>:<to>[@<recv>]` | Pass at point `pt` to player `to`, caught at their point `recv` |
-| `rebound=<pt>:<to>[@<recv>]` | Shoot at `pt`; the carom is collected by `to` at their point `recv` |
-| `shoot=<pt>` | Terminal shot at point `pt` |
-| `rim=<pt>[~<deg>]` | Hard rim around the boards; `~<deg>` (or the aim ring) picks which way. A rimmed puck lands loose — a player can **collect** it at a later waypoint (which turns it into the row below). |
-| `rim=<pt>:<to>[@<recv>][~<deg>]` | Rim to player `to`, who collects it at their point `recv`. Follows the boards the short way, or in the `~<deg>` direction, and settles at the collector. |
-| `chip=<pt>:<to>[@<recv>][~<deg>]` | Chip to `to` (self or a teammate): fires along the chipper's facing (or `~<deg>` aim), banks off the boards, and carries exactly as far as `to`'s pickup point `recv` — a harder chip for a farther pickup. Aim it into the boards for a bank-off-the-glass to yourself. Always goes to a collector; never ends possession. |
+| `shoot=<pt>` | Terminal shot at point `pt` — the puck caroms off the net and lands loose |
+| `rim=<pt>[~<deg>][*<ft>]` | Hard-rim **release** around the boards. `~<deg>` sets the direction, `*<ft>` the distance — or drag the on-ice handle at the end of the rim to set both. The puck lands loose. |
+| `chip=<pt>[~<deg>][*<ft>]` | Chip **release** into space (banks off the boards). `~<deg>` sets the direction (default: the chipper's facing), `*<ft>` the distance — or drag the on-ice handle. The puck lands loose. |
 | `pickup=<to>@<pt>` | A loose puck hops onto player `to`'s blade at their point `pt` |
+
+**Releases + Collect puck.** `shoot` / `rim` / `chip` are *releases*: the puck
+travels and lands loose. Any player then **collects** it — in the app, *Collect
+puck* (on the player's popup, or at a route waypoint) grabs the nearest loose
+puck at that spot. Under the hood a collected release is stored as a handoff:
+
+| Handoff form | Meaning |
+|---|---|
+| `rebound=<pt>:<to>[@<recv>]` | Shoot at `pt`; `to` collects the carom at their point `recv` |
+| `rim=<pt>:<to>[@<recv>][~<deg>]` | Rim from `pt`; `to` collects it at their point `recv` |
+| `chip=<pt>:<to>[@<recv>][~<deg>]` | Chip from `pt`; `to` (self for a give-and-go) collects it at `recv` |
+
+These handoff forms carry the puck straight to the collector; they still load
+and play, and are what the app writes when you use *Collect puck*.
 
 ### `PATH <id> <segments…>`
 The route for a player or puck. Points are numbered **1…N** in order; **point 0**
