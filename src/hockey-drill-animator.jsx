@@ -101,6 +101,12 @@ export default function DrillAnimator() {
   const svgRef = useRef(null);
   const sceneRef = useRef(null);
   const stageRef = useRef(null);
+  // pinch-zoom view: scale + pan in the SVG's root-viewBox units (applied as an
+  // outer <g> transform, so svgPt — which uses the inner scene CTM — stays right)
+  const [view, setView] = useState({ s: 1, tx: 0, ty: 0 });
+  const viewRef = useRef({ s: 1, tx: 0, ty: 0 });
+  const geomRef = useRef({ ox: 0, oy: 0, rootW: 200, rootH: 85 });
+  const pinchRef = useRef(null);
   const segRefs = useRef({});
   const drag = useRef(null);
   const drawRaw = useRef([]);
@@ -279,6 +285,11 @@ export default function DrillAnimator() {
   // maps rink coords into the rotated viewBox: (x,y) -> (my+vh-y, x-mx)
   const sceneTransform = rotated ? `rotate(90) translate(${-mxF} ${-(myF + vhF)})` : undefined;
   const screenRot = rotated ? 90 : 0;
+  // the root viewBox the pinch-zoom transform operates in (rotated swaps axes)
+  geomRef.current = rotated
+    ? { ox: 0, oy: 0, rootW: vhF, rootH: vwF }
+    : { ox: mxF, oy: myF, rootW: vwF, rootH: vhF };
+  const zoomXf = view.s !== 1 || view.tx || view.ty ? `translate(${view.tx} ${view.ty}) scale(${view.s})` : undefined;
   // roundness correction: the fill-mode stretch scales the two rink axes
   // differently; circles are drawn as ellipses with ry scaled by yFix so
   // they render perfectly round on screen after the stretch
@@ -518,16 +529,62 @@ export default function DrillAnimator() {
   const [, bumpTick] = useState(0);
   useEffect(() => { bumpTick(t => t + 1); }, []);
 
-  // Block page scroll/zoom for touches that start on the rink.
+  // keep the pan/scale within bounds so the ice always fills the view
+  function clampView(s, tx, ty) {
+    const g = geomRef.current;
+    s = Math.max(1, Math.min(6, s));
+    const clamp = (t, o, size) => Math.max((o + size) * (1 - s), Math.min(o * (1 - s), t));
+    return { s, tx: clamp(tx, g.ox, g.rootW), ty: clamp(ty, g.oy, g.rootH) };
+  }
+  const resetView = () => { const v = { s: 1, tx: 0, ty: 0 }; viewRef.current = v; setView(v); };
+  // screen px → root-viewBox units (the space the zoom transform lives in)
+  function rootPt(cx, cy) {
+    const svg = svgRef.current; if (!svg) return null;
+    const p = svg.createSVGPoint(); p.x = cx; p.y = cy;
+    const m = svg.getScreenCTM(); if (!m) return null;
+    return p.matrixTransform(m.inverse());
+  }
+  useEffect(() => { viewRef.current = view; }, [view]);
+
+  // Block page scroll/zoom for touches on the rink; two fingers pinch-zoom + pan.
   useEffect(() => {
     const svg = svgRef.current;
     if (!svg) return;
-    const block = e => e.preventDefault();
-    svg.addEventListener("touchstart", block, { passive: false });
-    svg.addEventListener("touchmove", block, { passive: false });
+    const start = e => {
+      e.preventDefault();
+      if (e.touches.length === 2) {
+        const [a, b] = e.touches;
+        const d0 = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+        const mid = rootPt((a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2);
+        if (mid) { pinchRef.current = { d0, mid0: mid, view0: { ...viewRef.current } };
+          drag.current = null; setDrawPreview(null); setLoupe(null); }
+      }
+    };
+    const move = e => {
+      e.preventDefault();
+      const pin = pinchRef.current;
+      if (!pin || e.touches.length !== 2) return;
+      const [a, b] = e.touches;
+      const d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+      const mid = rootPt((a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2);
+      if (!mid) return;
+      const { d0, mid0, view0 } = pin;
+      const s = view0.s * (d / (d0 || 1));
+      // keep the pinch focal point pinned, then pan by the midpoint drift
+      const pcx = (mid0.x - view0.tx) / view0.s, pcy = (mid0.y - view0.ty) / view0.s;
+      const nv = clampView(s, mid.x - s * pcx, mid.y - s * pcy);
+      viewRef.current = nv; setView(nv);
+    };
+    const end = e => { if (e.touches.length < 2) pinchRef.current = null; };
+    svg.addEventListener("touchstart", start, { passive: false });
+    svg.addEventListener("touchmove", move, { passive: false });
+    svg.addEventListener("touchend", end);
+    svg.addEventListener("touchcancel", end);
     return () => {
-      svg.removeEventListener("touchstart", block);
-      svg.removeEventListener("touchmove", block);
+      svg.removeEventListener("touchstart", start);
+      svg.removeEventListener("touchmove", move);
+      svg.removeEventListener("touchend", end);
+      svg.removeEventListener("touchcancel", end);
     };
   }, []);
 
@@ -881,7 +938,7 @@ export default function DrillAnimator() {
   const TAP_DIST = 1.4;
 
   function onSvgDown(e) {
-    if (playing) return;
+    if (playing || pinchRef.current) return;
     setOpenMenu(null);
     const pt = svgPt(e);
     if (tool === "draw") { setPopup(null); beginDraw(e); return; }
@@ -930,7 +987,7 @@ export default function DrillAnimator() {
   }
 
   function pieceDown(e, id) {
-    if (playing) return;
+    if (playing || pinchRef.current) return;
     e.stopPropagation();
     setOpenMenu(null);
     if (tool === "draw") { setSelectedId(id); setPopup(null); beginDraw(e, id); return; }
@@ -942,7 +999,7 @@ export default function DrillAnimator() {
   }
 
   function lineDown(e, id, segIdx) {
-    if (playing) return;
+    if (playing || pinchRef.current) return;
     e.stopPropagation();
     setOpenMenu(null);
     if (tool === "draw") { setSelectedId(id); setPopup(null); beginDraw(e, id); return; }
@@ -954,7 +1011,7 @@ export default function DrillAnimator() {
   }
 
   function handleDown(e, payload) {
-    if (!editing) return;
+    if (!editing || pinchRef.current) return;
     e.stopPropagation();
     setOpenMenu(null);
     if (payload.id) setSelectedId(payload.id);
@@ -971,7 +1028,7 @@ export default function DrillAnimator() {
   // own angular offset from the body is subtracted so the blade tracks
   // the pointer exactly instead of jumping on grab
   function stickDown(e, p) {
-    if (playing || animT > 0) return;
+    if (playing || animT > 0 || pinchRef.current) return;
     e.stopPropagation();
     setOpenMenu(null);
     setSelectedId(p.id);
@@ -983,6 +1040,7 @@ export default function DrillAnimator() {
   }
 
   function onSvgMove(e) {
+    if (pinchRef.current) return;
     const d = drag.current;
     if (!d) return;
     const pt = svgPt(e);
@@ -2037,6 +2095,7 @@ export default function DrillAnimator() {
               <clipPath id="boards"><rect x={0.5} y={0.5} width={199} height={84} rx={27.5} ry={27.5 * yFix} /></clipPath>
             </defs>
 
+            <g transform={zoomXf}>
             <g ref={sceneRef} transform={sceneTransform}>
             <RinkMarkings yFix={yFix} />
 
@@ -2208,9 +2267,20 @@ export default function DrillAnimator() {
           {pieces.map(p => <g key={`ca-${p.id}`}>{renderAim(p)}</g>)}
             {!aiPlay && renderLabels()}
             </g>
+            </g>
           </svg>
           {renderPopout()}
           {renderLoupe()}
+          {view.s > 1.02 && (
+            <button onClick={resetView} title="Reset zoom"
+              style={{ position: "absolute", top: "calc(8px + env(safe-area-inset-top))", right: 8, zIndex: 46,
+                display: "flex", alignItems: "center", gap: 6, padding: "8px 12px", minHeight: 40,
+                font: "600 13px system-ui, sans-serif", color: "#e8edf2",
+                background: "rgba(23,29,37,.92)", border: "1px solid #33404f", borderRadius: 999,
+                boxShadow: "0 2px 10px rgba(0,0,0,.4)", cursor: "pointer" }}>
+              ⤢ Fit · {view.s.toFixed(1)}×
+            </button>
+          )}
         </div>
       </div>
 
