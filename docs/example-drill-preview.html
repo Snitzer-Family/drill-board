@@ -41,7 +41,10 @@
   .steps-list li{padding-left:4px}
   .steps-list li::marker{color:var(--red);font-weight:800;font-variant-numeric:tabular-nums}
   .steps-list li.note{color:var(--muted);font-style:italic}
-  .steps-list:empty::after{content:"Add a puck chain (on=, pass=, shoot=…) to see the steps.";color:var(--muted);font-size:14px;font-style:italic;padding-left:-24px}</style>
+  .steps-list:empty::after{content:"Add a puck chain (on=, pass=, shoot=…) to see the steps.";color:var(--muted);font-size:14px;font-style:italic;padding-left:-24px}
+  .playbtn{display:inline-flex;align-items:center;gap:6px;font:600 13px/1 var(--font-body);color:#fff;background:var(--red);border:none;border-radius:9px;padding:9px 15px;cursor:pointer;box-shadow:var(--shadow)}
+  .playbtn:active{transform:translateY(1px)}
+  #anim .mv text{pointer-events:none}</style>
 <div class="wrap">
   <header>
     <div class="topbar">
@@ -58,6 +61,11 @@
     <div class="card-head"><span class="t" id="sheet">Full sheet</span><span class="meta" id="meta">rendered from the DSL</span></div>
     <div class="rinkbox" id="diagram"></div>
     <div class="legend" id="legend"></div>
+  </section>
+  <section class="card" aria-label="Animation">
+    <div class="card-head"><span class="t">Animation</span>
+      <button id="playbtn" class="playbtn" type="button">▶ Play</button></div>
+    <div class="rinkbox" id="anim"></div>
   </section>
   <section class="card" aria-label="Drill steps">
     <div class="card-head"><span class="t">The drill, step by step</span><span class="meta" id="stepmeta"></span></div>
@@ -843,6 +851,117 @@ function chain(pk, byId, pieces) {
   return out.join("");
 }
 
+// A compact play-time engine for the preview animation. Players skate their
+// routes at a speed-scaled pace; the puck rides its carrier (with a stickhandle
+// wiggle), then flies to wherever the next receiver is when it lands, then the
+// terminal shot flies to the net. Not the full app engine — a faithful preview.
+function buildAnim(pieces) {
+  const PACE = 22, PASS = 60, SHOT = 95;                 // ft/s
+  const players = pieces.filter(p => p.kind === "player");
+  const nets = pieces.filter(q => q.kind === "net" || q.kind === "passer");
+  const R = {};
+  players.forEach(p => {
+    if (!p.path.length) { R[p.id] = { pts: null, total: 0, dur: 0, wpL: [], speed: p.speed || 1, x: p.x, y: p.y }; return; }
+    const pts = [{ x: p.x, y: p.y, l: 0 }]; let prev = { x: p.x, y: p.y }, L = 0; const wpL = [];
+    p.path.forEach(s => {
+      const N = 24;
+      for (let k = 1; k <= N; k++) { const q = evalSeg(prev, s, k / N), last = pts[pts.length - 1]; L += Math.hypot(q.x - last.x, q.y - last.y); pts.push({ x: q.x, y: q.y, l: L }); }
+      wpL.push(L); prev = { x: s.x, y: s.y };
+    });
+    R[p.id] = { pts, total: L, dur: L / (PACE * (p.speed || 1)), wpL, speed: p.speed || 1, x: p.x, y: p.y };
+  });
+  const playerAt = (id, t) => {
+    const r = R[id]; if (!r) { const p = players.find(q => q.id === id); return p ? { x: p.x, y: p.y } : { x: 0, y: 0 }; }
+    if (!r.pts || !r.total) return { x: r.x, y: r.y };
+    const target = Math.min(1, Math.max(0, t / r.dur)) * r.total;
+    for (let k = 1; k < r.pts.length; k++) if (r.pts[k].l >= target) { const a = r.pts[k - 1], b = r.pts[k], f = (target - a.l) / ((b.l - a.l) || 1); return { x: a.x + f * (b.x - a.x), y: a.y + f * (b.y - a.y) }; }
+    const e = r.pts[r.pts.length - 1]; return { x: e.x, y: e.y };
+  };
+  const timeAtWp = (id, wi) => { const r = R[id]; if (!r || !r.wpL.length || wi < 0) return 0; return (r.wpL[Math.min(wi, r.wpL.length - 1)] || 0) / (PACE * r.speed); };
+  // carried puck: forward of the player, stickhandling side-to-side. Slow skating
+  // shows more stickhandle; fast skating or a sharp turn pushes it further ahead.
+  const bladeOf = (id, t) => {
+    const dt = 0.06, a = playerAt(id, t), b = playerAt(id, t + dt), c = playerAt(id, t - dt);
+    let hx = b.x - a.x, hy = b.y - a.y, hd = Math.hypot(hx, hy) || 1e-3; const speed = hd / dt; hx /= hd; hy /= hd;
+    let ix = a.x - c.x, iy = a.y - c.y, il = Math.hypot(ix, iy) || 1; ix /= il; iy /= il;
+    const turn = Math.acos(Math.max(-1, Math.min(1, ix * hx + iy * hy)));
+    const stickAmp = Math.max(0, 2.2 - speed * 0.05 - turn * 2.6);
+    const fwd = 3.4 + 1 + Math.min(2.4, speed * 0.06 + turn * 3);
+    const lat = Math.sin(t * 6.5) * stickAmp, px = -hy, py = hx;
+    return { x: a.x + hx * fwd + px * lat, y: a.y + hy * fwd + py * lat };
+  };
+  const shotNet = (pk, launch) => {
+    if (pk.net) { const n = nets.find(x => x.id === pk.net); if (n) return { x: n.x, y: n.y }; }
+    if (nets.length) return nets.reduce((a, b) => Math.hypot(b.x - launch.x, b.y - launch.y) < Math.hypot(a.x - launch.x, a.y - launch.y) ? b : a);
+    return launch.x < 100 ? { x: 17, y: 42.5 } : { x: 183, y: 42.5 };
+  };
+  const P = {};
+  let maxT = Math.max(0, ...players.map(p => R[p.id] ? R[p.id].dur : 0));
+  pieces.filter(p => p.kind === "puck").forEach(pk => {
+    const chain = [pk.carrier || (pk.pickup && pk.pickup.to) || null, ...(pk.transfers || []).map(t => t.to)].filter(Boolean);
+    if (!chain.length) { P[pk.id] = { ph: [{ type: "still", x: pk.x, y: pk.y }] }; return; }
+    const ts = pk.transfers || [], ph = []; let cur = chain[0], carryStart = 0;
+    for (let s = 0; s < ts.length; s++) {
+      const t = ts[s]; if (t.by && t.by !== cur) break;
+      const rel = Math.max(carryStart, timeAtWp(cur, t.at)), relPos = bladeOf(cur, rel);
+      let target = t.kind === "shot" ? shotNet(pk, relPos) : playerAt(t.to, rel);
+      let flight = Math.hypot(target.x - relPos.x, target.y - relPos.y) / PASS, land = rel + flight;
+      if (t.kind !== "shot") { target = playerAt(t.to, land); flight = Math.hypot(target.x - relPos.x, target.y - relPos.y) / PASS; land = rel + flight; }
+      ph.push({ type: "carry", id: cur, t0: carryStart, t1: rel });
+      ph.push({ type: "fly", from: relPos, to: target, t0: rel, t1: land });
+      cur = t.to; carryStart = land;
+    }
+    const termAt = pk.shotAt != null ? pk.shotAt : pk.rimAt != null ? pk.rimAt : pk.chipAt != null ? pk.chipAt : null;
+    if ((!pk.termBy || pk.termBy === cur) && termAt != null) {
+      const rel = Math.max(carryStart, timeAtWp(cur, termAt)), relPos = bladeOf(cur, rel);
+      const np = pk.shotAt != null ? shotNet(pk, relPos) : relPos;
+      const flight = Math.hypot(np.x - relPos.x, np.y - relPos.y) / SHOT, land = rel + flight;
+      ph.push({ type: "carry", id: cur, t0: carryStart, t1: rel });
+      ph.push({ type: "fly", from: relPos, to: np, t0: rel, t1: land });
+      ph.push({ type: "rest", x: np.x, y: np.y, t0: land });
+      carryStart = land;
+    } else ph.push({ type: "carry", id: cur, t0: carryStart, t1: 1e9 });
+    P[pk.id] = { ph }; maxT = Math.max(maxT, carryStart);
+  });
+  const puckAt = (pkId, t) => {
+    const rec = P[pkId]; if (!rec) return { x: 0, y: 0 };
+    let last = null;
+    for (const p of rec.ph) {
+      if (p.type === "still") return { x: p.x, y: p.y };
+      if (p.type === "rest") { if (t >= p.t0) return { x: p.x, y: p.y }; last = p; continue; }
+      if (t >= p.t0 && t <= p.t1) {
+        if (p.type === "carry") return bladeOf(p.id, t);
+        const f = (t - p.t0) / ((p.t1 - p.t0) || 1); return { x: p.from.x + f * (p.to.x - p.from.x), y: p.from.y + f * (p.to.y - p.from.y) };
+      }
+      last = p;
+    }
+    if (last && last.type === "carry") return bladeOf(last.id, t);
+    if (last && last.type === "fly") return { x: last.to.x, y: last.to.y };
+    if (last && last.type === "rest") return { x: last.x, y: last.y };
+    return { x: 0, y: 0 };
+  };
+  return { duration: maxT, posAt: (id, t) => { const pk = pieces.find(q => q.id === id && q.kind === "puck"); return pk ? puckAt(id, t) : playerAt(id, t); } };
+}
+// the animated diagram: rink + faint routes + still pieces, with the routed
+// players and pucks as .mv groups the loop repositions each frame
+function animScene(pieces, rinkMode) {
+  const rank = k => (k === "net" || k === "bumper" || k === "deker" || k === "passer" || k === "tire" ? 0 : k === "player" ? 2 : 1);
+  const faint = pieces.filter(p => p.kind === "player" && p.path.length).map(p => {
+    let d = `M ${f(p.x)} ${f(p.y)}`; p.path.forEach(s => { d += " " + segCmd(s); });
+    return `<path d="${d}" fill="none" stroke="${p.color}" stroke-width="0.6" stroke-linecap="round" opacity="0.28"/>`;
+  }).join("");
+  const stills = [...pieces].filter(p => !(p.kind === "player" && p.path.length) && p.kind !== "puck" && p.kind !== "label").sort((a, b) => rank(a.kind) - rank(b.kind)).map(piece).join("");
+  const moving = pieces.filter(p => (p.kind === "player" && p.path.length) || p.kind === "puck").map(p => {
+    const icon = p.kind === "puck"
+      ? `<circle r="1.5" fill="${V("puck", "#14171a")}" stroke="#fff" stroke-width="0.4"/>`
+      : `<circle r="3.4" fill="${p.color}" stroke="#fff" stroke-width="0.5"/><text y="1.05" font-size="3" font-weight="800" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif">${esc(p.label || p.id)}</text>`;
+    return `<g class="mv" data-id="${p.id}" transform="translate(${f(p.x)} ${f(p.y)})">${icon}</g>`;
+  }).join("");
+  const labels = pieces.filter(p => p.kind === "label").map(p => labelSvg(p.x, p.y, p.text, p.size, p.color)).join("");
+  const [vx, vy, vw, vh] = VIEWS[rinkMode] || VIEWS.full, PAD = 7;
+  return `<svg class="rink" viewBox="${vx - PAD} ${vy - PAD} ${vw + 2 * PAD} ${vh + 2 * PAD}" xmlns="http://www.w3.org/2000/svg" role="img">${rink()}${faint}${stills}${moving}${labels}</svg>`;
+}
+
 // a recipe-style, play-ordered list of what happens in the drill. Coach-written
 // waypoint descriptions are used verbatim; everything else is auto-described.
 function drillSteps(pieces) {
@@ -935,8 +1054,34 @@ function drillSvg(dsl, opts = {}) {
 (function(){
   var ta=document.getElementById('dsl'),dia=document.getElementById('diagram'),err=document.getElementById('err'),
       title=document.getElementById('title'),lede=document.getElementById('lede'),leg=document.getElementById('legend'),meta=document.getElementById('meta'),
-      sheet=document.getElementById('sheet'),steps=document.getElementById('steps'),stepmeta=document.getElementById('stepmeta'),copy=document.getElementById('copy');
+      sheet=document.getElementById('sheet'),steps=document.getElementById('steps'),stepmeta=document.getElementById('stepmeta'),
+      anim=document.getElementById('anim'),playbtn=document.getElementById('playbtn'),copy=document.getElementById('copy');
   var SHEET_LABEL={full:'Full sheet',half:'Half ice',quarter:'Quarter ice'};
+  // ---- animation ----
+  var animData=null, playing=false, animT0=0, raf=0, TAIL=1.4;
+  function stopAnim(){ playing=false; if(raf)cancelAnimationFrame(raf); raf=0; playbtn.textContent='▶ Play'; }
+  function setFrame(t){
+    if(!animData) return;
+    var els=anim.querySelectorAll('.mv');
+    for(var i=0;i<els.length;i++){ var id=els[i].getAttribute('data-id'); var p=animData.posAt(id,t); els[i].setAttribute('transform','translate('+(Math.round(p.x*100)/100)+' '+(Math.round(p.y*100)/100)+')'); }
+  }
+  function loop(now){
+    if(!playing) return;
+    var total=animData.duration+TAIL;
+    var t=((now-animT0)/1000)%total;
+    setFrame(Math.min(t,animData.duration));
+    raf=requestAnimationFrame(loop);
+  }
+  function buildAnimScene(r){
+    stopAnim();
+    try{ anim.innerHTML=animScene(r.pieces, r.rink); animData=buildAnim(r.pieces); setFrame(0); }
+    catch(e){ anim.innerHTML=''; animData=null; }
+  }
+  playbtn.addEventListener('click',function(){
+    if(!animData||animData.duration<=0) return;
+    if(playing){ stopAnim(); }
+    else { playing=true; animT0=performance.now(); playbtn.textContent='⏸ Pause'; raf=requestAnimationFrame(loop); }
+  });
   function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
   // URL-safe base64 of UTF-8 text, for sharing the current drill in the link.
   function enc(s){try{return btoa(unescape(encodeURIComponent(s))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}catch(e){return '';}}
@@ -958,6 +1103,7 @@ function drillSvg(dsl, opts = {}) {
     var st=drillSteps(r.pieces);
     steps.innerHTML=st.map(function(s){return '<li'+(s.custom?' class="note"':'')+'>'+esc(s.text)+'</li>';}).join('');
     stepmeta.textContent=st.length?st.length+' step'+(st.length===1?'':'s'):'';
+    buildAnimScene(r);
     syncHash();
   }
   // A shared link carries the drill in #d=… — prefer it over the built-in default.
