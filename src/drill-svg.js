@@ -244,7 +244,7 @@ function routePath(p, pieces) {
   const carry = pieces ? carrySegsOf(p, pieces) : new Set();
   const startTrim = trimSegStart({ x: p.x, y: p.y }, p.path[0], 3.6);
   const startPt = startTrim ? startTrim.start : { x: p.x, y: p.y };
-  const stroke = `fill="none" stroke="${p.color}" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"`;
+  const stroke = `fill="none" stroke="${p.color}" stroke-width="0.7" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"`;
   let lines = "";
   p.path.forEach((s0, i) => {
     const segPrev = i === 0 ? startPt : { x: p.path[i - 1].x, y: p.path[i - 1].y };
@@ -280,7 +280,7 @@ const chainLine = (pts, mode) => {
   const dash = shot ? "" : dotted ? ' stroke-dasharray="0.1 1.9"' : ' stroke-dasharray="2.4 2"';
   const marker = blocked ? "arrowRX" : rebound ? "arrowRB" : "arrowP";
   const line = trimLine(pts, CHAIN_START[mode] != null ? CHAIN_START[mode] : 3.5, CHAIN_TRIM[mode] != null ? CHAIN_TRIM[mode] : 3.5);
-  return `<polyline points="${polyPts(line)}" fill="none" stroke="${color}" stroke-width="${shot ? 0.85 : blocked ? 0.85 : 0.7}"`
+  return `<polyline points="${polyPts(line)}" fill="none" stroke="${color}" stroke-width="${shot ? 0.72 : blocked ? 0.72 : 0.6}"`
     + `${dash} stroke-linecap="round" stroke-linejoin="round" opacity="0.9" marker-end="url(#${marker})"/>`;
 };
 
