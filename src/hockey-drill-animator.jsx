@@ -287,8 +287,17 @@ export default function DrillAnimator() {
   const sa = stageSize.w / Math.max(1, stageSize.h);
   const rotated =
     Math.abs(Math.log(sa / (vhF / vwF))) < Math.abs(Math.log(sa / (vwF / vhF)));
-  const canvasW = Math.max(50, stageSize.w);
-  const canvasH = Math.max(20, stageSize.h);
+  let canvasW = Math.max(50, stageSize.w);
+  let canvasH = Math.max(20, stageSize.h);
+  // Full ice fills the stage (fill mode). Half / quarter keep their true
+  // proportions: fit the width, then cap the height (and vice-versa) to at most
+  // a small over-stretch, letterboxing the surplus instead of stretching tall.
+  if (rink !== "full") {
+    const vbW = rotated ? vhF : vwF, vbH = rotated ? vwF : vhF;   // effective viewBox dims
+    const CAP = 1.12;                                             // max stretch past true aspect
+    canvasH = Math.min(canvasH, Math.round((canvasW * vbH) / vbW * CAP));
+    canvasW = Math.min(canvasW, Math.round((canvasH * vbW) / vbH * CAP));
+  }
   // maps rink coords into the rotated viewBox: (x,y) -> (my+vh-y, x-mx)
   const sceneTransform = rotated ? `rotate(90) translate(${-mxF} ${-(myF + vhF)})` : undefined;
   const screenRot = rotated ? 90 : 0;
