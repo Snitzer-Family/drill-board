@@ -665,7 +665,7 @@ export default function DrillAnimator() {
   function nextId(kind) {
     const prefix = kind === "player" ? "P" : kind === "puck" ? "PK" : kind === "net" ? "N"
       : kind === "bumper" ? "B" : kind === "deker" ? "DK" : kind === "passer" ? "PS"
-      : kind === "label" ? "L" : "C";
+      : kind === "label" ? "L" : kind === "tire" ? "T" : "C";
     let n = 1;
     while (pieces.some(p => p.id === prefix + n)) n++;
     return prefix + n;
@@ -679,7 +679,7 @@ export default function DrillAnimator() {
       facing: kind === "net" && pt.x >= 100 ? 180 : 0, transfers: [], shotAt: null, rimAt: null, chipAt: null, chipAim: null, rimAim: null, chipDist: null, rimDist: null, pickup: null, net: null, holdLine: false, goalie: false, defense: false,
       color: kind === "player" ? COLORS[colorIdx] : kind === "cone" ? "#e0731d" : kind === "net" ? "#c81e33"
         : kind === "bumper" ? "#4d6fa6" : kind === "deker" ? "#c79a4e" : kind === "passer" ? "#57636f"
-        : kind === "label" ? "#14202b" : "#14171a",
+        : kind === "label" ? "#14202b" : kind === "tire" ? "#1c1c1e" : "#14171a",
       label: kind === "player" ? id : "", text: kind === "label" ? "Label" : "", size: 1, path: [],
     };
   }
@@ -1585,6 +1585,7 @@ export default function DrillAnimator() {
           <button className="hd-mini" onClick={() => addPieceAt("deker", popup.pt)}>π Deker</button>
           <button className="hd-mini" onClick={() => addPieceAt("passer", popup.pt)}>▭ Passer</button>
           <button className="hd-mini" onClick={() => addPieceAt("label", popup.pt)}>🇹 Label</button>
+          <button className="hd-mini" onClick={() => addPieceAt("tire", popup.pt)}>⭕ Tire</button>
         </div>
       );
     } else if (popup.type === "piece") {
@@ -1592,7 +1593,7 @@ export default function DrillAnimator() {
       title = p.kind === "player" ? `Player ${p.id}` : p.kind === "puck" ? `Puck ${p.id}`
         : p.kind === "net" ? `Net ${p.id}` : p.kind === "bumper" ? `Bumper ${p.id}`
         : p.kind === "deker" ? `Deker ${p.id}` : p.kind === "passer" ? `Passer ${p.id}`
-        : p.kind === "label" ? `Label ${p.id}` : `Cone ${p.id}`;
+        : p.kind === "label" ? `Label ${p.id}` : p.kind === "tire" ? `Tire ${p.id}` : `Cone ${p.id}`;
       body = (
         <>
           {p.kind === "label" && (
@@ -1623,13 +1624,40 @@ export default function DrillAnimator() {
             </>
           )}
           {p.kind === "net" && (
-            <div className="hd-poprow">
-              <button className={`hd-mini${p.goalie ? " on" : ""}`}
-                onClick={() => updateById(p.id, { goalie: !p.goalie })}>
-                {p.goalie ? "✓ Goalie in net" : "🥅 Goalie in net"}
-              </button>
-              <span style={{ fontSize: 11, color: "#8b99a8" }}>drag to move · ring to rotate</span>
-            </div>
+            <>
+              <div className="hd-poprow">
+                <button className={`hd-mini${p.goalie ? " on" : ""}`}
+                  onClick={() => updateById(p.id, { goalie: !p.goalie })}>
+                  {p.goalie ? "✓ Goalie in net" : "🥅 Goalie in net"}
+                </button>
+                <span style={{ fontSize: 11, color: "#8b99a8" }}>drag to move · ring to rotate</span>
+              </div>
+              <div className="hd-poprow">
+                <span>Size</span>
+                <button className={`hd-mini${(p.size || 1) >= 0.85 ? " on" : ""}`}
+                  onClick={() => updateById(p.id, { size: 1 })}>NHL</button>
+                <button className={`hd-mini${(p.size || 1) < 0.85 ? " on" : ""}`}
+                  onClick={() => updateById(p.id, { size: 0.62 })}>Mite</button>
+              </div>
+            </>
+          )}
+          {p.kind === "tire" && (
+            <>
+              <div className="hd-poprow">
+                <span>Size</span>
+                <button className={`hd-mini${(p.size || 1) >= 0.8 ? " on" : ""}`}
+                  onClick={() => updateById(p.id, { size: 1 })}>Large</button>
+                <button className={`hd-mini${(p.size || 1) < 0.8 ? " on" : ""}`}
+                  onClick={() => updateById(p.id, { size: 0.55 })}>Small</button>
+                <span style={{ fontSize: 11, color: "#8b99a8" }}>drag to move</span>
+              </div>
+              <div className="hd-poprow">
+                <button className="hd-mini danger"
+                  onClick={() => { setPieces(ps => ps.filter(q => q.id !== p.id)); setSelectedId(null); setPopup(null); }}>
+                  Delete tire
+                </button>
+              </div>
+            </>
           )}
           {(p.kind === "bumper" || p.kind === "deker" || p.kind === "passer") && (
             <div className="hd-poprow">
@@ -2150,7 +2178,7 @@ export default function DrillAnimator() {
             {!aiPlay && [...pieces]
               .filter(p => p.kind !== "label")
               .sort((a, b) => {
-                const rank = k => (k === "net" || k === "bumper" || k === "deker" || k === "passer" ? 0 : k === "player" ? 2 : 1);
+                const rank = k => (k === "net" || k === "bumper" || k === "deker" || k === "passer" || k === "tire" ? 0 : k === "player" ? 2 : 1);
                 return rank(a.kind) - rank(b.kind);
               })
               .map(p => {
@@ -2329,6 +2357,7 @@ export default function DrillAnimator() {
           <button className="hd-item" onClick={() => { setTool("deker"); setOpenMenu(null); }}>π Deker</button>
           <button className="hd-item" onClick={() => { setTool("passer"); setOpenMenu(null); }}>▭ Passer</button>
           <button className="hd-item" onClick={() => { setTool("label"); setOpenMenu(null); }}>🇹 Label</button>
+          <button className="hd-item" onClick={() => { setTool("tire"); setOpenMenu(null); }}>⭕ Tire</button>
           <button className="hd-item" onClick={() => { resetAnim(); setPlaying(false); setPopup(null); setTool("draw"); setOpenMenu(null); }}>
             ✎ Draw a route
           </button>
@@ -2351,11 +2380,12 @@ export default function DrillAnimator() {
           </div>
           <div className="hd-note">
             Feet: x 0–200, y 0–85. <b>RINK</b> full|half|quarter ·
-            <b> PIECE</b> id player|puck|cone|net|bumper|deker|passer|label x y [#color] [label] [speed=1.2] [hand=L] [on=F1]
+            <b> PIECE</b> id player|puck|cone|net|bumper|deker|passer|label|tire x y [#color] [label] [speed=1.2] [hand=L] [on=F1]
             (a <b>bumper</b> is a foam barrier, a <b>deker</b> a stickhandling gate, a <b>passer</b> a rebounder box — all take <code>face=deg</code>)
+            (a <b>tire</b> is an agility prop — <code>size=1</code> large / <code>size=0.55</code> small)
             (a <b>label</b> is a movable/resizable text note: <code>PIECE L1 label 100 40 size=1.2 "Regroup here"</code>)
-            (a <b>net</b> takes <code>face=deg</code> and <code>goalie</code>; a goalie tracks the puck and
-            randomly saves or lets in each shot) ·
+            (a <b>net</b> takes <code>face=deg</code>, <code>goalie</code>, and <code>size</code> — <code>1</code> NHL / <code>0.62</code> mite; pucks
+            enter only from the front and bounce off its sides/back) ·
             <b> PATH</b> id segments (<b>L</b> x,y · <b>Q</b> cx,cy x,y · <b>C</b> c1x,c1y c2x,c2y x,y).
             Modifiers before a segment: <b>PASS</b>/<b>SHOT</b>, <b>BWD</b>, <b>STOP n</b>, <b>RATE n</b>,
             <b> NAME word</b> (names that waypoint for presentation text; underscores show as spaces),

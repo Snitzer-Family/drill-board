@@ -75,8 +75,8 @@ Drill name and description (everything to the end of the line). Optional.
 Places a piece. `id` is any unique token (e.g. `F1`, `PK1`, `N2`).
 
 **Kinds:** `player` · `puck` · `cone` · `net` · `bumper` (foam barrier) ·
-`deker` (stickhandling gate) · `passer` (rebounder box) · `label` (a movable,
-resizable on-ice text note).
+`deker` (stickhandling gate) · `passer` (rebounder box) · `tire` (agility prop) ·
+`label` (a movable, resizable on-ice text note).
 
 **Modifiers** (any order):
 
@@ -85,11 +85,11 @@ resizable on-ice text note).
 | `#RRGGBB` / `#RGB` | any | Colour |
 | *bare word* | player | Jersey label (e.g. `F1`) |
 | `"quoted text"` | label | The label's text (spaces and commas allowed) |
-| `size=<n>` | label | Font scale (1 = default; the label is also resizable by dragging its corner) |
+| `size=<n>` | label, net, tire | label: font scale · **net**: `1` NHL / `0.62` mite · **tire**: `1` large / `0.55` small |
+| `goalie` | net | A goalie who tracks the puck (pucks also enter only from the front — the sides/back are solid) |
 | `speed=<n>` | player, puck | Pace multiplier (1 = default; players default 1.5) |
 | `hand=L` / `hand=R` | player | Shooting hand |
 | `face=<deg>` | route-less player, net, bumper, deker, passer | Facing angle (0 = +x / toward the right) |
-| `goalie` | net | Put a goalie in the net (tracks the puck, random save/goal) |
 | `defense` | player | Auto-reacting defenceman (holds the slot, stays goal-side) |
 | `hold=line` | player | Wait at the blue line until the puck enters the zone |
 | `net=<id>` | puck | Which net/passer a shot targets (default: nearest) |

@@ -38,11 +38,11 @@ export function parseDrill(text) {
       } else if (cmd === "PIECE") {
         const [, id, kind, xs, ys, ...rest] = tok;
         const x = parseFloat(xs), y = parseFloat(ys);
-        if (!id || !["player", "puck", "cone", "net", "bumper", "deker", "passer", "label"].includes(kind) || isNaN(x) || isNaN(y))
+        if (!id || !["player", "puck", "cone", "net", "bumper", "deker", "passer", "label", "tire"].includes(kind) || isNaN(x) || isNaN(y))
           throw new Error("PIECE needs: id kind x y");
         let color = kind === "cone" ? "#e0731d" : kind === "puck" ? "#14171a" : kind === "net" ? "#c81e33"
           : kind === "bumper" ? "#4d6fa6" : kind === "deker" ? "#c79a4e" : kind === "passer" ? "#57636f"
-          : kind === "label" ? "#14202b" : "#d7263d";
+          : kind === "label" ? "#14202b" : kind === "tire" ? "#1c1c1e" : "#d7263d";
         let label = kind === "player" ? id : "";
         let text = "", size = 1;                          // label piece: text + font scale
         let speed = 1, hand = "R", carrier = null, facing = 0, shotAt = null, pickup = null, rimAt = null, chipAt = null, chipAim = null, rimAim = null, chipDist = null, rimDist = null;
@@ -198,7 +198,8 @@ export function serializeDrill(rink, pieces, title = "", desc = "") {
     const hld = p.kind === "player" && p.holdLine ? " hold=line" : "";
     const gl = p.kind === "net" && p.goalie ? " goalie" : "";
     const df = p.kind === "player" && p.defense ? " defense" : "";
-    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${car}${gp}${pas}${sht}${rmT}${chT}${nt}${hld}${fac}${gl}${df}${spd}`);
+    const siz = (p.kind === "net" || p.kind === "tire") && p.size && p.size !== 1 ? ` size=${f2(p.size)}` : "";
+    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${car}${gp}${pas}${sht}${rmT}${chT}${nt}${hld}${fac}${gl}${df}${siz}${spd}`);
     if (p.path.length) out.push(`PATH ${p.id} ${p.path.map(segToStr).join(" ")}`);
   });
   return out.join("\n") + "\n";

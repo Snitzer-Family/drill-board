@@ -331,11 +331,11 @@ function parseDrill(text) {
       } else if (cmd === "PIECE") {
         const [, id, kind, xs, ys, ...rest] = tok;
         const x = parseFloat(xs), y = parseFloat(ys);
-        if (!id || !["player", "puck", "cone", "net", "bumper", "deker", "passer", "label"].includes(kind) || isNaN(x) || isNaN(y))
+        if (!id || !["player", "puck", "cone", "net", "bumper", "deker", "passer", "label", "tire"].includes(kind) || isNaN(x) || isNaN(y))
           throw new Error("PIECE needs: id kind x y");
         let color = kind === "cone" ? "#e0731d" : kind === "puck" ? "#14171a" : kind === "net" ? "#c81e33"
           : kind === "bumper" ? "#4d6fa6" : kind === "deker" ? "#c79a4e" : kind === "passer" ? "#57636f"
-          : kind === "label" ? "#14202b" : "#d7263d";
+          : kind === "label" ? "#14202b" : kind === "tire" ? "#1c1c1e" : "#d7263d";
         let label = kind === "player" ? id : "";
         let text = "", size = 1;                          // label piece: text + font scale
         let speed = 1, hand = "R", carrier = null, facing = 0, shotAt = null, pickup = null, rimAt = null, chipAt = null, chipAim = null, rimAim = null, chipDist = null, rimDist = null;
@@ -491,7 +491,8 @@ function serializeDrill(rink, pieces, title = "", desc = "") {
     const hld = p.kind === "player" && p.holdLine ? " hold=line" : "";
     const gl = p.kind === "net" && p.goalie ? " goalie" : "";
     const df = p.kind === "player" && p.defense ? " defense" : "";
-    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${car}${gp}${pas}${sht}${rmT}${chT}${nt}${hld}${fac}${gl}${df}${spd}`);
+    const siz = (p.kind === "net" || p.kind === "tire") && p.size && p.size !== 1 ? ` size=${f2(p.size)}` : "";
+    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${car}${gp}${pas}${sht}${rmT}${chT}${nt}${hld}${fac}${gl}${df}${siz}${spd}`);
     if (p.path.length) out.push(`PATH ${p.id} ${p.path.map(segToStr).join(" ")}`);
   });
   return out.join("\n") + "\n";
@@ -584,10 +585,25 @@ function piece(p) {
     return `<circle cx="${f(p.x)}" cy="${f(p.y)}" r="1.5" fill="${V("puck", "#14171a")}" stroke="${V("surface", "#fff")}" stroke-width="0.4"/>`;
   if (p.kind === "cone")
     return `<path transform="${rot()}" d="M 0 -2.4 L 2.2 1.8 L -2.2 1.8 Z" fill="${p.color}" stroke="#fff" stroke-width="0.35" stroke-linejoin="round"/>`;
-  if (p.kind === "net")
-    return `<g transform="${rot()}"><path d="M 0 -3.75 L -4.6 -3 L -4.6 3 L 0 3.75 Z" fill="rgba(210,225,240,0.16)" stroke="${p.color}" stroke-width="0.5" stroke-linejoin="round"/>`
-      + `<circle cx="0" cy="-3.75" r="0.7" fill="${p.color}"/><circle cx="0" cy="3.75" r="0.7" fill="${p.color}"/>`
+  if (p.kind === "net") {
+    const CAGE = "M 0 -3.75 L -1.7 -3.75 Q -4.15 -3.75 -4.15 -1.5 L -4.15 1.5 Q -4.15 3.75 -1.7 3.75 L 0 3.75";
+    return `<g transform="${rot()} scale(${p.size || 1})">`
+      + `<path d="${CAGE} Z" fill="rgba(230,238,246,0.3)" stroke="none"/>`
+      + `<g stroke="#9fb0c0" stroke-width="0.13" opacity="0.85" fill="none"><path d="M -0.4 -2.9 L -3.7 -1.7 M -0.4 -1.45 L -3.95 -0.85 M -0.4 1.45 L -3.95 0.85 M -0.4 2.9 L -3.7 1.7"/><path d="M -1.2 -3.3 L -1.2 3.3 M -2.4 -3.1 L -2.4 3.1 M -3.4 -2 L -3.4 2"/><path d="M -0.2 0 L -4.0 0"/></g>`
+      + `<path d="${CAGE}" fill="none" stroke="${p.color}" stroke-width="0.55" stroke-linejoin="round" stroke-linecap="round"/>`
+      + `<line x1="0" y1="-4.05" x2="0" y2="4.05" stroke="${p.color}" stroke-width="0.8" stroke-linecap="round"/>`
+      + `<circle cx="0" cy="-3.75" r="0.82" fill="${p.color}"/><circle cx="0" cy="3.75" r="0.82" fill="${p.color}"/>`
       + (p.goalie ? `<rect x="-1.6" y="-2.4" width="2.4" height="4.8" rx="1.1" fill="#2f9e57" stroke="#fff" stroke-width="0.3"/>` : "") + `</g>`;
+  }
+  if (p.kind === "tire") {
+    let ticks = "";
+    for (let k = 0; k < 12; k++) { const a = (k / 12) * Math.PI * 2, c = Math.cos(a), s = Math.sin(a);
+      ticks += `<line x1="${f(c * 1.45)}" y1="${f(s * 1.45)}" x2="${f(c * 2.55)}" y2="${f(s * 2.55)}" stroke="#3a3a3e" stroke-width="0.28" stroke-linecap="round"/>`; }
+    return `<g transform="translate(${f(p.x)} ${f(p.y)}) scale(${p.size || 1})">`
+      + `<circle cx="0" cy="0" r="2.0" fill="none" stroke="${p.color}" stroke-width="1.55"/>`
+      + `<circle cx="0" cy="0" r="2.78" fill="none" stroke="#000" stroke-width="0.2" opacity="0.55"/>`
+      + `<circle cx="0" cy="0" r="1.22" fill="none" stroke="#000" stroke-width="0.2" opacity="0.55"/>${ticks}</g>`;
+  }
   if (p.kind === "bumper")
     return `<g transform="${rot()}"><rect x="-7" y="-0.95" width="14" height="1.9" rx="0.95" fill="${p.color}" stroke="#fff" stroke-width="0.3"/>`
       + `<path d="M -3.5 -0.75 L -3.5 0.75 M 0 -0.75 L 0 0.75 M 3.5 -0.75 L 3.5 0.75" stroke="#fff" stroke-width="0.18" opacity="0.4"/></g>`;
@@ -652,7 +668,7 @@ function chain(pk, byId, pieces) {
 function drillSvg(dsl, opts = {}) {
   const { pieces } = parseDrill(dsl);
   const byId = id => pieces.find(p => p.id === id);
-  const rank = k => (k === "net" || k === "bumper" || k === "deker" || k === "passer" ? 0 : k === "player" ? 2 : 1);
+  const rank = k => (k === "net" || k === "bumper" || k === "deker" || k === "passer" || k === "tire" ? 0 : k === "player" ? 2 : 1);
   const defs = `<defs>
       <clipPath id="ice"><rect x="0.6" y="0.6" width="198.8" height="83.8" rx="26"/></clipPath>
       <marker id="arrowR" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="${V("mark", "#cf3346")}"/></marker>
