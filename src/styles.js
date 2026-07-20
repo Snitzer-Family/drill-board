@@ -119,7 +119,8 @@ export const STYLES = `
         .hd-pophead { display:flex; align-items:center; gap:6px; font-size:12px; font-weight:700;
           letter-spacing:.06em; text-transform:uppercase; color:#aab7c4;
           cursor:grab; touch-action:none; user-select:none; -webkit-user-select:none;
-          margin:-10px -12px 0; padding:10px 12px 6px; }
+          margin:-10px -12px 0; padding:10px 12px 6px;
+          position:sticky; top:-10px; z-index:2; background:#1a222c; }
         .hd-pophead:active { cursor:grabbing; }
         .hd-grip { color:#5b6c7d; font-size:13px; letter-spacing:0; }
         .hd-poprow { display:flex; align-items:center; gap:7px; flex-wrap:wrap; font-size:12.5px; color:#cdd8e2; }

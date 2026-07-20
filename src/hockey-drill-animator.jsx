@@ -2056,12 +2056,19 @@ export default function DrillAnimator() {
 
     const a = popoutAnchor(anchorPt);
     if (!a) return null;
-    const up = a.ty > 58;
+    // open toward the side of the anchor with more room, and cap the height to
+    // that room (with margins for the top play-dock and the bottom) so a tall
+    // popup scrolls internally instead of running off the top of the screen
+    const topPad = 12, botPad = 5, gap = 3;           // % of the ice (gap = anchor offset below)
+    const roomAbove = a.ty - topPad, roomBelow = 100 - a.ty - botPad;
+    const up = roomAbove >= roomBelow;
+    const maxH = Math.max(22, (up ? roomAbove : roomBelow) - gap);
     const shift = a.lx < 22 ? "-12%" : a.lx > 78 ? "-88%" : "-50%";
     const style = {
       left: `${a.lx}%`,
       transform: `translateX(${shift}) translate(${popOff.x}px, ${popOff.y}px)`,
-      ...(up ? { bottom: `${100 - a.ty + 4}%` } : { top: `${a.ty + 4}%` }),
+      maxHeight: `${maxH}%`,
+      ...(up ? { bottom: `${100 - a.ty + gap}%` } : { top: `${a.ty + gap}%` }),
     };
     return (
       <div className={`hd-pop${up ? " up" : ""}`} style={style} ref={popRef}
