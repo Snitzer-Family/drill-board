@@ -13,6 +13,10 @@ import { STYLES } from "./styles.js";
 // swatch palette for on-ice text labels (dark ink first — labels sit on light ice)
 const LABEL_COLORS = ["#14202b", "#d7263d", "#1f4fa3", "#1f8a4c", "#e0731d", "#7a3fa8"];
 
+// chip / hard-rim release handle sits this many times CLOSER than the puck's
+// actual travel, so a small drag near the player controls a long release
+const REL_MULT = 2.5;
+
 /* ============================================================
    HOCKEY DRILL ANIMATOR — v5 (full-screen ice)
    Coordinates: real feet. x 0..200 (goal line to goal line),
@@ -989,7 +993,8 @@ export default function DrillAnimator() {
     }
     if (d.kind === "release") {
       const ang = Math.round((Math.atan2(pt.y - d.origin.y, pt.x - d.origin.x) * 180) / Math.PI);
-      const raw = Math.hypot(pt.x - d.origin.x, pt.y - d.origin.y);
+      // the handle is REL_MULT× closer than the landing, so scale the drag up
+      const raw = Math.hypot(pt.x - d.origin.x, pt.y - d.origin.y) * REL_MULT;
       const lo = d.relKind === "chip" ? 6 : 10, hi = d.relKind === "chip" ? 90 : 170;
       const dist = Math.round(Math.max(lo, Math.min(hi, raw)));
       setRelease(d.pkId, d.aimField, d.distField, ang, dist);
@@ -1245,7 +1250,9 @@ export default function DrillAnimator() {
         : (() => { const pv = at - 1 < 0 ? { x: p.x, y: p.y } : segEnd(p, at - 1); return Math.atan2(here.y - pv.y, here.x - pv.x); })();
     };
 
-    // terminal release handle (dir + distance) for chip / hard rim
+    // terminal release handle (dir + distance) for chip / hard rim. The grab
+    // knob sits REL_MULT× closer than the puck's real landing, so a compact drag
+    // near the player sets a long release; the dashed path shows where it lands.
     const release = (at, kind, aim, dist, aimField, distField) => {
       const here = at < 0 ? { x: p.x, y: p.y } : segEnd(p, at);
       const ang = aim != null ? (aim * Math.PI) / 180 : defDirAt(at);
@@ -1256,15 +1263,18 @@ export default function DrillAnimator() {
           : boards.rimAround(here, dist, aim);
       } catch { path = [here]; }
       const end = path[path.length - 1] || here;
+      const hd = dist / REL_MULT;                                  // handle sits closer
+      const hx = here.x + Math.cos(ang) * hd, hy = here.y + Math.sin(ang) * hd;
       const col = "#3a8dff";
       out.push(
         <g key={`rel-${p.id}-${aimField}`}>
           <polyline points={path.map(q => `${q.x},${q.y}`).join(" ")} fill="none" stroke={col}
             strokeWidth={0.4} strokeDasharray="2 1.4" opacity={0.7} pointerEvents="none" />
-          <line x1={here.x} y1={here.y} x2={end.x} y2={end.y} stroke={col} strokeWidth={0.25} opacity={0.4} strokeDasharray="1 1" pointerEvents="none" />
+          <circle cx={end.x} cy={end.y} r={1.4} fill="none" stroke={col} strokeWidth={0.35} opacity={0.7} pointerEvents="none" />
+          <line x1={here.x} y1={here.y} x2={hx} y2={hy} stroke={col} strokeWidth={0.3} opacity={0.6} pointerEvents="none" />
           <circle cx={here.x} cy={here.y} r={1} fill={col} opacity={0.8} pointerEvents="none" />
-          <circle cx={end.x} cy={end.y} r={1.9} fill={col} stroke="#fff" strokeWidth={0.4} pointerEvents="none" />
-          <circle cx={end.x} cy={end.y} r={5} fill="transparent" style={{ cursor: "grab" }}
+          <circle cx={hx} cy={hy} r={1.9} fill={col} stroke="#fff" strokeWidth={0.4} pointerEvents="none" />
+          <circle cx={hx} cy={hy} r={5} fill="transparent" style={{ cursor: "grab" }}
             onPointerDown={e => handleDown(e, { kind: "release", pkId: pk.id, origin: here, aimField, distField, relKind: kind })} />
         </g>
       );
