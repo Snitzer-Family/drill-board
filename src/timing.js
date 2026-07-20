@@ -92,7 +92,9 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
           let v = speed;
           if (flag.easeOut) {
             const rem = (remTo[k - 1] + remTo[k]) / 2;         // avg distance-to-end over this leg
-            if (rem < flag.easeOut) v = speed * (0.15 + 0.85 * (rem / flag.easeOut));
+            // friction glide: v ∝ √(distance-to-end), so it decelerates smoothly
+            // and crawls the last bit instead of stopping short
+            if (rem < flag.easeOut) v = speed * Math.max(0.04, Math.sqrt(rem / flag.easeOut));
           }
           const dt = Math.max(1e-3, Math.hypot(seg.x - prev.x, seg.y - prev.y) / Math.max(1e-3, v));
           legs.push({ type: "fly", x0: prev.x, y0: prev.y, x1: seg.x, y1: seg.y, t0: t, t1: t + dt,
@@ -333,7 +335,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
         const launchT = (cur.path.length && at >= 0) ? Math.max(tBase, routeTimeW(cur, warp, Math.min(at, cur.path.length - 1))) : tBase;
         const launch = bladeAt(cur, launchT, warp);
         const dist = pk.rimDist != null ? pk.rimDist : 65;       // handle-set travel distance
-        const r = pushTravel(boards.rimAround(launch, dist, pk.rimAim), launchT, vRim(), { by: cur.id, rim: true, easeOut: Math.min(26, dist * 0.4) });
+        const r = pushTravel(densify(boards.rimAround(launch, dist, pk.rimAim)), launchT, vRim(), { by: cur.id, rim: true, easeOut: Math.min(55, dist * 0.6) });
         legs.push({ type: "rest", x: r.end.x, y: r.end.y, t0: r.t }); tBase = r.t;
       } else if (pk.chipAt != null && cur) {           // terminal chip into space (bounces)
         const at = pk.chipAt;
@@ -341,7 +343,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
         const launch = bladeAt(cur, launchT, warp);
         const h = chipHeading(cur, launchT, pk.chipAim);
         const dist = pk.chipDist != null ? pk.chipDist : 26;     // handle-set travel distance
-        const r = pushTravel(boards.slide(launch.x, launch.y, h.x, h.y, dist), launchT, vChip(), { by: cur.id, chip: true, easeOut: Math.min(12, dist * 0.4) });
+        const r = pushTravel(densify(boards.slide(launch.x, launch.y, h.x, h.y, dist)), launchT, vChip(), { by: cur.id, chip: true, easeOut: Math.min(28, dist * 0.6) });
         legs.push({ type: "rest", x: r.end.x, y: r.end.y, t0: r.t }); tBase = r.t;
       }
       let relT = Infinity;
@@ -467,6 +469,25 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
   function routePosAt(p, e, warp) {
     const flip = s => (s.dir === "bwd" ? 180 : 0);
     if (!p.path.length) return { x: p.x, y: p.y, a: p.facing || 0, v: 0, dist: 0 };
+    // Sharp interior corners get a speed dip (carve the turn) so the skater
+    // decelerates in and accelerates out instead of pivoting at full speed.
+    const dirN = (dx, dy) => { const m = Math.hypot(dx, dy) || 1; return [dx / m, dy / m]; };
+    const legStart = j => (j === 0 ? { x: p.x, y: p.y } : { x: p.path[j - 1].x, y: p.path[j - 1].y });
+    const exitDir = j => { const sj = p.path[j], pv = legStart(j);
+      if (sj.type === "Q") return dirN(sj.x - sj.cx, sj.y - sj.cy);
+      if (sj.type === "C") return dirN(sj.x - sj.c2x, sj.y - sj.c2y);
+      return dirN(sj.x - pv.x, sj.y - pv.y); };
+    const entryDir = j => { const sj = p.path[j], pv = legStart(j);
+      if (sj.type === "Q") return dirN(sj.cx - pv.x, sj.cy - pv.y);
+      if (sj.type === "C") return dirN(sj.c1x - pv.x, sj.c1y - pv.y);
+      return dirN(sj.x - pv.x, sj.y - pv.y); };
+    // ramp fraction for the corner between leg j and j+1 (0 straight → ~0.2 hairpin)
+    const cornerRamp = j => {
+      if (j < 0 || j + 1 >= p.path.length) return 0;
+      const [ax, ay] = exitDir(j), [bx, by] = entryDir(j + 1);
+      const ang = (Math.acos(Math.max(-1, Math.min(1, ax * bx + ay * by))) * 180) / Math.PI;
+      return Math.max(0, Math.min(1, (ang - 22) / (120 - 22))) * 0.2;
+    };
     if (e <= 0) {
       const s0 = p.path[0];
       return { x: p.x, y: p.y, a: segTangentAngle({ x: p.x, y: p.y }, s0, 0.02) + flip(s0), v: 0, dist: 0 };
@@ -538,7 +559,9 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
 
       if (mt > 0 && e < mt) {
         try {
-          const { s: sf, v } = easeLeg(e / mt, entryRest ? RAMP_UP : 0, exitRest ? RAMP_DOWN : 0);
+          const aRamp = entryRest ? RAMP_UP : cornerRamp(i - 1);   // ease out of a sharp corner
+          const bRamp = exitRest ? RAMP_DOWN : cornerRamp(i);      // ease into the next sharp corner
+          const { s: sf, v } = easeLeg(e / mt, aRamp, bRamp);
           const braking = exitRest && e / mt > 1 - RAMP_DOWN;
           const smul = mt > 0 ? ((L / mt) / pace) * v : 0;
           return { ...atArc(el, L, L * sf, s), v, smul, dist: dist + L * sf, braking };
