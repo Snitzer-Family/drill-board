@@ -50,7 +50,7 @@
     <p class="lede" id="lede"></p>
   </header>
   <section class="card" aria-label="Rink diagram">
-    <div class="card-head"><span class="t">Full sheet</span><span class="meta" id="meta">rendered from the DSL</span></div>
+    <div class="card-head"><span class="t" id="sheet">Full sheet</span><span class="meta" id="meta">rendered from the DSL</span></div>
     <div class="rinkbox" id="diagram"></div>
     <div class="legend" id="legend"></div>
   </section>
@@ -687,7 +687,8 @@ function drillSvg(dsl, opts = {}) {
 (function(){
   var ta=document.getElementById('dsl'),dia=document.getElementById('diagram'),err=document.getElementById('err'),
       title=document.getElementById('title'),lede=document.getElementById('lede'),leg=document.getElementById('legend'),meta=document.getElementById('meta'),
-      copy=document.getElementById('copy');
+      sheet=document.getElementById('sheet'),copy=document.getElementById('copy');
+  var SHEET_LABEL={full:'Full sheet',half:'Half ice',quarter:'Quarter ice'};
   function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
   // URL-safe base64 of UTF-8 text, for sharing the current drill in the link.
   function enc(s){try{return btoa(unescape(encodeURIComponent(s))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}catch(e){return '';}}
@@ -698,6 +699,7 @@ function drillSvg(dsl, opts = {}) {
     try{ r=parseDrill(dsl); dia.innerHTML=drillSvg(dsl); }
     catch(e){ err.textContent=String(e&&e.message||e); return; }
     err.textContent=r.errors.length?r.errors.join('  \u00b7  '):'';
+    sheet.textContent=SHEET_LABEL[r.rink]||'Full sheet';
     title.textContent=r.title||'Drill'; lede.textContent=r.desc||'';
     var players=r.pieces.filter(function(p){return p.kind==='player';});
     var L=players.map(function(p){return '<span><span class="dot" style="background:'+p.color+'"></span>'+esc(p.id)+(p.defense?' \u2014 auto-D':'')+'</span>';});

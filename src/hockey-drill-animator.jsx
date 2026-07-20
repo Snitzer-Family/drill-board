@@ -1626,46 +1626,45 @@ export default function DrillAnimator() {
 
   function renderHandles(p) {
     if (!editing || p.id !== selectedId || tool === "draw") return null;
-    // the "selected waypoint" is the leg/point whose popup is open (tapping the
-    // line opens a "line" popup, tapping the anchor a "point" popup — both carry
-    // its seg); its curve-shaping handles show only for it, not every waypoint.
-    // A handle actively being dragged stays active too, so it never collapses to
-    // a dot mid-drag.
+    // the selected waypoint = the leg/point popup that's open (tapping the anchor
+    // opens a "point" popup, the line a "line" popup — both carry its seg). Its
+    // handles show only for it, not every waypoint. A handle being dragged stays
+    // active via its `wp` (owning waypoint) so it can't collapse to a dot mid-drag.
     const d = drag.current;
-    const dragSeg = d && d.id === p.id ? (d.seg != null ? d.seg : d.line != null ? d.line : null) : null;
-    const activeSeg = dragSeg != null ? dragSeg
+    const activeWp = d && d.id === p.id && (d.wp != null || d.seg != null || d.line != null)
+      ? (d.wp != null ? d.wp : d.seg != null ? d.seg : d.line)
       : popup && (popup.type === "line" || popup.type === "point") && popup.id === p.id ? popup.seg : null;
     const els = [];
-    const ctrlPt = (key, cx, cy, kind, i) => {
+    // a draggable tangent control, with a dashed leash back to its waypoint anchor.
+    // `seg` is which path segment the control belongs to; `wp` the waypoint it sits
+    // at (so dragging keeps that waypoint selected).
+    const ctrlPt = (key, cx, cy, kind, seg, wp, ax, ay) => {
+      els.push(<line key={key + "l"} x1={ax} y1={ay} x2={cx} y2={cy} stroke="#8fa3b5" strokeWidth={0.25} strokeDasharray="1 1" />);
       els.push(<circle key={key} cx={cx} cy={cy} r={1.5} fill="#fff" stroke="#5b7d9e" strokeWidth={0.4} pointerEvents="none" />);
       els.push(<circle key={key + "h"} cx={cx} cy={cy} r={4} fill="transparent" style={{ cursor: "grab" }}
-        onPointerDown={e => handleDown(e, { kind, id: p.id, seg: i })} />);
+        onPointerDown={e => handleDown(e, { kind, id: p.id, seg, wp })} />);
     };
     p.path.forEach((s, i) => {
-      const prev = segEnd(p, i - 1);
-      const active = i === activeSeg;                 // show control handles only for the selected leg
-      if (active && s.type === "Q") {
-        els.push(<line key={`ql1${i}`} x1={prev.x} y1={prev.y} x2={s.cx} y2={s.cy} stroke="#8fa3b5" strokeWidth={0.25} strokeDasharray="1 1" />);
-        els.push(<line key={`ql2${i}`} x1={s.x} y1={s.y} x2={s.cx} y2={s.cy} stroke="#8fa3b5" strokeWidth={0.25} strokeDasharray="1 1" />);
-        ctrlPt(`qc${i}`, s.cx, s.cy, "q", i);
-      }
-      if (active && s.type === "C") {
-        els.push(<line key={`cl1${i}`} x1={prev.x} y1={prev.y} x2={s.c1x} y2={s.c1y} stroke="#8fa3b5" strokeWidth={0.25} strokeDasharray="1 1" />);
-        els.push(<line key={`cl2${i}`} x1={s.x} y1={s.y} x2={s.c2x} y2={s.c2y} stroke="#8fa3b5" strokeWidth={0.25} strokeDasharray="1 1" />);
-        ctrlPt(`cc1${i}`, s.c1x, s.c1y, "c1", i);
-        ctrlPt(`cc2${i}`, s.c2x, s.c2y, "c2", i);
-      }
-      // the selected waypoint gets the full grab square; every other waypoint is
-      // just a small dot (still grabbable) so the route isn't buried in handles
-      if (active) {
+      if (i === activeWp) {
+        // full anchor grab
         els.push(<rect key={`a${i}`} x={s.x - 1.4} y={s.y - 1.4} width={2.8} height={2.8}
           fill="#ffd447" stroke="#7a5c00" strokeWidth={0.35} pointerEvents="none" />);
         els.push(<circle key={`ah${i}`} cx={s.x} cy={s.y} r={4} fill="transparent" style={{ cursor: "grab" }}
-          onPointerDown={e => handleDown(e, { kind: "anchor", id: p.id, seg: i })} />);
+          onPointerDown={e => handleDown(e, { kind: "anchor", id: p.id, seg: i, wp: i })} />);
+        // incoming tangent: this leg's control nearest waypoint i
+        if (s.type === "C") ctrlPt(`ic${i}`, s.c2x, s.c2y, "c2", i, i, s.x, s.y);
+        else if (s.type === "Q") ctrlPt(`iq${i}`, s.cx, s.cy, "q", i, i, s.x, s.y);
+        // the first waypoint also exposes the departure tangent off the player start
+        if (i === 0 && s.type === "C") ctrlPt(`sc${i}`, s.c1x, s.c1y, "c1", i, i, p.x, p.y);
+        // outgoing tangent: the next leg's control nearest waypoint i
+        const nx = p.path[i + 1];
+        if (nx && nx.type === "C") ctrlPt(`oc${i}`, nx.c1x, nx.c1y, "c1", i + 1, i, s.x, s.y);
+        else if (nx && nx.type === "Q") ctrlPt(`oq${i}`, nx.cx, nx.cy, "q", i + 1, i, s.x, s.y);
       } else {
+        // every other waypoint is just a small (still grabbable) dot
         els.push(<circle key={`am${i}`} cx={s.x} cy={s.y} r={0.9} fill="#ffd447" stroke="#7a5c00" strokeWidth={0.3} pointerEvents="none" />);
         els.push(<circle key={`amh${i}`} cx={s.x} cy={s.y} r={3.5} fill="transparent" style={{ cursor: "grab" }}
-          onPointerDown={e => handleDown(e, { kind: "anchor", id: p.id, seg: i })} />);
+          onPointerDown={e => handleDown(e, { kind: "anchor", id: p.id, seg: i, wp: i })} />);
       }
     });
     return <g>{els}</g>;
