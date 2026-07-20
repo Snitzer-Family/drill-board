@@ -1227,7 +1227,7 @@ export default function DrillAnimator() {
   // the distance of the release; the dashed path previews where the puck goes.
   // (Legacy rim/chip transfers keep a simple direction-only aim ring.)
   function renderAim(p) {
-    if (!editing || tool === "draw" || p.kind !== "player" || !p.path.length) return null;
+    if (!editing || tool === "draw" || p.kind !== "player") return null;
     const pk = pieces.find(q => q.kind === "puck" && puckChain(q).includes(p.id));
     if (!pk) return null;
     const chain = puckChain(pk);
@@ -1236,6 +1236,8 @@ export default function DrillAnimator() {
     const out = [];
 
     const defDirAt = at => {
+      // a route-less player releases along its facing; otherwise follow the route
+      if (!p.path.length) return ((p.facing || 0) * Math.PI) / 180;
       const here = at < 0 ? { x: p.x, y: p.y } : segEnd(p, at);
       const nextPt = p.path[at + 1] ? segEnd(p, at + 1) : null;
       return nextPt
