@@ -1608,27 +1608,42 @@ export default function DrillAnimator() {
 
   // Arrowhead at a route's end, drawn in the stretch-cancelling icon frame so it
   // stays a clean triangle (SVG markers get sheared by the fill-mode stretch).
-  function renderArrow(p) {
+  function renderArrow(p, bentPts) {
     const n = p.path.length;
     if (!n) return null;
-    const last = p.path[n - 1];
-    const prev = n >= 2 ? segEnd(p, n - 2) : { x: p.x, y: p.y };
-    // anchor the arrow tip AT the end of the curve and point it along the true
-    // end tangent (from a point just before the end), so it reads as arriving at
-    // the endpoint heading the way the route finishes — not shifted up the curve
-    const near = evalSeg(prev, last, 0.9);
-    let tx = last.x - near.x, ty = last.y - near.y;
-    if (Math.hypot(tx, ty) < 1e-4) {                 // degenerate (control on the endpoint)
-      if (last.type === "C") { tx = last.x - last.c2x; ty = last.y - last.c2y; }
-      else if (last.type === "Q") { tx = last.x - last.cx; ty = last.y - last.cy; }
-      else { tx = last.x - prev.x; ty = last.y - prev.y; }
+    // anchor the tip at the drawn line's END and point it along that line's end
+    // tangent — use the detoured (bent) polyline when there is one so the head
+    // lines up with the curve actually shown, not the raw path
+    let endPt, tx, ty;
+    if (bentPts && bentPts.length >= 2) {
+      endPt = bentPts[bentPts.length - 1];
+      const b = bentPts[Math.max(0, bentPts.length - 4)];
+      tx = endPt.x - b.x; ty = endPt.y - b.y;
+    } else {
+      const last = p.path[n - 1];
+      const prev = n >= 2 ? segEnd(p, n - 2) : { x: p.x, y: p.y };
+      endPt = { x: last.x, y: last.y };
+      const near = evalSeg(prev, last, 0.9);
+      tx = last.x - near.x; ty = last.y - near.y;
+      if (Math.hypot(tx, ty) < 1e-4) {               // degenerate (control on the endpoint)
+        if (last.type === "C") { tx = last.x - last.c2x; ty = last.y - last.c2y; }
+        else if (last.type === "Q") { tx = last.x - last.cx; ty = last.y - last.cy; }
+        else { tx = last.x - prev.x; ty = last.y - prev.y; }
+      }
     }
     if (!tx && !ty) return null;
     const ang = (Math.atan2(ty, tx) * 180) / Math.PI;
-    const fx = iconXf({ x: last.x, y: last.y, a: ang });
+    const fx = iconXf({ x: endPt.x, y: endPt.y, a: ang });
+    // hold a constant SCREEN size (counter the pinch-zoom) so the head stays
+    // locked to the non-scaling line and is equally distinctive at any zoom
+    const z = 1 / (view.s || 1);
     return (
       <g key={`arw-${p.id}`} transform={fx.t} pointerEvents="none">
-        <path d="M 0 0 L -2.7 -1.5 L -1.9 0 L -2.7 1.5 Z" fill={p.color} opacity={0.85} />
+        <g transform={`scale(${z})`}>
+          {/* SOLID head so the line can't show through and the tip sits on the end */}
+          <path d="M 0 0 L -4.6 -2.7 L -4.6 2.7 Z" fill={p.color} stroke={p.color}
+            strokeWidth={0.6} strokeLinejoin="round" />
+        </g>
       </g>
     );
   }
@@ -2677,7 +2692,6 @@ export default function DrillAnimator() {
                         {showRoutes && !bent && (p.kind === "player" && s.dir === "bwd"
                           ? <polyline points={zigzagPoints(from, s, strokeAR)} {...style} strokeLinejoin="round" pointerEvents="none" />
                           : <path d={d} {...style} pointerEvents="none" />)}
-                        {showRoutes && isLast && renderArrow(p)}
                         {showRoutes && (
                           <path d={d} fill="none" stroke="transparent" strokeWidth={4}
                             onPointerDown={e => lineDown(e, p.id, i)} style={{ cursor: "pointer" }} />
@@ -2690,6 +2704,8 @@ export default function DrillAnimator() {
                       {...segStroke(p, p.path[p.path.length - 1] || {}, false)}
                       strokeLinejoin="round" pointerEvents="none" />
                   )}
+                  {/* arrow last so it sits ON TOP of the line (raw or bent) */}
+                  {showRoutes && p.path.length > 0 && renderArrow(p, bent)}
                 </g>
               );
             })}
