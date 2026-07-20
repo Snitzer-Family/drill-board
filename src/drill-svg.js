@@ -238,10 +238,26 @@ function chain(pk, byId, pieces) {
   };
   const out = [];
   const rimPoly = (launch, aim, anchor) => (aim != null ? boards.rimTo(launch, aim, anchor) : boards.rimPath(launch, anchor));
-  (pk.transfers || []).forEach(tr => {
+  const transfers = pk.transfers || [];
+  const termAt = pk.shotAt != null ? pk.shotAt : pk.rimAt != null ? pk.rimAt : pk.chipAt != null ? pk.chipAt : null;
+  const lastAt = {};                                  // player id → route index where they last released
+  // a give-and-go return: the receiver already carried the puck, so they catch
+  // it a bit up their route from where they gave it (not at their final waypoint,
+  // which is a later action) — this tracks what the animation actually does
+  const returnPoint = (rec, giveAt, nextAt) => {
+    const seg = Math.max(0, Math.min(giveAt + 1, nextAt, rec.path.length - 1));
+    const prevPt = seg > 0 ? { x: rec.path[seg - 1].x, y: rec.path[seg - 1].y } : { x: rec.x, y: rec.y };
+    return evalSeg(prevPt, rec.path[seg], 0.5);
+  };
+  transfers.forEach((tr, i) => {
     const rec = byId(tr.to); if (!rec) return;
     const launch = routePoint(cur, tr.at);
-    const anchor = routePoint(rec, tr.recvAt == null ? rec.path.length - 1 : tr.recvAt);
+    const nextAt = transfers[i + 1] ? transfers[i + 1].at : (termAt != null ? termAt : rec.path.length - 1);
+    const giveAt = lastAt[rec.id];
+    const anchor = giveAt != null && tr.recvAt == null && tr.kind === "pass" && rec.path.length
+      ? returnPoint(rec, giveAt, nextAt)
+      : routePoint(rec, tr.recvAt == null ? rec.path.length - 1 : tr.recvAt);
+    lastAt[cur.id] = tr.at;                            // the passer just released here
     if (tr.kind === "shot") {
       const net = shotNet(launch);
       // if the carom to the collector would pass through a net, it can't get
