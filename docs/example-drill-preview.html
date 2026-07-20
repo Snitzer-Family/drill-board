@@ -615,10 +615,52 @@ function piece(p) {
 
 /* ------------------------------------------------------------------ */
 /* routes + chain                                                      */
+// evaluate a path segment at t (for arc-length arrow trimming)
+function evalSeg(prev, s, t) {
+  const u = 1 - t;
+  if (s.type === "L") return { x: prev.x + t * (s.x - prev.x), y: prev.y + t * (s.y - prev.y) };
+  if (s.type === "Q") return { x: u*u*prev.x + 2*u*t*s.cx + t*t*s.x, y: u*u*prev.y + 2*u*t*s.cy + t*t*s.y };
+  return { x: u*u*u*prev.x + 3*u*u*t*s.c1x + 3*u*t*t*s.c2x + t*t*t*s.x, y: u*u*u*prev.y + 3*u*u*t*s.c1y + 3*u*t*t*s.c2y + t*t*t*s.y };
+}
+// pull a polyline's end back by `d` ft so an arrowhead points AT the target
+function trimEnd(pts, d) {
+  if (!pts || pts.length < 2 || d <= 0) return pts;
+  const out = pts.map(p => ({ x: p.x, y: p.y }));
+  let rem = d;
+  while (out.length >= 2) {
+    const b = out[out.length - 1], a = out[out.length - 2];
+    const seg = Math.hypot(b.x - a.x, b.y - a.y);
+    if (seg > rem) { const g = (seg - rem) / seg; out[out.length - 1] = { x: a.x + (b.x - a.x) * g, y: a.y + (b.y - a.y) * g }; break; }
+    rem -= seg; out.pop();
+  }
+  return out;
+}
+function subSeg(prev, s, t) {
+  const L = (a, b) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+  if (s.type === "L") { const e = L(prev, { x: s.x, y: s.y }); return { type: "L", x: e.x, y: e.y }; }
+  if (s.type === "Q") { const a = L(prev, { x: s.cx, y: s.cy }), b = L({ x: s.cx, y: s.cy }, { x: s.x, y: s.y }), e = L(a, b); return { type: "Q", cx: a.x, cy: a.y, x: e.x, y: e.y }; }
+  const c1 = { x: s.c1x, y: s.c1y }, c2 = { x: s.c2x, y: s.c2y }, p1 = { x: s.x, y: s.y };
+  const a = L(prev, c1), b = L(c1, c2), c = L(c2, p1), d = L(a, b), e = L(b, c), ff = L(d, e);
+  return { type: "C", c1x: a.x, c1y: a.y, c2x: d.x, c2y: d.y, x: ff.x, y: ff.y };
+}
+function trimSeg(prev, s, d) {
+  const N = 40; let len = 0, last = evalSeg(prev, s, 0); const arc = [{ t: 0, l: 0 }];
+  for (let k = 1; k <= N; k++) { const t = k / N, q = evalSeg(prev, s, t); len += Math.hypot(q.x - last.x, q.y - last.y); arc.push({ t, l: len }); last = q; }
+  const target = len - d;
+  if (target <= 0.5) return s;
+  let t = 1;
+  for (let k = 1; k < arc.length; k++) if (arc[k].l >= target) { const a = arc[k - 1], b = arc[k]; t = a.t + (b.t - a.t) * (target - a.l) / ((b.l - a.l) || 1); break; }
+  return subSeg(prev, s, t);
+}
+
 function routePath(p) {
   if (!p.path.length) return "";
+  // trim the final segment so the arrow points at the last waypoint, not onto it
+  const last = p.path.length - 1;
+  const prevOfLast = last === 0 ? { x: p.x, y: p.y } : { x: p.path[last - 1].x, y: p.path[last - 1].y };
   let d = `M ${f(p.x)} ${f(p.y)}`;
-  p.path.forEach(s => {
+  p.path.forEach((s0, i) => {
+    const s = i === last ? trimSeg(prevOfLast, s0, 2.7) : s0;
     if (s.type === "L") d += ` L ${f(s.x)} ${f(s.y)}`;
     else if (s.type === "Q") d += ` Q ${f(s.cx)} ${f(s.cy)} ${f(s.x)} ${f(s.y)}`;
     else d += ` C ${f(s.c1x)} ${f(s.c1y)} ${f(s.c2x)} ${f(s.c2y)} ${f(s.x)} ${f(s.y)}`;
@@ -629,9 +671,20 @@ function routePath(p) {
   return `<path d="${d}" fill="none" stroke="${p.color}" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round" opacity="0.9" marker-end="url(#arrowR)"/>${dots}`;
 }
 
-const chainLine = (pts, solid) =>
-  `<polyline points="${polyPts(pts)}" fill="none" stroke="${V("puck", "#14171a")}" stroke-width="${solid ? 1.1 : 0.9}"`
-  + `${solid ? "" : ' stroke-dasharray="2.4 2"'} stroke-linecap="round" stroke-linejoin="round" opacity="0.85" marker-end="url(#arrowP)"/>`;
+// puck flow lines. mode: "shot" solid dark · "rebound" dotted + distinct colour ·
+// else dashed pass/rim/chip. The endpoint is trimmed so the arrow points AT its
+// target (net / player / point) instead of sitting on top of the icon.
+const REBOUND_COLOR = "#e8892b";
+const CHAIN_TRIM = { shot: 4.6, rebound: 3, pass: 4 };
+const chainLine = (pts, mode) => {
+  const rebound = mode === "rebound", shot = mode === "shot";
+  const color = rebound ? REBOUND_COLOR : V("puck", "#14171a");
+  const dash = shot ? "" : rebound ? ' stroke-dasharray="0.1 1.9"' : ' stroke-dasharray="2.4 2"';
+  const marker = rebound ? "arrowRB" : "arrowP";
+  const line = trimEnd(pts, CHAIN_TRIM[mode] != null ? CHAIN_TRIM[mode] : 3.5);
+  return `<polyline points="${polyPts(line)}" fill="none" stroke="${color}" stroke-width="${shot ? 1.1 : 0.9}"`
+    + `${dash} stroke-linecap="round" stroke-linejoin="round" opacity="0.9" marker-end="url(#${marker})"/>`;
+};
 
 function chain(pk, byId, pieces) {
   let cur = pk.carrier ? byId(pk.carrier) : (pk.pickup && byId(pk.pickup.to));
@@ -648,15 +701,15 @@ function chain(pk, byId, pieces) {
     const rec = byId(tr.to); if (!rec) return;
     const launch = routePoint(cur, tr.at);
     const anchor = routePoint(rec, tr.recvAt == null ? rec.path.length - 1 : tr.recvAt);
-    if (tr.kind === "shot") out.push(chainLine([launch, shotNet(launch)], true), chainLine([shotNet(launch), anchor], false));
-    else if (tr.kind === "rim") out.push(chainLine(rimPoly(launch, tr.aim, anchor), false));
-    else if (tr.kind === "chip") { const h = tr.aim != null ? aimVec(tr.aim) : heading(cur, tr.at); out.push(chainLine(boards.slideTo(launch.x, launch.y, h.x, h.y, anchor), false)); }
-    else out.push(chainLine([launch, anchor], false));   // pass
+    if (tr.kind === "shot") out.push(chainLine([launch, shotNet(launch)], "shot"), chainLine([shotNet(launch), anchor], "rebound"));
+    else if (tr.kind === "rim") out.push(chainLine(rimPoly(launch, tr.aim, anchor), "pass"));
+    else if (tr.kind === "chip") { const h = tr.aim != null ? aimVec(tr.aim) : heading(cur, tr.at); out.push(chainLine(boards.slideTo(launch.x, launch.y, h.x, h.y, anchor), "pass")); }
+    else out.push(chainLine([launch, anchor], "pass"));   // pass
     cur = rec;
   });
-  if (pk.shotAt != null) { const l = routePoint(cur, pk.shotAt); out.push(chainLine([l, shotNet(l)], true)); }
-  else if (pk.rimAt != null) { const l = routePoint(cur, pk.rimAt); out.push(chainLine(boards.rimAround(l, pk.rimDist != null ? pk.rimDist : 65, pk.rimAim), false)); }
-  else if (pk.chipAt != null) { const l = routePoint(cur, pk.chipAt); const h = pk.chipAim != null ? aimVec(pk.chipAim) : heading(cur, pk.chipAt); out.push(chainLine(boards.slide(l.x, l.y, h.x, h.y, pk.chipDist != null ? pk.chipDist : 26), false)); }
+  if (pk.shotAt != null) { const l = routePoint(cur, pk.shotAt); out.push(chainLine([l, shotNet(l)], "shot")); }
+  else if (pk.rimAt != null) { const l = routePoint(cur, pk.rimAt); out.push(chainLine(boards.rimAround(l, pk.rimDist != null ? pk.rimDist : 65, pk.rimAim), "pass")); }
+  else if (pk.chipAt != null) { const l = routePoint(cur, pk.chipAt); const h = pk.chipAim != null ? aimVec(pk.chipAim) : heading(cur, pk.chipAt); out.push(chainLine(boards.slide(l.x, l.y, h.x, h.y, pk.chipDist != null ? pk.chipDist : 26), "pass")); }
   return out.join("");
 }
 
@@ -669,10 +722,18 @@ function drillSvg(dsl, opts = {}) {
       <clipPath id="ice"><rect x="0.6" y="0.6" width="198.8" height="83.8" rx="26"/></clipPath>
       <marker id="arrowR" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="${V("mark", "#cf3346")}"/></marker>
       <marker id="arrowP" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="${V("puck", "#14171a")}"/></marker>
+      <marker id="arrowRB" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="${REBOUND_COLOR}"/></marker>
     </defs>`;
   const routes = pieces.map(routePath).join("");
   const chains = pieces.filter(p => p.kind === "puck").map(pk => chain(pk, byId, pieces)).join("");
-  const icons = [...pieces].sort((a, b) => rank(a.kind) - rank(b.kind)).map(piece).join("");
+  // a carried puck draws close to its player, not at its loose stored spot
+  const drawPos = p => {
+    if (p.kind !== "puck" || !p.carrier) return p;
+    const c = byId(p.carrier); if (!c) return p;
+    const dx = p.x - c.x, dy = p.y - c.y, dd = Math.hypot(dx, dy) || 1, off = 4.2;
+    return { ...p, x: c.x + dx / dd * off, y: c.y + dy / dd * off };
+  };
+  const icons = [...pieces].sort((a, b) => rank(a.kind) - rank(b.kind)).map(p => piece(drawPos(p))).join("");
   // text labels paint on top: standalone label pieces + "label"-mode waypoints
   const labels = pieces.filter(p => p.kind === "label").map(p => labelSvg(p.x, p.y, p.text, p.size, p.color)).join("")
     + pieces.flatMap(p => (p.path || []).filter(s => s.dmode === "label" && s.desc)
