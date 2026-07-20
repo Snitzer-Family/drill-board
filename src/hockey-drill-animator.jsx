@@ -1716,7 +1716,7 @@ export default function DrillAnimator() {
         const cur = byNet.get(side);
         // keep only the latest shot on this net that has already arrived, so a
         // rebound goal instantly supersedes the earlier save (no overlap)
-        if (L.t1 <= e && (!cur || L.t1 > cur.t1)) byNet.set(side, { L, key: `${q.id}-${i}` });
+        if (L.t1 <= e && (!cur || L.t1 > cur.L.t1)) byNet.set(side, { L, key: `${q.id}-${i}` });
       });
     }
     const els = [];
