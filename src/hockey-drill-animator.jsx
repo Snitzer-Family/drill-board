@@ -685,15 +685,34 @@ export default function DrillAnimator() {
       .map(net => { const g = goaliePos(net, displayPosRaw); return { cx: g.x, cy: g.y, r: GOALIE_R }; });
     return _goalieDiscs;
   };
-  // obstacles a given piece's route should detour around (nets + parked players,
-  // minus itself). The goalie is intentionally NOT here: its disc overlaps the
-  // net's and the two together destabilise the multi-disc detour into cutting
-  // through the cage — the goalie is handled by a smooth per-frame push instead.
+  // smallest disc enclosing two discs — used to fuse a net's keep-out with its
+  // goalie into ONE region so the route arcs around both as a single obstacle
+  const mergeDiscs = (a, b) => {
+    const d = Math.hypot(b.cx - a.cx, b.cy - a.cy);
+    if (d + b.r <= a.r) return a;
+    if (d + a.r <= b.r) return b;
+    const r = (d + a.r + b.r) / 2, t = (r - a.r) / (d || 1);
+    return { cx: a.cx + (b.cx - a.cx) * t, cy: a.cy + (b.cy - a.cy) * t, r };
+  };
+  const netPieces = pieces.filter(q => q.kind === "net");
+  // net keep-out discs for routing: a goalie net is FUSED with its goalie disc
+  // into one bigger disc, so the skater curves smoothly around the whole net +
+  // crease. (Two overlapping discs made the tangent-arc solve cut through the
+  // cage; one merged disc solves cleanly.)
+  const detourNetDiscs = () => netObstacles.map((sh, i) => {
+    const net = netPieces[i];
+    if (!net || !net.goalie) return sh;
+    const g = goaliePos(net, displayPosRaw);
+    return mergeDiscs({ cx: sh.cx, cy: sh.cy, r: sh.r }, { cx: g.x, cy: g.y, r: GOALIE_R });
+  });
+  // obstacles a given piece's route should detour around (nets fused with their
+  // goalie + parked players, minus itself)
   const detourObstaclesFor = id => {
     const self = pieces.find(q => q.id === id);
     const mine = self && !self.path.length ? [{ cx: self.x, cy: self.y }] : [];
     const discs = stationaryDiscs.filter(d => !mine.some(m => m.cx === d.cx && m.cy === d.cy));
-    return netObstacles.length || discs.length ? [...netObstacles, ...discs] : [];
+    const nets = detourNetDiscs();
+    return nets.length || discs.length ? [...nets, ...discs] : [];
   };
   // A route sampled then re-routed to arc smoothly around any net it crosses.
   // Returns { pts, origLen } (origLen = the straight-sampled length, for mapping
@@ -782,24 +801,13 @@ export default function DrillAnimator() {
           if (d < MIN && d > 1e-3) { const push = (MIN - d) * 0.5; x += (dx / d) * push; y += (dy / d) * push; }
         }
       }
-      // the goalie is solid: deflect the skater around it with a SMOOTH push that
-      // eases in over a buffer (smoothstep) plus a tangential slide so the path
-      // curves past instead of snapping. Kept out of the net detour on purpose
-      // (see detourObstaclesFor) so it can't push the route through the cage.
+      // the goalie is fused into the net's route detour (see detourNetDiscs) so
+      // the skater curves smoothly around it; a soft radial nudge only catches
+      // residual overlap as the goalie slides frame-to-frame.
       const gDiscs = goalieDiscs();
       if (p.path.length) for (const gd of gDiscs) {
-        const dx = x - gd.cx, dy = y - gd.cy, d = Math.hypot(dx, dy) || 1e-3;
-        const MIN = PLAYER_R + gd.r, BUF = MIN + 3.5;      // start easing 3.5 ft out
-        if (d < BUF) {
-          let t = (BUF - d) / BUF; t = t * t * (3 - 2 * t); // smoothstep ramp
-          const nx = dx / d, ny = dy / d, tx = -ny, ty = nx;
-          const dir = (a * Math.PI) / 180;
-          const side = Math.cos(dir) * tx + Math.sin(dir) * ty >= 0 ? 1 : -1;
-          const radial = Math.max(0, MIN - d);              // firm keep-out inside contact
-          const slide = t * 1.4;                            // eased tangential curve-around
-          x += nx * radial + tx * side * slide;
-          y += ny * radial + ty * side * slide;
-        }
+        const dx = x - gd.cx, dy = y - gd.cy, d = Math.hypot(dx, dy), MIN = PLAYER_R + gd.r;
+        if (d < MIN && d > 1e-3) { const push = (MIN - d) * 0.3; x += (dx / d) * push; y += (dy / d) * push; }
       }
       // open the body to shield a carried puck from a net, goalie, or another player
       const carries = pieces.some(q => q.kind === "puck"
