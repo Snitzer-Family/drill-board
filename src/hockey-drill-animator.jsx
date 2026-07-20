@@ -3,6 +3,7 @@ import { VIEWS, COLORS, vb, APP_VERSION, ICON_SCALE, BUILD_STAMP, DEFAULT_TEXT }
 import { parseDrill, serializeDrill, extractDrill } from "./drill-format.js";
 import { clampX, clampY, segEnd, segD, nearestT, splitSeg, zigzagPoints, convertSeg, fitRoute } from "./geometry.js";
 import * as boards from "./boards.js";
+import { netShapes, avoidNets } from "./net-collide.js";
 import { RinkMarkings } from "./rink.jsx";
 import { ZONES, zoneAt } from "./zones.js";
 import { PieceIcon, Stepper, DiagPanel } from "./icons.jsx";
@@ -575,7 +576,18 @@ export default function DrillAnimator() {
     return { x: clampX(tx), y: clampY(ty), a: (Math.atan2(threat.y - ty, threat.x - tx) * 180) / Math.PI };
   }
 
+  // solid net footprints — players and pucks are kept out (routed around) so a
+  // route or a loose puck never sits inside the sides/back of a net
+  const netObstacles = netShapes(pieces);
   function displayPos(p) {
+    const res = displayPosRaw(p);
+    if (animT > 0 && netObstacles.length && (p.kind === "player" || p.kind === "puck")) {
+      const a = avoidNets(netObstacles, res.x, res.y);
+      if (a.x !== res.x || a.y !== res.y) return { ...res, x: a.x, y: a.y };
+    }
+    return res;
+  }
+  function displayPosRaw(p) {
     if (p.kind === "player" && p.defense) return animT > 0 ? dmanPos(p) : { x: p.x, y: p.y, a: p.facing || 0 };
     const dp = displayPosAt(p, animT <= 0 ? 0 : animT * totalTime);
     if (p.kind !== "player" || !(dp.smul > 0.02)) return dp;

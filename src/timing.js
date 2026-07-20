@@ -4,6 +4,7 @@
 import { SPEED, ICON_SCALE, SAVE_PROB } from "./constants.js";
 import { clampX, clampY, segEnd, segTangentAngle } from "./geometry.js";
 import * as boards from "./boards.js";
+import { netShapes, reflectPath } from "./net-collide.js";
 
 const GOALIE_DEPTH = 2.5; // how far out front of the net the goalie plays
 
@@ -71,6 +72,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
     const warp = {};
     const plans = {};
     const rel = {};
+    const netSh = netShapes(pieces);          // solid net obstacles for puck caroms
     pieces.forEach(pk => {
       if (pk.kind !== "puck") return;
       const vPass = () => pace * SPEED.pass * (pk.speed || 1);
@@ -335,7 +337,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
         const launchT = (cur.path.length && at >= 0) ? Math.max(tBase, routeTimeW(cur, warp, Math.min(at, cur.path.length - 1))) : tBase;
         const launch = bladeAt(cur, launchT, warp);
         const dist = pk.rimDist != null ? pk.rimDist : 65;       // handle-set travel distance
-        const r = pushTravel(densify(boards.rimAround(launch, dist, pk.rimAim)), launchT, vRim(), { by: cur.id, rim: true, easeOut: Math.min(55, dist * 0.6) });
+        const r = pushTravel(densify(reflectPath(boards.rimAround(launch, dist, pk.rimAim), netSh)), launchT, vRim(), { by: cur.id, rim: true, easeOut: Math.min(55, dist * 0.6) });
         legs.push({ type: "rest", x: r.end.x, y: r.end.y, t0: r.t }); tBase = r.t;
       } else if (pk.chipAt != null && cur) {           // terminal chip into space (bounces)
         const at = pk.chipAt;
@@ -343,7 +345,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
         const launch = bladeAt(cur, launchT, warp);
         const h = chipHeading(cur, launchT, pk.chipAim);
         const dist = pk.chipDist != null ? pk.chipDist : 26;     // handle-set travel distance
-        const r = pushTravel(densify(boards.slide(launch.x, launch.y, h.x, h.y, dist)), launchT, vChip(), { by: cur.id, chip: true, easeOut: Math.min(28, dist * 0.6) });
+        const r = pushTravel(densify(reflectPath(boards.slide(launch.x, launch.y, h.x, h.y, dist), netSh)), launchT, vChip(), { by: cur.id, chip: true, easeOut: Math.min(28, dist * 0.6) });
         legs.push({ type: "rest", x: r.end.x, y: r.end.y, t0: r.t }); tBase = r.t;
       }
       let relT = Infinity;
