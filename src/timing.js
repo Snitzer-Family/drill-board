@@ -250,6 +250,9 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
       // the normal pass/shoot options resume from the collection point.
       (pk.transfers || []).forEach(tr => {
         if (chainBlocked) return;                             // a prior rebound died at the net
+        // an intended actor (`by`) that isn't the one actually holding the puck
+        // is an impossible step — it (and everything after) won't happen
+        if (tr.by && tr.by !== cur.id) { chainBlocked = true; return; }
         const rec = pieces.find(q => q.id === tr.to && q.kind === "player");
         if (!rec) return;
         if (tr.kind === "pass" && rec.id === cur.id) return;  // no plain pass to yourself
@@ -352,6 +355,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
         tBase = tArr;
       });
       if (chainBlocked) { /* chain died at a net — no terminal action */ }
+      else if (pk.termBy && cur && pk.termBy !== cur.id) { /* intended shooter never got it */ }
       else if (pk.shotAt != null && cur) doShot(pk.shotAt); // terminal shot (no collector)
       else if (pk.rimAt != null && cur) {              // terminal hard rim around the boards
         const at = pk.rimAt;

@@ -1128,21 +1128,31 @@ export default function DrillAnimator() {
         const anchor = t.recvAt != null && rec.path.length ? segEnd(rec, Math.min(t.recvAt, rec.path.length - 1)) : { x: rec.x, y: rec.y };
         if (segCrossesNet(nPt, anchor, shapes)) blockStage = Math.min(blockStage, s);
       });
-      const downstream = s => (s > blockStage ? "won't happen — an earlier step is blocked" : null);
+      // an impossible step: its intended actor (`by`) isn't the one actually
+      // holding the puck at that point — it and everything after won't happen
+      let badStage = Infinity;
+      ts.forEach((t, s) => { if (t.by && t.by !== chain[s]) badStage = Math.min(badStage, s); });
+      const deadFrom = Math.min(blockStage, badStage);
+      const flag = s => s === badStage ? `${nameOf(ts[s].by)} isn't holding the puck here — won't happen`
+        : s === blockStage ? "rebound can't reach the collector — a net is in the way"
+        : s > deadFrom ? "won't happen — an earlier step is blocked" : null;
       ts.forEach((t, s) => {
+        const actor = t.by || chain[s];
         // the receiver shows their side of the action too (at the designated
         // receive waypoint, else at their standing spot i=-1)
         const rSpot = t.recvAt != null ? t.recvAt : -1;
-        if (t.to === p.id && chain[s] !== p.id && rSpot === i)
-          steps.push({ ord: s + 0.5, text: t.kind === "shot" ? `Collect rebound from ${nameOf(chain[s])}` : `Receive pass from ${nameOf(chain[s])}`, warn: downstream(s), del: () => setTransfer(pk.id, s, null) });
-        if (chain[s] === p.id && t.at === i) {
+        if (t.to === p.id && actor !== p.id && rSpot === i)
+          steps.push({ ord: s + 0.5, text: t.kind === "shot" ? `Collect rebound from ${nameOf(actor)}` : `Receive pass from ${nameOf(actor)}`, warn: flag(s), del: () => setTransfer(pk.id, s, null) });
+        if (actor === p.id && t.at === i) {
           const to = nameOf(t.to);
           const txt = t.kind === "pass" ? `Pass ${pk.id} to ${to}` : t.kind === "shot" ? `Shoot ${pk.id} — rebound to ${to}` : t.kind === "rim" ? `Hard rim to ${to}` : `Chip to ${to}`;
-          steps.push({ ord: s + 1, text: txt, warn: s === blockStage ? "rebound can't reach the collector — a net is in the way" : downstream(s), del: () => setTransfer(pk.id, s, null) });
+          steps.push({ ord: s + 1, text: txt, warn: flag(s), del: () => setTransfer(pk.id, s, null) });
         }
       });
-      if (chain[chain.length - 1] === p.id) {
-        const wt = blockStage < Infinity ? "won't happen — an earlier step is blocked" : null;
+      const termActor = pk.termBy || chain[chain.length - 1];
+      if (termActor === p.id) {
+        const wt = (pk.termBy && pk.termBy !== chain[chain.length - 1]) ? `${nameOf(pk.termBy)} isn't holding the puck here — won't happen`
+          : deadFrom < Infinity ? "won't happen — an earlier step is blocked" : null;
         if (pk.shotAt === i) steps.push({ ord: 900, text: `Shoot ${pk.id} at ${pk.net || "nearest net"}`, warn: wt, del: () => clearTerminal(pk.id) });
         else if (pk.rimAt === i) steps.push({ ord: 900, text: `Hard rim ${pk.id}`, warn: wt, del: () => clearTerminal(pk.id) });
         else if (pk.chipAt === i) steps.push({ ord: 900, text: `Chip ${pk.id}`, warn: wt, del: () => clearTerminal(pk.id) });
@@ -1181,9 +1191,14 @@ export default function DrillAnimator() {
       if (q.id !== pkId) return q;
       const ts = (q.transfers || []).slice(0, stage);
       if (tr) ts[stage] = tr;
-      return { ...q, transfers: ts, shotAt: null, rimAt: null, chipAt: null, rimAim: null, chipAim: null };
+      return { ...q, transfers: ts, shotAt: null, rimAt: null, chipAt: null, rimAim: null, chipAim: null, termBy: null };
     });
   }
+  // append an action for a player who doesn't actually hold the puck here — it's
+  // recorded (with its intended `by` actor) and flagged "won't complete", not
+  // silently dropped, so the user sees their intent
+  const appendTransfer = (pkId, tr) =>
+    update(q => (q.id === pkId ? { ...q, transfers: [...(q.transfers || []), tr] } : q));
   // default travel distance (feet) for a fresh terminal release
   const REL_DEFAULT = { rimAt: 65, chipAt: 26 };
   // terminal actions (shoot / hard rim / chip into space) are mutually exclusive;
@@ -2116,14 +2131,18 @@ export default function DrillAnimator() {
     // pass/shoot/collect controls for player p at possession point i. Used at
     // route points (point popup) and, with i=0, in a stationary player's popup
     // (a route-less carrier releases immediately, so its "point" is just 0).
+    // Always-available action buttons for player p at spot i. Every action can be
+    // added at any spot; if p doesn't actually hold the puck there, the step is
+    // still recorded (tagged with its intended actor) and shows flagged in the
+    // Steps list rather than being hidden.
     const chainControls = (p, i) => {
-      const pk = pieces.find(q => q.kind === "puck" && puckChain(q).includes(p.id));
+      let pk = pieces.find(q => q.kind === "puck" && puckChain(q).includes(p.id));
+      if (!pk) pk = pieces.find(q => q.kind === "puck");
       if (!pk) return null;
       const chain = puckChain(pk);
       const ts = pk.transfers || [];
-      // resolve which POSSESSION this point belongs to: a player can hold the
-      // puck several times in one chain (give-and-go), so prefer an exact match
-      // on an existing action here, else the latest window that can contain it
+      // p's possession stage that owns this spot (a give-and-go can hold twice);
+      // stage < 0 means p doesn't validly hold the puck here
       let stage = -1;
       for (let s = 0; s < chain.length; s++) {
         if (chain[s] !== p.id) continue;
@@ -2131,37 +2150,41 @@ export default function DrillAnimator() {
         if (out && out.at === i) { stage = s; break; }
         if (!out || i <= out.at) stage = s;
       }
-      if (stage < 0) return null;
-      const from = ts[stage];
-      const incoming = stage >= 1 ? ts[stage - 1] : null;
+      const holds = stage >= 0;
+      const from = holds ? ts[stage] : null;
+      const incoming = holds && stage >= 1 ? ts[stage - 1] : null;
       const others = pieces.filter(q => q.kind === "player" && q.id !== p.id);
-      const canAct = !from || from.at === i;              // release point (or unset)
-      const isPass = t => from && from.kind !== "shot" && from.at === i && from.to === t;
-      const isShot = t => from && from.kind === "shot" && from.at === i && from.to === t;
+      const isPass = to => from && from.kind === "pass" && from.at === i && from.to === to;
+      const isTerm = field => holds && stage === ts.length && pk[field] === i && (!pk.termBy || pk.termBy === p.id);
+      const doPass = to => {
+        if (holds) setTransfer(pk.id, stage, isPass(to) ? null : { at: i, to, recvAt: null, kind: "pass" });
+        else appendTransfer(pk.id, { at: i, to, recvAt: null, kind: "pass", by: p.id });
+      };
+      const doTerm = field => {
+        if (holds && stage === ts.length) setTerminal(pk.id, field, i);
+        else updateById(pk.id, { shotAt: null, rimAt: null, chipAt: null, [field]: i, termBy: p.id,
+          ...(field === "rimAt" ? { rimDist: pk.rimDist || REL_DEFAULT.rimAt } : field === "chipAt" ? { chipDist: pk.chipDist || REL_DEFAULT.chipAt } : {}) });
+      };
       return (
         <>
-          {canAct && others.length > 0 && (
+          {others.length > 0 && (
             <div className="hd-poprow">
               <span>Pass {pk.id} to</span>
               {others.map(o => (
-                <button key={o.id} className={`hd-mini${isPass(o.id) ? " on" : ""}`}
-                  onClick={() => setTransfer(pk.id, stage,
-                    isPass(o.id) ? null : { at: i, to: o.id, recvAt: null, kind: "pass" })}>
+                <button key={o.id} className={`hd-mini${isPass(o.id) ? " on" : ""}`} onClick={() => doPass(o.id)}>
                   {nameOf(o.id)}
                 </button>
               ))}
             </div>
           )}
-          {/* the passer designates WHICH waypoint the receiver catches it at, so a
-              multi-waypoint route doesn't grab a nearby pass by accident */}
+          {/* the passer designates WHICH waypoint the receiver catches it at */}
           {from && from.kind === "pass" && from.at === i && (() => {
             const rec = pieces.find(q => q.id === from.to && q.kind === "player");
             if (!rec || rec.path.length < 2) return null;
             return (
               <div className="hd-poprow">
                 <span>Receive at</span>
-                <button className={`hd-mini${from.recvAt == null ? " on" : ""}`}
-                  onClick={() => setRecvAt(pk.id, stage, null)}>auto</button>
+                <button className={`hd-mini${from.recvAt == null ? " on" : ""}`} onClick={() => setRecvAt(pk.id, stage, null)}>auto</button>
                 {rec.path.map((s, wi) => (
                   <button key={wi} className={`hd-mini${from.recvAt === wi ? " on" : ""}`}
                     onClick={() => setRecvAt(pk.id, stage, from.recvAt === wi ? null : wi)}>{wi + 1}</button>
@@ -2169,75 +2192,31 @@ export default function DrillAnimator() {
               </div>
             );
           })()}
-          {stage === (pk.transfers || []).length && (
-            <div className="hd-poprow">
-              <button className={`hd-mini${pk.shotAt === i ? " on" : ""}`}
-                onClick={() => setTerminal(pk.id, "shotAt", i)}>
-                {pk.shotAt === i ? `✓ Shooting at ${pk.net || "nearest"}` : `🥅 Shoot at ${pk.net || "nearest"}`}
-              </button>
-              <button className={`hd-mini${pk.rimAt === i ? " on" : ""}`}
-                onClick={() => setTerminal(pk.id, "rimAt", i)}>
-                {pk.rimAt === i ? "✓ Hard rim" : "Hard rim"}
-              </button>
-              <button className={`hd-mini${pk.chipAt === i ? " on" : ""}`}
-                onClick={() => setTerminal(pk.id, "chipAt", i)}>
-                {pk.chipAt === i ? "✓ Chip" : "Chip"}
-              </button>
-            </div>
-          )}
-          {(pk.rimAt === i || pk.chipAt === i) && (
+          <div className="hd-poprow">
+            <button className={`hd-mini${isTerm("shotAt") ? " on" : ""}`} onClick={() => doTerm("shotAt")}>
+              {isTerm("shotAt") ? `✓ Shooting at ${pk.net || "nearest"}` : "🥅 Shoot"}
+            </button>
+            <button className={`hd-mini${isTerm("rimAt") ? " on" : ""}`} onClick={() => doTerm("rimAt")}>
+              {isTerm("rimAt") ? "✓ Hard rim" : "Hard rim"}
+            </button>
+            <button className={`hd-mini${isTerm("chipAt") ? " on" : ""}`} onClick={() => doTerm("chipAt")}>
+              {isTerm("chipAt") ? "✓ Chip" : "Chip"}
+            </button>
+          </div>
+          {(isTerm("rimAt") || isTerm("chipAt")) && (
             <div className="hd-poprow">
               <span style={{ fontSize: 11, color: "#8b99a8" }}>drag the handle on the ice to aim &amp; set distance</span>
             </div>
           )}
-          {(pk.shotAt === i || (from && from.kind === "shot" && from.at === i)) && netRow(pk)}
+          {(isTerm("shotAt") || (from && from.kind === "shot" && from.at === i)) && netRow(pk)}
           {incoming && incoming.kind === "pass" && (
             <div className="hd-poprow">
               <button className={`hd-mini${incoming.recvAt === i ? " on" : ""}`}
                 onClick={() => setRecvAt(pk.id, stage - 1, incoming.recvAt === i ? null : i)}>
                 {incoming.recvAt === i ? "✓ Receiving here" : "Receive pass here"}
               </button>
-              {incoming.recvAt === i && p.path.length > 0 && (
-                <span style={{ fontSize: 11, color: "#8b99a8" }}>
-                  {pk.shotAt === i ? "one-timer — pace auto-syncs" : "pace auto-syncs"}
-                </span>
-              )}
             </div>
           )}
-          {/* give-and-go: this player is also the FINAL possessor, so offer the
-              return reception + shot here too (their earlier pass resolved above) */}
-          {(() => {
-            const finalStage = ts.length;
-            if (chain[finalStage] !== p.id || finalStage === stage) return null;
-            const inc = ts[finalStage - 1];               // the pass that returns the puck
-            return (
-              <>
-                {inc && inc.kind === "pass" && (
-                  <div className="hd-poprow">
-                    <button className={`hd-mini${inc.recvAt === i ? " on" : ""}`}
-                      onClick={() => setRecvAt(pk.id, finalStage - 1, inc.recvAt === i ? null : i)}>
-                      {inc.recvAt === i ? "✓ Receiving here" : "Receive pass here"}
-                    </button>
-                  </div>
-                )}
-                <div className="hd-poprow">
-                  <button className={`hd-mini${pk.shotAt === i ? " on" : ""}`}
-                    onClick={() => setTerminal(pk.id, "shotAt", i)}>
-                    {pk.shotAt === i ? `✓ Shooting at ${pk.net || "nearest"}` : `🥅 Shoot at ${pk.net || "nearest"}`}
-                  </button>
-                  <button className={`hd-mini${pk.rimAt === i ? " on" : ""}`}
-                    onClick={() => setTerminal(pk.id, "rimAt", i)}>
-                    {pk.rimAt === i ? "✓ Hard rim" : "Hard rim"}
-                  </button>
-                  <button className={`hd-mini${pk.chipAt === i ? " on" : ""}`}
-                    onClick={() => setTerminal(pk.id, "chipAt", i)}>
-                    {pk.chipAt === i ? "✓ Chip" : "Chip"}
-                  </button>
-                </div>
-                {pk.shotAt === i && netRow(pk)}
-              </>
-            );
-          })()}
         </>
       );
     };
@@ -2386,14 +2365,10 @@ export default function DrillAnimator() {
               </div>
               {/* collect a loose puck at the player's standing spot */}
               {collectRow(p, -1)}
-              {/* host the chain (pass / shoot / rebound) on the player itself
-                  for a route-less player, and for any puck head so the option
-                  stays put after a route is added — i=-1 releases from the
-                  starting spot, before skating to the first waypoint */}
-              {(p.path.length === 0
-                || pieces.some(q => q.kind === "puck"
-                  && (q.carrier === p.id || (q.pickup && q.pickup.to === p.id))))
-                && chainControls(p, -1)}
+              {/* action buttons are always available on the player itself (i=-1 =
+                  their standing / start spot); a route-less carrier releases from
+                  here, and any step can be added even if it can't happen */}
+              {pieces.some(q => q.kind === "puck") && chainControls(p, -1)}
               {stepsPanel(p, -1)}
             </>
           )}

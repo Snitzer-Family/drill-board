@@ -182,16 +182,22 @@ export function serializeDrill(rink, pieces, title = "", desc = "") {
     const hnd = p.kind === "player" && p.hand === "L" ? " hand=L" : "";
     const car = p.kind === "puck" && p.carrier ? ` on=${p.carrier}` : "";
     const gp = p.kind === "puck" && !p.carrier && p.pickup ? ` pickup=${p.pickup.to}@${p.pickup.at + 1}` : "";
-    // chain transfers in order: pass= passes, rebound= shot handoffs, rim=/chip= board plays
+    // chain transfers in order: pass= passes, rebound= shot handoffs, rim=/chip= board plays.
+    // Only the VALID prefix is saved: an impossible step (an actor that never has
+    // the puck) and everything after it is dropped, and the intended-actor tags
+    // (`by` / `termBy`) are editor-only, not part of the DSL.
     const kw = t => t.kind === "shot" ? "rebound" : t.kind === "rim" ? "rim" : t.kind === "chip" ? "chip" : "pass";
-    const pas = p.kind === "puck" && (p.carrier || p.pickup) && p.transfers && p.transfers.length
-      ? p.transfers.map(t => ` ${kw(t)}=${t.at + 1}:${t.to}${t.recvAt != null ? "@" + (t.recvAt + 1) : ""}${(t.kind === "chip" || t.kind === "rim") && t.aim != null ? "~" + f1(t.aim) : ""}`).join("")
-      : "";
+    let vts = [], lastCarrier = (p.carrier || (p.pickup && p.pickup.to)) || null;
+    if (p.kind === "puck") for (const t of (p.transfers || [])) { if (t.by && t.by !== lastCarrier) break; vts.push(t); lastCarrier = t.to; }
     const head = p.kind === "puck" && (p.carrier || p.pickup);
-    const sht = head && p.shotAt != null ? ` shoot=${p.shotAt + 1}` : "";
-    const rmT = head && p.rimAt != null ? ` rim=${p.rimAt + 1}${p.rimAim != null ? "~" + f1(p.rimAim) : ""}${p.rimDist != null ? "*" + f1(p.rimDist) : ""}` : "";
-    const chT = head && p.chipAt != null ? ` chip=${p.chipAt + 1}${p.chipAim != null ? "~" + f1(p.chipAim) : ""}${p.chipDist != null ? "*" + f1(p.chipDist) : ""}` : "";
-    const hasShot = p.kind === "puck" && (p.shotAt != null || (p.transfers || []).some(t => t.kind === "shot"));
+    const pas = head && vts.length
+      ? vts.map(t => ` ${kw(t)}=${t.at + 1}:${t.to}${t.recvAt != null ? "@" + (t.recvAt + 1) : ""}${(t.kind === "chip" || t.kind === "rim") && t.aim != null ? "~" + f1(t.aim) : ""}`).join("")
+      : "";
+    const termOk = !p.termBy || p.termBy === lastCarrier;
+    const sht = head && termOk && p.shotAt != null ? ` shoot=${p.shotAt + 1}` : "";
+    const rmT = head && termOk && p.rimAt != null ? ` rim=${p.rimAt + 1}${p.rimAim != null ? "~" + f1(p.rimAim) : ""}${p.rimDist != null ? "*" + f1(p.rimDist) : ""}` : "";
+    const chT = head && termOk && p.chipAt != null ? ` chip=${p.chipAt + 1}${p.chipAim != null ? "~" + f1(p.chipAim) : ""}${p.chipDist != null ? "*" + f1(p.chipDist) : ""}` : "";
+    const hasShot = p.kind === "puck" && ((termOk && p.shotAt != null) || vts.some(t => t.kind === "shot"));
     const nt = hasShot && p.net ? ` net=${p.net}` : "";
     const rotatable = p.kind === "net" || p.kind === "bumper" || p.kind === "deker" || p.kind === "passer" || (p.kind === "player" && !p.path.length);
     const fac = rotatable && p.facing ? ` face=${f1(p.facing)}` : "";
