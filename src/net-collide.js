@@ -10,18 +10,17 @@ const LOCAL = [
   [-4.15, 1.5], [-3.45, 3.1], [-1.7, 3.75], [0, 3.75],
 ];
 
-// world-space shape for one net piece
+// world-space shape for one net piece (+ world↔local transforms)
 export function netShape(n) {
   const s = (n.size || 1) * ICON;
   const a = ((n.facing || 0) * Math.PI) / 180, c = Math.cos(a), si = Math.sin(a);
-  const pts = LOCAL.map(([lx, ly]) => {
-    const X = lx * s, Y = ly * s;
-    return { x: n.x + X * c - Y * si, y: n.y + X * si + Y * c };
-  });
+  const toWorld = (lx, ly) => ({ x: n.x + lx * s * c - ly * s * si, y: n.y + lx * s * si + ly * s * c });
+  const toLocal = (x, y) => { const dx = x - n.x, dy = y - n.y; return { lx: (dx * c + dy * si) / s, ly: (-dx * si + dy * c) / s }; };
+  const pts = LOCAL.map(([lx, ly]) => toWorld(lx, ly));
   // solid edges = consecutive pts[0..7]; the mouth edge pts[7]→pts[0] is open
   const solid = [];
   for (let i = 0; i < pts.length - 1; i++) solid.push([pts[i], pts[i + 1]]);
-  return { pts, solid, mouth: [pts[pts.length - 1], pts[0]] };
+  return { pts, solid, mouth: [pts[pts.length - 1], pts[0]], toWorld, toLocal, s };
 }
 
 export function netShapes(pieces) {
@@ -46,26 +45,28 @@ function nearestOnSeg(a, b, x, y) {
   return { x: a.x + dx * t, y: a.y + dy * t, dx, dy };
 }
 
-// If (x,y) is inside a net, push it just outside the nearest boundary edge
-// (mouth included, so players pop out whichever side is closest). margin in feet.
-export function avoidNets(shapes, x, y, margin = 1.4) {
+// If (x,y) is inside a net, slide it out the NEARER SIDE (in the net's local
+// frame) so a route that crosses the net skates around a side instead of popping
+// out the front or back. margin (feet) keeps a small skating gap.
+export function avoidNets(shapes, x, y, margin = 1.8) {
   for (const sh of shapes) {
-    if (!inNet(sh, x, y)) continue;
-    const edges = [...sh.solid, sh.mouth];
-    let best = null;
-    for (const [a, b] of edges) {
-      const q = nearestOnSeg(a, b, x, y);
-      const d = Math.hypot(q.x - x, q.y - y);
-      if (!best || d < best.d) best = { d, q };
-    }
-    if (best) {
-      // outward normal = from the interior point toward the nearest edge point
-      const nx = best.q.x - x, ny = best.q.y - y, m = Math.hypot(nx, ny) || 1;
-      x = best.q.x + (nx / m) * margin;
-      y = best.q.y + (ny / m) * margin;
-    }
+    const { lx, ly } = sh.toLocal(x, y);
+    if (lx > -0.05 || lx < -4.3) continue;               // in front of the mouth / past the back
+    // cage half-width at this depth (full near the mouth, tapering to the back)
+    const half = lx > -1.7 ? 3.75 : Math.max(1.4, 3.75 * (lx + 4.15) / 2.45);
+    if (Math.abs(ly) >= half) continue;                  // already outside a side
+    const side = ly >= 0 ? 1 : -1;
+    const w = sh.toWorld(lx, side * (half + margin / sh.s));
+    x = w.x; y = w.y;
   }
   return { x, y };
+}
+
+// Bend a sampled polyline around nets (push each vertex out through a solid wall)
+// for drawing a route that detours around a net. Returns a new point list.
+export function bendPolyline(points, shapes) {
+  if (!shapes.length) return points;
+  return points.map(p => avoidNets(shapes, p.x, p.y));
 }
 
 // segment a→b vs segment c→d intersection; returns { t, x, y } (t along a→b) or null

@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useLayoutEffect } from "react";
 import { VIEWS, COLORS, vb, APP_VERSION, ICON_SCALE, BUILD_STAMP, DEFAULT_TEXT } from "./constants.js";
 import { parseDrill, serializeDrill, extractDrill } from "./drill-format.js";
-import { clampX, clampY, segEnd, segD, nearestT, splitSeg, zigzagPoints, convertSeg, fitRoute } from "./geometry.js";
+import { clampX, clampY, segEnd, segD, nearestT, splitSeg, zigzagPoints, convertSeg, fitRoute, evalSeg } from "./geometry.js";
 import * as boards from "./boards.js";
 import { netShapes, avoidNets } from "./net-collide.js";
 import { RinkMarkings } from "./rink.jsx";
@@ -636,9 +636,24 @@ export default function DrillAnimator() {
   // solid net footprints — players and pucks are kept out (routed around) so a
   // route or a loose puck never sits inside the sides/back of a net
   const netObstacles = netShapes(pieces);
+  // sampled route bent around any net it crosses (for drawing a detour that
+  // matches how the skater is routed around the net); null if nothing bends
+  function bentRoute(p) {
+    if (!netObstacles.length || !p.path.length || (p.kind !== "player" && p.kind !== "puck")) return null;
+    const pts = [{ x: p.x, y: p.y }];
+    let prev = { x: p.x, y: p.y };
+    for (const s of p.path) {
+      const n = Math.max(2, Math.min(48, Math.round((Math.hypot(s.x - prev.x, s.y - prev.y) + 4) / 2)));
+      for (let k = 1; k <= n; k++) pts.push(evalSeg(prev, s, k / n));
+      prev = { x: s.x, y: s.y };
+    }
+    const bent = pts.map(q => avoidNets(netObstacles, q.x, q.y));
+    return bent.some((b, i) => Math.abs(b.x - pts[i].x) > 0.02 || Math.abs(b.y - pts[i].y) > 0.02) ? bent : null;
+  }
   function displayPos(p) {
     const res = displayPosRaw(p);
-    if (animT > 0 && netObstacles.length && (p.kind === "player" || p.kind === "puck")) {
+    // players route around a net (pucks bounce off it via the flight reflection)
+    if (animT > 0 && netObstacles.length && p.kind === "player") {
       const a = avoidNets(netObstacles, res.x, res.y);
       if (a.x !== res.x || a.y !== res.y) return { ...res, x: a.x, y: a.y };
     }
@@ -2185,29 +2200,39 @@ export default function DrillAnimator() {
             })}
 
             {!aiPlay && pieces.map(p => {
+              const bent = showRoutes ? bentRoute(p) : null;   // detour around a crossed net
               let prev = { x: p.x, y: p.y };
-              return p.path.map((s, i) => {
-                const d = segD(prev, s);
-                const from = prev;
-                prev = { x: s.x, y: s.y };
-                const isLast = i === p.path.length - 1;
-                const style = segStroke(p, s, isLast);
-                return (
-                  <g key={`${p.id}/${i}`}>
-                    {/* invisible ref path is always present — timing measures it */}
-                    <path d={d} fill="none" stroke="none"
-                      ref={el => { if (el) segRefs.current[`${p.id}/${i}`] = el; }} />
-                    {showRoutes && (p.kind === "player" && s.dir === "bwd"
-                      ? <polyline points={zigzagPoints(from, s, strokeAR)} {...style} strokeLinejoin="round" pointerEvents="none" />
-                      : <path d={d} {...style} pointerEvents="none" />)}
-                    {showRoutes && isLast && renderArrow(p)}
-                    {showRoutes && (
-                      <path d={d} fill="none" stroke="transparent" strokeWidth={4}
-                        onPointerDown={e => lineDown(e, p.id, i)} style={{ cursor: "pointer" }} />
-                    )}
-                  </g>
-                );
-              });
+              return (
+                <g key={`rt-${p.id}`}>
+                  {p.path.map((s, i) => {
+                    const d = segD(prev, s);
+                    const from = prev;
+                    prev = { x: s.x, y: s.y };
+                    const isLast = i === p.path.length - 1;
+                    const style = segStroke(p, s, isLast);
+                    return (
+                      <g key={`${p.id}/${i}`}>
+                        {/* invisible ref path is always present — timing measures it */}
+                        <path d={d} fill="none" stroke="none"
+                          ref={el => { if (el) segRefs.current[`${p.id}/${i}`] = el; }} />
+                        {showRoutes && !bent && (p.kind === "player" && s.dir === "bwd"
+                          ? <polyline points={zigzagPoints(from, s, strokeAR)} {...style} strokeLinejoin="round" pointerEvents="none" />
+                          : <path d={d} {...style} pointerEvents="none" />)}
+                        {showRoutes && isLast && renderArrow(p)}
+                        {showRoutes && (
+                          <path d={d} fill="none" stroke="transparent" strokeWidth={4}
+                            onPointerDown={e => lineDown(e, p.id, i)} style={{ cursor: "pointer" }} />
+                        )}
+                      </g>
+                    );
+                  })}
+                  {bent && (
+                    <polyline points={bent.map(q => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" ")}
+                      {...segStroke(p, p.path[p.path.length - 1] || {}, false)}
+                      strokeLinejoin="round" pointerEvents="none" />
+                  )}
+                </g>
+              );
             })}
 
             {showRoutes && pieces.map(p => <g key={`s-${p.id}`}>{renderStops(p)}</g>)}
