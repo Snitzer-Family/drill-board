@@ -3,7 +3,7 @@ import { VIEWS, COLORS, vb, APP_VERSION, ICON_SCALE, BUILD_STAMP, DEFAULT_TEXT }
 import { parseDrill, serializeDrill, extractDrill } from "./drill-format.js";
 import { clampX, clampY, segEnd, segD, nearestT, splitSeg, zigzagPoints, convertSeg, fitRoute, evalSeg } from "./geometry.js";
 import * as boards from "./boards.js";
-import { netShapes, avoidNets } from "./net-collide.js";
+import { netShapes, detourRoute } from "./net-collide.js";
 import { RinkMarkings } from "./rink.jsx";
 import { ZONES, zoneAt } from "./zones.js";
 import { PieceIcon, Stepper, DiagPanel } from "./icons.jsx";
@@ -646,26 +646,47 @@ export default function DrillAnimator() {
   // solid net footprints — players and pucks are kept out (routed around) so a
   // route or a loose puck never sits inside the sides/back of a net
   const netObstacles = netShapes(pieces);
-  // sampled route bent around any net it crosses (for drawing a detour that
-  // matches how the skater is routed around the net); null if nothing bends
-  function bentRoute(p) {
+  // A route sampled then re-routed to arc smoothly around any net it crosses.
+  // Returns { pts, origLen } (origLen = the straight-sampled length, for mapping
+  // animation progress onto the detour) or null if no net is in the way. Cached
+  // per render so the line and the animation share one detour.
+  const detourCache = new Map();
+  function routeDetour(p) {
     if (!netObstacles.length || !p.path.length || (p.kind !== "player" && p.kind !== "puck")) return null;
+    if (detourCache.has(p.id)) return detourCache.get(p.id);
     const pts = [{ x: p.x, y: p.y }];
-    let prev = { x: p.x, y: p.y };
+    let prev = { x: p.x, y: p.y }, origLen = 0;
     for (const s of p.path) {
       const n = Math.max(2, Math.min(48, Math.round((Math.hypot(s.x - prev.x, s.y - prev.y) + 4) / 2)));
-      for (let k = 1; k <= n; k++) pts.push(evalSeg(prev, s, k / n));
+      for (let k = 1; k <= n; k++) { const q = evalSeg(prev, s, k / n); const last = pts[pts.length - 1]; origLen += Math.hypot(q.x - last.x, q.y - last.y); pts.push(q); }
       prev = { x: s.x, y: s.y };
     }
-    const bent = pts.map(q => avoidNets(netObstacles, q.x, q.y));
-    return bent.some((b, i) => Math.abs(b.x - pts[i].x) > 0.02 || Math.abs(b.y - pts[i].y) > 0.02) ? bent : null;
+    const det = detourRoute(pts, netObstacles);
+    const out = det !== pts ? { pts: det, origLen } : null;
+    detourCache.set(p.id, out);
+    return out;
+  }
+  // point + heading at fraction f (0..1 by arc length) along a polyline
+  function samplePoly(poly, f) {
+    let total = 0; const cum = [0];
+    for (let i = 1; i < poly.length; i++) { total += Math.hypot(poly[i].x - poly[i - 1].x, poly[i].y - poly[i - 1].y); cum.push(total); }
+    const target = Math.max(0, Math.min(1, f)) * total;
+    let i = 1; while (i < poly.length && cum[i] < target) i++;
+    const a = poly[i - 1], b = poly[Math.min(i, poly.length - 1)];
+    const seg = cum[Math.min(i, poly.length - 1)] - cum[i - 1] || 1;
+    const t = Math.max(0, Math.min(1, (target - cum[i - 1]) / seg));
+    return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, a: (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI };
   }
   function displayPos(p) {
     const res = displayPosRaw(p);
-    // players route around a net (pucks bounce off it via the flight reflection)
-    if (animT > 0 && netObstacles.length && p.kind === "player") {
-      const a = avoidNets(netObstacles, res.x, res.y);
-      if (a.x !== res.x || a.y !== res.y) return { ...res, x: a.x, y: a.y };
+    // players follow the arc-detour around a net (pucks carom via flight reflection)
+    if (animT > 0 && p.kind === "player") {
+      const rd = routeDetour(p);
+      if (rd) {
+        const f = rd.origLen > 0 ? (res.dist || 0) / rd.origLen : 0;
+        const s = samplePoly(rd.pts, f);
+        return { ...res, x: s.x, y: s.y, a: p.path.some(sg => sg.dir === "bwd") ? res.a : s.a };
+      }
     }
     return res;
   }
@@ -2210,7 +2231,8 @@ export default function DrillAnimator() {
             })}
 
             {!aiPlay && pieces.map(p => {
-              const bent = showRoutes ? bentRoute(p) : null;   // detour around a crossed net
+              const rd = showRoutes ? routeDetour(p) : null;   // arc detour around a crossed net
+              const bent = rd && rd.pts;
               let prev = { x: p.x, y: p.y };
               return (
                 <g key={`rt-${p.id}`}>

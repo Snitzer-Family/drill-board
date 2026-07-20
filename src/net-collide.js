@@ -69,11 +69,102 @@ export function avoidNets(shapes, x, y, margin = 1.1) {
   return { x, y };
 }
 
-// Bend a sampled polyline around nets (push each vertex out through a solid wall)
-// for drawing a route that detours around a net. Returns a new point list.
-export function bendPolyline(points, shapes) {
-  if (!shapes.length) return points;
-  return points.map(p => avoidNets(shapes, p.x, p.y));
+// Reroute a sampled polyline so it arcs smoothly AROUND each net's keep-out disc
+// instead of cutting through it — a single tangent-in → boundary-arc → tangent-out
+// per net, so there's no per-point jitter. Endpoints (incl. a start/end placed
+// inside the disc, e.g. behind the net) are preserved.
+export function detourRoute(points, shapes) {
+  let pts = points, changed = false;
+  for (const sh of shapes) { const np = aroundDisc(pts, sh.cx, sh.cy, sh.r + 1); if (np !== pts) { pts = np; changed = true; } }
+  return changed ? chaikin(chaikin(pts)) : points;   // round the tangent/radial joins
+}
+// Chaikin corner-cutting (endpoints fixed) — rounds any residual joins
+function chaikin(pts) {
+  if (pts.length < 3) return pts;
+  const out = [pts[0]];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1];
+    if (Math.hypot(b.x - a.x, b.y - a.y) < 1e-6) continue;
+    out.push({ x: a.x * 0.75 + b.x * 0.25, y: a.y * 0.75 + b.y * 0.25 });
+    out.push({ x: a.x * 0.25 + b.x * 0.75, y: a.y * 0.25 + b.y * 0.75 });
+  }
+  out.push(pts[pts.length - 1]);
+  return out;
+}
+
+function segCircleHit(a, b, cx, cy, R) {
+  const dx = b.x - a.x, dy = b.y - a.y, fx = a.x - cx, fy = a.y - cy;
+  const A = dx * dx + dy * dy, B = 2 * (fx * dx + fy * dy), C = fx * fx + fy * fy - R * R;
+  let dis = B * B - 4 * A * C;
+  if (dis < 0) return { x: b.x, y: b.y };
+  dis = Math.sqrt(dis);
+  const t = Math.max(0, Math.min(1, (-B - dis) / (2 * A)));
+  return { x: a.x + dx * t, y: a.y + dy * t };
+}
+// the two tangent points from an external point P to a circle
+function tangents(P, cx, cy, R) {
+  const dx = P.x - cx, dy = P.y - cy, d = Math.hypot(dx, dy);
+  if (d <= R + 1e-6) return [];
+  const base = Math.atan2(dy, dx), off = Math.acos(Math.max(-1, Math.min(1, R / d)));
+  return [base + off, base - off].map(a => ({ x: cx + Math.cos(a) * R, y: cy + Math.sin(a) * R, ang: a }));
+}
+function arcPts(cx, cy, R, a0, ccw, span) {
+  const n = Math.max(4, Math.round(span / 0.12)), out = [];
+  for (let k = 0; k <= n; k++) { const a = a0 + (ccw ? 1 : -1) * span * k / n; out.push({ x: cx + Math.cos(a) * R, y: cy + Math.sin(a) * R }); }
+  return out;
+}
+
+function aroundDisc(pts, cx, cy, R) {
+  const D = p => Math.hypot(p.x - cx, p.y - cy);
+  let i0 = -1, i1 = -1;
+  for (let i = 0; i < pts.length; i++) if (D(pts[i]) < R) { if (i0 < 0) i0 = i; i1 = i; }
+  if (i0 < 0) return pts;                                    // never enters the disc
+  // anchor the tangents well outside the disc (~2.4R) so the route eases in
+  // gradually instead of turning hard right at the edge
+  const AR = 2.4 * R;
+  let ai = i0; while (ai > 0 && D(pts[ai - 1]) < AR) ai--;
+  let bi = i1; while (bi < pts.length - 1 && D(pts[bi + 1]) < AR) bi++;
+  ai = Math.max(0, ai - 1); bi = Math.min(pts.length - 1, bi + 1);
+  const A = pts[ai], B = pts[bi];
+  const startInside = D(A) < R, endInside = D(B) < R;
+  const ang = p => Math.atan2(p.y - cy, p.x - cx);
+
+  // Prefer a tangent-in → arc → tangent-out path (smooth, no kink at the joins).
+  // If an endpoint is inside the disc, that side starts/ends radially instead.
+  const TA = startInside ? null : tangents(A, cx, cy, R);
+  const TB = endInside ? null : tangents(B, cx, cy, R);
+  const startAngs = TA ? TA : [{ ...segCircleHitProj(pts[0], cx, cy, R), fromInside: true }];
+  const endAngs = TB ? TB : [{ ...segCircleHitProj(pts[pts.length - 1], cx, cy, R), fromInside: true }];
+
+  let best = null;
+  for (const t1 of startAngs) for (const t2 of endAngs) {
+    // arc direction follows the A→t1 tangent (radial-out if the start is inside)
+    const inx = t1.x - A.x, iny = t1.y - A.y;
+    const ccwTan1 = { x: -Math.sin(t1.ang), y: Math.cos(t1.ang) };
+    const ccw = t1.fromInside
+      ? (-Math.sin(t1.ang) * (B.x - A.x) + Math.cos(t1.ang) * (B.y - A.y)) >= 0
+      : (inx * ccwTan1.x + iny * ccwTan1.y) >= 0;
+    // require the arc to LEAVE at t2 heading toward B (tangency) unless B is inside
+    const exitTan = ccw ? { x: -Math.sin(t2.ang), y: Math.cos(t2.ang) } : { x: Math.sin(t2.ang), y: -Math.cos(t2.ang) };
+    const outx = B.x - t2.x, outy = B.y - t2.y;
+    if (!t2.fromInside && exitTan.x * outx + exitTan.y * outy < 0) continue;
+    let span = ccw ? t2.ang - t1.ang : t1.ang - t2.ang;
+    while (span < 0) span += 2 * Math.PI;
+    if (span > Math.PI * 1.7) continue;                     // reject wrong-way near-full loops
+    const len = Math.hypot(inx, iny) + span * R + Math.hypot(outx, outy);
+    if (!best || len < best.len) best = { t1, t2, ccw, span, len };
+  }
+  if (!best) return pts;
+  const arc = arcPts(cx, cy, R, best.t1.ang, best.ccw, best.span);   // includes t1 & t2 as endpoints
+  const pre = startInside ? [pts[0]] : pts.slice(0, ai + 1);
+  const post = endInside ? [pts[pts.length - 1]] : pts.slice(bi);
+  return [...pre, ...arc, ...post];
+}
+// project a point radially onto the circle (for an endpoint inside the disc)
+function segCircleHitProj(p, cx, cy, R) {
+  const dx = p.x - cx, dy = p.y - cy, d = Math.hypot(dx, dy) || 1;
+  const ang = Math.atan2(dy, dx);
+  return { x: cx + Math.cos(ang) * R, y: cy + Math.sin(ang) * R, ang };
 }
 
 // segment a→b vs segment c→d intersection; returns { t, x, y } (t along a→b) or null
