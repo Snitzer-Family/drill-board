@@ -311,6 +311,15 @@ export default function DrillAnimator() {
       th: (th * 180) / Math.PI,
     };
   }
+  // rink→screen anisotropy: `strokeAR` un-skews the backward-skating zigzag;
+  // `strokeK` is the isotropic screen scale so strokes drawn with
+  // vector-effect:non-scaling-stroke keep their intended on-ice weight
+  const strokeAR = iconGeom.Sx / iconGeom.Sy;
+  const strokeK = Math.sqrt(iconGeom.Sx * iconGeom.Sy);
+  // scale a stroke width (rink feet) to non-scaling-stroke screen px
+  const sw = w => +(w * strokeK).toFixed(2);
+  // scale a dash pattern string ("2.4 1.8") the same way
+  const sdash = d => d.split(/\s+/).map(n => +(parseFloat(n) * strokeK).toFixed(2)).join(" ");
 
   /* ----- timing & pass planning (see timing.js) ----- */
   const planCache = useRef({ key: null, pace: 0, sig: -1, warp: {}, plans: {}, rel: {} });
@@ -1131,15 +1140,38 @@ export default function DrillAnimator() {
   }
 
   /* ----- render helpers ----- */
-  function segStroke(p, s, isLast) {
-    const base = {
-      stroke: p.color, fill: "none", strokeLinecap: "round", opacity: 0.78,
-      markerEnd: isLast ? `url(#arr-${p.id})` : undefined,
-    };
-    if (p.kind !== "puck") return { ...base, strokeWidth: 0.7 };
-    if (s.mode === "pass") return { ...base, strokeWidth: 0.7, strokeDasharray: "2.4 1.8" };
-    if (s.mode === "shot") return { ...base, strokeWidth: 1.25 };
-    return { ...base, strokeWidth: 0.75, strokeDasharray: "0.2 1.5" };
+  // `flat` = draw with plain rink-unit widths (used by the loupe, which has its
+  // own near-square viewBox); otherwise use screen-uniform non-scaling strokes so
+  // the fill-mode stretch can't make a line thicker along one axis than the other
+  function segStroke(p, s, isLast, flat) {
+    const W = w => (flat ? w : sw(w));
+    const D = d => (flat ? d : sdash(d));
+    const base = { stroke: p.color, fill: "none", strokeLinecap: "round", opacity: 0.78,
+      ...(flat ? {} : { vectorEffect: "non-scaling-stroke" }) };
+    if (p.kind !== "puck") return { ...base, strokeWidth: W(0.7) };
+    if (s.mode === "pass") return { ...base, strokeWidth: W(0.7), strokeDasharray: D("2.4 1.8") };
+    if (s.mode === "shot") return { ...base, strokeWidth: W(1.25) };
+    return { ...base, strokeWidth: W(0.75), strokeDasharray: D("0.2 1.5") };
+  }
+
+  // Arrowhead at a route's end, drawn in the stretch-cancelling icon frame so it
+  // stays a clean triangle (SVG markers get sheared by the fill-mode stretch).
+  function renderArrow(p) {
+    const n = p.path.length;
+    if (!n) return null;
+    const last = p.path[n - 1];
+    const from = n >= 2 ? segEnd(p, n - 2) : { x: p.x, y: p.y };
+    const tail = last.type === "Q" ? { x: last.cx, y: last.cy }
+      : last.type === "C" ? { x: last.c2x, y: last.c2y } : from;
+    const dx = last.x - tail.x, dy = last.y - tail.y;
+    if (!dx && !dy) return null;
+    const ang = (Math.atan2(dy, dx) * 180) / Math.PI;
+    const fx = iconXf({ x: last.x, y: last.y, a: ang });
+    return (
+      <g key={`arw-${p.id}`} transform={fx.t} pointerEvents="none">
+        <path d="M 0 0 L -2.7 -1.5 L -1.9 0 L -2.7 1.5 Z" fill={p.color} opacity={0.85} />
+      </g>
+    );
   }
 
   function renderHandles(p) {
@@ -1874,7 +1906,7 @@ export default function DrillAnimator() {
               const d = segD(prev, s);
               const from = prev;
               prev = { x: s.x, y: s.y };
-              const style = segStroke(p, s, i === p.path.length - 1);
+              const style = segStroke(p, s, i === p.path.length - 1, true);
               return p.kind === "player" && s.dir === "bwd"
                 ? <polyline key={`${p.id}${i}`} points={zigzagPoints(from, s)} {...style} strokeLinejoin="round" />
                 : <path key={`${p.id}${i}`} d={d} {...style} />;
@@ -1931,12 +1963,6 @@ export default function DrillAnimator() {
             onPointerUp={onSvgUp} onPointerCancel={onSvgUp}>
             <defs>
               <clipPath id="boards"><rect x={0.5} y={0.5} width={199} height={84} rx={27.5} ry={27.5 * yFix} /></clipPath>
-              {pieces.map(p => (
-                <marker key={p.id} id={`arr-${p.id}`} viewBox="0 0 10 10" refX="8" refY="5"
-                  markerWidth="5" markerHeight="5" orient="auto-start-reverse">
-                  <path d="M 0 0 L 10 5 L 0 10 z" fill={p.color} />
-                </marker>
-              ))}
             </defs>
 
             <g ref={sceneRef} transform={sceneTransform}>
@@ -2041,8 +2067,9 @@ export default function DrillAnimator() {
                     <path d={d} fill="none" stroke="none"
                       ref={el => { if (el) segRefs.current[`${p.id}/${i}`] = el; }} />
                     {showRoutes && (p.kind === "player" && s.dir === "bwd"
-                      ? <polyline points={zigzagPoints(from, s)} {...style} strokeLinejoin="round" pointerEvents="none" />
+                      ? <polyline points={zigzagPoints(from, s, strokeAR)} {...style} strokeLinejoin="round" pointerEvents="none" />
                       : <path d={d} {...style} pointerEvents="none" />)}
+                    {showRoutes && isLast && renderArrow(p)}
                     {showRoutes && (
                       <path d={d} fill="none" stroke="transparent" strokeWidth={4}
                         onPointerDown={e => lineDown(e, p.id, i)} style={{ cursor: "pointer" }} />
@@ -2070,18 +2097,18 @@ export default function DrillAnimator() {
                   .filter(L => L.type === "fly")
                   .map((L, k) => (
                     <g key={`pf-${q.id}-${k}`} pointerEvents="none" opacity={0.6}>
-                      <line x1={L.x0} y1={L.y0} x2={L.x1} y2={L.y1}
-                        stroke="#14171a" strokeWidth={L.shot ? 1.1 : 0.55}
-                        strokeDasharray={L.shot ? undefined : "2.4 1.8"} />
-                      <circle cx={L.x1} cy={L.y1} r={1.1} fill="none"
-                        stroke="#14171a" strokeWidth={0.3} />
+                      <line x1={L.x0} y1={L.y0} x2={L.x1} y2={L.y1} vectorEffect="non-scaling-stroke"
+                        stroke="#14171a" strokeWidth={sw(L.shot ? 1.1 : 0.55)}
+                        strokeDasharray={L.shot ? undefined : sdash("2.4 1.8")} />
+                      <circle cx={L.x1} cy={L.y1} r={1.1} fill="none" vectorEffect="non-scaling-stroke"
+                        stroke="#14171a" strokeWidth={sw(0.3)} />
                     </g>
                   )));
             })()}
 
             {drawPreview && drawPreview.length > 1 && (
-              <polyline points={drawPreview.map(q => `${q.x},${q.y}`).join(" ")}
-                fill="none" stroke="#ffd447" strokeWidth={0.6} strokeDasharray="1.4 1" opacity={0.9} />
+              <polyline points={drawPreview.map(q => `${q.x},${q.y}`).join(" ")} vectorEffect="non-scaling-stroke"
+                fill="none" stroke="#ffd447" strokeWidth={sw(0.6)} strokeDasharray={sdash("1.4 1")} opacity={0.9} />
             )}
 
             {pieces.map(p => <g key={`h-${p.id}`}>{renderHandles(p)}</g>)}

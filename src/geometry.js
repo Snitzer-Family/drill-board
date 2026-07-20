@@ -72,22 +72,31 @@ export function splitSeg(prev, s, t) {
   ];
 }
 
-export function zigzagPoints(prev, s) {
+// `ar` is the rink→screen aspect ratio (Sx/Sy). The zigzag's bump direction and
+// spacing are computed in stretched "screen" space so the pattern still reads as
+// even, upright squiggles after the fill-mode stretch (ar=1 → no correction).
+export function zigzagPoints(prev, s, ar = 1) {
+  // arc length measured in aspect-weighted space (x scaled by ar) so bump
+  // spacing stays uniform on screen regardless of the segment's direction
+  const wlen = (ax, ay, bx, by) => Math.hypot((bx - ax) * ar, by - ay);
   const approx =
-    s.type === "L" ? Math.hypot(s.x - prev.x, s.y - prev.y)
-    : s.type === "Q" ? Math.hypot(s.cx - prev.x, s.cy - prev.y) + Math.hypot(s.x - s.cx, s.y - s.cy)
-    : Math.hypot(s.c1x - prev.x, s.c1y - prev.y) + Math.hypot(s.c2x - s.c1x, s.c2y - s.c1y) + Math.hypot(s.x - s.c2x, s.y - s.c2y);
+    s.type === "L" ? wlen(prev.x, prev.y, s.x, s.y)
+    : s.type === "Q" ? wlen(prev.x, prev.y, s.cx, s.cy) + wlen(s.cx, s.cy, s.x, s.y)
+    : wlen(prev.x, prev.y, s.c1x, s.c1y) + wlen(s.c1x, s.c1y, s.c2x, s.c2y) + wlen(s.c2x, s.c2y, s.x, s.y);
   const n = Math.max(6, Math.round(approx / 2.4));
+  const A = 0.9;                                   // bump amplitude, in screen units
   const pts = [];
   for (let i = 0; i <= n; i++) {
     const t = i / n;
     const pt = evalSeg(prev, s, t);
     if (i === 0 || i === n) { pts.push(pt); continue; }
     const ahead = evalSeg(prev, s, Math.min(1, t + 0.01));
-    let nx = -(ahead.y - pt.y), ny = ahead.x - pt.x;
-    const l = Math.hypot(nx, ny) || 1;
-    const a = i % 2 ? 0.9 : -0.9;
-    pts.push({ x: pt.x + (nx / l) * a, y: pt.y + (ny / l) * a });
+    // perpendicular to the on-SCREEN tangent, then mapped back to rink coords
+    const tx = (ahead.x - pt.x) * ar, ty = ahead.y - pt.y;   // screen-space tangent
+    const px = -ty, py = tx;                                 // screen-space normal
+    const l = Math.hypot(px, py) || 1;
+    const a = (i % 2 ? 1 : -1) * A;
+    pts.push({ x: pt.x + (px / l) * a / ar, y: pt.y + (py / l) * a });
   }
   return pts.map(q => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" ");
 }
