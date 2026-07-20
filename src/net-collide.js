@@ -241,3 +241,25 @@ export function reflectPath(poly, shapes) {
 }
 
 function norm(x, y) { const m = Math.hypot(x, y) || 1; return { x: x / m, y: y / m }; }
+
+// Real-time puck vs nets: if a step from (x,y) to (nx,ny) crosses a net's solid
+// edge (its sides/back — the mouth is open), reflect the velocity off that edge
+// and stop just short. Returns { x, y, vx, vy, hit }. `rest` = bounce energy kept.
+export function bounceOffNets(x, y, nx, ny, vx, vy, shapes, rest = 0.72) {
+  for (const sh of shapes) {
+    for (const [a, b] of sh.solid) {
+      const h = segInt({ x, y }, { x: nx, y: ny }, a, b);
+      if (!h) continue;
+      const ex = b.x - a.x, ey = b.y - a.y, el = Math.hypot(ex, ey) || 1;
+      const nlx = -ey / el, nly = ex / el;                 // edge normal
+      const dot = vx * nlx + vy * nly;
+      // settle just outside the edge, along the normal facing the incoming puck
+      const s = dot > 0 ? -1 : 1;
+      return {
+        x: h.x + nlx * s * 0.4, y: h.y + nly * s * 0.4,
+        vx: (vx - 2 * dot * nlx) * rest, vy: (vy - 2 * dot * nly) * rest, hit: true,
+      };
+    }
+  }
+  return { x: nx, y: ny, vx, vy, hit: false };
+}

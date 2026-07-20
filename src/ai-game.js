@@ -10,6 +10,7 @@
 // Rink feet: x 0..200, y 0..85. Goal lines 17/183, blue lines 75/125,
 // center 100. End-zone dots (45/155, 20.5/64.5), neutral dots (80/120, …).
 import * as boards from "./boards.js";
+import { netShapes, avoidNets, bounceOffNets } from "./net-collide.js";
 
 /* ------------------------------------------------------------------ */
 /* tunables                                                           */
@@ -35,6 +36,12 @@ const KNOCK = 15;                 // body-check knockback impulse
 /* geometry                                                           */
 const OWN_BLUE = 58, CENTER_F = 83, ATT_BLUE = 108, ATT_GOAL = 166;
 const NETS = [{ x: 17, y: 42.5 }, { x: 183, y: 42.5 }];
+// solid net footprints for collision: mouths face center ice (left net +x, right -x)
+const NET_SHAPES = netShapes([
+  { kind: "net", x: 17, y: 42.5, facing: 0, size: 1 },
+  { kind: "net", x: 183, y: 42.5, facing: 180, size: 1 },
+]);
+const PLAY_R = 2.9;               // skater keep-apart radius (no skating through)
 
 const dir = t => (t === 0 ? 1 : -1);           // team 0 attacks +x
 const ownGoalX = t => (t === 0 ? 17 : 183);
@@ -360,15 +367,35 @@ export function stepGame(g, dt) {
   const carrier = puck.carrier && players.find(p => p.id === puck.carrier);
   if (carrier) {
     const on = attNet(carrier.team);
-    const ang = Math.atan2(on.y - carrier.y, on.x - carrier.x);
-    const cc = boards.clampInside(carrier.x + Math.cos(ang) * 2.2, carrier.y + Math.sin(ang) * 2.2);
+    let ox = on.x - carrier.x, oy = on.y - carrier.y;
+    const om = Math.hypot(ox, oy) || 1; ox /= om; oy /= om;   // toward the attacking net
+    // PUCK PROTECTION — pull the puck to the far side from the nearest defender
+    const foe = players.filter(p => p.team !== carrier.team && p.stun <= 0);
+    if (foe.length) {
+      const near = foe.reduce((a, b) => (D(b, carrier) < D(a, carrier) ? b : a));
+      const nd = D(near, carrier);
+      if (nd < 9) {
+        const w = 1 - nd / 9;                                 // shield strength
+        const ax2 = (carrier.x - near.x) / (nd || 1), ay2 = (carrier.y - near.y) / (nd || 1);
+        ox = ox * (1 - w) + ax2 * w; oy = oy * (1 - w) + ay2 * w;
+        const m = Math.hypot(ox, oy) || 1; ox /= m; oy /= m;
+      }
+    }
+    let cc = boards.clampInside(carrier.x + ox * 2.4, carrier.y + oy * 2.4);
+    cc = avoidNets(NET_SHAPES, cc.x, cc.y);                   // keep the puck out of a net
     puck.x = cc.x; puck.y = cc.y;
     puck.lastTeam = carrier.team;
   } else if (puck.flying) {
+    const fx = puck.x, fy = puck.y;                           // step start (for net-edge test)
     puck.x += puck.vx * dt; puck.y += puck.vy * dt;
     puck.vx *= 0.987; puck.vy *= 0.987;
     const c = boards.contain(puck.x, puck.y, puck.vx, puck.vy, 0.75);  // rim / bounce off the boards
     puck.x = c.x; puck.y = c.y; puck.vx = c.vx; puck.vy = c.vy;
+    // carom off a net's sides/back (unless it's a shot heading into the mouth)
+    if (!puck.shot) {
+      const nb = bounceOffNets(fx, fy, puck.x, puck.y, puck.vx, puck.vy, NET_SHAPES);
+      if (nb.hit) { puck.x = nb.x; puck.y = nb.y; puck.vx = nb.vx; puck.vy = nb.vy; }
+    }
     // a shot arriving at the net → goal or save (rebound)
     if (puck.shot && D(puck, puck.shot.net) < 4.5) {
       if (puck.shot.goal) { g.score[puck.shot.team]++; faceoff(g, 100, 42.5, "GOAL!"); updateGoalies(g); return g; }
@@ -433,16 +460,30 @@ export function stepGame(g, dt) {
     } else {
       steer(p, p.tx, p.ty, dt);
     }
-    // soft separation so teammates don't stack
-    players.forEach(q => { if (q !== p) { const d = D(p, q); if (d < 4 && d > 0.01) {
-      p.vx += ((p.x - q.x) / d) * 9 * dt; p.vy += ((p.y - q.y) / d) * 9 * dt; } } });
+    // steer around a nearby skater so nobody plows straight through another
+    players.forEach(q => { if (q !== p && q.stun <= 0) { const d = D(p, q); if (d < PLAY_R * 2 + 1.5 && d > 0.01) {
+      const s = (PLAY_R * 2 + 1.5 - d); p.vx += ((p.x - q.x) / d) * s * 6 * dt; p.vy += ((p.y - q.y) / d) * s * 6 * dt; } } });
     const sp = Math.hypot(p.vx, p.vy);
     if (sp > SKATE) { p.vx = (p.vx / sp) * SKATE; p.vy = (p.vy / sp) * SKATE; }
-    const pc = boards.clampInside(p.x + p.vx * dt, p.y + p.vy * dt);   // skaters ride the boards
+    let pc = boards.clampInside(p.x + p.vx * dt, p.y + p.vy * dt);   // skaters ride the boards
+    pc = avoidNets(NET_SHAPES, pc.x, pc.y);                          // and never skate through a net
     p.x = pc.x; p.y = pc.y;
     if (sp > 3 && !(carNow && p.id === carNow.id)) p.a = (Math.atan2(p.vy, p.vx) * 180) / Math.PI;
     else if (carNow && p.id === carNow.id) { const n = attNet(p.team); p.a = (Math.atan2(n.y - p.y, n.x - p.x) * 180) / Math.PI; }
   });
+
+  // firm collision: positionally separate any overlapping skaters (no pass-through)
+  for (let i = 0; i < players.length; i++) for (let j = i + 1; j < players.length; j++) {
+    const a = players[i], b = players[j];
+    if (a.stun > 0 || b.stun > 0) continue;
+    const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy), MIN = PLAY_R * 2;
+    if (d < MIN && d > 0.01) {
+      const push = (MIN - d) / 2, ux = dx / d, uy = dy / d;
+      const ca = boards.clampInside(a.x - ux * push, a.y - uy * push);
+      const cb = boards.clampInside(b.x + ux * push, b.y + uy * push);
+      a.x = ca.x; a.y = ca.y; b.x = cb.x; b.y = cb.y;
+    }
+  }
 
   updateGoalies(g);
   return g;
