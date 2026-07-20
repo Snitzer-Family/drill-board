@@ -199,10 +199,13 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
           ? { x: net.x - ux * GOALIE_DEPTH, y: net.y - uy * GOALIE_DEPTH }
           : { x: clampX(net.x + px * place * GOAL_HALF), y: clampY(net.y + py * place * GOAL_HALF) };
         const tArr = launchT + Math.hypot(hit.x - launch.x, hit.y - launch.y) / vShot;
-        // an empty net (no goalie) is a goal, unless the shot is a designated
-        // rebound (aimPt) meant to carom out to a collector; a passer never scores
-        const scored = !!(!goalie && !aimPt && netPiece && netPiece.kind === "net");
-        legs.push({ type: "fly", shot: true, save: goalie, goal: scored, by: cur.id, x0: launch.x, y0: launch.y, x1: hit.x, y1: hit.y, t0: launchT, t1: tArr });
+        // a shot on a real net: empty net = goal; a designated rebound (aimPt,
+        // carom out to a collector) reads as a save. A passer is a pass, not a
+        // shot on net, so it stays quiet either way.
+        const onNet = !!(netPiece && netPiece.kind === "net");
+        const scored = onNet && !goalie && !aimPt;
+        const saved = goalie || (onNet && !!aimPt);
+        legs.push({ type: "fly", shot: true, save: saved, goal: scored, by: cur.id, x0: launch.x, y0: launch.y, x1: hit.x, y1: hit.y, t0: launchT, t1: tArr });
         // rebound: to the collector's gather spot, else a damped carom. A passer
         // reflects the shot off its face (normal = its facing); a net without a
         // goalie just kicks it back toward the slot.
