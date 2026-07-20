@@ -1418,15 +1418,19 @@ export default function DrillAnimator() {
           : boards.rimAround(here, dist, aim);
       } catch { path = [here]; }
       const end = path[path.length - 1] || here;
-      const hd = dist / REL_MULT;                                  // handle sits closer
-      const hx = here.x + Math.cos(ang) * hd, hy = here.y + Math.sin(ang) * hd;
+      // the grab knob sits on the actual travel path at 1/REL_MULT of its length,
+      // so a rim's handle follows the boards and stays inside the rink (clamped as
+      // a safety) instead of projecting straight into a corner
+      const hpt = path.length > 1 ? samplePoly(path, 1 / REL_MULT)
+        : { x: here.x + Math.cos(ang) * dist / REL_MULT, y: here.y + Math.sin(ang) * dist / REL_MULT };
+      const hc = boards.clampInside(hpt.x, hpt.y);
+      const hx = hc.x, hy = hc.y;
       const col = "#3a8dff";
       out.push(
         <g key={`rel-${p.id}-${aimField}`}>
           <polyline points={path.map(q => `${q.x},${q.y}`).join(" ")} fill="none" stroke={col}
             strokeWidth={0.4} strokeDasharray="2 1.4" opacity={0.7} pointerEvents="none" />
           <circle cx={end.x} cy={end.y} r={1.4} fill="none" stroke={col} strokeWidth={0.35} opacity={0.7} pointerEvents="none" />
-          <line x1={here.x} y1={here.y} x2={hx} y2={hy} stroke={col} strokeWidth={0.3} opacity={0.6} pointerEvents="none" />
           <circle cx={here.x} cy={here.y} r={1} fill={col} opacity={0.8} pointerEvents="none" />
           <circle cx={hx} cy={hy} r={1.9} fill={col} stroke="#fff" strokeWidth={0.4} pointerEvents="none" />
           <circle cx={hx} cy={hy} r={5} fill="transparent" style={{ cursor: "grab" }}
