@@ -605,18 +605,6 @@ export default function DrillAnimator() {
   function displaySwing(p) {
     return p.kind === "player" && animT > 0 ? stickSwing(p.id, animT * totalTime) : 0;
   }
-  // stick-blade reach (degrees) toward a puck pulled across the body to protect
-  // it from a net — pivots the stick only (not the arms), so it reads as
-  // stickhandling. Requires the player to actually be carrying a puck.
-  function stickReach(p) {
-    if (p.kind !== "player" || animT <= 0) return 0;
-    const sw = carriedSwing(p);
-    if (!sw) return 0;
-    const rp = displayPosRaw(p);
-    const carries = pieces.some(q => q.kind === "puck"
-      && Math.hypot(displayPosRaw(q).x - rp.x, displayPosRaw(q).y - rp.y) < 5.5);
-    return carries ? -sw.w * 55 * sw.side : 0;
-  }
   // an auto-reacting defenseman: hold the middle / front of the defended net,
   // stay goal-side of the puck (keep the attacker in front), gap up toward it.
   function dmanPos(p) {
@@ -689,22 +677,34 @@ export default function DrillAnimator() {
     const t = Math.max(0, Math.min(1, (target - cum[i - 1]) / seg));
     return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, a: (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI };
   }
-  // ICON_SCALE-based blade offset a carried puck rides at (forward + strong side)
+  // where a carried puck sits: the drawn blade tip, forward + strong side (icon
+  // units × ICON_SCALE), and the timing blade the puck rides in the plan
+  const TIP_FWD = 5.6 * ICON_SCALE, TIP_LAT = 2.45 * ICON_SCALE;
   const BLADE_FWD = 4.9 * ICON_SCALE, BLADE_LAT = 2.55 * ICON_SCALE;
-  // How far (0..1) a carried puck should be swept across the body to protect it
-  // from a net: rises as the player's strong-side blade nears a net's keep-out.
-  function carriedSwing(player) {
-    if (!netObstacles.length) return null;
-    const pd = displayPos(player);
-    const side = player.hand === "L" ? -1 : 1;
-    const a = ((pd.a || 0) * Math.PI) / 180, px = -Math.sin(a), py = Math.cos(a);
-    const bx = pd.x + px * BLADE_LAT * side, by = pd.y + py * BLADE_LAT * side;  // strong-side blade
-    let w = 0;
+  const bladeAtWorld = (x, y, aDeg, fwd, lat, side) => {
+    const a = (aDeg * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a);
+    return { x: x + c * fwd - s * lat * side, y: y + s * fwd + c * lat * side };
+  };
+  // how much (deg) a puck-carrier opens their body to shield the puck when its
+  // strong-side blade would run into a net's keep-out (whole icon rotates, so
+  // nothing detaches; 0 when clear). `side` = strong side (R:+1 / L:-1)
+  function shieldDelta(x, y, aDeg, side) {
+    if (!netObstacles.length) return 0;
+    const b = bladeAtWorld(x, y, aDeg, TIP_FWD, TIP_LAT, side);
+    let w = 0, near = null, bd = Infinity;
     for (const sh of netObstacles) {
-      const d = Math.hypot(bx - sh.cx, by - sh.cy), R = sh.r + 3.5;
+      const d = Math.hypot(b.x - sh.cx, b.y - sh.cy), R = sh.r + 3;
       if (d < R) { const t = Math.min(1, (R - d) / 4.5); w = Math.max(w, t * t * (3 - 2 * t)); }
+      if (d < bd) { bd = d; near = sh; }
     }
-    return w > 0 ? { w, side, px, py } : null;
+    if (w <= 0 || !near) return 0;
+    // rotate the blade (whole icon) so it points further AWAY from the net
+    const a = (aDeg * Math.PI) / 180;
+    const bladeAng = Math.atan2(Math.sin(a) * TIP_FWD + Math.cos(a) * TIP_LAT * side, Math.cos(a) * TIP_FWD - Math.sin(a) * TIP_LAT * side);
+    let diff = bladeAng - Math.atan2(near.cy - y, near.cx - x);
+    while (diff > Math.PI) diff -= 2 * Math.PI;
+    while (diff < -Math.PI) diff += 2 * Math.PI;
+    return (diff >= 0 ? 1 : -1) * w * 60;   // degrees, tunable
   }
   function displayPos(p) {
     const res = displayPosRaw(p);
@@ -712,35 +712,32 @@ export default function DrillAnimator() {
     // players follow the arc-detour around a net (loose pucks carom via reflection)
     if (p.kind === "player") {
       const rd = routeDetour(p);
+      let x = res.x, y = res.y, a = res.a;
       if (rd) {
         const f = rd.origLen > 0 ? (res.dist || 0) / rd.origLen : 0;
         const s = samplePoly(rd.pts, f);
-        return { ...res, x: s.x, y: s.y, a: p.path.some(sg => sg.dir === "bwd") ? res.a : s.a };
+        x = s.x; y = s.y; a = p.path.some(sg => sg.dir === "bwd") ? res.a : s.a;
       }
-      return res;
+      // open the body to shield a carried puck from a net
+      const side = p.hand === "L" ? -1 : 1;
+      const carries = pieces.some(q => q.kind === "puck"
+        && Math.hypot(displayPosRaw(q).x - x, displayPosRaw(q).y - y) < 5.5);
+      if (carries) a += shieldDelta(x, y, a, side);
+      return { ...res, x, y, a };
     }
-    // a carried puck rides its carrier's blade — follow the carrier's detour, then
-    // sweep across the body (to the weak side and back) to protect it from a net
+    // a carried puck sits on its carrier's blade tip (so it stays on the stick
+    // through the detour + shield, instead of clipping the net)
     if (p.kind === "puck") {
-      let best = null, bd = 5.5;
       for (const q of pieces) {
-        if (q.kind !== "player" || q.defense) continue;   // (defense never carries; also avoids recursion)
-        const rq = displayPosRaw(q);
-        const d = Math.hypot(rq.x - res.x, rq.y - res.y);
-        if (d < bd) { bd = d; best = q; }
-      }
-      if (best) {
-        let x = res.x, y = res.y;
-        const rd = routeDetour(best);
-        if (rd) {
-          const raw = displayPosRaw(best);
-          const f = rd.origLen > 0 ? (raw.dist || 0) / rd.origLen : 0;
-          const s = samplePoly(rd.pts, f);
-          x += s.x - raw.x; y += s.y - raw.y;
+        if (q.kind !== "player" || q.defense) continue;   // (defense never carries; avoids recursion)
+        const raw = displayPosRaw(q);
+        const side = q.hand === "L" ? -1 : 1;
+        const bladeRaw = bladeAtWorld(raw.x, raw.y, raw.a || 0, BLADE_FWD, BLADE_LAT, side);
+        if (Math.hypot(res.x - bladeRaw.x, res.y - bladeRaw.y) < 2.2) {   // this puck is on q's blade
+          const qd = displayPos(q);                                       // shielded carrier
+          const tip = bladeAtWorld(qd.x, qd.y, qd.a || 0, TIP_FWD, TIP_LAT, side);
+          return { ...res, x: tip.x, y: tip.y };
         }
-        const sw = carriedSwing(best);
-        if (sw) { const shift = -sw.w * 2.7 * BLADE_LAT * sw.side; x += sw.px * shift; y += sw.py * shift; }
-        if (x !== res.x || y !== res.y) return { ...res, x, y };
       }
     }
     return res;
@@ -2385,7 +2382,7 @@ export default function DrillAnimator() {
               const fx = iconXf(dp);
               return (
                 <PieceIcon key={p.id} p={p} pos={dp} xf={fx.t} thDeg={fx.th}
-                  selected={p.id === selectedId} swing={displaySwing(p)} reach={stickReach(p)}
+                  selected={p.id === selectedId} swing={displaySwing(p)}
                   dim={animT > 0} onDown={e => pieceDown(e, p.id)}
                   onStickDown={editing && tool !== "draw" && p.kind === "player" && !p.path.length
                     ? e => stickDown(e, p) : undefined} />
