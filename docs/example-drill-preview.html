@@ -961,7 +961,7 @@ function buildAnim(pieces) {
     // a loose puck a player collects sits still at its spot until they reach it
     if (pk.pickup && !pk.carrier) {
       const picker = pieces.find(q => q.id === pk.pickup.to);
-      const T = picker && picker.path.length ? timeAtWp(picker, Math.max(0, Math.min(pk.pickup.at, picker.path.length - 1))) : 0;
+      const T = picker && picker.path.length ? timeAtWp(picker.id, Math.max(0, Math.min(pk.pickup.at, picker.path.length - 1))) : 0;
       if (T > 0) ph.push({ type: "hold", x: pk.x, y: pk.y, t0: 0, t1: T });
       carryStart = T;
     }
