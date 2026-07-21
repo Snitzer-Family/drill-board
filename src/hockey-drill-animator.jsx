@@ -224,6 +224,7 @@ export default function DrillAnimator() {
   const [textError, setTextError] = useState("");
   const [playing, setPlaying] = useState(false);
   const [animT, setAnimT] = useState(0);
+  const [restFade, setRestFade] = useState(1);         // extra splash fade-out that runs while paused/stopped
   const [pace, setPace] = useState(15);
   // routes shown during playback: "player" (routes only), "hide", "all" (+puck/shots)
   const [playRoutes, setPlayRoutes] = useState("player");
@@ -892,6 +893,22 @@ export default function DrillAnimator() {
     return () => cancelAnimationFrame(raf);
   }, [playing]); // eslint-disable-line
 
+  // while playing, the sim's own clock fades the result splash; once paused or
+  // stopped that clock freezes, so drive a real-time fade here so the splash
+  // always fades out completely instead of hanging on screen.
+  useEffect(() => {
+    if (playing) { setRestFade(1); return; }
+    let raf, start = null;
+    const tick = now => {
+      if (start == null) start = now;
+      const f = Math.max(0, 1 - (now - start) / 450);   // fade over ~0.45s of real time
+      setRestFade(f);
+      if (f > 0) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [playing]);
+
   function resetAnim() { animRef.current = 0; setAnimT(0); holdRef.current = 0; loopPendingRef.current = false; nextStepRef.current = 0; setHoldStep(null); }
   // editing while the animation is paused/finished snaps the pieces back to their
   // start positions first — returns true if it consumed the interaction
@@ -1306,17 +1323,25 @@ export default function DrillAnimator() {
     return onArc(Math.atan2(aim.y - net.y, aim.x - net.x), R);
   }
 
-  // airborne height (0..1) of a sauced puck this frame — for the fake-3D lift +
-  // shadow. Peaks at mid-flight, then a small hop as it lands and settles.
+  // airborne height (0..1) of a lofted puck this frame — for the fake-3D lift +
+  // shadow. A `sauce` leg arcs up and back down to land (pass); a `rise` leg is a
+  // shot climbing all the way to the net — it keeps rising to a peak AT the net,
+  // then drops in over a beat.
   function sauceLift(pk) {
     if (animT <= 0 || pk.kind !== "puck") return 0;
     const e = animT * totalTime;
     const plan = getPlan().plans[pk.id];
     if (!plan) return 0;
     for (const leg of plan.legs) {
-      if (leg.type !== "fly" || !leg.sauce) continue;
-      if (e >= leg.t0 && e <= leg.t1) { const u = (e - leg.t0) / ((leg.t1 - leg.t0) || 1); return Math.sin(Math.PI * u); }
-      if (e > leg.t1 && e < leg.t1 + 0.22) { const u = (e - leg.t1) / 0.22; return Math.sin(Math.PI * u) * 0.22; } // landing bounce
+      if (leg.type !== "fly" || (!leg.sauce && !leg.rise)) continue;
+      const span = (leg.t1 - leg.t0) || 1;
+      if (leg.rise) {
+        if (e >= leg.t0 && e <= leg.t1) return Math.sin(((e - leg.t0) / span) * Math.PI / 2);       // climb to a peak at the net
+        if (e > leg.t1 && e < leg.t1 + 0.16) return Math.cos(((e - leg.t1) / 0.16) * Math.PI / 2);  // drop into the net
+      } else {
+        if (e >= leg.t0 && e <= leg.t1) return Math.sin(Math.PI * ((e - leg.t0) / span));           // sauce arc up and down
+        if (e > leg.t1 && e < leg.t1 + 0.22) return Math.sin(Math.PI * ((e - leg.t1) / 0.22)) * 0.22; // landing bounce
+      }
     }
     return 0;
   }
@@ -2841,7 +2866,7 @@ export default function DrillAnimator() {
   // isn't cut off. Stretch-cancelled via the icon frame like a label.
   function renderResultSplash() {
     if (!showResult || aiPlay || animT <= 0) return null;
-    const DUR = 0.9, e = animT * totalTime, finished = animT >= 1;
+    const DUR = 0.9, e = animT * totalTime;
     const { plans } = getPlan();
     // gather every shot result, grouped by which net it hit (left vs right)
     const byNet = new Map();
@@ -2871,7 +2896,7 @@ export default function DrillAnimator() {
     const els = [];
     for (const [side, { L, key }] of byNet) {
       const dt = e - L.t1;
-      if (!finished && (dt < 0 || dt > DUR)) continue;      // faded, no newer shot to replace it
+      if (dt < 0 || dt > DUR) continue;                     // before the shot lands, or fully faded
       const type = L.goal ? "goal" : L.post ? "post" : "grow";
       // pop right at the net the shot is on, floated a touch up-screen so it
       // clears the cage and puck
@@ -2879,24 +2904,23 @@ export default function DrillAnimator() {
       const ax = (netP ? netP.x : L.x1) + ld.x * 8, ay = (netP ? netP.y : L.y1) + ld.y * 8;
       // per-outcome flash: GOAL pops in, tilts back-and-forth, pops out; POST
       // fades in and violently shakes; a miss (save / wide / over) fades in, grows.
-      // Held static once the drill has finished on this result.
+      // restFade drives the fade to zero once the sim is paused/stopped.
       let op = 1, scale = 1, rot = 0, dx = 0, dy = 0;
-      if (!finished) {
-        const inT = 0.1, outT = 0.28;                       // quick in, quick fade out
-        op = dt < inT ? dt / inT : dt > DUR - outT ? Math.max(0, (DUR - dt) / outT) : 1;
-        if (type === "goal") {
-          const eob = f => { const c1 = 1.9, c3 = c1 + 1, g = f - 1; return 1 + c3 * g * g * g + c1 * g * g; };
-          scale = dt < 0.18 ? eob(dt / 0.18) : 1;                          // pop in w/ overshoot
-          if (dt > DUR - outT) scale = 1 + 0.5 * (1 - (DUR - dt) / outT);  // pop out bigger
-          rot = 12 * Math.max(0, 1 - dt / DUR) * Math.sin(dt * 16);        // tilt back and forth
-        } else if (type === "post") {
-          const sd = Math.max(0, 1 - dt / 0.45);                           // shake decays over ~0.45s
-          dx = 1.6 * sd * Math.sin(dt * 60);
-          dy = 1.2 * sd * Math.cos(dt * 67);
-          rot = 7 * sd * Math.sin(dt * 52);
-        } else {
-          scale = 0.85 + 0.5 * (dt / DUR);                                 // fade in + grow
-        }
+      const inT = 0.1, outT = 0.28;                         // quick in, quick fade out
+      op = dt < inT ? dt / inT : dt > DUR - outT ? Math.max(0, (DUR - dt) / outT) : 1;
+      op *= restFade;
+      if (type === "goal") {
+        const eob = f => { const c1 = 1.9, c3 = c1 + 1, g = f - 1; return 1 + c3 * g * g * g + c1 * g * g; };
+        scale = dt < 0.18 ? eob(dt / 0.18) : 1;                          // pop in w/ overshoot
+        if (dt > DUR - outT) scale = 1 + 0.5 * (1 - (DUR - dt) / outT);  // pop out bigger
+        rot = 12 * Math.max(0, 1 - dt / DUR) * Math.sin(dt * 16);        // tilt back and forth
+      } else if (type === "post") {
+        const sd = Math.max(0, 1 - dt / 0.45);                           // shake decays over ~0.45s
+        dx = 1.6 * sd * Math.sin(dt * 60);
+        dy = 1.2 * sd * Math.cos(dt * 67);
+        rot = 7 * sd * Math.sin(dt * 52);
+      } else {
+        scale = 0.85 + 0.5 * (dt / DUR);                                 // fade in + grow
       }
       const fx = iconXf({ x: clampX(ax), y: clampY(ay), a: 0 });
       // GOAL is a hit; SAVE/POST/WIDE/OVER are all misses (post & wide share the
@@ -2904,13 +2928,13 @@ export default function DrillAnimator() {
       const text = L.goal ? "GOAL!" : L.save ? "SAVE!" : L.post ? "POST!" : L.wide ? "WIDE!" : "OVER!";
       const fill = L.goal ? "#ff3b52" : L.save ? "#2b8cff" : L.over ? "#8a5a2b" : "#e0902b";
       const dk = darken(fill, 0.42);
-      const fs = 4.6 / ICON_SCALE;                          // smaller than before
-      const dep = fs * 0.1;                                 // extrusion step
+      const fs = 3.7 / ICON_SCALE;                          // smaller
+      const dep = fs * 0.07;                                 // extrusion step (shallower 3D)
       els.push(
         <g key={`rs-${key}`} transform={fx.t} opacity={op} pointerEvents="none">
           <g transform={`rotate(${-fx.th}) translate(${dx.toFixed(2)} ${dy.toFixed(2)}) rotate(${rot.toFixed(2)}) scale(${scale.toFixed(3)})`}>
-            {/* extruded 3D depth: dark copies stacked down-screen behind the face */}
-            {[5, 4, 3, 2, 1].map(k => (
+            {/* extruded 3D depth: a few dark copies stacked down-screen behind the face */}
+            {[3, 2, 1].map(k => (
               <text key={k} textAnchor="middle" y={fs * 0.34 + k * dep} fontSize={fs} fontWeight={900}
                 fill={dk} style={{ ...LAB, letterSpacing: fs * 0.02 }}>{text}</text>
             ))}

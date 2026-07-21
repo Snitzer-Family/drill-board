@@ -388,9 +388,11 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
         // gliding to a stop — a miss doesn't just die behind the net.
         // ice friction (ft/s^2) and the crawl speed (ft/s) below which it's at rest
         const MISS_FRIC = 62, MISS_STOP = 8;
-        const missOut = (contact, rollDir, flagKey, air, entryV = vShot) => {
+        const missOut = (contact, rollDir, flagKey, air, entryV = vShot, rise = false) => {
           const tArr = launchT + Math.hypot(contact.x - launch.x, contact.y - launch.y) / vShot;
-          legs.push({ type: "fly", shot: true, [flagKey]: true, sauce: air, by: cur.id,
+          // a shot that reaches the net plane (post) climbs into it (rise); a puck
+          // that sails wide/over arcs like a sauce and comes back down to land
+          legs.push({ type: "fly", shot: true, [flagKey]: true, ...(air ? (rise ? { rise: true } : { sauce: true }) : {}), by: cur.id,
             x0: launch.x, y0: launch.y, x1: contact.x, y1: contact.y, t0: launchT, t1: tArr });
           const dm = Math.hypot(rollDir.x, rollDir.y) || 1;
           const poly = boards.slide(contact.x, contact.y, rollDir.x / dm, rollDir.y / dm, 210);
@@ -420,7 +422,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
         if (miss === "post") {
           const postPt = { x: clampX(net.x + px * side * GOAL_HALF), y: clampY(net.y + py * side * GOAL_HALF) };
           const defl = { x: px * side - ux * 0.4, y: py * side - uy * 0.4 };   // reflect off the post
-          return missOut(postPt, defl, "post", airborne, vShot * OD.bounce);
+          return missOut(postPt, defl, "post", airborne, vShot * OD.bounce, true);
         }
         // WIDE: sails just past the post and keeps going into the corner, banking
         if (miss === "wide") {
@@ -447,7 +449,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           const tArr = launchT + Math.hypot(endPt.x - launch.x, endPt.y - launch.y) / vShot;
           // goal=true rides through the rest too: the puck sits BEHIND the net
           // plane, so render (via puckInGoal) sinks it under the cage
-          legs.push({ type: "fly", shot: true, goal: true, sauce: airborne, by: cur.id, x0: launch.x, y0: launch.y, x1: endPt.x, y1: endPt.y, t0: launchT, t1: tArr });
+          legs.push({ type: "fly", shot: true, goal: true, rise: airborne, by: cur.id, x0: launch.x, y0: launch.y, x1: endPt.x, y1: endPt.y, t0: launchT, t1: tArr });
           legs.push({ type: "rest", goal: true, x: endPt.x, y: endPt.y, t0: tArr });
           tBase = tArr;
           return endPt;
@@ -479,8 +481,9 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
         // reaches here on a net is a goalie save or a designated rebound (aimPt)
         // reading as a save. A passer is a pass, not a shot on net, so it stays quiet.
         const saved = (goalie && !isGoal) || (onNet && !!aimPt);
-        // a blocked designated rebound stays flat (its carom is cut off at the net)
-        const flyLeg = { type: "fly", shot: true, save: saved, goal: false, sauce: airborne && !aimPt, by: cur.id, x0: launch.x, y0: launch.y, x1: hit.x, y1: hit.y, t0: launchT, t1: tArr };
+        // a blocked designated rebound stays flat (its carom is cut off at the net);
+        // an airborne save/shot climbs into the net (rise), not a sauce arc
+        const flyLeg = { type: "fly", shot: true, save: saved, goal: false, rise: airborne && !aimPt, by: cur.id, x0: launch.x, y0: launch.y, x1: hit.x, y1: hit.y, t0: launchT, t1: tArr };
         legs.push(flyLeg);
         // a designated rebound whose collection spot sits behind/through the net
         // can never get there — stop the puck dead at the net and break the chain
