@@ -71,6 +71,13 @@ export const STYLES = `
           cursor:pointer; text-align:left; }
         .hd-item.on { background:#1f4fa3; border-color:#1f4fa3; color:#fff; }
         .hd-item.danger { color:#ff8d9c; border-color:#4a2a30; }
+        /* sliced photo icons on the add-tool buttons */
+        .hd-toolitem { padding:6px 10px; }
+        .hd-toolitem .hd-toolimg { width:34px; height:30px; }
+        .hd-toolmini { gap:6px; padding-left:6px; }
+        .hd-toolmini .hd-toolimg { width:22px; height:20px; }
+        .hd-toolimg { object-fit:contain; border-radius:5px; background:#0e131a;
+          flex:0 0 auto; pointer-events:none; box-shadow:inset 0 0 0 1px rgba(255,255,255,0.06); }
         .hd-note { font-size:11.5px; color:#7d8b99; line-height:1.5; }
         .hd-note code { color:#a8c3da; }
         /* hint text lives in the bottom bar */

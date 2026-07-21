@@ -10,6 +10,20 @@ import { ZONES, zoneAt } from "./zones.js";
 import { PieceIcon, Stepper, DiagPanel } from "./icons.jsx";
 import { createTiming } from "./timing.js";
 import { newGame, stepGame } from "./ai-game.js";
+import icoPlayer from "./tool-icons/player.png";
+import icoPuck from "./tool-icons/puck.png";
+import icoCone from "./tool-icons/cone.png";
+import icoNet from "./tool-icons/net.png";
+import icoBumper from "./tool-icons/bumper.png";
+import icoDeker from "./tool-icons/deker.png";
+import icoPasser from "./tool-icons/passer.png";
+import icoTire from "./tool-icons/tire.png";
+
+// photo icons sliced from the equipment sprite, keyed by the add-tool
+const TOOL_ICONS = { player: icoPlayer, playerpuck: icoPlayer, puck: icoPuck, cone: icoCone,
+  net: icoNet, bumper: icoBumper, deker: icoDeker, passer: icoPasser, tire: icoTire };
+const toolImg = kind => TOOL_ICONS[kind]
+  ? <img src={TOOL_ICONS[kind]} alt="" aria-hidden="true" className="hd-toolimg" draggable="false" /> : null;
 import { STYLES } from "./styles.js";
 
 // swatch palette for on-ice text labels (dark ink first — labels sit on light ice)
@@ -2515,16 +2529,16 @@ export default function DrillAnimator() {
       title = "Add here";
       body = (
         <div className="hd-poprow">
-          <button className="hd-mini" onClick={() => addPieceAt("player", popup.pt)}>⛹ Player</button>
-          <button className="hd-mini" onClick={() => addPlayerWithPuck(popup.pt, true)}>⛹● Carrier</button>
-          <button className="hd-mini" onClick={() => addPieceAt("puck", popup.pt)}>● Puck</button>
-          <button className="hd-mini" onClick={() => addPieceAt("cone", popup.pt)}>▲ Cone</button>
-          <button className="hd-mini" onClick={() => addPieceAt("net", popup.pt)}>🥅 Net</button>
-          <button className="hd-mini" onClick={() => addPieceAt("bumper", popup.pt)}>▬ Bumper</button>
-          <button className="hd-mini" onClick={() => addPieceAt("deker", popup.pt)}>π Deker</button>
-          <button className="hd-mini" onClick={() => addPieceAt("passer", popup.pt)}>▭ Passer</button>
+          <button className="hd-mini hd-toolmini" onClick={() => addPieceAt("player", popup.pt)}>{toolImg("player")} Player</button>
+          <button className="hd-mini hd-toolmini" onClick={() => addPlayerWithPuck(popup.pt, true)}>{toolImg("playerpuck")} Carrier</button>
+          <button className="hd-mini hd-toolmini" onClick={() => addPieceAt("puck", popup.pt)}>{toolImg("puck")} Puck</button>
+          <button className="hd-mini hd-toolmini" onClick={() => addPieceAt("cone", popup.pt)}>{toolImg("cone")} Cone</button>
+          <button className="hd-mini hd-toolmini" onClick={() => addPieceAt("net", popup.pt)}>{toolImg("net")} Net</button>
+          <button className="hd-mini hd-toolmini" onClick={() => addPieceAt("bumper", popup.pt)}>{toolImg("bumper")} Bumper</button>
+          <button className="hd-mini hd-toolmini" onClick={() => addPieceAt("deker", popup.pt)}>{toolImg("deker")} Deker</button>
+          <button className="hd-mini hd-toolmini" onClick={() => addPieceAt("passer", popup.pt)}>{toolImg("passer")} Passer</button>
           <button className="hd-mini" onClick={() => addPieceAt("label", popup.pt)}>🇹 Label</button>
-          <button className="hd-mini" onClick={() => addPieceAt("tire", popup.pt)}>⭕ Tire</button>
+          <button className="hd-mini hd-toolmini" onClick={() => addPieceAt("tire", popup.pt)}>{toolImg("tire")} Tire</button>
         </div>
       );
     } else if (popup.type === "piece") {
@@ -3419,16 +3433,16 @@ export default function DrillAnimator() {
       {openMenu === "tools" && (
         <div className="hd-menu br">
           <div className="hd-mh">Add to the ice</div>
-          <button className="hd-item" onClick={() => { setTool("player"); setOpenMenu(null); }}>⛹ Player</button>
-          <button className="hd-item" onClick={() => { setTool("playerpuck"); setOpenMenu(null); }}>⛹● Player with puck</button>
-          <button className="hd-item" onClick={() => { setTool("puck"); setOpenMenu(null); }}>● Puck</button>
-          <button className="hd-item" onClick={() => { setTool("cone"); setOpenMenu(null); }}>▲ Cone</button>
-          <button className="hd-item" onClick={() => { setTool("net"); setOpenMenu(null); }}>🥅 Net</button>
-          <button className="hd-item" onClick={() => { setTool("bumper"); setOpenMenu(null); }}>▬ Bumper</button>
-          <button className="hd-item" onClick={() => { setTool("deker"); setOpenMenu(null); }}>π Deker</button>
-          <button className="hd-item" onClick={() => { setTool("passer"); setOpenMenu(null); }}>▭ Passer</button>
+          <button className="hd-item hd-toolitem" onClick={() => { setTool("player"); setOpenMenu(null); }}>{toolImg("player")} Player</button>
+          <button className="hd-item hd-toolitem" onClick={() => { setTool("playerpuck"); setOpenMenu(null); }}>{toolImg("playerpuck")} Player with puck</button>
+          <button className="hd-item hd-toolitem" onClick={() => { setTool("puck"); setOpenMenu(null); }}>{toolImg("puck")} Puck</button>
+          <button className="hd-item hd-toolitem" onClick={() => { setTool("cone"); setOpenMenu(null); }}>{toolImg("cone")} Cone</button>
+          <button className="hd-item hd-toolitem" onClick={() => { setTool("net"); setOpenMenu(null); }}>{toolImg("net")} Net</button>
+          <button className="hd-item hd-toolitem" onClick={() => { setTool("bumper"); setOpenMenu(null); }}>{toolImg("bumper")} Bumper</button>
+          <button className="hd-item hd-toolitem" onClick={() => { setTool("deker"); setOpenMenu(null); }}>{toolImg("deker")} Deker</button>
+          <button className="hd-item hd-toolitem" onClick={() => { setTool("passer"); setOpenMenu(null); }}>{toolImg("passer")} Passer</button>
           <button className="hd-item" onClick={() => { setTool("label"); setOpenMenu(null); }}>🇹 Label</button>
-          <button className="hd-item" onClick={() => { setTool("tire"); setOpenMenu(null); }}>⭕ Tire</button>
+          <button className="hd-item hd-toolitem" onClick={() => { setTool("tire"); setOpenMenu(null); }}>{toolImg("tire")} Tire</button>
           <button className="hd-item" onClick={() => { resetAnim(); setPlaying(false); setPopup(null); setTool("draw"); setOpenMenu(null); }}>
             ✎ Draw a route
           </button>
