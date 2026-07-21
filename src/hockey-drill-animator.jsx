@@ -740,17 +740,28 @@ export default function DrillAnimator() {
     const g = goaliePos(net, displayPosRaw);
     return mergeDiscs({ cx: sh.cx, cy: sh.cy, r: sh.r }, { cx: g.x, cy: g.y, r: GOALIE_R });
   });
-  // obstacles a given piece's route should detour around (nets fused with their
-  // goalie + parked players, minus itself)
-  // a bumper is a long bar — routes arc around a keep-out disc that encloses it
-  const bumperDiscs = () => bumperShapes(pieces).map(sh => ({ cx: sh.cx, cy: sh.cy, r: sh.r }));
+  // solid props routes curve around: bumpers (a long bar enclosed by a disc),
+  // passers, tires, and dekers. A jump over one lets it sit on the path instead.
+  const propDiscs = () => [
+    ...bumperShapes(pieces).map(sh => ({ cx: sh.cx, cy: sh.cy, r: sh.r })),
+    ...pieces.filter(q => q.kind === "passer").map(q => ({ cx: q.x, cy: q.y, r: 2.6 })),
+    ...pieces.filter(q => q.kind === "tire").map(q => ({ cx: q.x, cy: q.y, r: 2.6 * ICON_SCALE * (q.size || 1) + 0.6 })),
+    ...pieces.filter(q => q.kind === "deker").map(q => ({ cx: q.x, cy: q.y, r: 2.6 })),
+  ];
+  // where a player's route jumps (the waypoint at the start of a `jump` leg)
+  const jumpPointsOf = p => (p && p.kind === "player" ? p.path : [])
+    .map((s, i) => (s.jump ? (i === 0 ? { x: p.x, y: p.y } : { x: p.path[i - 1].x, y: p.path[i - 1].y }) : null))
+    .filter(Boolean);
   const detourObstaclesFor = id => {
     const self = pieces.find(q => q.id === id);
     const mine = self && !self.path.length ? [{ cx: self.x, cy: self.y }] : [];
     const discs = stationaryDiscs.filter(d => !mine.some(m => m.cx === d.cx && m.cy === d.cy));
     const nets = detourNetDiscs();
-    const bumps = bumperDiscs();
-    const all = [...nets, ...bumps, ...discs];
+    // a prop the player jumps over (a jump point sits within it) is skipped, so
+    // it stays on the path and the hop carries them over it
+    const jps = jumpPointsOf(self);
+    const props = propDiscs().filter(d => !jps.some(j => Math.hypot(j.x - d.cx, j.y - d.cy) < d.r + 3));
+    const all = [...nets, ...props, ...discs];
     return all.length ? all : [];
   };
   // A route sampled then re-routed to arc smoothly around any net it crosses.
