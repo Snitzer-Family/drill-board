@@ -1899,14 +1899,16 @@ export default function DrillAnimator() {
   // sitting at the puck's landing point: drag it to set BOTH the direction and
   // the distance of the release; the dashed path previews where the puck goes.
   // (Legacy rim/chip transfers keep a simple direction-only aim ring.)
-  function renderAim(p) {
+  function renderAim(p, force) {
     if (!editing || tool === "draw" || p.kind !== "player") return null;
     // prefer the selected puck's handle when p carries more than one
     const pk = pieces.find(q => q.kind === "puck" && q.id === selectedId && puckChain(q).includes(p.id))
       || pieces.find(q => q.kind === "puck" && puckChain(q).includes(p.id));
     if (!pk) return null;
     // only show the release/aim handle when this player (or its puck) is selected
-    if (p.id !== selectedId && pk.id !== selectedId) return null;
+    // (the loupe passes force=true so the chip/rim path always shows while aiming,
+    // even if grabbing the small handle dropped the selection on touch)
+    if (!force && p.id !== selectedId && pk.id !== selectedId) return null;
     const chain = puckChain(pk);
     const ts = pk.transfers || [];
     const last = chain.length - 1;
@@ -2756,7 +2758,7 @@ export default function DrillAnimator() {
           )}
           {selected && renderHandles(selected)}
           {selected && renderRotateHandle(selected)}
-          {pieces.map(p => <g key={`ca-${p.id}`}>{renderAim(p)}</g>)}
+          {pieces.map(p => <g key={`ca-${p.id}`}>{renderAim(p, true)}</g>)}
           {pieces.map(p => {
             const dp = displayPos(p);
             return (
