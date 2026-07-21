@@ -116,10 +116,12 @@ export default function DrillAnimator() {
   const drag = useRef(null);
   // undo history: coalesced snapshots of `pieces` (a drag = one entry)
   const undoStack = useRef([]);
+  const redoStack = useRef([]);
   const prevPiecesRef = useRef();
   const lastSnapRef = useRef(0);
   const undoingRef = useRef(false);
   const [undoCount, setUndoCount] = useState(0);
+  const [redoCount, setRedoCount] = useState(0);
   const drawRaw = useRef([]);
   const drawTarget = useRef(null);
   const fileRef = useRef(null);
@@ -979,6 +981,8 @@ export default function DrillAnimator() {
     prevPiecesRef.current = pieces;
     if (undoingRef.current) { undoingRef.current = false; return; }
     if (prev === undefined || prev === pieces) return;
+    // a fresh edit invalidates the redo history
+    if (redoStack.current.length) { redoStack.current = []; setRedoCount(0); }
     const now = performance.now();
     if (now - lastSnapRef.current > 130) {
       undoStack.current.push(prev);
@@ -990,10 +994,24 @@ export default function DrillAnimator() {
   function undoLast() {
     if (!undoStack.current.length) return;
     const prev = undoStack.current.pop();
+    redoStack.current.push(pieces);            // current state → redo
+    if (redoStack.current.length > 60) redoStack.current.shift();
+    setRedoCount(redoStack.current.length);
     undoingRef.current = true;
     setPieces(prev);
-    setSelectedId(null); setPopup(null); setOpenMenu(null);
+    setSelectedId(null); setMultiSel(null); setPopup(null); setOpenMenu(null);
     setUndoCount(undoStack.current.length);
+  }
+  function redoLast() {
+    if (!redoStack.current.length) return;
+    const next = redoStack.current.pop();
+    undoStack.current.push(pieces);            // current state → undo
+    if (undoStack.current.length > 60) undoStack.current.shift();
+    setUndoCount(undoStack.current.length);
+    undoingRef.current = true;
+    setPieces(next);
+    setSelectedId(null); setMultiSel(null); setPopup(null); setOpenMenu(null);
+    setRedoCount(redoStack.current.length);
   }
   const updateSeg = (id, i, patch) =>
     update(p => {
@@ -3287,6 +3305,8 @@ export default function DrillAnimator() {
           onClick={() => setOpenMenu(m => (m === "tools" ? null : "tools"))}>✎</button>
         <button className="hd-barbtn" title="Undo last change" disabled={!undoCount}
           onClick={undoLast} style={undoCount ? undefined : { opacity: 0.4 }}>↶</button>
+        <button className="hd-barbtn" title="Redo" disabled={!redoCount}
+          onClick={redoLast} style={redoCount ? undefined : { opacity: 0.4 }}>↷</button>
         {/* play controls live in the bar on desktop (hidden on mobile via CSS) */}
         {!aiPlay && <>
           <button className={`hd-barbtn hd-barplay${loopMode ? " on" : ""}`} title="Loop"
