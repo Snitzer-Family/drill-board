@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo } from "react";
-import { VIEWS, COLORS, vb, APP_VERSION, ICON_SCALE, BUILD_STAMP, DEFAULT_TEXT } from "./constants.js";
+import { VIEWS, COLORS, vb, APP_VERSION, ICON_SCALE, BUILD_STAMP, DEFAULT_TEXT,
+  SAVE_PROB, MISS_POST, MISS_WIDE, MISS_OVER, SHOT_AIR_PROB } from "./constants.js";
 import { parseDrill, serializeDrill, extractDrill } from "./drill-format.js";
 import { drillSvg } from "./drill-svg.js";
 import { clampX, clampY, segEnd, segD, nearestT, splitSeg, zigzagPoints, wigglePoints, convertSeg, fitRoute, evalSeg, rdp, catmullToBezier } from "./geometry.js";
@@ -238,6 +239,10 @@ export default function DrillAnimator() {
   const [detailAnim, setDetailAnim] = useState(true);  // skater stride sway, stick swing, dribble cradle
   const [lineScale, setLineScale] = useState(1);       // route line-thickness multiplier
   const [defaultSpeed, setDefaultSpeed] = useState(1.5); // speed given to newly-added players
+  // tunable shot odds (0..1): goalie save chance; empty-net miss split into
+  // post/wide/over (the remainder is a goal); and how often a shot goes airborne
+  const [shotOdds, setShotOdds] = useState({ save: SAVE_PROB, post: MISS_POST, wide: MISS_WIDE, over: MISS_OVER, air: SHOT_AIR_PROB });
+  const [showAdvanced, setShowAdvanced] = useState(false); // reveal the shot-odds sliders
   const [showZones, setShowZones] = useState(false);   // named ice-area overlay
   const [playSeed, setPlaySeed] = useState(0);         // bumps each play → new save/goal rolls
   const [loopMode, setLoopMode] = useState(false);     // replay the routine continuously
@@ -726,7 +731,7 @@ export default function DrillAnimator() {
   // re-binds to whichever loose puck is actually closest right now. Rendering &
   // editing stay on raw `pieces` (displayPosAt keys plans by id, so it lines up).
   const rpieces = useMemo(() => resolveNearest(pieces), [pieces]);
-  const { getPlan, pieceTime, displayPosAt, stickSwing, waypointTime, puckInGoal } = createTiming({ pieces: rpieces, pace, segRefs, planCache, seed: playSeed, realisticShots, detail: detailAnim });
+  const { getPlan, pieceTime, displayPosAt, stickSwing, waypointTime, puckInGoal } = createTiming({ pieces: rpieces, pace, segRefs, planCache, seed: playSeed, realisticShots, detail: detailAnim, odds: shotOdds });
 
   const totalTime = Math.max(0.1, ...rpieces.map(pieceTime));
   totalRef.current = totalTime;
@@ -4274,6 +4279,39 @@ export default function DrillAnimator() {
             <input type="range" min={6} max={30} step={1} value={pace} style={{ width: "100%" }}
               onChange={e => setPace(parseFloat(e.target.value))} />
           </div>
+          <button className={`hd-item${showAdvanced ? " on" : ""}`} style={{ marginTop: 4 }}
+            onClick={() => setShowAdvanced(v => !v)}>
+            <Icon name="target" size={16} /> {showAdvanced ? "▾" : "▸"} Advanced · shot odds
+          </button>
+          {showAdvanced && (() => {
+            const pct = v => Math.round(v * 100);
+            const goalPct = Math.max(0, 1 - shotOdds.post - shotOdds.wide - shotOdds.over);
+            const odd = (label, key, hint) => (
+              <div style={{ fontSize: 11, color: "#8b99a8", marginTop: 2 }}>
+                {label} <b style={{ color: "#c8d2dc" }}>{pct(shotOdds[key])}%</b>{hint ? ` · ${hint}` : ""}
+                <input type="range" min={0} max={1} step={0.05} value={shotOdds[key]} style={{ width: "100%" }}
+                  onChange={e => setShotOdds(o => ({ ...o, [key]: parseFloat(e.target.value) }))} />
+              </div>
+            );
+            return (
+              <div style={{ opacity: realisticShots ? 1 : 0.5 }}>
+                {!realisticShots && <div style={{ fontSize: 11, color: "#c98b3a", marginTop: 2 }}>Turn on “Realistic shots” for these to apply.</div>}
+                {odd("Goalie save", "save", "else a goal on net")}
+                <div className="hd-mh" style={{ marginTop: 4 }}>Empty net · miss odds</div>
+                {odd("Off the post", "post")}
+                {odd("Wide", "wide")}
+                {odd("Over the net", "over")}
+                <div style={{ fontSize: 11, color: "#8b99a8", marginTop: 2 }}>
+                  Goal <b style={{ color: goalPct > 0 ? "#3ecf7a" : "#e05a5a" }}>{pct(goalPct)}%</b>
+                  {goalPct > 0 ? " — the remainder" : " — misses exceed 100%"}
+                </div>
+                <div className="hd-mh" style={{ marginTop: 4 }}>Any shot</div>
+                {odd("Airborne", "air", "sauce-style rise + shadow")}
+                <button className="hd-mini" style={{ marginTop: 4 }}
+                  onClick={() => setShotOdds({ save: SAVE_PROB, post: MISS_POST, wide: MISS_WIDE, over: MISS_OVER, air: SHOT_AIR_PROB })}>Reset to defaults</button>
+              </div>
+            );
+          })()}
           <div className="hd-note">Preferences apply to this session and to how new pieces are added.</div>
         </div>
       )}

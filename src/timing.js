@@ -53,7 +53,9 @@ const DRIB_FORE = 0.55 * ICON_SCALE;       // fore-aft cradle (ft)
 const DRIB_LAT = 0.8 * ICON_SCALE;         // lateral sweep (ft)
 const DRIB_SWING = 7;                       // matching stick sweep (deg)
 
-export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, realisticShots = true, detail = true }) {
+export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, realisticShots = true, detail = true, odds }) {
+  // tunable shot odds (0..1), falling back to the constant defaults
+  const OD = { save: SAVE_PROB, post: MISS_POST, wide: MISS_WIDE, over: MISS_OVER, air: SHOT_AIR_PROB, ...(odds || {}) };
   // deterministic per-shot randomness — stable within a playback, varies as the
   // play seed changes so replays can produce different saves/goals
   const hashStr = s => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return h; };
@@ -365,16 +367,16 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
         let miss = null;                                      // "post" | "wide" | "over"
         if (emptyFree && realisticShots) {
           const r = rand(`${pk.id}:${legs.length}:out`);
-          if (r < MISS_POST) miss = "post";
-          else if (r < MISS_POST + MISS_WIDE) miss = "wide";
-          else if (r < MISS_POST + MISS_WIDE + MISS_OVER) miss = "over";
+          if (r < OD.post) miss = "post";
+          else if (r < OD.post + OD.wide) miss = "wide";
+          else if (r < OD.post + OD.wide + OD.over) miss = "over";
         }
-        const isGoal = goalie && !aimPt ? rand(`${pk.id}:${legs.length}`) >= SAVE_PROB
+        const isGoal = goalie && !aimPt ? rand(`${pk.id}:${legs.length}`) >= OD.save
           : emptyFree ? !miss : false;
         // flat or airborne (sauce-style rise + shadow) — an over-the-net miss must
         // leave the ice; everything else rolls. Deflect props (tire/passer/bumper)
         // and blocked rebounds stay flat so their carom geometry reads cleanly.
-        const airborne = miss === "over" || (realisticShots && onNet && rand(`${pk.id}:${legs.length}:air`) < SHOT_AIR_PROB);
+        const airborne = miss === "over" || (realisticShots && onNet && rand(`${pk.id}:${legs.length}:air`) < OD.air);
 
         // a missed shot flies to a contact/landing point (carrying the outcome flag
         // for the splash + air lift), then rolls & banks off the boards like a rim,
