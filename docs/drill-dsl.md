@@ -142,6 +142,7 @@ is the piece's starting spot (so `shoot=0` / `chip=0` releases before skating).
 | `CARRY` / `PASS` / `SHOT` | Puck speed class for a puck's own route leg |
 | `FWD` / `BWD` | Skate forward / backward |
 | `STOP <n>` | Pause `n` seconds at the start of this leg |
+| `WAIT <player> <pt>` | Pause at the start of this leg until `<player>` reaches point `<pt>` (a trigger pause — after they pass/shoot/arrive). In the app: *Pause here → Time* or pick a player, then *until … reaches …*. |
 | `RATE <n>` | Speed multiplier for this leg |
 | `NAME <word>` | Name this waypoint (underscores → spaces) for presentation text |
 | `DESC "<text>"` | A free-text description for this waypoint |

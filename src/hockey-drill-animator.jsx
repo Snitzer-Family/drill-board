@@ -992,8 +992,14 @@ export default function DrillAnimator() {
   // starts the chain (carrier/pickup) the whole chain goes; if it's a transfer
   // target, that action and everything downstream (incl. the terminal) is dropped
   const scrubRefs = (list, goneId) => list.map(q => {
-    // a player whose start-trigger was the removed player just starts normally
-    if (q.kind === "player" && q.wait && q.wait.on === goneId) return { ...q, wait: null };
+    // a player whose start-trigger / pause-trigger was the removed player loses it
+    if (q.kind === "player") {
+      let nq = q;
+      if (q.wait && q.wait.on === goneId) nq = { ...nq, wait: null };
+      if ((q.path || []).some(s => s.waitOn && s.waitOn.on === goneId))
+        nq = { ...nq, path: q.path.map(s => (s.waitOn && s.waitOn.on === goneId ? { ...s, waitOn: null } : s)) };
+      if (nq !== q) return nq;
+    }
     if (q.kind !== "puck") return q;
     if (q.carrier === goneId || (q.pickup && q.pickup.to === goneId)) return { ...q, ...looseFields };
     const idx = (q.transfers || []).findIndex(t => t.to === goneId);
@@ -2323,7 +2329,7 @@ export default function DrillAnimator() {
     const hd = (cx, cy, r, props) => hdot(cx, cy, r, props, yf);
     const els = [];
     p.path.forEach((s, i) => {
-      if (!(s.stop > 0)) return;
+      if (!(s.stop > 0) && !(s.waitOn && s.waitOn.on)) return;   // a fixed pause OR a trigger pause
       const pt = segEnd(p, i - 1);
       els.push(
         <g key={`st${p.id}${i}`} opacity={0.9} pointerEvents="none">
@@ -2876,10 +2882,43 @@ export default function DrillAnimator() {
           )}
           {next ? (
             <>
-              <div className="hd-poprow">
-                <span>Pause here</span>
-                <Stepper value={next.stop || 0} onChange={v => updateSeg(p.id, i + 1, { stop: v })} />
-              </div>
+              {/* Pause here: a fixed time, or hold until another player reaches a
+                  waypoint (i.e. after they pass / shoot / arrive there) */}
+              {(() => {
+                const others = p.kind === "player" ? pieces.filter(q => q.kind === "player" && q.id !== p.id && q.path.length > 0) : [];
+                const w = next.waitOn;
+                const trig = w && pieces.find(q => q.id === w.on && q.kind === "player");
+                return (
+                  <>
+                    <div className="hd-poprow">
+                      <span>Pause here</span>
+                      <button className={`hd-mini${!w ? " on" : ""}`} onClick={() => updateSeg(p.id, i + 1, { waitOn: null })}>Time</button>
+                      {others.map(o => (
+                        <button key={o.id} className={`hd-mini${w && w.on === o.id ? " on" : ""}`}
+                          onClick={() => updateSeg(p.id, i + 1, { waitOn: w && w.on === o.id ? null : { on: o.id, at: Math.max(0, o.path.length - 1) }, stop: 0 })}>
+                          {nameOf(o.id)}
+                        </button>
+                      ))}
+                    </div>
+                    {!w ? (
+                      <div className="hd-poprow">
+                        <span>for</span>
+                        <Stepper value={next.stop || 0} onChange={v => updateSeg(p.id, i + 1, { stop: v })} />
+                        <span style={{ fontSize: 11, color: "#8b99a8" }}>seconds</span>
+                      </div>
+                    ) : trig && trig.path.length > 0 && (
+                      <div className="hd-poprow">
+                        <span>until {nameOf(w.on)} reaches</span>
+                        <button className={`hd-mini${w.at < 0 ? " on" : ""}`} onClick={() => updateSeg(p.id, i + 1, { waitOn: { ...w, at: -1 } })}>start</button>
+                        {trig.path.map((s, wi) => (
+                          <button key={wi} className={`hd-mini${w.at === wi ? " on" : ""}`}
+                            onClick={() => updateSeg(p.id, i + 1, { waitOn: { ...w, at: wi } })}>{wi + 2}</button>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
               <div className="hd-poprow">
                 <span>Speed after ×{(next.rate || 1).toFixed(2)}</span>
                 <input type="range" min={0.5} max={2} step={0.05} value={next.rate || 1} style={{ flex: 1, minWidth: 70 }}

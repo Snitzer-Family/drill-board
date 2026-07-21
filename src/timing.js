@@ -48,12 +48,17 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
   // their route (until a trigger — another player reaching a waypoint — fires)
   let currentStartWait = {};
   const startWaitOf = p => currentStartWait[p.id] || 0;
+  // trigger pause: a waypoint can pause the player until another player reaches
+  // a waypoint. Resolved to an extra hold (seconds) on that segment, keyed
+  // "playerId/segIndex", so it flows through the same machinery as a fixed stop.
+  let currentTrigPause = {};
+  const trigPauseOf = (p, i) => currentTrigPause[p.id + "/" + i] || 0;
 
   function routeTimeW(p, warp, upto = Infinity) {
     let t = startWaitOf(p);
     for (let i = 0; i < p.path.length; i++) {
       if (i > upto) break;
-      t += (p.path[i].stop || 0) + holdAt(p, i) + effMove(p, p.path[i], i, warp);
+      t += (p.path[i].stop || 0) + trigPauseOf(p, i) + holdAt(p, i) + effMove(p, p.path[i], i, warp);
     }
     return t;
   }
@@ -72,7 +77,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
 
   function getPlan() {
     const pc = planCache.current;
-    if (pc.key === pieces && pc.pace === pace && pc.sig === lenSig && pc.seed === seed) { currentHolds = pc.holds || {}; currentStartWait = pc.startWait || {}; return pc; }
+    if (pc.key === pieces && pc.pace === pace && pc.sig === lenSig && pc.seed === seed) { currentHolds = pc.holds || {}; currentStartWait = pc.startWait || {}; currentTrigPause = pc.trigPause || {}; return pc; }
     const warp = {};
     const plans = {};
     const rel = {};
@@ -95,6 +100,34 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
       if (!changed) break;
     }
     currentStartWait = sw;
+    // trigger pauses: a waypoint holds until another player reaches a waypoint.
+    // The pause length = max(0, trigger-arrival − our-arrival at that waypoint).
+    // rawArr includes start-waits + fixed stops + already-resolved trig pauses.
+    const tp = {};
+    const rawArr = (p, at) => {
+      let t = (sw[p.id] || 0);
+      for (let i = 0; i < p.path.length; i++) { if (i > at) break; t += (p.path[i].stop || 0) + (tp[p.id + "/" + i] || 0) + effMove(p, p.path[i], i, warp); }
+      return t;
+    };
+    for (let pass = 0; pass <= pieces.length + 1; pass++) {
+      let changed = false;
+      pieces.forEach(p => {
+        if (p.kind !== "player" || !p.path.length) return;
+        p.path.forEach((s, i) => {
+          if (!s.waitOn || !s.waitOn.on) return;
+          const trig = pieces.find(q => q.id === s.waitOn.on && q.kind === "player");
+          if (!trig || trig.id === p.id) return;
+          const at = s.waitOn.at == null ? trig.path.length - 1 : Math.max(-1, Math.min(s.waitOn.at, trig.path.length - 1));
+          const trigT = at < 0 ? (sw[trig.id] || 0) : rawArr(trig, at);
+          const arriveT = rawArr(p, i - 1);        // the pause sits at the start of segment i (= the prior waypoint)
+          const dur = Math.max(0, trigT - arriveT);
+          const key = p.id + "/" + i;
+          if (Math.abs((tp[key] || 0) - dur) > 1e-6) { tp[key] = dur; changed = true; }
+        });
+      });
+      if (!changed) break;
+    }
+    currentTrigPause = tp;
     const netSh = solidShapes(pieces);        // solid obstacles pucks carom off (nets + bumpers)
     const bumpSh = bumperShapes(pieces);      // a flat pass across a bumper auto-lifts (sauces) over it
     pieces.forEach(pk => {
@@ -454,7 +487,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
       plans[pk.id] = { legs, final: cur.id };
       rel[pk.id] = relT;
     });
-    planCache.current = { key: pieces, pace, sig: lenSig, seed, warp, plans, rel, holds: {}, startWait: sw };
+    planCache.current = { key: pieces, pace, sig: lenSig, seed, warp, plans, rel, holds: {}, startWait: sw, trigPause: tp };
     currentHolds = {};
 
     // blue-line entry holds: a "hold=line" player waits at their last neutral
@@ -605,7 +638,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
     let dist = 0;
     for (let i = 0; i < p.path.length; i++) {
       const s = p.path[i];
-      const stop = s.stop || 0;
+      const stop = (s.stop || 0) + trigPauseOf(p, i);
       if (e < stop) return { ...prev, a: segTangentAngle(prev, s, 0.02) + flip(s), v: 0, dist };
       e -= stop;
       const mt = effMove(p, s, i, warp);
