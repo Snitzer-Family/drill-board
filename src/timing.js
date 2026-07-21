@@ -376,7 +376,13 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           else if (r < OD.post + OD.wide) miss = "wide";
           else if (r < OD.post + OD.wide + OD.over) miss = "over";
         }
-        const isGoal = goalie && !aimPt ? rand(`${pk.id}:${legs.length}`) >= OD.save
+        // a rebound collector set up within reach of the net (≤15 ft) — the only
+        // thing that forces a save when realistic shots are off
+        const nearCollect = !!aimPt && Math.hypot(aimPt.x - net.x, aimPt.y - net.y) <= 15;
+        // realistic OFF ("simple"): every shot on a net scores — even past a goalie
+        // — unless a near-net rebound collect is set up, which forces a save out.
+        const isGoal = !realisticShots ? (onNet && !nearCollect)
+          : goalie && !aimPt ? rand(`${pk.id}:${legs.length}`) >= OD.save
           : emptyFree ? !miss : false;
         // flat or airborne (sauce-style rise + shadow) — an over-the-net miss must
         // leave the ice; everything else rolls. Deflect props (tire/passer/bumper)
@@ -464,6 +470,9 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           legs.push({ type: "fly", shot: true, goal: true, rise: airborne, by: cur.id, x0: launch.x, y0: launch.y, x1: endPt.x, y1: endPt.y, t0: launchT, t1: tArr });
           legs.push({ type: "rest", goal: true, x: endPt.x, y: endPt.y, t0: tArr });
           tBase = tArr;
+          // if a collector was expecting this shot's rebound (aimPt) but it went in
+          // anyway, end the chain so the puck stays buried (no teleport to them)
+          if (aimPt) chainBlocked = true;
           return endPt;
         }
 
