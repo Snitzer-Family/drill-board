@@ -1671,29 +1671,6 @@ export default function DrillAnimator() {
     steps.sort((a, b) => a.ord - b.ord);
     return steps;
   }
-  // numbered "Steps here" panel for a spot — sits under the action buttons
-  function stepsPanel(p, i) {
-    const steps = stepsAt(p, i);
-    if (!steps.length) return null;
-    return (
-      <div style={{ margin: "4px 0", padding: "6px 8px", background: "rgba(120,140,160,0.12)", borderRadius: 8 }}>
-        <div className="hd-mh" style={{ marginBottom: 4 }}>Waypoint {i < 0 ? 1 : i + 2} — steps</div>
-        {steps.map((st, n) => (
-          <div key={n} style={{ display: "flex", alignItems: "center", gap: 8, padding: "2px 0" }}>
-            <span style={{ minWidth: 16, textAlign: "right", fontWeight: 700, color: "#8b99a8", fontVariantNumeric: "tabular-nums" }}>{n + 1}</span>
-            <span title={st.warn || undefined} style={{ flex: 1, fontSize: 12.5,
-              textDecoration: st.warn ? "line-through" : "none", color: st.warn ? "#c98a2b" : undefined }}>
-              {st.warn ? "⚠ " : ""}{st.text}
-            </span>
-            <button className="hd-mini danger" style={{ padding: "2px 7px", minHeight: 0 }} title="Delete this step" onClick={st.del}>✕</button>
-          </div>
-        ))}
-        {steps.some(s => s.warn) && (
-          <div style={{ fontSize: 10.5, color: "#c98a2b", marginTop: 3 }}>⚠ crossed-out steps won't complete in the animation</div>
-        )}
-      </div>
-    );
-  }
   function setTransfer(pkId, stage, tr) {
     update(q => {
       if (q.id !== pkId) return q;
@@ -1796,6 +1773,24 @@ export default function DrillAnimator() {
       const ts = (q.transfers || []).map((t, k) => (k === trIdx ? { ...t, recvAt: idx } : t));
       return { ...q, transfers: ts };
     });
+  }
+  // manual "Receive Pass": the chosen source player passes to `receiverId` at
+  // waypoint `at`. Appends the pass onto a puck the source holds; if they hold
+  // none, hand them a fresh one so the feed still happens.
+  function doReceiveFrom(receiverId, at, srcId) {
+    const src = pieces.find(q => q.id === srcId && q.kind === "player");
+    if (!src) return;
+    const passAt = src.path.length ? src.path.length - 1 : -1;   // source releases from their route end / spot
+    const pk = heldPuckAt(src, passAt) || pieces.find(q => q.kind === "puck" && puckChain(q).includes(src.id));
+    const tr = { at: passAt, to: receiverId, recvAt: at < 0 ? null : at, kind: "pass", by: src.id };
+    if (pk) appendTransfer(pk.id, tr);
+    else {
+      const np = makePiece("puck", { x: src.x, y: src.y });
+      np.carrier = src.id;
+      np.transfers = [{ ...tr, by: undefined }];
+      setPieces(ps => [...ps, np]);
+    }
+    setSelectedId(receiverId);
   }
 
   function addPointAt(id, segIdx, pt) {
@@ -2877,213 +2872,169 @@ export default function DrillAnimator() {
     const p = pieces.find(q => q.id === popup.id);
     if (!p && popup.type !== "add") return null;
 
-    // which net/passer a shot aims at (default: nearest). A bumper or tire can
-    // also be picked — the shot deflects off it (bumper: mirror; tire: by angle)
-    // stage == null → the puck's terminal shot (pk.net); a stage targets that
-    // rebound transfer's OWN net, so two shots in a chain aim independently
-    const netRow = (pk, stg = null) => {
-      const targets = pieces.filter(q => q.kind === "net" || q.kind === "passer" || q.kind === "bumper" || q.kind === "tire");
-      const curNet = stg != null ? ((pk.transfers || [])[stg] || {}).net : pk.net;
-      const setNet = id => {
-        if (stg != null) update(q => q.id !== pk.id ? q
-          : { ...q, transfers: (q.transfers || []).map((t, s) => s === stg ? { ...t, net: id } : t) });
-        else updateById(pk.id, { net: id });
-      };
-      return (
-        <div className="hd-poprow">
-          <span>Rebound at</span>
-          <select className={`hd-select${curNet ? " on" : ""}`} value={curNet || "nearest"}
-            onChange={e => setNet(e.target.value === "nearest" ? null : e.target.value)}>
-            <option value="nearest">Nearest net</option>
-            {targets.map(n => <option key={n.id} value={n.id}>{n.id + (n.kind === "bumper" ? " · bumper" : n.kind === "tire" ? " · tire" : n.kind === "passer" ? " · passer" : "")}</option>)}
-          </select>
-        </div>
-      );
-    };
-    // Unified "Collect puck" toggle for player p at point i (-1 = standing).
-    // Grabs the nearest loose puck; toggling off reverts it to a release.
-    const collectRow = (p, i) => {
-      // a collect from the standing spot (i = -1) of a routed player lands at
-      // their route end, so match that here too
-      const endAt = p.path.length ? p.path.length - 1 : 0;
-      const spotHit = a => a === i || (i < 0 && (a == null || a === 0 || a === endAt));
-      let hit = null;
-      for (const q of pieces) {
-        if (q.kind !== "puck") continue;
-        if (q.pickup && q.pickup.to === p.id && spotHit(q.pickup.at)) { hit = { pk: q, kind: "pickup" }; break; }
-        const ts = q.transfers || [];
-        const s = ts.length - 1;
-        const t = ts[s];
-        if (t && t.to === p.id && spotHit(t.recvAt) && (t.kind === "rim" || t.kind === "chip" || t.kind === "shot")) {
-          hit = { pk: q, kind: "tr", stage: s, tr: t }; break;
-        }
-      }
-      // Collect is always offered (a default action at every spot); if there's
-      // no loose puck here, clicking just reports that there's nothing to grab
-      const undo = () => {
-        if (hit.kind === "pickup") { updateById(hit.pk.id, { pickup: null }); return; }
-        const tr = hit.tr, field = tr.kind === "rim" ? "rimAt" : tr.kind === "chip" ? "chipAt" : "shotAt";
-        update(q => q.id !== hit.pk.id ? q : { ...q, transfers: (q.transfers || []).slice(0, hit.stage),
-          [field]: tr.at, ...(tr.kind === "rim" ? { rimAim: tr.aim != null ? tr.aim : null } : tr.kind === "chip" ? { chipAim: tr.aim != null ? tr.aim : null } : {}) });
-      };
-      return (
-        <div className="hd-poprow">
-          <button className={`hd-mini${hit ? " on" : ""}`}
-            onClick={() => (hit ? undo() : collectPuckAt(p.id, i))}>
-            <Icon name={hit ? "check" : "collect"} size={15} /> Collect puck
-          </button>
-          <span style={{ fontSize: 11, color: "#8b99a8" }}>grabs the nearest loose puck here</span>
-        </div>
-      );
-    };
-    // pass/shoot/collect controls for player p at possession point i. Used at
-    // route points (point popup) and, with i=0, in a stationary player's popup
-    // (a route-less carrier releases immediately, so its "point" is just 0).
-    // Always-available action buttons for player p at spot i. Every action can be
-    // added at any spot; if p doesn't actually hold the puck there, the step is
-    // still recorded (tagged with its intended actor) and shows flagged in the
-    // Steps list rather than being hidden.
-    const chainControls = (p, i) => {
-      // target the puck p holds at THIS spot (so shoot/pass act on the right one
-      // when p is in more than one chain), then any chain mentioning p, else any
-      let pk = heldPuckAt(p, i) || pieces.find(q => q.kind === "puck" && puckChain(q).includes(p.id));
-      if (!pk) pk = pieces.find(q => q.kind === "puck");
-      if (!pk) return null;
-      const chain = puckChain(pk);
-      const ts = pk.transfers || [];
-      // p's possession stage that owns this spot (a give-and-go can hold twice);
-      // stage < 0 means p doesn't validly hold the puck here
-      let stage = -1;
-      for (let s = 0; s < chain.length; s++) {
-        if (chain[s] !== p.id) continue;
-        const out = ts[s];
-        if (out && out.at === i) { stage = s; break; }
-        if (!out || i <= out.at) stage = s;
-      }
-      const holds = stage >= 0;
-      const from = holds ? ts[stage] : null;
-      const incoming = holds && stage >= 1 ? ts[stage - 1] : null;
-      const others = pieces.filter(q => q.kind === "player" && q.id !== p.id);
-      const passers = pieces.filter(q => q.kind === "passer");
-      const isPass = to => from && from.kind === "pass" && from.at === i && !from.via && from.to === to;
-      const isVia = ps => from && from.kind === "pass" && from.at === i && from.via === ps;
-      const isTerm = field => holds && stage === ts.length && pk[field] === i && (!pk.termBy || pk.termBy === p.id);
-      const doPass = to => {
-        if (holds) setTransfer(pk.id, stage, isPass(to) ? null : { at: i, to, recvAt: null, kind: "pass" });
-        else appendTransfer(pk.id, { at: i, to, recvAt: null, kind: "pass", by: p.id });
-      };
-      // pass into a stationary passer and get it right back — a give-and-go that
-      // returns to this player at the same spot (default) or a chosen waypoint
-      const doVia = ps => {
-        const tr = { at: i, to: p.id, recvAt: i < 0 ? null : i, kind: "pass", via: ps };
-        if (holds) setTransfer(pk.id, stage, isVia(ps) ? null : tr);
-        else appendTransfer(pk.id, { ...tr, by: p.id });
-      };
-      // pass target as a dropdown value: p:<player> or v:<passer give-and-go>
-      const passVal = from && from.kind === "pass" && from.at === i ? (from.via ? "v:" + from.via : "p:" + from.to) : "";
-      const onPassSel = v => {
-        if (!v) { if (from && from.kind === "pass" && from.at === i) setTransfer(pk.id, stage, null); return; }
-        if (v[0] === "v") doVia(v.slice(2)); else doPass(v.slice(2));
-      };
-      // sauce (raised) pass: the puck arcs up and over ice obstacles, bouncing
-      // when it lands — toggled on the active pass at this waypoint
-      const isSauce = !!(from && from.kind === "pass" && from.at === i && from.sauce);
-      const doSauce = () => update(q => q.id !== pk.id ? q
-        : { ...q, transfers: (q.transfers || []).map((t, s) => s === stage ? { ...t, sauce: !t.sauce } : t) });
-      const doTerm = field => {
-        if (holds && stage === ts.length) setTerminal(pk.id, field, i);
-        else updateById(pk.id, { shotAt: null, rimAt: null, chipAt: null, [field]: i, termBy: p.id,
-          ...(field === "rimAt" ? { rimDist: pk.rimDist || REL_DEFAULT.rimAt } : field === "chipAt" ? { chipDist: pk.chipDist || REL_DEFAULT.chipAt } : {}) });
-      };
-      // shooting names its target the same way passing names a receiver: a row of
-      // nets/passers/bumpers/tires (plus "Nearest"). Tapping one sets the shot AND
-      // its target in one go; tapping the active one clears the shot.
-      const shootTargets = pieces.filter(q => q.kind === "net" || q.kind === "passer" || q.kind === "bumper" || q.kind === "tire");
-      const isShootAt = tid => isTerm("shotAt") && (tid == null ? !pk.net : pk.net === tid);
-      const doShootAt = tid => {
-        if (isShootAt(tid)) { updateById(pk.id, { shotAt: null, rimAt: null, chipAt: null }); return; } // toggle off
-        update(q => q.id !== pk.id ? q
-          : { ...q, shotAt: i, rimAt: null, chipAt: null, rimAim: null, chipAim: null, net: tid,
-              ...(holds && stage === ts.length ? {} : { termBy: p.id }) });
-      };
-      const shootVal = isTerm("shotAt") ? (pk.net || "nearest") : "";
-      const onShootSel = v => {
-        if (!v) { if (isTerm("shotAt")) updateById(pk.id, { shotAt: null, rimAt: null, chipAt: null }); return; }
-        doShootAt(v === "nearest" ? null : v);
-      };
-      const tgtLabel = t => t.id + (t.kind === "bumper" ? " · bumper" : t.kind === "tire" ? " · tire" : t.kind === "passer" ? " · passer" : "");
+    // ── Unified per-waypoint Action panel ─────────────────────────────────
+    // an ordered, editable list of steps at ONE spot (player p, waypoint i;
+    // i=-1 = the start/standing spot). Context-aware: with no puck only Receive
+    // Pass / Collect Puck are offered; once holding, Pass / Shoot / Chip / Hard
+    // Rim open up. Projects the existing puck-chain model via stepsAt and edits
+    // it with the same mutators — timing/DSL unchanged.
+    const GAIN_TYPES = [["receive", "Receive Pass"], ["collect", "Collect Puck"]];
+    const RELEASE_TYPES = [["pass", "Pass"], ["shoot", "Shoot"], ["chip", "Chip"], ["rim", "Hard Rim"]];
+    const isGain = t => t === "receive" || t === "collect";
+    const shootTargets2 = pieces.filter(q => q.kind === "net" || q.kind === "passer" || q.kind === "bumper" || q.kind === "tire");
+    const tgtLabel2 = t => t.id + (t.kind === "bumper" ? " · bumper" : t.kind === "tire" ? " · tire" : t.kind === "passer" ? " · passer" : "");
+    const typeOfStep = st => st.role === "receive" ? "receive"
+      : st.role === "collect" || st.role === "pickup" ? "collect"
+      : st.kind === "pass" ? "pass" : st.kind === "shot" ? "shoot" : st.kind === "rim" ? "rim" : "chip";
+
+    const passSubRows = (p, i, st) => {
+      const pk = st.pk, tr = (pk.transfers || [])[st.stage] || {};
+      const rec = pieces.find(q => q.id === tr.to && q.kind === "player");
+      const isSauce = !!tr.sauce;
+      const doSauce = () => update(q => q.id !== pk.id ? q : { ...q, transfers: (q.transfers || []).map((x, s) => s === st.stage ? { ...x, sauce: !x.sauce } : x) });
       return (
         <>
-          {(others.length > 0 || passers.length > 0) && (
+          {rec && rec.path.length >= 2 && (
             <div className="hd-poprow">
-              <span>Pass {pk.id} to</span>
-              <select className={`hd-select${passVal ? " on" : ""}`} value={passVal} onChange={e => onPassSel(e.target.value)}>
-                <option value="">— pick a target —</option>
-                {others.map(o => <option key={o.id} value={"p:" + o.id}>{nameOf(o.id)}</option>)}
-                {passers.map(ps => <option key={ps.id} value={"v:" + ps.id}>{nameOf(ps.id)} — give &amp; go ⟲</option>)}
-              </select>
+              <span style={{ fontSize: 11 }}>{tr.via ? "back at" : "caught at"}</span>
+              <button className={`hd-mini${tr.recvAt == null ? " on" : ""}`} onClick={() => setRecvAt(pk.id, st.stage, null)}>auto</button>
+              {rec.path.map((s, wi) => <button key={wi} className={`hd-mini${tr.recvAt === wi ? " on" : ""}`} onClick={() => setRecvAt(pk.id, st.stage, tr.recvAt === wi ? null : wi)}>{wi + 2}</button>)}
             </div>
           )}
-          {/* WHICH waypoint the receiver catches it at — for a via give-and-go the
-              receiver is this player, so it picks where they get it back */}
-          {from && from.kind === "pass" && from.at === i && (() => {
-            const rec = pieces.find(q => q.id === from.to && q.kind === "player");
-            if (!rec || rec.path.length < 2) return null;
-            return (
-              <div className="hd-poprow">
-                <span>{from.via ? "Get it back at" : "Receive at"}</span>
-                <button className={`hd-mini${from.recvAt == null ? " on" : ""}`} onClick={() => setRecvAt(pk.id, stage, null)}>auto</button>
-                {rec.path.map((s, wi) => (
-                  <button key={wi} className={`hd-mini${from.recvAt === wi ? " on" : ""}`}
-                    onClick={() => setRecvAt(pk.id, stage, from.recvAt === wi ? null : wi)}>{wi + 2}</button>
-                ))}
-              </div>
-            );
-          })()}
-          {/* a sauce pass lifts the puck over ice obstacles and bounces on landing */}
-          {from && from.kind === "pass" && from.at === i && (
-            <div className="hd-poprow">
-              <button className={`hd-mini${isSauce ? " on" : ""}`} onClick={doSauce}>
-                <Icon name={isSauce ? "check" : "sauce"} size={15} /> Sauce pass
-              </button>
-              <span style={{ fontSize: 11, color: "#8b99a8" }}>arcs up &amp; over obstacles</span>
-            </div>
-          )}
-          {/* Shoot names its target from a dropdown, like Pass names a receiver */}
           <div className="hd-poprow">
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><Icon name="net" size={15} /> Shoot at</span>
-            <select className={`hd-select${shootVal ? " on" : ""}`} value={shootVal} onChange={e => onShootSel(e.target.value)}>
-              <option value="">— don't shoot —</option>
-              <option value="nearest">Nearest net</option>
-              {shootTargets.map(t => <option key={t.id} value={t.id}>{tgtLabel(t)}</option>)}
-            </select>
+            <button className={`hd-mini${isSauce ? " on" : ""}`} onClick={doSauce}><Icon name={isSauce ? "check" : "sauce"} size={14} /> Sauce pass</button>
           </div>
-          <div className="hd-poprow">
-            <button className={`hd-mini${isTerm("rimAt") ? " on" : ""}`} onClick={() => doTerm("rimAt")}>
-              <Icon name={isTerm("rimAt") ? "check" : "rim"} size={15} /> Hard rim
-            </button>
-            <button className={`hd-mini${isTerm("chipAt") ? " on" : ""}`} onClick={() => doTerm("chipAt")}>
-              <Icon name={isTerm("chipAt") ? "check" : "chip"} size={15} /> Chip
-            </button>
-          </div>
-          {(isTerm("rimAt") || isTerm("chipAt")) && (
-            <div className="hd-poprow">
-              <span style={{ fontSize: 11, color: "#8b99a8" }}>drag the handle on the ice to aim &amp; set distance</span>
-            </div>
-          )}
-          {/* a rebound shot (a handoff to a collector) still picks its target here */}
-          {(from && from.kind === "shot" && from.at === i) && netRow(pk, stage)}
-          {incoming && incoming.kind === "pass" && (
-            <div className="hd-poprow">
-              <button className={`hd-mini${incoming.recvAt === i ? " on" : ""}`}
-                onClick={() => setRecvAt(pk.id, stage - 1, incoming.recvAt === i ? null : i)}>
-                {incoming.recvAt === i ? "✓ Receiving here" : "Receive pass here"}
-              </button>
-            </div>
-          )}
         </>
       );
     };
+
+    const ActionSteps = (p, i) => {
+      const steps = stepsAt(p, i);
+      const others = pieces.filter(q => q.kind === "player" && q.id !== p.id);
+      const passers = pieces.filter(q => q.kind === "passer");
+      const carriesIn = i < 0 ? pieces.some(q => q.kind === "puck" && q.carrier === p.id) : carrySegs(p).has(i);
+      const defaultPasser = () => ((others.find(o => pieces.some(q => q.kind === "puck" && puckChain(q).includes(o.id))) || others[0] || {}).id) || null;
+      const heldRelease = () => {
+        const pk = heldPuckAt(p, i) || pieces.find(q => q.kind === "puck" && puckChain(q).includes(p.id)) || pieces.find(q => q.kind === "puck");
+        if (!pk) return null;
+        const ch = puckChain(pk);
+        return { pk, last: ch[ch.length - 1] === p.id };
+      };
+      const addPass = to => { const h = heldRelease(); if (h) appendTransfer(h.pk.id, { at: i, to, recvAt: null, kind: "pass", ...(h.last ? {} : { by: p.id }) }); };
+      const addTerminal = (field, net) => {
+        const h = heldRelease(); if (!h) return;
+        updateById(h.pk.id, { shotAt: null, rimAt: null, chipAt: null, [field]: i,
+          ...(field === "shotAt" ? { net: net || null, rimAim: null, chipAim: null } : {}),
+          ...(field === "rimAt" ? { rimDist: h.pk.rimDist || REL_DEFAULT.rimAt } : field === "chipAt" ? { chipDist: h.pk.chipDist || REL_DEFAULT.chipAt } : {}),
+          ...(h.last ? {} : { termBy: p.id }) });
+      };
+      const createType = t => {
+        if (t === "receive") { const src = defaultPasser(); if (src) doReceiveFrom(p.id, i, src); else flash("Add another player to pass from"); }
+        else if (t === "collect") collectPuckAt(p.id, i);
+        else if (t === "pass") { const to = (others[0] || {}).id; if (to) addPass(to); else flash("Add another player to pass to"); }
+        else if (t === "shoot") addTerminal("shotAt", null);
+        else if (t === "chip") addTerminal("chipAt");
+        else if (t === "rim") addTerminal("rimAt");
+      };
+      const changeType = (st, t) => {
+        if (t === "none") { st.del(); return; }
+        const cur = typeOfStep(st);
+        if (t === cur) return;
+        const pk = st.pk;
+        if (!isGain(cur) && !isGain(t)) {                       // release/terminal ↔ release/terminal, same stage/puck
+          const stage = st.role === "terminal" ? (pk.transfers || []).length : st.stage;
+          if (t === "pass") setTransfer(pk.id, stage, { at: i, to: (others[0] || {}).id, recvAt: null, kind: "pass" });
+          else {
+            const field = t === "shoot" ? "shotAt" : t === "rim" ? "rimAt" : "chipAt";
+            update(q => q.id !== pk.id ? q : { ...q, transfers: (q.transfers || []).slice(0, stage),
+              shotAt: null, rimAt: null, chipAt: null, rimAim: null, chipAim: null, termBy: null, [field]: i,
+              ...(field === "rimAt" ? { rimDist: q.rimDist || REL_DEFAULT.rimAt } : field === "chipAt" ? { chipDist: q.chipDist || REL_DEFAULT.chipAt } : {}) });
+          }
+          return;
+        }
+        st.del(); createType(t);                               // crossing gain↔release (or gain↔gain): rebuild
+      };
+      const secondary = (st) => {
+        const t = typeOfStep(st), pk = st.pk;
+        if (t === "pass") {
+          const tr = (pk.transfers || [])[st.stage] || {};
+          const val = tr.via ? "v:" + tr.via : "p:" + tr.to;
+          return (
+            <select className="hd-select on" value={val} onChange={e => { const v = e.target.value;
+              if (v[0] === "v") setTransfer(pk.id, st.stage, { at: i, to: p.id, recvAt: i < 0 ? null : i, kind: "pass", via: v.slice(2) });
+              else setTransfer(pk.id, st.stage, { ...tr, to: v.slice(2), via: undefined, at: i, kind: "pass" }); }}>
+              {others.map(o => <option key={o.id} value={"p:" + o.id}>{nameOf(o.id)}</option>)}
+              {passers.map(ps => <option key={ps.id} value={"v:" + ps.id}>{nameOf(ps.id)} — give &amp; go ⟲</option>)}
+            </select>
+          );
+        }
+        if (t === "shoot") {
+          const term = st.role === "terminal";
+          const curNet = term ? pk.net : ((pk.transfers || [])[st.stage] || {}).net;
+          const setNet = id => term ? updateById(pk.id, { net: id })
+            : update(q => q.id !== pk.id ? q : { ...q, transfers: (q.transfers || []).map((x, s) => s === st.stage ? { ...x, net: id } : x) });
+          return (
+            <select className="hd-select on" value={curNet || "nearest"} onChange={e => setNet(e.target.value === "nearest" ? null : e.target.value)}>
+              <option value="nearest">Nearest net</option>
+              {shootTargets2.map(n => <option key={n.id} value={n.id}>{tgtLabel2(n)}</option>)}
+            </select>
+          );
+        }
+        if (t === "receive") {
+          const src = st.via || st.src || "";
+          return (
+            <select className="hd-select on" value={src} onChange={e => { const v = e.target.value; st.del(); if (v) doReceiveFrom(p.id, i, v); }}>
+              {[...others, ...passers].map(o => <option key={o.id} value={o.id}>{nameOf(o.id)}</option>)}
+            </select>
+          );
+        }
+        if (t === "collect") return <span style={{ fontSize: 11, color: "#8b99a8" }}>nearest loose puck</span>;
+        return null;                                            // chip / rim → on-ice handle (hint row below)
+      };
+      // possession walk: which types each row / the add control may offer
+      let has = carriesIn;
+      const rows = steps.map(st => { const before = has;
+        has = (st.role === "receive" || st.role === "collect" || st.role === "pickup"); return { st, opts: before ? RELEASE_TYPES : GAIN_TYPES }; });
+      const addOpts = has ? RELEASE_TYPES : GAIN_TYPES;
+      const typeSelect = (value, options, onChange, key) => (
+        <select key={key} className={`hd-select${value !== "none" ? " on" : ""}`} style={{ flex: "0 1 auto", minWidth: 96 }} value={value} onChange={e => onChange(e.target.value)}>
+          <option value="none">No Action</option>
+          {options.map(([v, lbl]) => <option key={v} value={v}>{lbl}</option>)}
+        </select>
+      );
+      const addRow = key => (
+        <div key={key} className="hd-poprow">
+          <span style={{ minWidth: 46, fontSize: 11, color: "#8b99a8" }}>＋ Add</span>
+          {typeSelect("none", addOpts, t => t !== "none" && createType(t), key)}
+        </div>
+      );
+      return (
+        <div style={{ margin: "6px 0", padding: "7px 8px", background: "rgba(120,140,160,0.12)", borderRadius: 8 }}>
+          <div className="hd-mh" style={{ marginBottom: 5 }}>Action — {i < 0 ? "start" : `waypoint ${i + 2}`}</div>
+          {rows.length > 0 && addRow("addtop")}
+          {rows.map(({ st, opts }, n) => {
+            const t = typeOfStep(st);
+            return (
+              <div key={n}>
+                <div className="hd-poprow" style={{ opacity: st.warn ? 0.65 : 1 }}>
+                  <span style={{ minWidth: 46, fontWeight: 700, color: "#8b99a8", fontSize: 12 }}>Step {n + 1}</span>
+                  {typeSelect(t, opts, v => changeType(st, v), n)}
+                  {secondary(st)}
+                  <button className="hd-mini danger" style={{ padding: "3px 8px", minHeight: 0 }} title="Remove step" onClick={st.del}>✕</button>
+                </div>
+                {st.warn && <div className="hd-poprow"><span style={{ fontSize: 10.5, color: "#c98a2b" }}>⚠ {st.warn}</span></div>}
+                {t === "pass" && passSubRows(p, i, st)}
+                {(t === "chip" || t === "rim") && <div className="hd-poprow"><span style={{ fontSize: 10.5, color: "#8b99a8" }}>drag the on-ice handle to aim &amp; set distance</span></div>}
+              </div>
+            );
+          })}
+          {rows.length === 0
+            ? <div className="hd-poprow"><span style={{ minWidth: 46, fontWeight: 700, color: "#8b99a8", fontSize: 12 }}>Step 1</span>{typeSelect("none", addOpts, t => t !== "none" && createType(t), "s1")}</div>
+            : addRow("addbot")}
+        </div>
+      );
+    };
+
     let anchorPt, body, title;
     if (popup.type === "add") {
       if (!popup.pt) return null;
@@ -3285,12 +3236,8 @@ export default function DrillAnimator() {
                 <span style={{ fontSize: 11, color: "#8b99a8" }}>holds the slot, tracks the puck goal-side</span>
               </div>
               {/* collect a loose puck at the player's standing spot */}
-              {collectRow(p, -1)}
-              {/* action buttons are always available on the player itself (i=-1 =
-                  their standing / start spot); a route-less carrier releases from
-                  here, and any step can be added even if it can't happen */}
-              {pieces.some(q => q.kind === "puck") && chainControls(p, -1)}
-              {stepsPanel(p, -1)}
+              {/* the unified Action panel at the player's standing/start spot */}
+              {ActionSteps(p, -1)}
             </>
           )}
           {p.kind === "puck" && chainEvents(p).length > 0 && chainList(p, null)}
@@ -3512,9 +3459,7 @@ export default function DrillAnimator() {
           ) : (
             <div className="hd-poprow" style={{ color: "#8b99a8", fontSize: 12 }}>End of route</div>
           )}
-          {p.kind === "player" && collectRow(p, i)}
-          {p.kind === "player" && chainControls(p, i)}
-          {p.kind === "player" && stepsPanel(p, i)}
+          {p.kind === "player" && ActionSteps(p, i)}
           <div className="hd-poprow">
             <button className="hd-mini danger" onClick={() => deleteSeg(p.id, i)}>Delete point</button>
           </div>
