@@ -249,9 +249,13 @@ export default function DrillAnimator() {
   const [loupe, setLoupe] = useState(null);
   const [popOff, setPopOff] = useState({ x: 0, y: 0 });
   const [popState, setPopState] = useState("mid");   // pinned popup size: "min" (header) | "mid" (small) | "max" (full)
-  // once the user drags a resize handle, the popup detaches to an explicit
-  // top/left/width/height box (px, relative to .hd-canvas) so it grows freely
-  const [popBox, setPopBox] = useState(null);
+  // popup position + size are decoupled (both px, relative to .hd-canvas):
+  //   popPos {top,left} | null  → null follows the auto edge-anchor
+  //   popDim {w, h|null} | null → null is the default width + auto height; set
+  //     when the user resizes, and preserved across Prev/Next so their sizing sticks
+  const [popPos, setPopPos] = useState(null);
+  const [popDim, setPopDim] = useState(null);
+  const [placeToken, setPlaceToken] = useState(0);   // bumped to run clear-space placement after a fresh open renders
   const [stageSize, setStageSize] = useState({ w: 800, h: 500 });
 
   const svgRef = useRef(null);
@@ -304,12 +308,23 @@ export default function DrillAnimator() {
   // clear last — both must see it on a preserved Prev/Next step)
   useLayoutEffect(() => {
     if (preservePopPos.current) return;                 // Prev/Next kept it in place
-    setPopState("mid"); setPopBox(null);
+    // fresh open: reset to the auto edge-anchor at default size, then (next
+    // render) run clear-space placement now that the real content is measurable
+    setPopState("mid"); setPopPos(null); setPopDim(null);
+    if (popup && popup.type !== "add") setPlaceToken(t => t + 1);
   }, [popup?.type, popup?.id, popup?.seg]);
   useEffect(() => {
     if (preservePopPos.current) { preservePopPos.current = false; return; }
     setPopOff({ x: 0, y: 0 });
   }, [popup?.type, popup?.id, popup?.seg, popup?.pt?.x, popup?.pt?.y]);
+  // clear-space placement: after a fresh open renders at its anchor (default
+  // size), measure it and, if it covers routes/players, move it to open space —
+  // preferring a fully clear spot, else one that avoids the working chain
+  useLayoutEffect(() => {
+    if (!placeToken) return;
+    const pos = computePlacement();
+    if (pos) setPopPos(pos);
+  }, [placeToken]);
 
   // keep popouts fully inside the ice box: after every render, measure the
   // card against its container and pull it back in with a corrective margin
@@ -380,7 +395,8 @@ export default function DrillAnimator() {
     const box = { top: r.top - pr.top, left: r.left - pr.left, w: r.width, h: r.height };
     popResize.current = { sx: e.clientX, sy: e.clientY, box, mode };
     setPopOff({ x: 0, y: 0 });                          // popOff is folded into box.top/left
-    setPopBox(box);
+    setPopPos({ top: box.top, left: box.left });        // detach position
+    setPopDim({ w: box.w, h: box.h });                  // explicit size the user now owns
   }
   function popResizeMove(e) {
     const d = popResize.current;
@@ -390,7 +406,7 @@ export default function DrillAnimator() {
       ? Math.max(190, Math.min(b.w + (e.clientX - d.sx), canvasW - 16))
       : b.w;
     const h = Math.max(56, Math.min(b.h + (e.clientY - d.sy), canvasH - 16));
-    setPopBox({ top: b.top, left: b.left, w, h });
+    setPopDim({ w, h });                                 // position stays put; only size changes
   }
   function popResizeEnd() { popResize.current = null; }
 
@@ -431,20 +447,79 @@ export default function DrillAnimator() {
     return routeClientPoints(p).some(c =>
       c.x >= r.left - pad && c.x <= r.right + pad && c.y >= r.top - pad && c.y <= r.bottom + pad);
   }
-  // Prev/Next through a piece's waypoints: if the popup is already clear of the
-  // route, freeze it exactly where it is and just swap in the new content;
-  // otherwise fall through to the usual reposition-opposite-the-item behavior.
+  // the piece ids of the "chain" the popup is working on — the piece itself plus
+  // any puck that involves it and every player that puck touches
+  function workingChainIds(id) {
+    const set = new Set([id]);
+    pieces.forEach(pk => {
+      if (pk.kind !== "puck") return;
+      const players = [pk.carrier, pk.pickup && pk.pickup.to, ...(pk.transfers || []).map(t => t.to)].filter(Boolean);
+      if (pk.id === id || players.includes(id)) { set.add(pk.id); players.forEach(x => set.add(x)); }
+    });
+    return set;
+  }
+  // obstacle points (client px) for placement — route samples + icon centres of
+  // every piece, split into the working chain vs everything else
+  function obstaclePoints(chain) {
+    const chainPts = [], otherPts = [];
+    pieces.forEach(p => {
+      if (p.kind === "mark" || p.kind === "label") return;
+      const bucket = chain.has(p.id) ? chainPts : otherPts;
+      const c = rinkToClient(p.x, p.y);
+      if (c) bucket.push(c);
+      if (p.path && p.path.length) routeClientPoints(p).forEach(q => bucket.push(q));
+    });
+    return { chainPts, otherPts };
+  }
+  // choose a clear-space position for the popup at its just-measured size. Prefer
+  // a fully clear spot; failing that, one that covers other pieces but NOT the
+  // chain being edited. Returns {top,left} in offsetParent px, or null to keep
+  // the responsive edge-anchor (when the natural spot is already clear).
+  function computePlacement() {
+    const el = popRef.current;
+    if (!el || !popup || popup.type === "add") return null;
+    const par = el.offsetParent || el.parentElement;
+    if (!par) return null;
+    const cr = par.getBoundingClientRect();
+    const r0 = el.getBoundingClientRect();               // the popup as rendered at its anchor
+    const w = r0.width, h = r0.height, pad = 8;
+    const { chainPts, otherPts } = obstaclePoints(workingChainIds(popup.id));
+    const hits = (left, top, pts) => pts.some(c =>
+      c.x >= left - pad && c.x <= left + w + pad && c.y >= top - pad && c.y <= top + h + pad);
+    // region the popup may occupy: inside the ice, clear of the top dock band and
+    // the bottom play bar
+    const TOP = cr.top + 74, BOT = cr.bottom - 66, LEFT = cr.left + 8, RIGHT = cr.right - 8;
+    const clampL = x => Math.max(LEFT, Math.min(x, RIGHT - w));
+    const clampT = y => Math.max(TOP, Math.min(y, Math.max(TOP, BOT - h)));
+    const cands = [{ left: r0.left, top: r0.top, anchor: true }];       // the natural spot first
+    [TOP, (TOP + BOT - h) / 2, BOT - h].forEach(t =>
+      [LEFT, (LEFT + RIGHT - w) / 2, RIGHT - w].forEach(l =>
+        cands.push({ left: clampL(l), top: clampT(t), anchor: false })));
+    const acx = r0.left + w / 2, acy = r0.top + h / 2;
+    let best = null;
+    cands.forEach(c => {
+      const rank = hits(c.left, c.top, chainPts) ? 2 : hits(c.left, c.top, otherPts) ? 1 : 0;
+      const score = rank * 1e7 + Math.hypot(c.left + w / 2 - acx, c.top + h / 2 - acy);  // stay near the item on ties
+      if (!best || score < best.score) best = { ...c, score };
+    });
+    if (!best || best.anchor) return null;               // natural spot wins → keep the responsive anchor
+    return { top: best.top - cr.top, left: best.left - cr.left };
+  }
+  // Prev/Next through a piece's waypoints: keep the user's size, and keep the
+  // popup put when it isn't covering its own route; otherwise re-place it into
+  // open space (preferring not to cover the chain it's editing).
   function navPopup(target) {
     setSelectedId(target.id);
     const el = popRef.current;
-    if (el && !popupCoversRoute(target.id)) {
+    if (el) {
+      preservePopPos.current = true;                     // preserve size + our chosen position this step
       const par = el.offsetParent || el.parentElement;
-      const pr = par.getBoundingClientRect();
+      const cr = par.getBoundingClientRect();
       const r = el.getBoundingClientRect();
-      preservePopPos.current = true;
-      // width frozen, height left auto (h:null) so new content fits without a jump
-      setPopBox({ top: r.top - pr.top, left: r.left - pr.left, w: r.width, h: null });
+      if (!popupCoversRoute(target.id)) setPopPos({ top: r.top - cr.top, left: r.left - cr.left });
+      else setPopPos(computePlacement());                // null → responsive anchor
       setPopOff({ x: 0, y: 0 });
+      // popDim is left untouched, so a user's resize carries to the next step
     }
     setPopup(target);
   }
@@ -3437,9 +3512,9 @@ export default function DrillAnimator() {
       );
     }
 
-    // a frozen/resized popup keeps its own px position, so a briefly off-screen
-    // anchor (e.g. a far waypoint during Prev/Next) must not blank it out
-    const a = popoutAnchor(anchorPt) || (popBox ? { lx: 50, ty: 50 } : null);
+    // a positioned popup keeps its own px spot, so a briefly off-screen anchor
+    // (e.g. a far waypoint during Prev/Next) must not blank it out
+    const a = popoutAnchor(anchorPt) || (popPos ? { lx: 50, ty: 50 } : null);
     if (!a) return null;
     // EVERY popup pins to the edge OPPOSITE the item it belongs to so it opens
     // completely clear of what's being selected/edited (and its handles) — no
@@ -3462,21 +3537,22 @@ export default function DrillAnimator() {
           maxHeight: collapsed ? "none"
             : maxed ? "calc(100% - env(safe-area-inset-top) - var(--hd-pintop, 78px) - var(--hd-b) - 60px)"
             : "38%" };
-    // once resized, the popup is a free box anchored top-left; header drag still
-    // rides on top via popOff (which we zeroed on detach, then re-accumulates)
-    // once resized/frozen the popup is a free box anchored top-left; a Prev/Next
-    // freeze keeps position + width but leaves height auto (h:null) so the new
-    // waypoint's content fits without a jump, capped by the same preset maxHeight
-    const boxed = !collapsed && popBox;
-    const finalStyle = boxed
-      ? { left: `${popBox.left}px`, top: `${popBox.top}px`, bottom: "auto",
-          width: `${popBox.w}px`,
-          ...(popBox.h != null
-            ? { height: `${popBox.h}px`, maxHeight: "none" }
-            : { maxHeight: style.maxHeight }),
-          transform: `translate(${popOff.x}px, ${popOff.y}px)` }
-      : style;
-    const usePreset = () => setPopBox(null);   // presets re-anchor to an edge
+    // layer explicit position (popPos) and size (popDim) over the anchor style —
+    // they're independent, so a placed/frozen popup can still carry the user's
+    // resize, and an auto-height (popDim.h == null) freeze grows to fit content
+    const finalStyle = { ...style };
+    if (!collapsed && popPos) {
+      finalStyle.left = `${popPos.left}px`;
+      finalStyle.top = `${popPos.top}px`;
+      finalStyle.bottom = "auto";
+      finalStyle.transform = `translate(${popOff.x}px, ${popOff.y}px)`;   // px position: no centering
+    }
+    if (!collapsed && popDim) {
+      finalStyle.width = `${popDim.w}px`;
+      if (popDim.h != null) { finalStyle.height = `${popDim.h}px`; finalStyle.maxHeight = "none"; }
+    }
+    const boxed = !collapsed && (popPos || popDim);
+    const usePreset = () => { setPopPos(null); setPopDim(null); };   // presets re-anchor at default size
     return (
       <div className="hd-pop pinned" style={finalStyle} ref={popRef}
         onScroll={syncPopScroll} onPointerDown={e => e.stopPropagation()}>
