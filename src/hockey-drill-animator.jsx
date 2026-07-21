@@ -193,9 +193,6 @@ export default function DrillAnimator() {
     if (!el || !box) return;
     el.style.marginLeft = "0px";
     el.style.marginTop = "0px";
-    // pinned (player/waypoint) popups are already clamped to the top and scroll
-    // internally — skip the pull-in correction so they don't flick on open
-    if (el.classList.contains("pinned")) return;
     const r = el.getBoundingClientRect();
     const b = box.getBoundingClientRect();
     const M = 4;
@@ -2385,7 +2382,6 @@ export default function DrillAnimator() {
     const dash = m.style === "dashed" ? `${(w * 2.6).toFixed(2)} ${(w * 1.9).toFixed(2)}`
       : m.style === "dotted" ? `0.02 ${(w * 2).toFixed(2)}` : undefined;
     const line = pts.map(q => `${clampX(q.x)},${clampY(q.y)}`).join(" ");
-    const edPts = hit && editing && m.id === selectedId && markEdit;
     return (
       <g key={`mk-${m.id}`}>
         <polyline points={line} fill="none" stroke={m.color} strokeWidth={w} strokeDasharray={dash}
@@ -2400,18 +2396,25 @@ export default function DrillAnimator() {
             strokeLinecap="round" strokeLinejoin="round" style={{ cursor: "grab" }}
             onPointerDown={e => pieceDown(e, m.id)} />
         )}
-        {edPts && m.pts.map((q, i) => (
-          <g key={`mp-${m.id}-${i}`}>
-            {hdot(clampX(q.x), clampY(q.y), 1.7, {
-              fill: "#ffd447", stroke: "#14171a", strokeWidth: 0.35, pointerEvents: "none" }, yFix)}
-            {/* a larger transparent target so a fingertip can grab the point */}
-            {hdot(clampX(q.x), clampY(q.y), 4.5, {
-              fill: "transparent", style: { cursor: "grab" },
-              onPointerDown: e => markPtDown(e, m.id, i) }, yFix)}
-          </g>
-        ))}
       </g>
     );
+  }
+  // the mark's draggable control points live in a TOP overlay (like route
+  // handles) so a fingertip target isn't buried under the drill layer
+  function renderMarkHandles(yf = yFix) {
+    if (!editing || !markEdit) return null;
+    const m = pieces.find(q => q.id === selectedId && q.kind === "mark");
+    if (!m || !m.pts) return null;
+    return m.pts.map((q, i) => (
+      <g key={`mp-${m.id}-${i}`}>
+        {hdot(clampX(q.x), clampY(q.y), 1.7, {
+          fill: "#ffd447", stroke: "#14171a", strokeWidth: 0.35, pointerEvents: "none" }, yf)}
+        {/* a larger transparent target so a fingertip can grab the point */}
+        {hdot(clampX(q.x), clampY(q.y), 4.5, {
+          fill: "transparent", style: { cursor: "grab" },
+          onPointerDown: e => markPtDown(e, m.id, i) }, yf)}
+      </g>
+    ));
   }
   function renderLabels() {
     const canEdit = editing && tool !== "draw";
@@ -3224,21 +3227,24 @@ export default function DrillAnimator() {
     let up = roomAbove >= roomBelow;
     let style;
     if (minable) {
-      // player/waypoint popups pin to the TOP of the ice, clear of the piece +
-      // its handles so curve handles are reachable; drag the header to move it.
-      // The mobile play dock floats top-centre (~62px tall), so drop the header
-      // just BELOW it — never directly behind the transport controls.
+      // player/waypoint popups pin to the edge OPPOSITE the piece so they open
+      // completely clear of it (and its handles) — no need to move/minimize just
+      // to see the waypoint. Piece in the top half → popup pins along the bottom
+      // (above the play bar); piece in the bottom half → pins along the top
+      // (below the floating play dock). Drag the header to move it; it's bounded.
       up = false;
       const lx = Math.max(16, Math.min(84, a.lx));
-      style = {
-        left: `${lx}%`,
-        top: `calc(env(safe-area-inset-top) + var(--hd-pintop, 78px))`,
-        transform: `translateX(-50%) translate(${popOff.x}px, ${popOff.y}px)`,
-        // header only / compact-and-scrollable / fills the height down to the bar
-        maxHeight: collapsed ? "none"
-          : maxed ? "calc(100% - env(safe-area-inset-top) - var(--hd-pintop, 78px) - 62px)"
-          : "38%",
-      };
+      const atBottom = a.ty < 50;
+      const common = { left: `${lx}%`, transform: `translateX(-50%) translate(${popOff.x}px, ${popOff.y}px)` };
+      style = atBottom
+        ? { ...common, bottom: `calc(var(--hd-b) + 60px)`,
+            maxHeight: collapsed ? "none"
+              : maxed ? "calc(100% - var(--hd-b) - 60px - env(safe-area-inset-top) - var(--hd-pintop, 78px))"
+              : "38%" }
+        : { ...common, top: `calc(env(safe-area-inset-top) + var(--hd-pintop, 78px))`,
+            maxHeight: collapsed ? "none"
+              : maxed ? "calc(100% - env(safe-area-inset-top) - var(--hd-pintop, 78px) - var(--hd-b) - 60px)"
+              : "38%" };
     } else {
       const maxH = Math.max(22, (up ? roomAbove : roomBelow) - gap);
       const shift = a.lx < 22 ? "-12%" : a.lx > 78 ? "-88%" : "-50%";
@@ -3345,6 +3351,7 @@ export default function DrillAnimator() {
           )}
           {puckPathNodes(true)}
           {selected && renderHandles(selected, 1)}
+          {renderMarkHandles(1)}
           {selected && renderRotateHandle(selected, 1)}
           {pieces.map(p => <g key={`ca-${p.id}`}>{renderAim(p, true, 1)}</g>)}
           {pieces.filter(p => p.kind !== "label" && p.kind !== "mark").map(p => {
@@ -3573,6 +3580,7 @@ export default function DrillAnimator() {
             )}
 
             {pieces.map(p => <g key={`h-${p.id}`}>{renderHandles(p)}</g>)}
+            {renderMarkHandles()}
 
             {/* nets sit on the ice (bottom); players paint above pucks so a
                carried puck can't steal the grab; rotate ring is drawn last */}
