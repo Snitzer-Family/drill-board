@@ -294,8 +294,8 @@ function chain(pk, byId, pieces) {
   const nets = pieces.filter(q => q.kind === "net" || q.kind === "passer");
   const targets = pieces.filter(q => q.kind === "net" || q.kind === "passer" || q.kind === "bumper" || q.kind === "tire");
   const netSh = solidShapes(pieces);
-  const shotNet = launch => {
-    if (pk.net) { const n = targets.find(x => x.id === pk.net); if (n) return { x: n.x, y: n.y }; }  // a bumper/tire can be an explicit target
+  const shotNet = (launch, netId = pk.net) => {
+    if (netId) { const n = targets.find(x => x.id === netId); if (n) return { x: n.x, y: n.y }; }  // this shot's own target
     if (nets.length) return nets.reduce((a, b) => (Math.hypot(b.x - launch.x, b.y - launch.y) < Math.hypot(a.x - launch.x, a.y - launch.y) ? b : a));
     return launch.x < 100 ? NET_L : NET_R;
   };
@@ -327,7 +327,7 @@ function chain(pk, byId, pieces) {
       out.push(chainLine([launch, pPt], "pass"), chainLine([pPt, anchor], "pass"));
     }
     else if (tr.kind === "shot") {
-      const net = shotNet(launch);
+      const net = shotNet(launch, tr.net != null ? tr.net : null);
       // if the carom to the collector would pass through a net, it can't get
       // there — flag that rebound red instead of drawing it as a clean carom
       const rbMode = segCrossesNet(net, anchor, netSh) ? "rebound-x" : "rebound";

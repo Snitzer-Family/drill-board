@@ -73,9 +73,11 @@ export function parseDrill(text) {
             } else if (key === "rebound") {
               // shot whose carom is collected by a player: shoot at <pt>, they
               // gather at their @<pt> (else route end / where they stand)
-              const m4 = /^(\d+):([^@\s]+)(?:@(\d+))?$/.exec(v);
+              // rebound=<pt>:<to>[@<recvPt>][>net] — >net gives this rebound shot its own target
+              const m4 = /^(\d+):([^@\s>]+)(?:@(\d+))?(?:>(\S+))?$/.exec(v);
               if (m4) transfers.push({ at: parseInt(m4[1], 10) - 1, to: m4[2],
-                recvAt: m4[3] ? parseInt(m4[3], 10) - 1 : null, kind: "shot" });
+                recvAt: m4[3] ? parseInt(m4[3], 10) - 1 : null, kind: "shot",
+                ...(m4[4] ? { net: m4[4] } : {}) });
             } else if (key === "shoot") {
               const n = parseInt(v, 10);
               if (!isNaN(n)) shotAt = n - 1;
@@ -195,7 +197,7 @@ export function serializeDrill(rink, pieces, title = "", desc = "") {
     if (p.kind === "puck") for (const t of (p.transfers || [])) { if (t.by && t.by !== lastCarrier) break; vts.push(t); lastCarrier = t.to; }
     const head = p.kind === "puck" && (p.carrier || p.pickup);
     const pas = head && vts.length
-      ? vts.map(t => ` ${kw(t)}=${t.at + 1}:${t.to}${t.recvAt != null ? "@" + (t.recvAt + 1) : ""}${t.via ? "^" + t.via : ""}${t.sauce ? "!" : ""}${(t.kind === "chip" || t.kind === "rim") && t.aim != null ? "~" + f1(t.aim) : ""}`).join("")
+      ? vts.map(t => ` ${kw(t)}=${t.at + 1}:${t.to}${t.recvAt != null ? "@" + (t.recvAt + 1) : ""}${t.via ? "^" + t.via : ""}${t.sauce ? "!" : ""}${t.kind === "shot" && t.net ? ">" + t.net : ""}${(t.kind === "chip" || t.kind === "rim") && t.aim != null ? "~" + f1(t.aim) : ""}`).join("")
       : "";
     const termOk = !p.termBy || p.termBy === lastCarrier;
     const sht = head && termOk && p.shotAt != null ? ` shoot=${p.shotAt + 1}` : "";

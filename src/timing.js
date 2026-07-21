@@ -149,28 +149,30 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
       // fire the current carrier's shot at shootIdx; the puck flies to the net,
       // caroms off it and glides to rest in the slot. Returns the rest point.
       // Path-less (stationary) shooters release immediately at tBase.
-      const doShot = (shootIdx, aimPt) => {
+      // netId targets THIS shot's net (each shot in a chain aims independently:
+      // the terminal uses pk.net, a rebound transfer its own tr.net)
+      const doShot = (shootIdx, aimPt, netId = pk.net) => {
         const launchT = (cur.path.length && shootIdx >= 0)
           ? Math.max(tBase, routeTimeW(cur, warp, Math.min(shootIdx, cur.path.length - 1)))
           : tBase;
         const launch = bladeAt(cur, launchT, warp);
         // target the nearest net or passer (respecting a forced side), else default;
         // a passer has no goalie, so shots at it always take the carom/rebound path.
-        // A bumper or tire can also be an EXPLICIT target (pk.net = its id) — a
+        // A bumper or tire can also be an EXPLICIT target (netId = its id) — a
         // shot deflects off it — but they never auto-attract a shot on their own.
         const nets = pieces.filter(q => q.kind === "net" || q.kind === "passer");
         const props = pieces.filter(q => q.kind === "bumper" || q.kind === "tire");
         let net, netPiece = null;
-        netPiece = pk.net ? [...nets, ...props].find(n => n.id === pk.net) || null : null;
+        netPiece = netId ? [...nets, ...props].find(n => n.id === netId) || null : null;
         if (!netPiece && nets.length) {
-          let cands = pk.net === "left" ? nets.filter(n => n.x < 100)
-            : pk.net === "right" ? nets.filter(n => n.x >= 100) : nets;  // legacy side / nearest
+          let cands = netId === "left" ? nets.filter(n => n.x < 100)
+            : netId === "right" ? nets.filter(n => n.x >= 100) : nets;  // legacy side / nearest
           if (!cands.length) cands = nets;
           netPiece = cands.reduce((a, b) =>
             Math.hypot(b.x - launch.x, b.y - launch.y) < Math.hypot(a.x - launch.x, a.y - launch.y) ? b : a);
         }
         if (netPiece) net = { x: netPiece.x, y: netPiece.y };
-        else net = pk.net === "left" ? { x: 15, y: 42.5 } : pk.net === "right" ? { x: 185, y: 42.5 }
+        else net = netId === "left" ? { x: 15, y: 42.5 } : netId === "right" ? { x: 185, y: 42.5 }
           : launch.x < 100 ? { x: 15, y: 42.5 } : { x: 185, y: 42.5 };
         const vShot = pace * SPEED.shot * (pk.speed || 1);
         const inx = net.x - launch.x, iny = net.y - launch.y;
@@ -327,7 +329,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
           } else {
             aim = { x: rec.x, y: rec.y };
           }
-          doShot(tr.at, aim);                            // carom rolls to the collector
+          doShot(tr.at, aim, tr.net != null ? tr.net : null);  // this rebound shot's own net (independent of the terminal)
           if (chainBlocked) return;                      // rebound died at the net — no collect
           const tGather = gi >= 0 ? Math.max(tBase, routeTimeW(rec, warp, gi)) : tBase;
           legs.push({ type: "ride", id: rec.id, t0: tGather, catch: true });

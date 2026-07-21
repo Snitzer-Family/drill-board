@@ -115,7 +115,7 @@ puck at that spot. Under the hood a collected release is stored as a handoff:
 
 | Handoff form | Meaning |
 |---|---|
-| `rebound=<pt>:<to>[@<recv>]` | Shoot at `pt`; `to` collects the carom at their point `recv` |
+| `rebound=<pt>:<to>[@<recv>][>net]` | Shoot at `pt`; `to` collects the carom at their point `recv`. `>net` gives THIS rebound shot its own target — independent of a later terminal `shoot=`'s `net=`, so P1 can shoot N1 and a collector then fling it at N2. |
 | `rim=<pt>:<to>[@<recv>][~<deg>]` | Rim from `pt`; `to` collects it at their point `recv` |
 | `chip=<pt>:<to>[@<recv>][~<deg>]` | Chip from `pt`; `to` (self for a give-and-go) collects it at `recv` |
 

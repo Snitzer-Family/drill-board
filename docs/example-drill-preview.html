@@ -380,9 +380,10 @@ function parseDrill(text) {
             } else if (key === "rebound") {
               // shot whose carom is collected by a player: shoot at <pt>, they
               // gather at their @<pt> (else route end / where they stand)
-              const m4 = /^(\d+):([^@\s]+)(?:@(\d+))?$/.exec(v);
+              const m4 = /^(\d+):([^@\s>]+)(?:@(\d+))?(?:>(\S+))?$/.exec(v);
               if (m4) transfers.push({ at: parseInt(m4[1], 10) - 1, to: m4[2],
-                recvAt: m4[3] ? parseInt(m4[3], 10) - 1 : null, kind: "shot" });
+                recvAt: m4[3] ? parseInt(m4[3], 10) - 1 : null, kind: "shot",
+                ...(m4[4] ? { net: m4[4] } : {}) });
             } else if (key === "shoot") {
               const n = parseInt(v, 10);
               if (!isNaN(n)) shotAt = n - 1;
@@ -818,8 +819,8 @@ function chain(pk, byId, pieces) {
   if (!cur) return "";
   const nets = pieces.filter(q => q.kind === "net" || q.kind === "passer");
   const targets = pieces.filter(q => q.kind === "net" || q.kind === "passer" || q.kind === "bumper" || q.kind === "tire");
-  const shotNet = launch => {
-    if (pk.net) { const n = targets.find(x => x.id === pk.net); if (n) return { x: n.x, y: n.y }; }
+  const shotNet = (launch, netId = pk.net) => {
+    if (netId) { const n = targets.find(x => x.id === netId); if (n) return { x: n.x, y: n.y }; }
     if (nets.length) return nets.reduce((a, b) => (Math.hypot(b.x - launch.x, b.y - launch.y) < Math.hypot(a.x - launch.x, a.y - launch.y) ? b : a));
     return launch.x < 100 ? NET_L : NET_R;
   };
@@ -845,7 +846,7 @@ function chain(pk, byId, pieces) {
       : routePoint(rec, tr.recvAt == null ? rec.path.length - 1 : tr.recvAt);
     lastAt[cur.id] = tr.at;                            // the passer just released here
     if (tr.via) { const ps = byId(tr.via); const pPt = ps ? { x: ps.x, y: ps.y } : launch; out.push(chainLine([launch, pPt], "pass"), chainLine([pPt, anchor], "pass")); }
-    else if (tr.kind === "shot") out.push(chainLine([launch, shotNet(launch)], "shot"), chainLine([shotNet(launch), anchor], "rebound"));
+    else if (tr.kind === "shot") { const sn = shotNet(launch, tr.net != null ? tr.net : null); out.push(chainLine([launch, sn], "shot"), chainLine([sn, anchor], "rebound")); }
     else if (tr.kind === "rim") out.push(chainLine(rimPoly(launch, tr.aim, anchor), "pass"));
     else if (tr.kind === "chip") { const h = tr.aim != null ? aimVec(tr.aim) : heading(cur, tr.at); out.push(chainLine(boards.slideTo(launch.x, launch.y, h.x, h.y, anchor), "pass")); }
     else out.push(chainLine([launch, anchor], "pass"));   // pass
@@ -908,8 +909,9 @@ function buildAnim(pieces) {
     const lat = Math.sin(t * 7.5) * stickAmp, px = -hy, py = hx;
     return { x: a.x + hx * fwd + px * lat, y: a.y + hy * fwd + py * lat };
   };
-  const shotNet = (pk, launch) => {
-    if (pk.net) { const n = targets.find(x => x.id === pk.net); if (n) return { x: n.x, y: n.y }; }
+  const shotNet = (pk, launch, netId) => {
+    const nid = netId !== undefined ? netId : pk.net;
+    if (nid) { const n = targets.find(x => x.id === nid); if (n) return { x: n.x, y: n.y }; }
     if (nets.length) return nets.reduce((a, b) => Math.hypot(b.x - launch.x, b.y - launch.y) < Math.hypot(a.x - launch.x, a.y - launch.y) ? b : a);
     return launch.x < 100 ? { x: 17, y: 42.5 } : { x: 183, y: 42.5 };
   };
@@ -952,7 +954,7 @@ function buildAnim(pieces) {
         ph.push({ type: "path", poly, t0: rel, t1: gather, travel: arrive - rel });
         cur = t.to; carryStart = gather; continue;
       }
-      let target = t.kind === "shot" ? shotNet(pk, relPos) : playerAt(t.to, rel);
+      let target = t.kind === "shot" ? shotNet(pk, relPos, t.net != null ? t.net : null) : playerAt(t.to, rel);
       let flight = Math.hypot(target.x - relPos.x, target.y - relPos.y) / PASS, land = rel + flight;
       if (t.kind !== "shot") { target = playerAt(t.to, land); flight = Math.hypot(target.x - relPos.x, target.y - relPos.y) / PASS; land = rel + flight; }
       ph.push({ type: "carry", id: cur, t0: carryStart, t1: rel });

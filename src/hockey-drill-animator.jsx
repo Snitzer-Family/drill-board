@@ -1233,7 +1233,8 @@ export default function DrillAnimator() {
         const carrier = pieces.find(q => q.id === chain[s]), rec = pieces.find(q => q.id === t.to);
         if (!carrier || !rec) return;
         const launch = t.at < 0 || !carrier.path.length ? { x: carrier.x, y: carrier.y } : segEnd(carrier, Math.min(t.at, carrier.path.length - 1));
-        const net = pk.net ? (nets.find(x => x.id === pk.net) || null) : (nets.length ? nets.reduce((a, b) => Math.hypot(b.x - launch.x, b.y - launch.y) < Math.hypot(a.x - launch.x, a.y - launch.y) ? b : a) : null);
+        const shotNetId = t.net != null ? t.net : null;   // this rebound's own target
+        const net = shotNetId ? (nets.find(x => x.id === shotNetId) || null) : (nets.length ? nets.reduce((a, b) => Math.hypot(b.x - launch.x, b.y - launch.y) < Math.hypot(a.x - launch.x, a.y - launch.y) ? b : a) : null);
         const nPt = net ? { x: net.x, y: net.y } : (launch.x < 100 ? { x: 17, y: 42.5 } : { x: 183, y: 42.5 });
         const anchor = t.recvAt != null && rec.path.length ? segEnd(rec, Math.min(t.recvAt, rec.path.length - 1)) : { x: rec.x, y: rec.y };
         if (segCrossesNet(nPt, anchor, shapes)) blockStage = Math.min(blockStage, s);
@@ -2338,16 +2339,23 @@ export default function DrillAnimator() {
 
     // which net/passer a shot aims at (default: nearest). A bumper or tire can
     // also be picked — the shot deflects off it (bumper: mirror; tire: by angle)
-    const netRow = pk => {
+    // stage == null → the puck's terminal shot (pk.net); a stage targets that
+    // rebound transfer's OWN net, so two shots in a chain aim independently
+    const netRow = (pk, stg = null) => {
       const targets = pieces.filter(q => q.kind === "net" || q.kind === "passer" || q.kind === "bumper" || q.kind === "tire");
+      const curNet = stg != null ? ((pk.transfers || [])[stg] || {}).net : pk.net;
+      const setNet = id => {
+        if (stg != null) update(q => q.id !== pk.id ? q
+          : { ...q, transfers: (q.transfers || []).map((t, s) => s === stg ? { ...t, net: id } : t) });
+        else updateById(pk.id, { net: id });
+      };
       return (
         <div className="hd-poprow">
           <span>Target</span>
-          <button className={`hd-mini${!pk.net ? " on" : ""}`}
-            onClick={() => updateById(pk.id, { net: null })}>Nearest</button>
+          <button className={`hd-mini${!curNet ? " on" : ""}`} onClick={() => setNet(null)}>Nearest</button>
           {targets.map(n => (
-            <button key={n.id} className={`hd-mini${pk.net === n.id ? " on" : ""}`}
-              onClick={() => updateById(pk.id, { net: pk.net === n.id ? null : n.id })}>{n.id}</button>
+            <button key={n.id} className={`hd-mini${curNet === n.id ? " on" : ""}`}
+              onClick={() => setNet(curNet === n.id ? null : n.id)}>{n.id}</button>
           ))}
         </div>
       );
@@ -2518,7 +2526,7 @@ export default function DrillAnimator() {
             </div>
           )}
           {/* a rebound shot (a handoff to a collector) still picks its target here */}
-          {(from && from.kind === "shot" && from.at === i) && netRow(pk)}
+          {(from && from.kind === "shot" && from.at === i) && netRow(pk, stage)}
           {incoming && incoming.kind === "pass" && (
             <div className="hd-poprow">
               <button className={`hd-mini${incoming.recvAt === i ? " on" : ""}`}
