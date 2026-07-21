@@ -919,6 +919,13 @@ function buildAnim(pieces) {
     const chain = [pk.carrier || (pk.pickup && pk.pickup.to) || null, ...(pk.transfers || []).map(t => t.to)].filter(Boolean);
     if (!chain.length) { P[pk.id] = { ph: [{ type: "still", x: pk.x, y: pk.y }] }; return; }
     const ts = pk.transfers || [], ph = []; let cur = chain[0], carryStart = 0;
+    // a loose puck a player collects sits still at its spot until they reach it
+    if (pk.pickup && !pk.carrier) {
+      const picker = pieces.find(q => q.id === pk.pickup.to);
+      const T = picker && picker.path.length ? timeAtWp(picker, Math.max(0, Math.min(pk.pickup.at, picker.path.length - 1))) : 0;
+      if (T > 0) ph.push({ type: "hold", x: pk.x, y: pk.y, t0: 0, t1: T });
+      carryStart = T;
+    }
     for (let s = 0; s < ts.length; s++) {
       const t = ts[s]; if (t.by && t.by !== cur) break;
       const rel = Math.max(carryStart, timeAtWp(cur, t.at)), relPos = bladeOf(cur, rel);
@@ -980,6 +987,7 @@ function buildAnim(pieces) {
       if (p.type === "still") return { x: p.x, y: p.y };
       if (p.type === "rest") { if (t >= p.t0) return { x: p.x, y: p.y }; last = p; continue; }
       if (t >= p.t0 && t <= p.t1) {
+        if (p.type === "hold") return { x: p.x, y: p.y };
         if (p.type === "carry") return bladeOf(p.id, t);
         // a rim/chip follows its banked polyline; the puck reaches the end in
         // `travel` seconds then waits there (t1 may run longer for the pickup)
