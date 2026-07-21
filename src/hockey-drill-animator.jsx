@@ -66,6 +66,8 @@ export default function DrillAnimator() {
   const [rink, setRink] = useState(init.rink);
   const [pieces, setPieces] = useState(init.pieces);
   const [selectedId, setSelectedId] = useState(null);
+  const [multiSel, setMultiSel] = useState(null);  // Set<id> from a box-select, or null
+  const [marquee, setMarquee] = useState(null);    // {x0,y0,x1,y1} while dragging a box
   const [popup, setPopup] = useState(null);
   const [tool, setTool] = useState("select");
   const [openMenu, setOpenMenu] = useState(null); // settings | rinkmenu | tools | text
@@ -1443,19 +1445,22 @@ export default function DrillAnimator() {
       setTool("select");
       return;
     }
-    setSelectedId(null);
     setPopup(null);
+    if (!editing) { setSelectedId(null); setMultiSel(null); return; }
     // double-click / double-tap on empty ice → "add here" menu
-    if (editing) {
-      const now = performance.now();
-      const it = lastIceTap.current;
-      if (it && now - it.t < 350 && Math.hypot(it.pt.x - pt.x, it.pt.y - pt.y) < 3) {
-        lastIceTap.current = null;
-        setPopup({ type: "add", pt });
-        return;
-      }
-      lastIceTap.current = { t: now, pt };
+    const now = performance.now();
+    const it = lastIceTap.current;
+    if (it && now - it.t < 350 && Math.hypot(it.pt.x - pt.x, it.pt.y - pt.y) < 3) {
+      lastIceTap.current = null;
+      setSelectedId(null); setMultiSel(null);
+      setPopup({ type: "add", pt });
+      return;
     }
+    lastIceTap.current = { t: now, pt };
+    // begin a box-select — it only activates once dragged; a plain tap (no move)
+    // just clears the selection on pointer-up
+    drag.current = { kind: "marquee", start: pt, last: pt, moved: false, touch: e.pointerType !== "mouse" };
+    svgRef.current.setPointerCapture?.(e.pointerId);
   }
 
   function addPieceAt(kind, pt) {
@@ -1485,6 +1490,89 @@ export default function DrillAnimator() {
     setPopup({ type: "piece", id: nid });
   }
 
+  // ----- box-select group operations (multiSel) -----
+  const idPrefix = kind => (kind === "player" ? "P" : kind === "puck" ? "PK" : kind === "net" ? "N"
+    : kind === "bumper" ? "B" : kind === "deker" ? "DK" : kind === "passer" ? "PS"
+    : kind === "label" ? "L" : kind === "tire" ? "T" : "C");
+  const rotatesFacing = p => ["net", "bumper", "deker", "passer", "tire"].includes(p.kind) || (p.kind === "player" && !p.path.length);
+  const groupCentroid = sel => sel.length
+    ? { x: sel.reduce((a, p) => a + p.x, 0) / sel.length, y: sel.reduce((a, p) => a + p.y, 0) / sel.length } : null;
+  // slide every selected piece (and its route) by dx,dy
+  const moveGroupBy = (dx, dy) => {
+    const ci = (x, y) => boards.clampInside(x, y);
+    update(p => {
+      if (!multiSel || !multiSel.has(p.id)) return p;
+      const np = ci(p.x + dx, p.y + dy);
+      const path = (p.path || []).map(s => {
+        const q = ci(s.x + dx, s.y + dy), s2 = { ...s, x: q.x, y: q.y };
+        if (s.type === "Q") { const c = ci(s.cx + dx, s.cy + dy); s2.cx = c.x; s2.cy = c.y; }
+        if (s.type === "C") { const c1 = ci(s.c1x + dx, s.c1y + dy); s2.c1x = c1.x; s2.c1y = c1.y; const c2 = ci(s.c2x + dx, s.c2y + dy); s2.c2x = c2.x; s2.c2y = c2.y; }
+        return s2;
+      });
+      return { ...p, x: np.x, y: np.y, path };
+    });
+  };
+  // rotate the whole selection around its centroid (positions, routes, facings)
+  function rotateGroup(deg) {
+    if (!multiSel || !multiSel.size) return;
+    const C = groupCentroid(pieces.filter(p => multiSel.has(p.id))); if (!C) return;
+    const r = (deg * Math.PI) / 180, ca = Math.cos(r), sa = Math.sin(r);
+    const rot = (x, y) => { const dx = x - C.x, dy = y - C.y; return boards.clampInside(C.x + dx * ca - dy * sa, C.y + dx * sa + dy * ca); };
+    update(p => {
+      if (!multiSel.has(p.id)) return p;
+      const np = { ...p }, q = rot(p.x, p.y); np.x = q.x; np.y = q.y;
+      if (rotatesFacing(p)) np.facing = (p.facing || 0) + deg;
+      np.path = (p.path || []).map(s => {
+        const t = { ...s };
+        for (const [xk, yk] of [["x", "y"], ["cx", "cy"], ["c1x", "c1y"], ["c2x", "c2y"]])
+          if (t[xk] != null && t[yk] != null) { const w = rot(t[xk], t[yk]); t[xk] = w.x; t[yk] = w.y; }
+        return t;
+      });
+      return np;
+    });
+  }
+  // duplicate the whole selection; references between selected pieces retarget to
+  // the copies, references to OUTSIDE pieces stay pointing at the originals
+  function duplicateGroup() {
+    if (!multiSel || !multiSel.size) return;
+    const off = 9, src = pieces.filter(p => multiSel.has(p.id));
+    const used = new Set(pieces.map(p => p.id)), idMap = {};
+    const fresh = kind => { const pre = idPrefix(kind); let n = 1; while (used.has(pre + n)) n++; used.add(pre + n); return pre + n; };
+    for (const p of src) idMap[p.id] = fresh(p.kind);
+    const copies = src.map(p => {
+      const c = JSON.parse(JSON.stringify(p));
+      c.id = idMap[p.id];
+      c.x = clampX(p.x + off); c.y = clampY(p.y + off);
+      if (Array.isArray(c.path)) c.path = c.path.map(s => {
+        const t = { ...s };
+        for (const k of ["x", "cx", "c1x", "c2x"]) if (t[k] != null) t[k] = clampX(t[k] + off);
+        for (const k of ["y", "cy", "c1y", "c2y"]) if (t[k] != null) t[k] = clampY(t[k] + off);
+        return t;
+      });
+      if (c.kind === "puck") {
+        if (c.carrier) c.carrier = idMap[c.carrier] || null;                       // carrier outside the group → drop (loose)
+        if (c.pickup && c.pickup.to) c.pickup = idMap[c.pickup.to] ? { ...c.pickup, to: idMap[c.pickup.to] } : null;
+        if (Array.isArray(c.transfers)) c.transfers = c.transfers.map(t => ({
+          ...t, ...(idMap[t.to] ? { to: idMap[t.to] } : {}),
+          ...(t.by && idMap[t.by] ? { by: idMap[t.by] } : {}), ...(t.via && idMap[t.via] ? { via: idMap[t.via] } : {}),
+        }));
+        if (c.net && idMap[c.net]) c.net = idMap[c.net];
+        if (c.termBy && idMap[c.termBy]) c.termBy = idMap[c.termBy];
+        // a copied puck whose carrier fell outside the group starts loose
+        if (!c.carrier && !c.pickup && p.carrier && !idMap[p.carrier]) { c.transfers = []; c.shotAt = c.rimAt = c.chipAt = null; }
+      }
+      return c;
+    });
+    setPieces(ps => [...ps, ...copies]);
+    setSelectedId(null); setPopup(null);
+    setMultiSel(new Set(copies.map(c => c.id)));
+  }
+  function deleteGroup() {
+    if (!multiSel || !multiSel.size) return;
+    setPieces(ps => { let list = ps.filter(q => !multiSel.has(q.id)); for (const id of multiSel) list = scrubRefs(list, id); return list; });
+    setMultiSel(null); setSelectedId(null); setPopup(null);
+  }
+
   function addPlayerWithPuck(pt, showPopup) {
     const pl = makePiece("player", pt);
     const pk = makePiece("puck", pt);
@@ -1500,8 +1588,15 @@ export default function DrillAnimator() {
     setOpenMenu(null);
     if (tool === "draw") { setSelectedId(id); setPopup(null); beginDraw(e, id); return; }
     if (wakeEdit()) return;
-    setSelectedId(id);
     const pt = svgPt(e);
+    // if this piece is part of a box-selection, drag the whole group together
+    if (multiSel && multiSel.has(id)) {
+      drag.current = { kind: "group", start: pt, last: pt, moved: false, touch: e.pointerType !== "mouse" };
+      svgRef.current.setPointerCapture?.(e.pointerId);
+      return;
+    }
+    setMultiSel(null);
+    setSelectedId(id);
     drag.current = { kind: "piece", id, start: pt, last: pt, moved: false, touch: e.pointerType !== "mouse" };
     svgRef.current.setPointerCapture?.(e.pointerId);
   }
@@ -1569,6 +1664,10 @@ export default function DrillAnimator() {
       d.last = d.start;
       setPopup(null);
     }
+    // box-select: track the rectangle (no loupe — it's not a precise handle drag)
+    if (d.kind === "marquee") { d.last = pt; setMarquee({ x0: d.start.x, y0: d.start.y, x1: pt.x, y1: pt.y }); return; }
+    // group move: slide every selected piece by the pointer delta
+    if (d.kind === "group") { const dx = pt.x - d.last.x, dy = pt.y - d.last.y; d.last = pt; moveGroupBy(dx, dy); if (d.touch) setLoupe(pt); return; }
     if (d.touch) setLoupe(pt);
     if (d.kind === "rotate") {
       update(p => {
@@ -1659,6 +1758,17 @@ export default function DrillAnimator() {
     setLoupe(null);
     if (!d) return;
     if (d.kind === "drawing") { finishDraw(); return; }
+    if (d.kind === "marquee") {
+      setMarquee(null);
+      if (!d.moved) { setSelectedId(null); setMultiSel(null); return; }   // a plain tap deselects
+      const x0 = Math.min(d.start.x, d.last.x), x1 = Math.max(d.start.x, d.last.x);
+      const y0 = Math.min(d.start.y, d.last.y), y1 = Math.max(d.start.y, d.last.y);
+      const hit = pieces.filter(p => p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1).map(p => p.id);
+      setSelectedId(null); setPopup(null);
+      setMultiSel(hit.length ? new Set(hit) : null);
+      return;
+    }
+    if (d.kind === "group") return;   // group move already applied live
     // snap a dropped net into a standard goal position if it's near one
     if (d.kind === "piece" && d.moved && d.line == null) {
       const pc = pieces.find(q => q.id === d.id);
@@ -2840,6 +2950,10 @@ export default function DrillAnimator() {
       ? (selected ? `Drawing ${selected.id}'s route — drag across the ice` : "Drag on the ice — creates a player")
       : tool !== "select" ? "Tap the ice to place" : null;
 
+  const mbtn = { display: "flex", alignItems: "center", justifyContent: "center", minWidth: 34, height: 34,
+    padding: "0 8px", borderRadius: 999, border: "1px solid rgba(255,255,255,0.14)", background: "rgba(255,255,255,0.06)",
+    color: "#eaf0f6", fontSize: 14, fontWeight: 700, cursor: "pointer" };
+
   const togglePlay = () => { if (animT >= 1) resetAnim(); if (!playing && animT === 0) setPlaySeed(s => s + 1); setPopup(null); setOpenMenu(null); setHoldStep(null); holdRef.current = 0; setPlaying(p => !p); };
   const resetPlay = () => { setPlaying(false); resetAnim(); };
 
@@ -3018,6 +3132,19 @@ export default function DrillAnimator() {
                 fill="none" stroke="#ffd447" strokeWidth={sw(0.6)} strokeDasharray={sdash("1.4 1")} opacity={0.9} />
             )}
 
+            {/* box-select highlights + the marquee rectangle */}
+            {multiSel && editing && [...pieces].filter(p => multiSel.has(p.id)).map(p => {
+              const dp = displayPos(p);
+              return <circle key={`ms-${p.id}`} cx={dp.x} cy={dp.y} r={5.2} fill="rgba(58,141,255,0.1)"
+                stroke="#3a8dff" strokeWidth={sw(0.6)} strokeDasharray={sdash("1.5 1")} vectorEffect="non-scaling-stroke" pointerEvents="none" />;
+            })}
+            {marquee && (
+              <rect x={Math.min(marquee.x0, marquee.x1)} y={Math.min(marquee.y0, marquee.y1)}
+                width={Math.abs(marquee.x1 - marquee.x0)} height={Math.abs(marquee.y1 - marquee.y0)}
+                fill="rgba(58,141,255,0.12)" stroke="#3a8dff" strokeWidth={sw(0.5)} strokeDasharray={sdash("1.5 1")}
+                vectorEffect="non-scaling-stroke" pointerEvents="none" />
+            )}
+
             {pieces.map(p => <g key={`h-${p.id}`}>{renderHandles(p)}</g>)}
 
             {/* nets sit on the ice (bottom); players paint above pucks so a
@@ -3069,6 +3196,20 @@ export default function DrillAnimator() {
           </svg>
           {renderPopout()}
           {renderLoupe()}
+          {multiSel && multiSel.size > 0 && !playing && (
+            <div style={{ position: "absolute", left: "50%", bottom: "calc(74px + env(safe-area-inset-bottom))",
+              transform: "translateX(-50%)", zIndex: 48, display: "flex", alignItems: "center", gap: 6,
+              padding: "7px 9px", background: "rgba(20,24,30,0.94)", border: "1px solid rgba(255,255,255,0.12)",
+              borderRadius: 999, boxShadow: "0 6px 22px rgba(0,0,0,0.45)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)" }}>
+              <span style={{ color: "#cdd6df", fontSize: 12, fontWeight: 700, padding: "0 4px", whiteSpace: "nowrap" }}>{multiSel.size} selected</span>
+              <button style={mbtn} onClick={() => rotateGroup(-15)} title="Rotate left 15°">⟲</button>
+              <button style={mbtn} onClick={() => rotateGroup(15)} title="Rotate right 15°">⟳</button>
+              <button style={mbtn} onClick={() => rotateGroup(90)} title="Rotate 90°">90°</button>
+              <button style={mbtn} onClick={duplicateGroup} title="Duplicate the selection">⧉</button>
+              <button style={{ ...mbtn, color: "#ff7a7a", borderColor: "rgba(255,90,90,0.35)" }} onClick={deleteGroup} title="Delete the selection">🗑</button>
+              <button style={mbtn} onClick={() => setMultiSel(null)} title="Clear selection">✕</button>
+            </div>
+          )}
           {view.s > 1.02 && (
             <button onClick={resetView} title="Reset zoom"
               style={{ position: "absolute", top: "calc(8px + env(safe-area-inset-top))", right: 8, zIndex: 46,
