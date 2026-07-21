@@ -53,6 +53,7 @@ const ICONS = {
   keyboard: <><rect x="2.5" y="6" width="19" height="12" rx="2" /><path d="M6 9.5h.01M9.5 9.5h.01M13 9.5h.01M16.5 9.5h.01M7.5 14h9" /></>,
   grid: <><rect x="3.5" y="3.5" width="7" height="7" rx="1" /><rect x="13.5" y="3.5" width="7" height="7" rx="1" /><rect x="3.5" y="13.5" width="7" height="7" rx="1" /><rect x="13.5" y="13.5" width="7" height="7" rx="1" /></>,
   gauge: <><path d="M4 18a8 8 0 1 1 16 0" /><path d="M12 18l4-5" /></>,
+  sliders: <><path d="M5 5v14M12 5v14M19 5v14" /><circle cx="5" cy="9" r="1.9" {...F} /><circle cx="12" cy="14" r="1.9" {...F} /><circle cx="19" cy="8" r="1.9" {...F} /></>,
   // line-segment types (player/waypoint popups)
   segLine: <path d="M4.5 19.5L19.5 4.5" />,
   segQuad: <path d="M4 18Q12 3 20 18" />,
@@ -292,12 +293,12 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
 
 /* ---------------- stepper ---------------- */
 
-export function Stepper({ value, onChange, step = 0.5, min = 0, suffix = "s" }) {
+export function Stepper({ value, onChange, step = 0.5, min = 0, max = Infinity, suffix = "s" }) {
   return (
     <span className="hd-stepper">
       <button onClick={() => onChange(Math.max(min, +(value - step).toFixed(2)))}>−</button>
       <span>{value}{suffix}</span>
-      <button onClick={() => onChange(+(value + step).toFixed(2))}>+</button>
+      <button onClick={() => onChange(Math.min(max, +(value + step).toFixed(2)))}>+</button>
     </span>
   );
 }

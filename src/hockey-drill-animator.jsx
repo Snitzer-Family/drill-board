@@ -234,6 +234,10 @@ export default function DrillAnimator() {
   const [minorDesc, setMinorDesc] = useState(false);   // describe zones skated through
   const [showResult, setShowResult] = useState(true);  // Save!/Goal! splash on shots
   const [collisions, setCollisions] = useState(true);  // route avoidance (nets/goalie/players)
+  const [realisticShots, setRealisticShots] = useState(true); // random goal/post/wide/over + air; off = always bury flat
+  const [detailAnim, setDetailAnim] = useState(true);  // skater stride sway, stick swing, dribble cradle
+  const [lineScale, setLineScale] = useState(1);       // route line-thickness multiplier
+  const [defaultSpeed, setDefaultSpeed] = useState(1.5); // speed given to newly-added players
   const [showZones, setShowZones] = useState(false);   // named ice-area overlay
   const [playSeed, setPlaySeed] = useState(0);         // bumps each play → new save/goal rolls
   const [loopMode, setLoopMode] = useState(false);     // replay the routine continuously
@@ -722,7 +726,7 @@ export default function DrillAnimator() {
   // re-binds to whichever loose puck is actually closest right now. Rendering &
   // editing stay on raw `pieces` (displayPosAt keys plans by id, so it lines up).
   const rpieces = useMemo(() => resolveNearest(pieces), [pieces]);
-  const { getPlan, pieceTime, displayPosAt, stickSwing, waypointTime, puckInGoal } = createTiming({ pieces: rpieces, pace, segRefs, planCache, seed: playSeed });
+  const { getPlan, pieceTime, displayPosAt, stickSwing, waypointTime, puckInGoal } = createTiming({ pieces: rpieces, pace, segRefs, planCache, seed: playSeed, realisticShots, detail: detailAnim });
 
   const totalTime = Math.max(0.1, ...rpieces.map(pieceTime));
   totalRef.current = totalTime;
@@ -1229,7 +1233,7 @@ export default function DrillAnimator() {
   function displayPosRaw(p) {
     if (p.kind === "player" && p.defense) return animT > 0 ? dmanPos(p) : { x: p.x, y: p.y, a: p.facing || 0 };
     const dp = displayPosAt(p, animT <= 0 ? 0 : animT * totalTime);
-    if (p.kind !== "player" || !(dp.smul > 0.02)) return dp;
+    if (!detailAnim || p.kind !== "player" || !(dp.smul > 0.02)) return dp;  // no stride sway/lean when detail off
     const r = dp.smul;                                    // effective speed multiple
     const g = Math.max(0, Math.min(1, (r - GLIDE_AT) / (HARD_AT - GLIDE_AT)));
     const strength = g * g * (3 - 2 * g);                 // 0 glide → 1 aggressive
@@ -1444,7 +1448,7 @@ export default function DrillAnimator() {
     const id = nextId(kind);
     const colorIdx = pieces.filter(p => p.kind === "player").length % COLORS.length;
     return {
-      id, kind, x: pt.x, y: pt.y, speed: kind === "player" ? 1.5 : 1, hand: "R", carrier: null,
+      id, kind, x: pt.x, y: pt.y, speed: kind === "player" ? defaultSpeed : 1, hand: "R", carrier: null,
       facing: kind === "net" && pt.x >= 100 ? 180 : 0, transfers: [], shotAt: null, rimAt: null, chipAt: null, chipAim: null, rimAim: null, chipDist: null, rimDist: null, pickup: null, net: null, holdLine: false, goalie: false, defense: false,
       color: kind === "player" ? COLORS[colorIdx] : kind === "cone" ? "#e0731d" : kind === "net" ? "#c81e33"
         : kind === "bumper" ? "#1b1e22" : kind === "deker" ? "#c79a4e" : kind === "passer" ? "#57636f"
@@ -2474,7 +2478,7 @@ export default function DrillAnimator() {
   // own near-square viewBox); otherwise use screen-uniform non-scaling strokes so
   // the fill-mode stretch can't make a line thicker along one axis than the other
   function segStroke(p, s, isLast, flat) {
-    const W = w => (flat ? w : sw(w));
+    const W = w => (flat ? w : sw(w)) * lineScale;   // global route line-thickness scale
     const D = d => (flat ? d : sdash(d));
     const base = { stroke: p.color, fill: "none", strokeLinecap: "round", opacity: 0.78,
       ...(flat ? {} : { vectorEffect: "non-scaling-stroke" }) };
@@ -4143,6 +4147,8 @@ export default function DrillAnimator() {
         </button>
         <button className={`hd-barbtn${tool === "draw" ? " draw-on" : openMenu === "tools" ? " on" : ""}`} title="Add / draw"
           onClick={() => setOpenMenu(m => (m === "tools" ? null : "tools"))}><Icon name="pencil" /></button>
+        <button className={`hd-barbtn${openMenu === "prefs" ? " on" : ""}`} title="Settings"
+          onClick={() => setOpenMenu(m => (m === "prefs" ? null : "prefs"))}><Icon name="sliders" /></button>
         <button className="hd-barbtn" title="Undo last change" disabled={!undoCount}
           onClick={undoLast} style={undoCount ? undefined : { opacity: 0.4 }}><Icon name="undo" /></button>
         <button className="hd-barbtn" title="Redo" disabled={!redoCount}
@@ -4188,17 +4194,9 @@ export default function DrillAnimator() {
             onClick={() => { setShowDiag(s => !s); setOpenMenu(null); }}>
             <Icon name="gauge" size={16} /> Diagnostics {showDiag ? "(on)" : ""}
           </button>
-          <div className="hd-mh" style={{ marginTop: 4 }}>Routes on play</div>
-          <div className="hd-poprow">
-            {[["player", "Routes"], ["hide", "Hide"], ["all", "All +puck"]].map(([v, lab]) => (
-              <button key={v} className={`hd-mini${playRoutes === v ? " on" : ""}`}
-                onClick={() => setPlayRoutes(v)}>{lab}</button>
-            ))}
-          </div>
-          <div className="hd-poprow" style={{ marginTop: 4 }}>
-            <span>Loop end pause</span>
-            <Stepper value={loopPause} onChange={setLoopPause} step={0.5} min={0} />
-          </div>
+          <button className="hd-item" onClick={() => setOpenMenu("prefs")}>
+            <Icon name="sliders" size={16} /> App &amp; drill settings…
+          </button>
           <div className="hd-mh" style={{ marginTop: 4 }}>Let AI play</div>
           <div className="hd-poprow">
             <span>5v5 for</span>
@@ -4218,29 +4216,65 @@ export default function DrillAnimator() {
             <span style={{ fontSize: 11, color: "#8b99a8" }}>describe areas skated through</span>
           </div>
           <div className="hd-poprow">
-            <button className={`hd-mini${showResult ? " on" : ""}`}
-              onClick={() => setShowResult(v => !v)}>{showResult ? "✓ Save/Goal calls" : "Save/Goal calls"}</button>
-            <span style={{ fontSize: 11, color: "#8b99a8" }}>splash the result over the net</span>
-          </div>
-          <div className="hd-poprow">
-            <button className={`hd-mini${collisions ? " on" : ""}`}
-              onClick={() => setCollisions(v => !v)}>{collisions ? "✓ Route avoidance" : "Route avoidance"}</button>
-            <span style={{ fontSize: 11, color: "#8b99a8" }}>curve around nets/goalie/players — off = draw straight</span>
-          </div>
-          <div className="hd-poprow">
             <button className="hd-mini" onClick={() => setOpenMenu("steps")}>✎ Edit steps</button>
             <span style={{ fontSize: 11, color: "#8b99a8" }}>play pauses at each described beat</span>
-          </div>
-          <div className="hd-mh" style={{ marginTop: 4 }}>Pace</div>
-          <div style={{ fontSize: 12, color: "#8b99a8" }}>
-            {pace} ft/s · run {totalTime.toFixed(1)}s
-            <input type="range" min={6} max={30} step={1} value={pace} style={{ width: "100%" }}
-              onChange={e => setPace(parseFloat(e.target.value))} />
           </div>
           <div className="hd-note">
             Tap a piece, route point, or line for its settings.
             Double-tap a line to add a point. Drag to move; touch drags show a magnifier.
           </div>
+        </div>
+      )}
+
+      {openMenu === "prefs" && (
+        <div className="hd-menu tl">
+          <div className="hd-mh">App &amp; drill settings</div>
+          <div className="hd-poprow">
+            <button className={`hd-mini${realisticShots ? " on" : ""}`}
+              onClick={() => setRealisticShots(v => !v)}>{realisticShots ? "✓ Realistic shots" : "Realistic shots"}</button>
+            <span style={{ fontSize: 11, color: "#8b99a8" }}>random goal / post / wide / over + air — off buries flat</span>
+          </div>
+          <div className="hd-poprow">
+            <button className={`hd-mini${showResult ? " on" : ""}`}
+              onClick={() => setShowResult(v => !v)}>{showResult ? "✓ Goal splashes" : "Goal splashes"}</button>
+            <span style={{ fontSize: 11, color: "#8b99a8" }}>GOAL! / SAVE! / POST! calls over the net</span>
+          </div>
+          <div className="hd-poprow">
+            <button className={`hd-mini${detailAnim ? " on" : ""}`}
+              onClick={() => setDetailAnim(v => !v)}>{detailAnim ? "✓ Detailed animations" : "Detailed animations"}</button>
+            <span style={{ fontSize: 11, color: "#8b99a8" }}>skater stride, stick swing, puck cradle</span>
+          </div>
+          <div className="hd-poprow">
+            <button className={`hd-mini${collisions ? " on" : ""}`}
+              onClick={() => setCollisions(v => !v)}>{collisions ? "✓ Route avoidance" : "Route avoidance"}</button>
+            <span style={{ fontSize: 11, color: "#8b99a8" }}>curve routes around nets / goalie / players</span>
+          </div>
+          <div className="hd-mh" style={{ marginTop: 4 }}>Routes on play</div>
+          <div className="hd-poprow">
+            {[["player", "Routes"], ["hide", "Hide"], ["all", "All +puck"]].map(([v, lab]) => (
+              <button key={v} className={`hd-mini${playRoutes === v ? " on" : ""}`}
+                onClick={() => setPlayRoutes(v)}>{lab}</button>
+            ))}
+          </div>
+          <div className="hd-poprow" style={{ marginTop: 4 }}>
+            <span>Line thickness</span>
+            <Stepper value={lineScale} onChange={setLineScale} step={0.25} min={0.5} max={3} suffix="×" />
+          </div>
+          <div className="hd-poprow">
+            <span>New player speed</span>
+            <Stepper value={defaultSpeed} onChange={setDefaultSpeed} step={0.1} min={0.5} max={3} suffix="×" />
+          </div>
+          <div className="hd-poprow">
+            <span>Loop end pause</span>
+            <Stepper value={loopPause} onChange={setLoopPause} step={0.5} min={0} suffix="s" />
+          </div>
+          <div className="hd-mh" style={{ marginTop: 4 }}>Default drill pace</div>
+          <div style={{ fontSize: 12, color: "#8b99a8" }}>
+            {pace} ft/s · run {totalTime.toFixed(1)}s
+            <input type="range" min={6} max={30} step={1} value={pace} style={{ width: "100%" }}
+              onChange={e => setPace(parseFloat(e.target.value))} />
+          </div>
+          <div className="hd-note">Preferences apply to this session and to how new pieces are added.</div>
         </div>
       )}
 
