@@ -3219,62 +3219,42 @@ export default function DrillAnimator() {
 
     const a = popoutAnchor(anchorPt);
     if (!a) return null;
-    // open toward the side of the anchor with more room, and cap the height to
-    // that room (with margins for the top play-dock and the bottom) so a tall
-    // popup scrolls internally instead of running off the top of the screen
-    const minable = !!(popup.type === "point" || (popup.type === "piece" && p && p.kind === "player"));
-    const collapsed = minable && popState === "min";
-    const maxed = minable && popState === "max";
-    const topPad = 12, botPad = 5, gap = 3;           // % of the ice (gap = anchor offset below)
-    const roomAbove = a.ty - topPad, roomBelow = 100 - a.ty - botPad;
-    let up = roomAbove >= roomBelow;
-    let style;
-    if (minable) {
-      // player/waypoint popups pin to the edge OPPOSITE the piece so they open
-      // completely clear of it (and its handles) — no need to move/minimize just
-      // to see the waypoint. Piece in the top half → popup pins along the bottom
-      // (above the play bar); piece in the bottom half → pins along the top
-      // (below the floating play dock). Drag the header to move it; it's bounded.
-      up = false;
-      const lx = Math.max(16, Math.min(84, a.lx));
-      const atBottom = a.ty < 50;
-      const common = { left: `${lx}%`, transform: `translateX(-50%) translate(${popOff.x}px, ${popOff.y}px)` };
-      style = atBottom
-        ? { ...common, bottom: `calc(var(--hd-b) + 60px)`,
-            maxHeight: collapsed ? "none"
-              : maxed ? "calc(100% - var(--hd-b) - 60px - env(safe-area-inset-top) - var(--hd-pintop, 78px))"
-              : "38%" }
-        : { ...common, top: `calc(env(safe-area-inset-top) + var(--hd-pintop, 78px))`,
-            maxHeight: collapsed ? "none"
-              : maxed ? "calc(100% - env(safe-area-inset-top) - var(--hd-pintop, 78px) - var(--hd-b) - 60px)"
-              : "38%" };
-    } else {
-      const maxH = Math.max(22, (up ? roomAbove : roomBelow) - gap);
-      const shift = a.lx < 22 ? "-12%" : a.lx > 78 ? "-88%" : "-50%";
-      style = {
-        left: `${a.lx}%`,
-        transform: `translateX(${shift}) translate(${popOff.x}px, ${popOff.y}px)`,
-        maxHeight: `${maxH}%`,
-        ...(up ? { bottom: `${100 - a.ty + gap}%` } : { top: `${a.ty + gap}%` }),
-      };
-    }
+    // EVERY popup pins to the edge OPPOSITE the item it belongs to so it opens
+    // completely clear of what's being selected/edited (and its handles) — no
+    // need to move or minimize just to see the item. Item in the top half →
+    // popup pins along the bottom (above the play bar); item in the bottom half →
+    // pins along the top (below the floating play dock). All popups carry a
+    // minimize (header only) + maximize (fill the height) control, and drag the
+    // header to move it (bounded — it can't leave the screen).
+    const collapsed = popState === "min";
+    const maxed = popState === "max";
+    const lx = Math.max(16, Math.min(84, a.lx));
+    const atBottom = a.ty < 50;
+    const common = { left: `${lx}%`, transform: `translateX(-50%) translate(${popOff.x}px, ${popOff.y}px)` };
+    const style = atBottom
+      ? { ...common, bottom: `calc(var(--hd-b) + 60px)`,
+          maxHeight: collapsed ? "none"
+            : maxed ? "calc(100% - var(--hd-b) - 60px - env(safe-area-inset-top) - var(--hd-pintop, 78px))"
+            : "38%" }
+      : { ...common, top: `calc(env(safe-area-inset-top) + var(--hd-pintop, 78px))`,
+          maxHeight: collapsed ? "none"
+            : maxed ? "calc(100% - env(safe-area-inset-top) - var(--hd-pintop, 78px) - var(--hd-b) - 60px)"
+            : "38%" };
     return (
-      <div className={`hd-pop${up ? " up" : ""}${minable ? " pinned" : ""}`} style={style} ref={popRef}
+      <div className="hd-pop pinned" style={style} ref={popRef}
         onPointerDown={e => e.stopPropagation()}>
         <div className="hd-pophead"
           onPointerDown={popDragStart} onPointerMove={popDragMove}
           onPointerUp={popDragEnd} onPointerCancel={popDragEnd}>
           <span className="hd-grip"><Icon name="grip" size={14} /></span>
           <span>{title}</span>
-          {minable && !collapsed && (
+          {!collapsed && (
             <button className="hd-x" onPointerDown={e => e.stopPropagation()} title="Minimize"
               onClick={() => setPopState("min")}><Icon name="chevronUp" size={15} /></button>
           )}
-          {minable && (
-            <button className="hd-x" onPointerDown={e => e.stopPropagation()} title={maxed ? "Restore" : "Maximize"}
-              onClick={() => setPopState(maxed ? "mid" : collapsed ? "mid" : "max")}>
-              <Icon name={collapsed ? "chevronDown" : maxed ? "restore" : "expand"} size={15} /></button>
-          )}
+          <button className="hd-x" onPointerDown={e => e.stopPropagation()} title={maxed ? "Restore" : "Maximize"}
+            onClick={() => setPopState(maxed ? "mid" : collapsed ? "mid" : "max")}>
+            <Icon name={collapsed ? "chevronDown" : maxed ? "restore" : "expand"} size={15} /></button>
           <button className="hd-x" onPointerDown={e => e.stopPropagation()}
             onClick={() => setPopup(null)}><Icon name="close" size={15} /></button>
         </div>
