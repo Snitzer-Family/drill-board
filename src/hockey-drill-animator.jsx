@@ -1724,7 +1724,7 @@ export default function DrillAnimator() {
   // this spot (waypoint index `at`, or -1 = their standing position). A loose
   // puck is a released chip / hard rim / shot, or a puck placed loose. Wires it
   // with the existing chain (release → collector) / pickup machinery.
-  function collectPuckAt(playerId, at) {
+  function collectPuckAt(playerId, at, targetId) {
     const player = pieces.find(q => q.id === playerId);
     if (!player) return;
     // a routed player collecting from their standing spot (at = -1) actually
@@ -1759,8 +1759,10 @@ export default function DrillAnimator() {
       return !(released && ch[ch.length - 1] === playerId && !player.path.length);
     });
     if (!cands.length) { setToast("No loose puck to collect"); setTimeout(() => setToast(""), 1500); return; }
+    // an explicit puck id designates that puck (if collectable), else nearest wins
+    const pick = targetId && cands.find(q => q.id === targetId);
     const near = q => { const L = landing(q); return Math.hypot(L.x - spot.x, L.y - spot.y); };
-    const target = cands.reduce((b, q) => (near(q) < near(b) ? q : b));
+    const target = pick || cands.reduce((b, q) => (near(q) < near(b) ? q : b));
     if (target.shotAt != null || target.rimAt != null || target.chipAt != null) {
       const field = target.shotAt != null ? "shotAt" : target.rimAt != null ? "rimAt" : "chipAt";
       const kind = field === "shotAt" ? "shot" : field === "rimAt" ? "rim" : "chip";
@@ -2953,10 +2955,25 @@ export default function DrillAnimator() {
       const steps = stepsAt(p, i);
       const others = pieces.filter(q => q.kind === "player" && q.id !== p.id);
       const passers = pieces.filter(q => q.kind === "passer");
-      const carriesIn = i < 0 ? pieces.some(q => q.kind === "puck" && q.carrier === p.id) : carrySegs(p).has(i);
       const defaultPasser = () => ((others.find(o => pieces.some(q => q.kind === "puck" && puckChain(q).includes(o.id))) || others[0] || {}).id) || null;
+      // the puck p is holding, unreleased, ready to act on — works at ANY spot
+      // (including a stationary i=-1, where index bookkeeping differs): p is the
+      // chain's current last carrier and it has no terminal yet. Prefer one
+      // gained right here, then the most recent.
       const heldRelease = () => {
-        const pk = heldPuckAt(p, i) || pieces.find(q => q.kind === "puck" && puckChain(q).includes(p.id)) || pieces.find(q => q.kind === "puck");
+        const holds = pieces.filter(q => {
+          if (q.kind !== "puck") return false;
+          const ch = puckChain(q);
+          return ch[ch.length - 1] === p.id && q.shotAt == null && q.rimAt == null && q.chipAt == null;
+        });
+        const here = holds.filter(q => {
+          if (q.pickup && q.pickup.to === p.id && (q.pickup.at === i || (i < 0 && q.pickup.at === 0))) return true;
+          const ts = q.transfers || [], t = ts[ts.length - 1];
+          return t && t.to === p.id && (t.recvAt != null ? t.recvAt : -1) === i;
+        });
+        const pool = here.length ? here : holds;
+        const pk = pool[pool.length - 1]
+          || heldPuckAt(p, i) || pieces.find(q => q.kind === "puck" && puckChain(q).includes(p.id)) || pieces.find(q => q.kind === "puck");
         if (!pk) return null;
         const ch = puckChain(pk);
         return { pk, last: ch[ch.length - 1] === p.id };
@@ -3029,14 +3046,31 @@ export default function DrillAnimator() {
             </select>
           );
         }
-        if (t === "collect") return <span style={{ fontSize: 11, color: "#8b99a8" }}>nearest loose puck</span>;
+        if (t === "collect") {
+          const cur = st.pk ? st.pk.id : "nearest";
+          return (
+            <select className="hd-select on" value={cur}
+              onChange={e => { const v = e.target.value; st.del(); collectPuckAt(p.id, i, v === "nearest" ? undefined : v); }}>
+              <option value="nearest">Nearest puck</option>
+              {pieces.filter(q => q.kind === "puck").map(q => <option key={q.id} value={q.id}>{q.id}</option>)}
+            </select>
+          );
+        }
         return null;                                            // chip / rim → on-ice handle (hint row below)
       };
-      // possession walk: which types each row / the add control may offer
-      let has = carriesIn;
-      const rows = steps.map(st => { const before = has;
-        has = (st.role === "receive" || st.role === "collect" || st.role === "pickup"); return { st, opts: before ? RELEASE_TYPES : GAIN_TYPES }; });
-      const addOpts = has ? RELEASE_TYPES : GAIN_TYPES;
+      // each step's type options come from ITS OWN role (a gain step offers
+      // gains, a release step offers releases) — robust to multiple pucks handled
+      // at one spot, where a single possession "walk" would mislabel steps.
+      const rows = steps.map(st => ({ st,
+        opts: (st.role === "receive" || st.role === "collect" || st.role === "pickup") ? GAIN_TYPES : RELEASE_TYPES }));
+      // the Add control offers releases when the player is currently holding an
+      // un-released puck (the chain's last carrier), else gains
+      const holdingHere = pieces.some(q => {
+        if (q.kind !== "puck") return false;
+        const ch = puckChain(q);
+        return ch[ch.length - 1] === p.id && q.shotAt == null && q.rimAt == null && q.chipAt == null;
+      });
+      const addOpts = holdingHere ? RELEASE_TYPES : GAIN_TYPES;
       const typeSelect = (value, options, onChange, key) => (
         <select key={key} className={`hd-select${value !== "none" ? " on" : ""}`} style={{ flex: "0 1 auto", minWidth: 96 }} value={value} onChange={e => onChange(e.target.value)}>
           <option value="none">No Action</option>
@@ -3605,19 +3639,27 @@ export default function DrillAnimator() {
     const D = d => (flat ? d : sdash(d));
     const ve = flat ? undefined : "non-scaling-stroke";
     const { plans } = getPlan();
+    const z = 1 / (view.s || 1);
     return pieces
       .filter(q => q.kind === "puck" && plans[q.id])
-      .map(q => plans[q.id].legs
-        .filter(L => L.type === "fly")
-        .map((L, k) => (
-          <g key={`pf-${q.id}-${k}`} pointerEvents="none" opacity={0.6}>
+      .map(q => plans[q.id].legs.map((L, k, legs) => {
+        if (L.type !== "fly") return null;
+        const nxt = legs[k + 1];
+        const runEnd = !nxt || nxt.type !== "fly";   // last fly leg of a pass/shot/rim/chip run
+        const dx = L.x1 - L.x0, dy = L.y1 - L.y0;
+        return (
+          <g key={`pf-${q.id}-${k}`} pointerEvents="none" opacity={0.62}>
             <line x1={L.x0} y1={L.y0} x2={L.x1} y2={L.y1} vectorEffect={ve}
               stroke="#14171a" strokeWidth={W(L.shot ? 1.1 : 0.55)}
               strokeDasharray={L.shot ? undefined : D("2.4 1.8")} />
-            <circle cx={L.x1} cy={L.y1} r={1.1} fill="none" vectorEffect={ve}
-              stroke="#14171a" strokeWidth={W(0.3)} />
+            {runEnd && (dx || dy) && (flat
+              ? <circle cx={L.x1} cy={L.y1} r={1.1} fill="none" vectorEffect={ve} stroke="#14171a" strokeWidth={W(0.3)} />
+              : (() => { const fx = iconXf({ x: L.x1, y: L.y1, a: (Math.atan2(dy, dx) * 180) / Math.PI });
+                  return <g transform={fx.t}><g transform={`scale(${z})`}>
+                    <path d="M 0 0 L -3.6 -2.1 L -3.6 2.1 Z" fill="#14171a" stroke="#14171a" strokeWidth={0.5} strokeLinejoin="round" /></g></g>; })())}
           </g>
-        )));
+        );
+      }));
   }
 
   /* ----- touch loupe ----- */
@@ -3980,9 +4022,10 @@ export default function DrillAnimator() {
           {renderLoupe()}
           {multiSel && multiSel.size > 0 && !playing && (
             <div style={{ position: "absolute", left: "50%", bottom: "calc(74px + env(safe-area-inset-bottom))",
-              transform: "translateX(-50%)", zIndex: 48, display: "flex", alignItems: "center", gap: 6,
+              transform: "translateX(-50%)", zIndex: 48, display: "flex", alignItems: "center", justifyContent: "center",
+              flexWrap: "wrap", gap: 5, maxWidth: "calc(100vw - 16px)", boxSizing: "border-box",
               padding: "7px 9px", background: "rgba(20,24,30,0.94)", border: "1px solid rgba(255,255,255,0.12)",
-              borderRadius: 999, boxShadow: "0 6px 22px rgba(0,0,0,0.45)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)" }}>
+              borderRadius: 16, boxShadow: "0 6px 22px rgba(0,0,0,0.45)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)" }}>
               <span style={{ color: "#cdd6df", fontSize: 12, fontWeight: 700, padding: "0 4px", whiteSpace: "nowrap" }}>
                 {selGroupName() ? `◇ ${selGroupName()}` : `${multiSel.size} selected`}
               </span>

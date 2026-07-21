@@ -262,6 +262,13 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
           // stationary picker: gather the loose puck when its own route delivers it
           tPick = routeTimeW(pk, warp);
         }
+        // a player collecting several pucks at the SAME spot handles them one at a
+        // time — offset each successive collect (in piece order) by a handling gap
+        // so collect→shoot→collect→shoot sequences instead of firing at once
+        let seq = 0;
+        for (const q of pieces) { if (q === pk) break;
+          if (q.kind === "puck" && q.pickup && q.pickup.to === pk.pickup.to && q.pickup.at === pk.pickup.at) seq++; }
+        tPick += seq * 1.6;
         legs.push({ type: "free", t0: 0 });
         legs.push({ type: "ride", id: pl.id, t0: tPick, catch: true });
         cur = pl;
