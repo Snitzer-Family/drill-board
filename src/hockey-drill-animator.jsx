@@ -87,8 +87,17 @@ const REL_MULT = 2.5;
    drag to move; touch drags show a magnifier loupe.
    ============================================================ */
 
+const SAVE_KEY = "drillboard:autosave";   // the whole board, persisted across refreshes
+
 export default function DrillAnimator() {
-  const init = parseDrill(DEFAULT_TEXT);
+  // boot from the last auto-saved board if there is one, else the built-in demo
+  const init = (() => {
+    try {
+      const saved = localStorage.getItem(SAVE_KEY);
+      if (saved) { const r = parseDrill(saved); if (!r.errors.length) return r; }
+    } catch { /* private mode / disabled storage → fall back to the demo */ }
+    return parseDrill(DEFAULT_TEXT);
+  })();
   const [rink, setRink] = useState(init.rink);
   const [pieces, setPieces] = useState(init.pieces);
   const [selectedId, setSelectedId] = useState(null);
@@ -1084,6 +1093,21 @@ export default function DrillAnimator() {
     }
     lastSnapRef.current = now;
   }, [pieces]);
+
+  // auto-save the whole board to localStorage so it survives a refresh / the
+  // app being killed. Debounced so a drag's frames coalesce into one write.
+  // Skipped during AI play (that mutates pieces transiently, not real edits).
+  const saveTimer = useRef(0);
+  useEffect(() => {
+    if (aiPlay) return;
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      try { localStorage.setItem(SAVE_KEY, serializeDrill(rink, pieces, drillTitle, drillDesc)); }
+      catch { /* storage full / disabled — nothing we can do, keep running */ }
+    }, 400);
+    return () => clearTimeout(saveTimer.current);
+  }, [rink, pieces, drillTitle, drillDesc, aiPlay]);
+
   function undoLast() {
     if (!undoStack.current.length) return;
     const prev = undoStack.current.pop();
