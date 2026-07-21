@@ -860,7 +860,14 @@ function chain(pk, byId, pieces) {
 // wiggle), then flies to wherever the next receiver is when it lands, then the
 // terminal shot flies to the net. Not the full app engine — a faithful preview.
 function buildAnim(pieces) {
-  const PACE = 22, PASS = 60, SHOT = 95;                 // ft/s
+  const PACE = 22, PASS = 60, SHOT = 95, CHIP = 48;      // ft/s (CHIP = rim/chip glide)
+  const polyLen = poly => { let L = 0; for (let i = 1; i < poly.length; i++) L += Math.hypot(poly[i].x - poly[i - 1].x, poly[i].y - poly[i - 1].y); return L; };
+  const alongPoly = (poly, f) => {
+    if (!poly || !poly.length) return { x: 0, y: 0 };
+    const total = polyLen(poly); if (total <= 0) return poly[0];
+    let d = Math.max(0, Math.min(1, f)) * total, acc = 0;
+    for (let i = 1; i < poly.length; i++) { const seg = Math.hypot(poly[i].x - poly[i - 1].x, poly[i].y - poly[i - 1].y); if (acc + seg >= d) { const u = (d - acc) / (seg || 1); return { x: poly[i - 1].x + u * (poly[i].x - poly[i - 1].x), y: poly[i - 1].y + u * (poly[i].y - poly[i - 1].y) }; } acc += seg; } return poly[poly.length - 1];
+  };
   const players = pieces.filter(p => p.kind === "player");
   const nets = pieces.filter(q => q.kind === "net" || q.kind === "passer");
   const targets = pieces.filter(q => q.kind === "net" || q.kind === "passer" || q.kind === "bumper" || q.kind === "tire");
@@ -923,6 +930,19 @@ function buildAnim(pieces) {
         ph.push({ type: "fly", from: pPt, to: tgt, t0: hit, t1: land });
         cur = t.to; carryStart = land; continue;
       }
+      if (t.kind === "rim" || t.kind === "chip") {          // banks off the boards to the collector
+        const recP = pieces.find(q => q.id === t.to);
+        const gj = t.recvAt != null ? t.recvAt : (recP && recP.path.length ? recP.path.length - 1 : -1);
+        const anchor = gj >= 0 && recP && recP.path.length ? routePoint(recP, gj) : playerAt(t.to, rel);
+        const poly = t.kind === "rim"
+          ? (t.aim != null ? boards.rimTo(relPos, t.aim, anchor) : boards.rimPath(relPos, anchor))
+          : (() => { const h = t.aim != null ? aimVec(t.aim) : heading(cur, t.at); return boards.slideTo(relPos.x, relPos.y, h.x, h.y, anchor); })();
+        const arrive = rel + Math.max(0.2, polyLen(poly) / CHIP);
+        const gather = Math.max(arrive, gj >= 0 && recP ? timeAtWp(recP, gj) : arrive);
+        ph.push({ type: "carry", id: cur, t0: carryStart, t1: rel });
+        ph.push({ type: "path", poly, t0: rel, t1: gather, travel: arrive - rel });
+        cur = t.to; carryStart = gather; continue;
+      }
       let target = t.kind === "shot" ? shotNet(pk, relPos) : playerAt(t.to, rel);
       let flight = Math.hypot(target.x - relPos.x, target.y - relPos.y) / PASS, land = rel + flight;
       if (t.kind !== "shot") { target = playerAt(t.to, land); flight = Math.hypot(target.x - relPos.x, target.y - relPos.y) / PASS; land = rel + flight; }
@@ -933,12 +953,21 @@ function buildAnim(pieces) {
     const termAt = pk.shotAt != null ? pk.shotAt : pk.rimAt != null ? pk.rimAt : pk.chipAt != null ? pk.chipAt : null;
     if ((!pk.termBy || pk.termBy === cur) && termAt != null) {
       const rel = Math.max(carryStart, timeAtWp(cur, termAt)), relPos = bladeOf(cur, rel);
-      const np = pk.shotAt != null ? shotNet(pk, relPos) : relPos;
-      const flight = Math.hypot(np.x - relPos.x, np.y - relPos.y) / SHOT, land = rel + flight;
       ph.push({ type: "carry", id: cur, t0: carryStart, t1: rel });
-      ph.push({ type: "fly", from: relPos, to: np, t0: rel, t1: land });
-      ph.push({ type: "rest", x: np.x, y: np.y, t0: land });
-      carryStart = land;
+      if (pk.shotAt != null) {                              // shot flies to the net
+        const np = shotNet(pk, relPos), land = rel + Math.hypot(np.x - relPos.x, np.y - relPos.y) / SHOT;
+        ph.push({ type: "fly", from: relPos, to: np, t0: rel, t1: land });
+        ph.push({ type: "rest", x: np.x, y: np.y, t0: land });
+        carryStart = land;
+      } else {                                              // rim/chip release: slide the banked path into space
+        const poly = pk.rimAt != null
+          ? boards.rimAround(relPos, pk.rimDist != null ? pk.rimDist : 65, pk.rimAim)
+          : (() => { const h = pk.chipAim != null ? aimVec(pk.chipAim) : heading(cur, pk.chipAt); return boards.slide(relPos.x, relPos.y, h.x, h.y, pk.chipDist != null ? pk.chipDist : 26); })();
+        const end = poly[poly.length - 1] || relPos, land = rel + Math.max(0.2, polyLen(poly) / CHIP);
+        ph.push({ type: "path", poly, t0: rel, t1: land, travel: land - rel });
+        ph.push({ type: "rest", x: end.x, y: end.y, t0: land });
+        carryStart = land;
+      }
     } else ph.push({ type: "carry", id: cur, t0: carryStart, t1: 1e9 });
     P[pk.id] = { ph }; maxT = Math.max(maxT, carryStart);
   });
@@ -950,12 +979,16 @@ function buildAnim(pieces) {
       if (p.type === "rest") { if (t >= p.t0) return { x: p.x, y: p.y }; last = p; continue; }
       if (t >= p.t0 && t <= p.t1) {
         if (p.type === "carry") return bladeOf(p.id, t);
+        // a rim/chip follows its banked polyline; the puck reaches the end in
+        // `travel` seconds then waits there (t1 may run longer for the pickup)
+        if (p.type === "path") return alongPoly(p.poly, (t - p.t0) / (p.travel || (p.t1 - p.t0) || 1));
         const f = (t - p.t0) / ((p.t1 - p.t0) || 1); return { x: p.from.x + f * (p.to.x - p.from.x), y: p.from.y + f * (p.to.y - p.from.y) };
       }
       last = p;
     }
     if (last && last.type === "carry") return bladeOf(last.id, t);
     if (last && last.type === "fly") return { x: last.to.x, y: last.to.y };
+    if (last && last.type === "path") return last.poly[last.poly.length - 1];
     if (last && last.type === "rest") return { x: last.x, y: last.y };
     return { x: 0, y: 0 };
   };

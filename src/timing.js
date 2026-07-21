@@ -4,7 +4,7 @@
 import { SPEED, ICON_SCALE, SAVE_PROB } from "./constants.js";
 import { clampX, clampY, segEnd, segTangentAngle } from "./geometry.js";
 import * as boards from "./boards.js";
-import { netShapes, solidShapes, reflectPath, segCrossesNet } from "./net-collide.js";
+import { netShapes, solidShapes, bumperShapes, reflectPath, segCrossesNet } from "./net-collide.js";
 
 const GOALIE_DEPTH = 2.5; // how far out front of the net the goalie plays
 
@@ -73,6 +73,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
     const plans = {};
     const rel = {};
     const netSh = solidShapes(pieces);        // solid obstacles pucks carom off (nets + bumpers)
+    const bumpSh = bumperShapes(pieces);      // a flat pass across a bumper auto-lifts (sauces) over it
     pieces.forEach(pk => {
       if (pk.kind !== "puck") return;
       const vPass = () => pace * SPEED.pass * (pk.speed || 1);
@@ -387,7 +388,9 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
           }
           target = bladeAt(rec, tArr, warp);
         }
-        legs.push({ type: "fly", by: byId, x0: launch.x, y0: launch.y, x1: target.x, y1: target.y, t0: launchT, t1: tArr, sauce: !!tr.sauce });
+        // a flat pass that would cut through a bumper lifts over it automatically
+        const sauce = !!tr.sauce || (bumpSh.length > 0 && segCrossesNet(launch, target, bumpSh));
+        legs.push({ type: "fly", by: byId, x0: launch.x, y0: launch.y, x1: target.x, y1: target.y, t0: launchT, t1: tArr, sauce });
         legs.push({ type: "ride", id: rec.id, t0: tArr, catch: true });
         cur = rec;
         tBase = tArr;
