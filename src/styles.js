@@ -38,8 +38,8 @@ export const STYLES = `
         /* bottom menu bar — owns the chrome so the ice stays clear */
         .hd-bar { position:absolute; z-index:44; left:env(safe-area-inset-left, 0px);
           right:env(safe-area-inset-right, 0px); bottom:0;
-          height:calc(54px + var(--hd-b)); padding:0 10px var(--hd-b);
-          box-sizing:border-box; display:flex; align-items:center; gap:8px;
+          height:calc(54px + var(--hd-b)); padding:0 8px var(--hd-b);
+          box-sizing:border-box; display:flex; align-items:center; gap:6px;
           background:#11161c; border-top:1px solid #2a3542; }
         .hd-barbtn { width:46px; height:40px; border-radius:10px; background:#1b232c;
           border:1px solid #33404f; color:#dbe4ec; font-size:17px; display:flex;
@@ -54,10 +54,15 @@ export const STYLES = `
           .hd-playdock { display:none; }
           .hd-barplay { display:flex; }
         }
-        .hd-barhint { flex:1; min-width:0; font-size:12px; color:#8b99a8; text-align:right;
+        .hd-barhint { flex:1 1 0; min-width:0; font-size:12px; color:#8b99a8; text-align:right;
           white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-        .hd-ver { flex:none; font-size:10px; color:#5b6c7d; white-space:nowrap;
+        /* the version never runs off the edge: vN stays put, only the build
+           stamp truncates (ellipsis) when the bar is too narrow */
+        .hd-ver { flex:0 1 auto; min-width:0; display:flex; align-items:baseline;
+          justify-content:flex-end; overflow:hidden; font-size:10px; color:#5b6c7d;
           font-variant-numeric:tabular-nums; letter-spacing:.02em; }
+        .hd-vernum { flex:0 0 auto; white-space:nowrap; }
+        .hd-verstamp { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
         /* corner menus */
         .hd-menu { position:absolute; z-index:45; background:#1a222c; border:1px solid #33404f;
           border-radius:12px; padding:10px 12px; box-shadow:0 8px 24px rgba(0,0,0,.5);

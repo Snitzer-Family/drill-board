@@ -3432,7 +3432,7 @@ export default function DrillAnimator() {
           <button className="hd-barbtn hd-barplay" title={playing ? "Stop" : "Reset"} onClick={resetPlay}><Icon name={playing ? "stop" : "reset"} /></button>
         </>}
         <div className="hd-barhint">{toolHint || ""}</div>
-        <div className="hd-ver">v{APP_VERSION} · {BUILD_STAMP}</div>
+        <div className="hd-ver"><span className="hd-vernum">v{APP_VERSION}</span><span className="hd-verstamp">&nbsp;· {BUILD_STAMP}</span></div>
       </div>
 
       {/* ---------- menus ---------- */}
