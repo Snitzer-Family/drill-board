@@ -593,7 +593,8 @@ function rink() {
 function piece(p) {
   const rot = (a = p.facing || 0) => `translate(${f(p.x)} ${f(p.y)}) rotate(${f(a)})`;
   if (p.kind === "player")
-    return `<g><circle cx="${f(p.x)}" cy="${f(p.y)}" r="3.4" fill="${p.color}" stroke="#fff" stroke-width="0.5"/>`
+    return `<g><ellipse cx="${f(p.x)}" cy="${f(p.y + 0.5)}" rx="3.7" ry="3.9" fill="#0a1016" opacity="0.15"/>`
+      + `<circle cx="${f(p.x)}" cy="${f(p.y)}" r="3.4" fill="${p.color}" stroke="#fff" stroke-width="0.5"/>`
       + `<text x="${f(p.x)}" y="${f(p.y) + 1.05}" font-weight="800" font-size="3" text-anchor="middle" fill="#fff">${p.label || ""}</text></g>`;
   if (p.kind === "puck")
     return `<circle cx="${f(p.x)}" cy="${f(p.y)}" r="1.5" fill="${V("puck", "#14171a")}" stroke="${V("surface", "#fff")}" stroke-width="0.4"/>`;
@@ -1006,7 +1007,7 @@ function animScene(pieces, rinkMode) {
   const moving = pieces.filter(p => (p.kind === "player" && p.path.length) || p.kind === "puck").map(p => {
     const icon = p.kind === "puck"
       ? `<circle r="1.5" fill="${V("puck", "#14171a")}" stroke="#fff" stroke-width="0.4"/>`
-      : `<circle r="3.4" fill="${p.color}" stroke="#fff" stroke-width="0.5"/><text y="1.05" font-size="3" font-weight="800" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif">${esc(p.label || p.id)}</text>`;
+      : `<ellipse cx="0" cy="0.5" rx="3.7" ry="3.9" fill="#0a1016" opacity="0.15"/><circle r="3.4" fill="${p.color}" stroke="#fff" stroke-width="0.5"/><text y="1.05" font-size="3" font-weight="800" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif">${esc(p.label || p.id)}</text>`;
     return `<g class="mv" data-id="${p.id}" transform="translate(${f(p.x)} ${f(p.y)})">${icon}</g>`;
   }).join("");
   const labels = pieces.filter(p => p.kind === "label").map(p => labelSvg(p.x, p.y, p.text, p.size, p.color)).join("");

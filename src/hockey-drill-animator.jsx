@@ -2876,6 +2876,7 @@ export default function DrillAnimator() {
                   const col = "#2f9e57", dark = "#1d2126";
                   return (
                     <g key={`aig-${i}`} transform={fx.t}>
+                      <ellipse cx={0.4} cy={0} rx={2.9} ry={2.6} fill="#0a1016" opacity={0.16} />
                       <path d="M 2.3 2.2 L 3.9 1 M 3.9 1.1 L 4.5 -1.1" stroke={dark} strokeWidth={1} strokeLinecap="round" />
                       <rect x={-1.7} y={-1.5} width={2.4} height={3} rx={1.05} fill={col} stroke="#fff" strokeWidth={0.3} />
                       <rect x={0.2} y={-1.85} width={2.6} height={1.5} rx={0.42} fill="#eef2f6" stroke="#2a2f36" strokeWidth={0.3} />
@@ -2912,6 +2913,7 @@ export default function DrillAnimator() {
               // catch glove (top), blocker + goalie stick (bottom)
               return (
                 <g key={`goalie-${net.id}`} transform={fx.t} pointerEvents="none">
+                  <ellipse cx={0.4} cy={0} rx={2.9} ry={2.6} fill="#0a1016" opacity={0.16} />
                   <path d="M 2.3 2.2 L 3.9 1 M 3.9 1.1 L 4.5 -1.1" stroke={dark} strokeWidth={1} strokeLinecap="round" />
                   <rect x={-1.7} y={-1.5} width={2.4} height={3} rx={1.05} fill={col} stroke="#fff" strokeWidth={0.3} />
                   <rect x={0.2} y={-1.85} width={2.6} height={1.5} rx={0.42} fill="#eef2f6" stroke="#2a2f36" strokeWidth={0.3} />
