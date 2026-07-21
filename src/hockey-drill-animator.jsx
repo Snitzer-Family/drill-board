@@ -828,7 +828,18 @@ export default function DrillAnimator() {
         if (Math.hypot(res.x - bladeRaw.x, res.y - bladeRaw.y) < 2.2) {   // this puck is on q's blade
           const qd = displayPos(q);                                       // shielded carrier
           const tip = bladeAtWorld(qd.x, qd.y, qd.a || 0, TIP_FWD, TIP_LAT, side);
-          return { ...res, x: tip.x, y: tip.y };
+          // carry stickhandle: the puck cradles side-to-side on the blade —
+          // more at low speed, less (with a forward push) when skating hard
+          const e = animT * totalTime;
+          const a2 = displayPosAt(q, Math.max(0, e - 0.07)), b2 = displayPosAt(q, Math.min(totalTime, e + 0.07));
+          const spd = Math.hypot(b2.x - a2.x, b2.y - a2.y) / 0.14;
+          const fast = Math.min(1, spd / 24);
+          const w = Math.sin(e * 8.5);
+          const lat = w * 1.2 * (1 - 0.5 * fast);                         // side-to-side cradle
+          const push = (0.5 + 0.5 * Math.sin(e * 8.5 + 1.3)) * 1.1 * fast; // slight fore-push when moving fast
+          const hd = ((qd.a || 0) * Math.PI) / 180;
+          const lx = -Math.sin(hd), ly = Math.cos(hd), fx = Math.cos(hd), fy = Math.sin(hd);
+          return { ...res, x: tip.x + lx * lat + fx * push, y: tip.y + ly * lat + fy * push };
         }
       }
     }
@@ -1141,8 +1152,10 @@ export default function DrillAnimator() {
         // the receiver shows their side of the action too (at the designated
         // receive waypoint, else at their standing spot i=-1)
         const rSpot = t.recvAt != null ? t.recvAt : -1;
-        if (t.to === p.id && actor !== p.id && rSpot === i) {
-          const rtext = t.kind === "shot" ? `Collect rebound from ${nameOf(actor)}`
+        const self = t.to === p.id && actor === p.id;   // chip/rim and go retrieve it
+        if (t.to === p.id && (actor !== p.id || (self && t.kind !== "pass")) && rSpot === i) {
+          const rtext = self ? (t.kind === "rim" ? "Collect your own rim" : "Collect your own chip")
+            : t.kind === "shot" ? `Collect rebound from ${nameOf(actor)}`
             : t.kind === "rim" ? `Collect ${nameOf(actor)}'s rim`
             : t.kind === "chip" ? `Collect ${nameOf(actor)}'s chip`
             : `Receive pass from ${nameOf(actor)}`;
@@ -1150,7 +1163,8 @@ export default function DrillAnimator() {
         }
         if (actor === p.id && t.at === i) {
           const to = nameOf(t.to);
-          const txt = t.kind === "pass" ? `Pass ${pk.id} to ${to}` : t.kind === "shot" ? `Shoot ${pk.id} — rebound to ${to}` : t.kind === "rim" ? `Hard rim to ${to}` : `Chip to ${to}`;
+          const txt = self && t.kind === "chip" ? "Chip and skate to retrieve" : self && t.kind === "rim" ? "Rim and skate to retrieve"
+            : t.kind === "pass" ? `Pass ${pk.id} to ${to}` : t.kind === "shot" ? `Shoot ${pk.id} — rebound to ${to}` : t.kind === "rim" ? `Hard rim to ${to}` : `Chip to ${to}`;
           steps.push({ ord: s + 1, text: txt, warn: flag(s), del: () => setTransfer(pk.id, s, null) });
         }
       });
@@ -1268,7 +1282,10 @@ export default function DrillAnimator() {
       const loose = !q.carrier && !q.pickup && !(q.transfers || []).length && !released;
       if (!(released || loose)) return false;
       const ch = puckChain(q);
-      return !(released && ch[ch.length - 1] === playerId);       // can't collect your own release
+      // you can chip/rim your own puck and skate to retrieve it — allow a self
+      // collect when the collector has a route to go get it; forbid only the
+      // nonsensical stationary "collect the puck I'm still holding" case
+      return !(released && ch[ch.length - 1] === playerId && !player.path.length);
     });
     if (!cands.length) { setToast("No loose puck to collect"); setTimeout(() => setToast(""), 1500); return; }
     const near = q => { const L = landing(q); return Math.hypot(L.x - spot.x, L.y - spot.y); };
