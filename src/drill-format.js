@@ -205,7 +205,7 @@ export function serializeDrill(rink, pieces, title = "", desc = "") {
     const rotatable = p.kind === "net" || p.kind === "bumper" || p.kind === "deker" || p.kind === "passer" || (p.kind === "player" && !p.path.length);
     const fac = rotatable && p.facing ? ` face=${f1(p.facing)}` : "";
     const hld = p.kind === "player" && p.holdLine ? " hold=line" : "";
-    const gl = p.kind === "net" && p.goalie ? " goalie" : "";
+    const gl = (p.kind === "net" || p.kind === "tire") && p.goalie ? " goalie" : "";
     const df = p.kind === "player" && p.defense ? " defense" : "";
     const siz = (p.kind === "net" || p.kind === "tire") && p.size && p.size !== 1 ? ` size=${f2(p.size)}` : "";
     out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${car}${gp}${pas}${sht}${rmT}${chT}${nt}${hld}${fac}${gl}${df}${siz}${spd}`);

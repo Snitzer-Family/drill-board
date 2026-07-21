@@ -682,7 +682,7 @@ export default function DrillAnimator() {
   let _goalieDiscs = null;
   const goalieDiscs = () => {
     if (_goalieDiscs) return _goalieDiscs;
-    _goalieDiscs = pieces.filter(q => q.kind === "net" && q.goalie)
+    _goalieDiscs = pieces.filter(q => (q.kind === "net" || q.kind === "tire") && q.goalie)
       .map(net => { const g = goaliePos(net, displayPosRaw); return { cx: g.x, cy: g.y, r: GOALIE_R }; });
     return _goalieDiscs;
   };
@@ -870,14 +870,19 @@ export default function DrillAnimator() {
   // out to challenge when the puck is far, and backs to the goal line as the
   // play nears. Clamped to the net's front hemisphere so it stays in the crease.
   function goaliePos(net, posFn = displayPos) {
+    // a tire keeper works the FULL circle (no front hemisphere), riding just
+    // outside the rubber wherever the puck is; a net keeper is post-to-post
+    const isTire = net.kind === "tire";
+    const R_TIRE = 2.6 * ICON_SCALE * (net.size || 1) + 1.3;
     const f = ((net.facing || 0) * Math.PI) / 180;    // net mouth opens this way
     const e = animT <= 0 ? 0 : animT * totalTime;
-    const MAXREL = (82 * Math.PI) / 180;               // post-to-post; never behind the net
+    const MAXREL = isTire ? Math.PI : (82 * Math.PI) / 180; // net: post-to-post; tire: all the way round
     const onArc = (ang, R) => {                         // clamp an aim angle to the front hemisphere
       let rel = ang - f; rel = Math.atan2(Math.sin(rel), Math.cos(rel));
       rel = Math.max(-MAXREL, Math.min(MAXREL, rel));
       const a = f + rel;
-      return { x: net.x + Math.cos(a) * R, y: net.y + Math.sin(a) * R, a: (a * 180) / Math.PI };
+      const rr = isTire ? R_TIRE : R;                   // a tire keeper always rides just off the rubber
+      return { x: net.x + Math.cos(a) * rr, y: net.y + Math.sin(a) * rr, a: (a * 180) / Math.PI };
     };
     // freeze on a shot: once a shot at this net is released, the goalie sets and
     // holds — on a save the puck stops right at it, a corner goal beats it clean
@@ -2368,6 +2373,13 @@ export default function DrillAnimator() {
           {p.kind === "tire" && (
             <>
               <div className="hd-poprow">
+                <button className={`hd-mini${p.goalie ? " on" : ""}`}
+                  onClick={() => updateById(p.id, { goalie: !p.goalie })}>
+                  {p.goalie ? "✓ Keeper on the tire" : "🥅 Keeper on the tire"}
+                </button>
+                <span style={{ fontSize: 11, color: "#8b99a8" }}>defends shots all the way around</span>
+              </div>
+              <div className="hd-poprow">
                 <span>Size</span>
                 <button className={`hd-mini${(p.size || 1) >= 0.8 ? " on" : ""}`}
                   onClick={() => updateById(p.id, { size: 1 })}>Large</button>
@@ -2833,8 +2845,9 @@ export default function DrillAnimator() {
               </g>
             )}
 
-            {/* goalies track the puck in front of their net (below the action) */}
-            {!aiPlay && pieces.filter(q => q.kind === "net" && q.goalie).map(net => {
+            {/* goalies track the puck in front of their net (or all the way
+               around a tire), below the action */}
+            {!aiPlay && pieces.filter(q => (q.kind === "net" || q.kind === "tire") && q.goalie).map(net => {
               const gp = goaliePos(net);
               const fx = iconXf(gp);
               const col = net.color || "#c81e33";
@@ -3178,7 +3191,7 @@ export default function DrillAnimator() {
             Feet: x 0–200, y 0–85. <b>RINK</b> full|half|quarter ·
             <b> PIECE</b> id player|puck|cone|net|bumper|deker|passer|label|tire x y [#color] [label] [speed=1.2] [hand=L] [on=F1]
             (a <b>bumper</b> is a foam barrier, a <b>deker</b> a stickhandling gate, a <b>passer</b> a rebounder box — all take <code>face=deg</code>)
-            (a <b>tire</b> is an agility prop — <code>size=1</code> large / <code>size=0.55</code> small)
+            (a <b>tire</b> is an agility prop — <code>size=1</code> large / <code>size=0.55</code> small; add <code>goalie</code> for a keeper that works the full circle to defend shots at it)
             (a <b>label</b> is a movable/resizable text note: <code>PIECE L1 label 100 40 size=1.2 "Regroup here"</code>)
             (a <b>net</b> takes <code>face=deg</code>, <code>goalie</code>, and <code>size</code> — <code>1</code> NHL / <code>0.62</code> mite; pucks
             enter only from the front and bounce off its sides/back) ·

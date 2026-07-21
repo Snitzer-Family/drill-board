@@ -176,6 +176,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
         const mag = Math.hypot(inx, iny) || 1;
         const ux = inx / mag, uy = iny / mag;                 // unit vector toward the net
         const goalie = !!(netPiece && netPiece.goalie);
+        const isTire = !!(netPiece && netPiece.kind === "tire");
         // a rebound-designated shot (aimPt = a collector's gather spot) must be
         // saved so the rebound actually comes out; only free shots roll goal/save
         const isGoal = goalie && !aimPt ? rand(`${pk.id}:${legs.length}`) >= SAVE_PROB : false;
@@ -184,7 +185,10 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
         const GOAL_HALF = 2.6;
         const place = rand(`${pk.id}:${legs.length}:p`) * 2 - 1; // −1..1 across the net
 
-        if (goalie && isGoal) {                               // beats the goalie — to a post/corner
+        // a NET goalie who is beaten lets it into a post/corner (a goal). A tire
+        // goalie who is beaten doesn't concede a goal — the puck just gets past
+        // and deflects off the rubber (handled below), so skip the corner here.
+        if (goalie && isGoal && !isTire) {                    // beats the goalie — to a post/corner
           const side = place >= 0 ? 1 : -1;
           const lat = side * (0.7 + Math.abs(place) * 0.3) * GOAL_HALF;
           const endPt = { x: clampX(net.x + ux * 1.5 + px * lat), y: clampY(net.y + uy * 1.5 + py * lat) };
@@ -195,18 +199,22 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
           return endPt;
         }
 
-        // where the shot strikes. A tire is a circle: the placement spread makes
-        // the puck contact the rubber off-centre, and it deflects off the radial
-        // normal there. Everything else is struck across a flat mouth/face.
-        const isTire = !!(netPiece && netPiece.kind === "tire");
+        // where the shot strikes. A tire is a circle: with no keeper (or a keeper
+        // who's beaten) the puck contacts the rubber off-centre and deflects off
+        // the radial normal there; a tire keeper who saves it steps out front and
+        // stops it. Everything else is struck across a flat mouth/face.
+        const tireDeflect = isTire && !(goalie && !isGoal);   // empty tire, or its keeper was beaten
         let hit, tireNrm = null;
-        if (isTire) {
+        if (tireDeflect) {
           const R = 2.6 * ICON_SCALE * (netPiece.size || 1);    // rubber radius, feet
           const off = place * R * 0.82;                         // how far off-centre it lands
           const back = Math.sqrt(Math.max(0, R * R - off * off));
           hit = { x: net.x - ux * back + px * off, y: net.y - uy * back + py * off };
           const nm = Math.hypot(hit.x - net.x, hit.y - net.y) || 1;
           tireNrm = { x: (hit.x - net.x) / nm, y: (hit.y - net.y) / nm };  // outward radial normal
+        } else if (isTire) {                                    // tire keeper steps out and stops it
+          const R = 2.6 * ICON_SCALE * (netPiece.size || 1);
+          hit = { x: net.x - ux * (R + 1.3), y: net.y - uy * (R + 1.3) };
         } else if (goalie) {
           hit = { x: net.x - ux * GOALIE_DEPTH, y: net.y - uy * GOALIE_DEPTH };
         } else {
@@ -218,7 +226,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
         // shot on net, so it stays quiet either way.
         const onNet = !!(netPiece && netPiece.kind === "net");
         const scored = onNet && !goalie && !aimPt;
-        const saved = goalie || (onNet && !!aimPt);
+        const saved = (goalie && !isGoal) || (onNet && !!aimPt);
         const flyLeg = { type: "fly", shot: true, save: saved, goal: scored, by: cur.id, x0: launch.x, y0: launch.y, x1: hit.x, y1: hit.y, t0: launchT, t1: tArr };
         legs.push(flyLeg);
         // a designated rebound whose collection spot sits behind/through the net

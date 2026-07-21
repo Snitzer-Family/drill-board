@@ -616,7 +616,8 @@ function piece(p) {
     return `<g transform="translate(${f(p.x)} ${f(p.y)}) scale(${p.size || 1})">`
       + `<circle cx="0" cy="0" r="2.0" fill="none" stroke="${p.color}" stroke-width="1.55"/>`
       + `<circle cx="0" cy="0" r="2.78" fill="none" stroke="#000" stroke-width="0.2" opacity="0.55"/>`
-      + `<circle cx="0" cy="0" r="1.22" fill="none" stroke="#000" stroke-width="0.2" opacity="0.55"/>${ticks}</g>`;
+      + `<circle cx="0" cy="0" r="1.22" fill="none" stroke="#000" stroke-width="0.2" opacity="0.55"/>${ticks}`
+      + (p.goalie ? `<circle cx="0" cy="-3.5" r="1.15" fill="#2f9e57" stroke="#fff" stroke-width="0.3"/>` : "") + `</g>`;
   }
   if (p.kind === "bumper")
     return `<g transform="${rot()}"><rect x="-7" y="-0.95" width="14" height="1.9" rx="0.95" fill="${p.color}" stroke="#fff" stroke-width="0.3"/>`
@@ -1117,6 +1118,7 @@ function drillSvg(dsl, opts = {}) {
     var players=r.pieces.filter(function(p){return p.kind==='player';});
     var L=players.map(function(p){return '<span><span class="dot" style="background:'+p.color+'"></span>'+esc(p.id)+(p.defense?' \u2014 auto-D':'')+'</span>';});
     r.pieces.filter(function(p){return p.kind==='net';}).forEach(function(p){L.push('<span><span class="dot" style="background:'+(p.goalie?'#2f9e57':p.color)+'"></span>'+esc(p.id)+(p.goalie?' \u2014 net + goalie':' \u2014 net')+'</span>');});
+    r.pieces.filter(function(p){return p.kind==='tire'&&p.goalie;}).forEach(function(p){L.push('<span><span class="dot" style="background:#2f9e57"></span>'+esc(p.id)+' \u2014 tire + keeper</span>');});
     L.push('<span><span class="solid"></span>skating route</span>','<span><span class="dash"></span>puck path</span>');
     leg.innerHTML=L.join('');
     meta.textContent=players.length+' skater'+(players.length===1?'':'s')+' \u00b7 live';
