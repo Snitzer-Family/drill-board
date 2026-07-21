@@ -2364,12 +2364,12 @@ export default function DrillAnimator() {
       };
       return (
         <div className="hd-poprow">
-          <span>Target</span>
-          <button className={`hd-mini${!curNet ? " on" : ""}`} onClick={() => setNet(null)}>Nearest</button>
-          {targets.map(n => (
-            <button key={n.id} className={`hd-mini${curNet === n.id ? " on" : ""}`}
-              onClick={() => setNet(curNet === n.id ? null : n.id)}>{n.id}</button>
-          ))}
+          <span>Rebound at</span>
+          <select className={`hd-select${curNet ? " on" : ""}`} value={curNet || "nearest"}
+            onChange={e => setNet(e.target.value === "nearest" ? null : e.target.value)}>
+            <option value="nearest">Nearest net</option>
+            {targets.map(n => <option key={n.id} value={n.id}>{n.id + (n.kind === "bumper" ? " · bumper" : n.kind === "tire" ? " · tire" : n.kind === "passer" ? " · passer" : "")}</option>)}
+          </select>
         </div>
       );
     };
@@ -2452,6 +2452,12 @@ export default function DrillAnimator() {
         if (holds) setTransfer(pk.id, stage, isVia(ps) ? null : tr);
         else appendTransfer(pk.id, { ...tr, by: p.id });
       };
+      // pass target as a dropdown value: p:<player> or v:<passer give-and-go>
+      const passVal = from && from.kind === "pass" && from.at === i ? (from.via ? "v:" + from.via : "p:" + from.to) : "";
+      const onPassSel = v => {
+        if (!v) { if (from && from.kind === "pass" && from.at === i) setTransfer(pk.id, stage, null); return; }
+        if (v[0] === "v") doVia(v.slice(2)); else doPass(v.slice(2));
+      };
       // sauce (raised) pass: the puck arcs up and over ice obstacles, bouncing
       // when it lands — toggled on the active pass at this waypoint
       const isSauce = !!(from && from.kind === "pass" && from.at === i && from.sauce);
@@ -2473,21 +2479,22 @@ export default function DrillAnimator() {
           : { ...q, shotAt: i, rimAt: null, chipAt: null, rimAim: null, chipAim: null, net: tid,
               ...(holds && stage === ts.length ? {} : { termBy: p.id }) });
       };
+      const shootVal = isTerm("shotAt") ? (pk.net || "nearest") : "";
+      const onShootSel = v => {
+        if (!v) { if (isTerm("shotAt")) updateById(pk.id, { shotAt: null, rimAt: null, chipAt: null }); return; }
+        doShootAt(v === "nearest" ? null : v);
+      };
+      const tgtLabel = t => t.id + (t.kind === "bumper" ? " · bumper" : t.kind === "tire" ? " · tire" : t.kind === "passer" ? " · passer" : "");
       return (
         <>
           {(others.length > 0 || passers.length > 0) && (
             <div className="hd-poprow">
               <span>Pass {pk.id} to</span>
-              {others.map(o => (
-                <button key={o.id} className={`hd-mini${isPass(o.id) ? " on" : ""}`} onClick={() => doPass(o.id)}>
-                  {nameOf(o.id)}
-                </button>
-              ))}
-              {/* a passer returns it — a give-and-go (⟲) back to this player */}
-              {passers.map(ps => (
-                <button key={ps.id} className={`hd-mini${isVia(ps.id) ? " on" : ""}`} title="give-and-go: passes into the rebounder and comes right back"
-                  onClick={() => doVia(ps.id)}>{nameOf(ps.id)} ⟲</button>
-              ))}
+              <select className={`hd-select${passVal ? " on" : ""}`} value={passVal} onChange={e => onPassSel(e.target.value)}>
+                <option value="">— pick a target —</option>
+                {others.map(o => <option key={o.id} value={"p:" + o.id}>{nameOf(o.id)}</option>)}
+                {passers.map(ps => <option key={ps.id} value={"v:" + ps.id}>{nameOf(ps.id)} — give &amp; go ⟲</option>)}
+              </select>
             </div>
           )}
           {/* WHICH waypoint the receiver catches it at — for a via give-and-go the
@@ -2515,15 +2522,14 @@ export default function DrillAnimator() {
               <span style={{ fontSize: 11, color: "#8b99a8" }}>arcs up &amp; over obstacles</span>
             </div>
           )}
-          {/* Shoot names its target like Pass names a receiver */}
+          {/* Shoot names its target from a dropdown, like Pass names a receiver */}
           <div className="hd-poprow">
             <span>🥅 Shoot at</span>
-            <button className={`hd-mini${isShootAt(null) ? " on" : ""}`} onClick={() => doShootAt(null)}>Nearest</button>
-            {shootTargets.map(t => (
-              <button key={t.id} className={`hd-mini${isShootAt(t.id) ? " on" : ""}`}
-                title={t.kind === "bumper" ? "mirror deflect" : t.kind === "tire" ? "deflects off the rubber" : t.kind === "passer" ? "rebounds off the face" : ""}
-                onClick={() => doShootAt(t.id)}>{t.id}</button>
-            ))}
+            <select className={`hd-select${shootVal ? " on" : ""}`} value={shootVal} onChange={e => onShootSel(e.target.value)}>
+              <option value="">— don't shoot —</option>
+              <option value="nearest">Nearest net</option>
+              {shootTargets.map(t => <option key={t.id} value={t.id}>{tgtLabel(t)}</option>)}
+            </select>
           </div>
           <div className="hd-poprow">
             <button className={`hd-mini${isTerm("rimAt") ? " on" : ""}`} onClick={() => doTerm("rimAt")}>
@@ -2680,11 +2686,6 @@ export default function DrillAnimator() {
                   );
                 })()}
               </div>
-              {/* just THIS player's own actions in each puck chain, numbered,
-                  with per-action delete — disambiguates passes/shots/rebounds
-                  that pile up on one spot */}
-              {pieces.filter(q => q.kind === "puck" && puckChain(q).includes(p.id))
-                .map(pk => chainList(pk, p.id))}
               {p.path.length > 0 && !p.defense && (
                 <div className="hd-poprow">
                   <button className={`hd-mini${p.holdLine ? " on" : ""}`}

@@ -142,6 +142,12 @@ export const STYLES = `
           color:#dbe4ec; border-radius:7px; cursor:pointer; min-height:34px; }
         .hd-mini.on { background:#1f4fa3; border-color:#1f4fa3; color:#fff; }
         .hd-mini.danger { color:#ff8d9c; border-color:#4a2a30; }
+        .hd-select { flex:1 1 auto; min-width:80px; padding:6px 8px; font-size:12.5px; border-radius:7px;
+          border:1px solid #2c3846; background:#212b36; color:#dbe4ec; cursor:pointer;
+          -webkit-appearance:none; appearance:none;
+          background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' stroke='%238b99a8' stroke-width='1.4' fill='none' stroke-linecap='round'/></svg>");
+          background-repeat:no-repeat; background-position:right 8px center; padding-right:22px; }
+        .hd-select.on { border-color:#1f4fa3; }
         .hd-stepper { display:inline-flex; align-items:center; gap:2px;
           background:#0f141a; border:1px solid #2c3846; border-radius:7px; overflow:hidden; }
         .hd-stepper button { width:32px; min-height:32px; border:none; background:#212b36; color:#e8edf2;

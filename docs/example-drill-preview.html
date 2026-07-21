@@ -1163,6 +1163,7 @@ function drillSvg(dsl, opts = {}) {
     err.textContent=r.errors.length?r.errors.join('  \u00b7  '):'';
     sheet.textContent=SHEET_LABEL[r.rink]||'Full sheet';
     title.textContent=r.title||'Drill'; lede.textContent=r.desc||'';
+    document.title = r.title ? r.title+' · DrillBoard' : 'DrillBoard · live drill card';
     var players=r.pieces.filter(function(p){return p.kind==='player';});
     var L=players.map(function(p){return '<span><span class="dot" style="background:'+p.color+'"></span>'+esc(p.id)+(p.defense?' \u2014 auto-D':'')+'</span>';});
     r.pieces.filter(function(p){return p.kind==='net';}).forEach(function(p){L.push('<span><span class="dot" style="background:'+(p.goalie?'#2f9e57':p.color)+'"></span>'+esc(p.id)+(p.goalie?' \u2014 net + goalie':' \u2014 net')+'</span>');});
