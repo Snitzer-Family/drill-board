@@ -139,7 +139,9 @@ export const STYLES = `
         .hd-grip { color:#5b6c7d; font-size:13px; letter-spacing:0; }
         .hd-poprow { display:flex; align-items:center; gap:7px; flex-wrap:wrap; font-size:12.5px; color:#cdd8e2; }
         .hd-mini { padding:6px 10px; font-size:12.5px; border:1px solid #2c3846; background:#212b36;
-          color:#dbe4ec; border-radius:7px; cursor:pointer; min-height:34px; }
+          color:#dbe4ec; border-radius:7px; cursor:pointer; min-height:34px;
+          display:inline-flex; align-items:center; justify-content:center; gap:5px; }
+        .hd-item svg, .hd-mini svg, .hd-btn svg { flex:0 0 auto; }
         .hd-mini.on { background:#1f4fa3; border-color:#1f4fa3; color:#fff; }
         .hd-mini.danger { color:#ff8d9c; border-color:#4a2a30; }
         .hd-select { flex:1 1 auto; min-width:80px; padding:6px 8px; font-size:12.5px; border-radius:7px;

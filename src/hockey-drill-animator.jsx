@@ -7,7 +7,7 @@ import * as boards from "./boards.js";
 import { netShapes, bumperShapes, solidShapes, detourRoute, segCrossesNet } from "./net-collide.js";
 import { RinkMarkings } from "./rink.jsx";
 import { ZONES, zoneAt } from "./zones.js";
-import { PieceIcon, Stepper, DiagPanel } from "./icons.jsx";
+import { PieceIcon, Stepper, DiagPanel, Icon } from "./icons.jsx";
 import { createTiming } from "./timing.js";
 import { newGame, stepGame } from "./ai-game.js";
 import { STYLES } from "./styles.js";
@@ -2403,7 +2403,7 @@ export default function DrillAnimator() {
         <div className="hd-poprow">
           <button className={`hd-mini${hit ? " on" : ""}`}
             onClick={() => (hit ? undo() : collectPuckAt(p.id, i))}>
-            {hit ? "✓ Collecting puck" : "⊕ Collect puck"}
+            <Icon name={hit ? "check" : "collect"} size={15} /> Collect puck
           </button>
           <span style={{ fontSize: 11, color: "#8b99a8" }}>grabs the nearest loose puck here</span>
         </div>
@@ -2517,14 +2517,14 @@ export default function DrillAnimator() {
           {from && from.kind === "pass" && from.at === i && (
             <div className="hd-poprow">
               <button className={`hd-mini${isSauce ? " on" : ""}`} onClick={doSauce}>
-                {isSauce ? "✓ Sauce pass ⤴" : "Sauce pass ⤴"}
+                <Icon name={isSauce ? "check" : "sauce"} size={15} /> Sauce pass
               </button>
               <span style={{ fontSize: 11, color: "#8b99a8" }}>arcs up &amp; over obstacles</span>
             </div>
           )}
           {/* Shoot names its target from a dropdown, like Pass names a receiver */}
           <div className="hd-poprow">
-            <span>🥅 Shoot at</span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><Icon name="net" size={15} /> Shoot at</span>
             <select className={`hd-select${shootVal ? " on" : ""}`} value={shootVal} onChange={e => onShootSel(e.target.value)}>
               <option value="">— don't shoot —</option>
               <option value="nearest">Nearest net</option>
@@ -2533,10 +2533,10 @@ export default function DrillAnimator() {
           </div>
           <div className="hd-poprow">
             <button className={`hd-mini${isTerm("rimAt") ? " on" : ""}`} onClick={() => doTerm("rimAt")}>
-              {isTerm("rimAt") ? "✓ Hard rim" : "Hard rim"}
+              <Icon name={isTerm("rimAt") ? "check" : "rim"} size={15} /> Hard rim
             </button>
             <button className={`hd-mini${isTerm("chipAt") ? " on" : ""}`} onClick={() => doTerm("chipAt")}>
-              {isTerm("chipAt") ? "✓ Chip" : "Chip"}
+              <Icon name={isTerm("chipAt") ? "check" : "chip"} size={15} /> Chip
             </button>
           </div>
           {(isTerm("rimAt") || isTerm("chipAt")) && (
@@ -2573,7 +2573,7 @@ export default function DrillAnimator() {
           <button className="hd-tool" onClick={() => addPieceAt("deker", popup.pt)}>{toolImg("deker")}<span>Deker</span></button>
           <button className="hd-tool" onClick={() => addPieceAt("passer", popup.pt)}>{toolImg("passer")}<span>Passer</span></button>
           <button className="hd-tool" onClick={() => addPieceAt("tire", popup.pt)}>{toolImg("tire")}<span>Tire</span></button>
-          <button className="hd-tool" onClick={() => addPieceAt("label", popup.pt)}><span className="hd-toolglyph">🇹</span><span>Label</span></button>
+          <button className="hd-tool" onClick={() => addPieceAt("label", popup.pt)}><span className="hd-toolglyph"><Icon name="label" size={22} /></span><span>Label</span></button>
         </div>
       );
     } else if (popup.type === "piece") {
@@ -2792,9 +2792,9 @@ export default function DrillAnimator() {
           {(p.kind === "player" || p.kind === "puck") && !p.defense && (
             <div className="hd-poprow">
               <span>Add leg</span>
-              <button className="hd-mini" onClick={() => addSegment(p.id, "L")}>⎯</button>
-              <button className="hd-mini" onClick={() => addSegment(p.id, "Q")}>⌒</button>
-              <button className="hd-mini" onClick={() => addSegment(p.id, "C")}>∿</button>
+              <button className="hd-mini" title="Straight" onClick={() => addSegment(p.id, "L")}><Icon name="segLine" /></button>
+              <button className="hd-mini" title="Curve" onClick={() => addSegment(p.id, "Q")}><Icon name="segQuad" /></button>
+              <button className="hd-mini" title="S-curve" onClick={() => addSegment(p.id, "C")}><Icon name="segCubic" /></button>
             </div>
           )}
           {p.kind !== "player" && p.kind !== "label" && (
@@ -2808,9 +2808,9 @@ export default function DrillAnimator() {
             {p.path.length > 0 && (
               <button className="hd-mini" onClick={() => { updateById(p.id, { path: [] }); setPopup(null); }}>Clear route</button>
             )}
-            <button className="hd-mini" onClick={() => duplicatePiece(p.id)}>⧉ Duplicate</button>
+            <button className="hd-mini" onClick={() => duplicatePiece(p.id)}><Icon name="duplicate" size={15} /> Duplicate</button>
             <button className="hd-mini danger" onClick={() => deletePiece(p.id)}>
-              Delete
+              <Icon name="trash" size={15} /> Delete
             </button>
           </div>
         </>
@@ -2887,9 +2887,9 @@ export default function DrillAnimator() {
               </div>
               <div className="hd-poprow">
                 <span>Next leg</span>
-                {[["L", "⎯"], ["Q", "⌒"], ["C", "∿"]].map(([t, g]) => (
-                  <button key={t} className={`hd-mini${next.type === t ? " on" : ""}`}
-                    onClick={() => changeSegType(p.id, i + 1, t)}>{g}</button>
+                {[["L", "segLine", "Straight"], ["Q", "segQuad", "Curve"], ["C", "segCubic", "S-curve"]].map(([t, ic, lbl]) => (
+                  <button key={t} className={`hd-mini${next.type === t ? " on" : ""}`} title={lbl}
+                    onClick={() => changeSegType(p.id, i + 1, t)}><Icon name={ic} /></button>
                 ))}
               </div>
               {p.kind === "player" && (
@@ -2916,9 +2916,9 @@ export default function DrillAnimator() {
           ) : (p.kind === "player" || p.kind === "puck") && !p.defense ? (
             <div className="hd-poprow">
               <span>Extend route</span>
-              <button className="hd-mini" onClick={() => addSegment(p.id, "L")}>⎯</button>
-              <button className="hd-mini" onClick={() => addSegment(p.id, "Q")}>⌒</button>
-              <button className="hd-mini" onClick={() => addSegment(p.id, "C")}>∿</button>
+              <button className="hd-mini" title="Straight" onClick={() => addSegment(p.id, "L")}><Icon name="segLine" /></button>
+              <button className="hd-mini" title="Curve" onClick={() => addSegment(p.id, "Q")}><Icon name="segQuad" /></button>
+              <button className="hd-mini" title="S-curve" onClick={() => addSegment(p.id, "C")}><Icon name="segCubic" /></button>
               <span style={{ fontSize: 11, color: "#8b99a8" }}>adds a waypoint after the end</span>
             </div>
           ) : (
@@ -3311,12 +3311,12 @@ export default function DrillAnimator() {
               padding: "7px 9px", background: "rgba(20,24,30,0.94)", border: "1px solid rgba(255,255,255,0.12)",
               borderRadius: 999, boxShadow: "0 6px 22px rgba(0,0,0,0.45)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)" }}>
               <span style={{ color: "#cdd6df", fontSize: 12, fontWeight: 700, padding: "0 4px", whiteSpace: "nowrap" }}>{multiSel.size} selected</span>
-              <button style={mbtn} onClick={() => rotateGroup(-15)} title="Rotate left 15°">⟲</button>
-              <button style={mbtn} onClick={() => rotateGroup(15)} title="Rotate right 15°">⟳</button>
-              <button style={mbtn} onClick={() => rotateGroup(90)} title="Rotate 90°">90°</button>
-              <button style={mbtn} onClick={duplicateGroup} title="Duplicate the selection">⧉</button>
-              <button style={{ ...mbtn, color: "#ff7a7a", borderColor: "rgba(255,90,90,0.35)" }} onClick={deleteGroup} title="Delete the selection">🗑</button>
-              <button style={mbtn} onClick={() => setMultiSel(null)} title="Clear selection">✕</button>
+              <button style={mbtn} onClick={() => rotateGroup(-15)} title="Rotate left 15°"><Icon name="rotateCcw" /></button>
+              <button style={mbtn} onClick={() => rotateGroup(15)} title="Rotate right 15°"><Icon name="rotateCw" /></button>
+              <button style={{ ...mbtn, fontSize: 12 }} onClick={() => rotateGroup(90)} title="Rotate 90°">90°</button>
+              <button style={mbtn} onClick={duplicateGroup} title="Duplicate the selection"><Icon name="duplicate" /></button>
+              <button style={{ ...mbtn, color: "#ff7a7a", borderColor: "rgba(255,90,90,0.35)" }} onClick={deleteGroup} title="Delete the selection"><Icon name="trash" /></button>
+              <button style={mbtn} onClick={() => setMultiSel(null)} title="Clear selection"><Icon name="close" /></button>
             </div>
           )}
           {view.s > 1.02 && (
@@ -3361,33 +3361,33 @@ export default function DrillAnimator() {
         ...(aiPlay ? { display: "none" } : {}),
       }}>
         <span className="hd-grip" onPointerDown={playDragStart} onPointerMove={playDragMove}
-          onPointerUp={playDragEnd} onPointerCancel={playDragEnd}>⠿</span>
+          onPointerUp={playDragEnd} onPointerCancel={playDragEnd}><Icon name="grip" size={16} /></span>
         <button className={`hd-fab small${loopMode ? " on" : ""}`} title="Loop"
-          onClick={() => setLoopMode(v => !v)}>🔁</button>
-        <button className="hd-fab small play" onClick={togglePlay}>{playing ? "❚❚" : "▶"}</button>
-        <button className="hd-fab small" title={playing ? "Stop" : "Reset"} onClick={resetPlay}>{playing ? "■" : "⟲"}</button>
+          onClick={() => setLoopMode(v => !v)}><Icon name="loop" size={19} /></button>
+        <button className="hd-fab small play" onClick={togglePlay}><Icon name={playing ? "pause" : "play"} size={22} /></button>
+        <button className="hd-fab small" title={playing ? "Stop" : "Reset"} onClick={resetPlay}><Icon name={playing ? "stop" : "reset"} size={19} /></button>
       </div>
 
       {/* ---------- bottom menu bar ---------- */}
       <div className="hd-bar">
-        <button className={`hd-barbtn${openMenu === "settings" ? " on" : ""}`}
-          onClick={() => setOpenMenu(m => (m === "settings" ? null : "settings"))}>☰</button>
+        <button className={`hd-barbtn${openMenu === "settings" ? " on" : ""}`} title="Menu"
+          onClick={() => setOpenMenu(m => (m === "settings" ? null : "settings"))}><Icon name="menu" /></button>
         <button className={`hd-barbtn${openMenu === "rinkmenu" ? " on" : ""}`}
           onClick={() => setOpenMenu(m => (m === "rinkmenu" ? null : "rinkmenu"))}>
           <small>{rink === "full" ? "FULL" : rink === "half" ? "½" : "¼"}</small>
         </button>
-        <button className={`hd-barbtn${tool === "draw" ? " draw-on" : openMenu === "tools" ? " on" : ""}`}
-          onClick={() => setOpenMenu(m => (m === "tools" ? null : "tools"))}>✎</button>
+        <button className={`hd-barbtn${tool === "draw" ? " draw-on" : openMenu === "tools" ? " on" : ""}`} title="Add / draw"
+          onClick={() => setOpenMenu(m => (m === "tools" ? null : "tools"))}><Icon name="pencil" /></button>
         <button className="hd-barbtn" title="Undo last change" disabled={!undoCount}
-          onClick={undoLast} style={undoCount ? undefined : { opacity: 0.4 }}>↶</button>
+          onClick={undoLast} style={undoCount ? undefined : { opacity: 0.4 }}><Icon name="undo" /></button>
         <button className="hd-barbtn" title="Redo" disabled={!redoCount}
-          onClick={redoLast} style={redoCount ? undefined : { opacity: 0.4 }}>↷</button>
+          onClick={redoLast} style={redoCount ? undefined : { opacity: 0.4 }}><Icon name="redo" /></button>
         {/* play controls live in the bar on desktop (hidden on mobile via CSS) */}
         {!aiPlay && <>
           <button className={`hd-barbtn hd-barplay${loopMode ? " on" : ""}`} title="Loop"
-            onClick={() => setLoopMode(v => !v)}>🔁</button>
-          <button className="hd-barbtn hd-barplay play" onClick={togglePlay}>{playing ? "❚❚" : "▶"}</button>
-          <button className="hd-barbtn hd-barplay" title={playing ? "Stop" : "Reset"} onClick={resetPlay}>{playing ? "■" : "⟲"}</button>
+            onClick={() => setLoopMode(v => !v)}><Icon name="loop" /></button>
+          <button className="hd-barbtn hd-barplay play" onClick={togglePlay}><Icon name={playing ? "pause" : "play"} size={19} /></button>
+          <button className="hd-barbtn hd-barplay" title={playing ? "Stop" : "Reset"} onClick={resetPlay}><Icon name={playing ? "stop" : "reset"} /></button>
         </>}
         <div className="hd-barhint">{toolHint || ""}</div>
         <div className="hd-ver">v{APP_VERSION} · {BUILD_STAMP}</div>
@@ -3401,27 +3401,27 @@ export default function DrillAnimator() {
             onChange={e => setDrillTitle(e.target.value)} />
           <textarea className="hd-input" style={{ minHeight: 46, resize: "vertical", fontFamily: "inherit" }}
             placeholder="Description" value={drillDesc} onChange={e => setDrillDesc(e.target.value)} spellCheck={false} />
-          <button className="hd-item" onClick={openText}>⌨ Text editor</button>
-          <button className="hd-item" onClick={() => { exportTxt(); setOpenMenu(null); }}>⇩ Export .txt</button>
-          <button className="hd-item" onClick={() => { exportMd(); setOpenMenu(null); }}>⬇ Export .md</button>
-          <button className="hd-item" onClick={() => { exportImage(); setOpenMenu(null); }}>🖼 Export image</button>
-          <button className="hd-item" onClick={() => { copyMd(); setOpenMenu(null); }}>⧉ Copy markdown</button>
-          <button className="hd-item" onClick={() => { previewLink(); setOpenMenu(null); }}>🔗 Share preview link</button>
-          <button className="hd-item" onClick={() => fileRef.current?.click()}>⇧ Load .txt / .md</button>
+          <button className="hd-item" onClick={openText}><Icon name="keyboard" size={16} /> Text editor</button>
+          <button className="hd-item" onClick={() => { exportTxt(); setOpenMenu(null); }}><Icon name="download" size={16} /> Export .txt</button>
+          <button className="hd-item" onClick={() => { exportMd(); setOpenMenu(null); }}><Icon name="download" size={16} /> Export .md</button>
+          <button className="hd-item" onClick={() => { exportImage(); setOpenMenu(null); }}><Icon name="image" size={16} /> Export image</button>
+          <button className="hd-item" onClick={() => { copyMd(); setOpenMenu(null); }}><Icon name="duplicate" size={16} /> Copy markdown</button>
+          <button className="hd-item" onClick={() => { previewLink(); setOpenMenu(null); }}><Icon name="share" size={16} /> Share preview link</button>
+          <button className="hd-item" onClick={() => fileRef.current?.click()}><Icon name="upload" size={16} /> Load .txt / .md</button>
           <button className="hd-item danger"
             onClick={() => {
               if (!pieces.length || window.confirm("Clear all pieces from the board?")) {
                 setPlaying(false); resetAnim();
                 setPieces([]); setSelectedId(null); setPopup(null); setOpenMenu(null);
               }
-            }}>🗑 Clear all</button>
+            }}><Icon name="trash" size={16} /> Clear all</button>
           <button className={`hd-item${showZones ? " on" : ""}`}
             onClick={() => setShowZones(s => !s)}>
-            ▦ Ice zones {showZones ? "(on)" : ""}
+            <Icon name="grid" size={16} /> Ice zones {showZones ? "(on)" : ""}
           </button>
           <button className={`hd-item${showDiag ? " on" : ""}`}
             onClick={() => { setShowDiag(s => !s); setOpenMenu(null); }}>
-            ◫ Diagnostics {showDiag ? "(on)" : ""}
+            <Icon name="gauge" size={16} /> Diagnostics {showDiag ? "(on)" : ""}
           </button>
           <div className="hd-mh" style={{ marginTop: 4 }}>Routes on play</div>
           <div className="hd-poprow">
@@ -3502,14 +3502,14 @@ export default function DrillAnimator() {
               </button>
             ))}
             <button className={`hd-tool${tool === "label" ? " on" : ""}`} onClick={() => { setTool("label"); setOpenMenu(null); }}>
-              <span className="hd-toolglyph">🇹</span><span>Label</span>
+              <span className="hd-toolglyph"><Icon name="label" size={22} /></span><span>Label</span>
             </button>
           </div>
           <button className="hd-item" onClick={() => { resetAnim(); setPlaying(false); setPopup(null); setTool("draw"); setOpenMenu(null); }}>
-            ✎ Draw a route
+            <Icon name="pencil" size={16} /> Draw a route
           </button>
           {tool !== "select" && (
-            <button className="hd-item" onClick={() => { setTool("select"); setOpenMenu(null); }}>✕ Cancel tool</button>
+            <button className="hd-item" onClick={() => { setTool("select"); setOpenMenu(null); }}><Icon name="close" size={16} /> Cancel tool</button>
           )}
         </div>
       )}
@@ -3521,7 +3521,7 @@ export default function DrillAnimator() {
           {textError && <div className="hd-err">{textError}</div>}
           <div className="hd-row">
             <button className="hd-btn primary" onClick={applyText}>Apply</button>
-            <button className="hd-btn" title="Copy text" aria-label="Copy text" onClick={copyText}>⧉</button>
+            <button className="hd-btn" title="Copy text" aria-label="Copy text" onClick={copyText}><Icon name="duplicate" size={15} /></button>
             <button className="hd-btn" title="Erase text" onClick={() => setTextDraft("")}>Erase</button>
             <button className="hd-btn" title="Share drill" onClick={shareDrill}>Share</button>
             <button className="hd-btn" onClick={() => fileRef.current?.click()}>Load</button>

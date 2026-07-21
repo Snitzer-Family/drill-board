@@ -2,6 +2,65 @@
 import { useState, useRef, useEffect } from "react";
 import { APP_VERSION, BUILD_STAMP, ICON_SCALE } from "./constants.js";
 
+/* ---------------- unified action icons ----------------
+   One monochrome, stroke-based set drawn on a 24×24 grid in currentColor, so
+   every button inherits its text colour and they all read as one family. */
+const F = { fill: "currentColor", stroke: "none" };
+const ICONS = {
+  play: <path d="M7 5.5v13l11-6.5z" {...F} />,
+  pause: <><rect x="6.5" y="5" width="3.6" height="14" rx="1.1" {...F} /><rect x="13.9" y="5" width="3.6" height="14" rx="1.1" {...F} /></>,
+  stop: <rect x="6" y="6" width="12" height="12" rx="1.8" {...F} />,
+  loop: <><path d="M17 3l3.5 3.5L17 10" /><path d="M3.5 11.5v-1a4 4 0 0 1 4-4h13" /><path d="M7 21l-3.5-3.5L7 14" /><path d="M20.5 12.5v1a4 4 0 0 1-4 4h-13" /></>,
+  reset: <><path d="M4 4v5h5" /><path d="M4.5 13a8 8 0 1 0 2-6.5L4 9" /></>,
+  undo: <><path d="M9 14L4 9l5-5" /><path d="M4 9h10a6 6 0 0 1 0 12H9" /></>,
+  redo: <><path d="M15 14l5-5-5-5" /><path d="M20 9H10a6 6 0 0 0 0 12h5" /></>,
+  menu: <path d="M3.5 6.5h17M3.5 12h17M3.5 17.5h17" />,
+  pencil: <><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z" /><path d="M14 8l3 3" /></>,
+  duplicate: <><rect x="8.5" y="8.5" width="11" height="11" rx="2.2" /><path d="M4.5 15.5V6a2 2 0 0 1 2-2h9.5" /></>,
+  trash: <><path d="M4 6.5h16" /><path d="M8 6.5V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v1.5" /><path d="M6.5 6.5l1 13a2 2 0 0 0 2 1.8h5a2 2 0 0 0 2-1.8l1-13" /></>,
+  rotateCw: <><path d="M20.5 12a8.5 8.5 0 1 1-2.5-6" /><path d="M20.5 3.5v5h-5" /></>,
+  rotateCcw: <><path d="M3.5 12a8.5 8.5 0 1 0 2.5-6" /><path d="M3.5 3.5v5h5" /></>,
+  close: <path d="M6 6l12 12M18 6L6 18" />,
+  plus: <path d="M12 5v14M5 12h14" />,
+  // hockey net (mouth + mesh) for "shoot at"
+  net: <><path d="M4 19V8h16v11" /><path d="M4 8l3-2.5h10L20 8" /><path d="M8 8v11M12 8v11M16 8v11M4 13.5h16" /></>,
+  // a puck dropping into a tray = collect a loose puck
+  collect: <><path d="M12 3.5v9" /><path d="M8.5 9l3.5 3.5L15.5 9" /><path d="M4.5 15v3a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-3" /></>,
+  // a raised arc + landing = sauce pass
+  sauce: <><path d="M3.5 17.5C7 6 17 6 20.5 17.5" /><path d="M16.5 14l4 3.5-5 1.2" {...F} /></>,
+  // return loop = give-and-go / rebounder pass
+  giveGo: <><path d="M8 8v4a4 4 0 0 0 8 0V7" /><path d="M12.5 10.5L16 7l3.5 3.5" /></>,
+  // straight arrow = a plain pass
+  pass: <><path d="M4 12h14" /><path d="M13 6l6 6-6 6" /></>,
+  chip: <path d="M4 16C8 7 16 7 20 16" />,
+  rim: <path d="M4 5v8a6 6 0 0 0 6 6h10" />,
+  target: <><circle cx="12" cy="12" r="8.5" /><circle cx="12" cy="12" r="3.2" /></>,
+  label: <><path d="M5 6h14" /><path d="M12 6v13" /></>,
+  puck: <ellipse cx="12" cy="12" rx="8" ry="4.4" {...F} />,
+  check: <path d="M5 12.5l4.5 4.5L19 6.5" />,
+  grip: <><circle cx="9" cy="7" r="1.4" {...F} /><circle cx="15" cy="7" r="1.4" {...F} /><circle cx="9" cy="12" r="1.4" {...F} /><circle cx="15" cy="12" r="1.4" {...F} /><circle cx="9" cy="17" r="1.4" {...F} /><circle cx="15" cy="17" r="1.4" {...F} /></>,
+  share: <><circle cx="6" cy="12" r="2.6" /><circle cx="17.5" cy="6" r="2.6" /><circle cx="17.5" cy="18" r="2.6" /><path d="M8.3 10.8l7-3.6M8.3 13.2l7 3.6" /></>,
+  download: <><path d="M12 3.5v11" /><path d="M7.5 10l4.5 4.5L16.5 10" /><path d="M4.5 19.5h15" /></>,
+  upload: <><path d="M12 20.5v-11" /><path d="M7.5 14l4.5-4.5L16.5 14" /><path d="M4.5 4.5h15" /></>,
+  image: <><rect x="3.5" y="4.5" width="17" height="15" rx="2.2" /><circle cx="8.5" cy="9.5" r="1.6" /><path d="M20 16l-5-5-8 8" /></>,
+  keyboard: <><rect x="2.5" y="6" width="19" height="12" rx="2" /><path d="M6 9.5h.01M9.5 9.5h.01M13 9.5h.01M16.5 9.5h.01M7.5 14h9" /></>,
+  grid: <><rect x="3.5" y="3.5" width="7" height="7" rx="1" /><rect x="13.5" y="3.5" width="7" height="7" rx="1" /><rect x="3.5" y="13.5" width="7" height="7" rx="1" /><rect x="13.5" y="13.5" width="7" height="7" rx="1" /></>,
+  gauge: <><path d="M4 18a8 8 0 1 1 16 0" /><path d="M12 18l4-5" /></>,
+  // line-segment types (player/waypoint popups)
+  segLine: <path d="M4.5 19.5L19.5 4.5" />,
+  segQuad: <path d="M4 18Q12 3 20 18" />,
+  segCubic: <path d="M4 18C4 10 9.5 10 12 12C14.5 14 20 14 20 6" />,
+};
+export function Icon({ name, size = 17, style }) {
+  const p = ICONS[name];
+  if (!p) return null;
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+      style={{ display: "block", flex: "0 0 auto", ...style }}>{p}</svg>
+  );
+}
+
 /* ---------------- diagnostics overlay (toggled from ☰ menu) ---------------- */
 
 export function DiagPanel() {
