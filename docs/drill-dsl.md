@@ -92,7 +92,7 @@ Places a piece. `id` is any unique token (e.g. `F1`, `PK1`, `N2`).
 | `face=<deg>` | route-less player, net, bumper, deker, passer | Facing angle (0 = +x / toward the right) |
 | `defense` | player | Auto-reacting defenceman (holds the slot, stays goal-side) |
 | `hold=line` | player | Wait at the blue line until the puck enters the zone |
-| `net=<id>` | puck | Which net/passer a shot targets (default: nearest) |
+| `net=<id>` | puck | What a shot targets (default: nearest net/passer). Can be a `bumper` id (the puck mirror-deflects off its face) or a `tire` id (the puck deflects off the round rubber by where it strikes) — bumpers/tires never auto-attract a shot; they must be named. |
 | `on=<playerId>` | puck | The puck starts on that player's blade (carried) |
 
 **Puck chain** (modifiers on the puck; points are 1-based, see below):

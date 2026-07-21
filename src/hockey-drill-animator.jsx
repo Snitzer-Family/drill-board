@@ -2138,9 +2138,10 @@ export default function DrillAnimator() {
     const p = pieces.find(q => q.id === popup.id);
     if (!p && popup.type !== "add") return null;
 
-    // which net or passer a shot aims at (default: nearest to the shooter)
+    // which net/passer a shot aims at (default: nearest). A bumper or tire can
+    // also be picked — the shot deflects off it (bumper: mirror; tire: by angle)
     const netRow = pk => {
-      const targets = pieces.filter(q => q.kind === "net" || q.kind === "passer");
+      const targets = pieces.filter(q => q.kind === "net" || q.kind === "passer" || q.kind === "bumper" || q.kind === "tire");
       return (
         <div className="hd-poprow">
           <span>Target</span>
@@ -3195,7 +3196,9 @@ export default function DrillAnimator() {
             Point <b>0</b> is the starting spot (release before skating to point 1).
             <b>Shoot</b>, <b>Hard rim</b>, and <b>Chip</b> are terminal <b>releases</b> — the puck goes
             into space and lands loose. <code> shoot=4</code> fires at point 4 (targets the nearest
-            net/passer, or <code>net=N2</code>/<code>net=PS1</code>). <code> rim=4~90*80</code> hard-rims around the
+            net/passer, or <code>net=N2</code>/<code>net=PS1</code> — or a <b>bumper</b> (mirror deflect) or
+            <b>tire</b> (deflects by where it strikes the round rubber), which must be named explicitly).
+            <code> rim=4~90*80</code> hard-rims around the
             boards and <code>chip=4~-45*30</code> chips into space; the <code>~deg</code> is the direction and
             <code>*ft</code> the distance — or just drag the on-ice <b>handle</b> at the end of the release
             to set both. Any player then uses <b>Collect puck</b> (in their popup, or at a waypoint) to

@@ -154,23 +154,23 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
           : tBase;
         const launch = bladeAt(cur, launchT, warp);
         // target the nearest net or passer (respecting a forced side), else default;
-        // a passer has no goalie, so shots at it always take the carom/rebound path
+        // a passer has no goalie, so shots at it always take the carom/rebound path.
+        // A bumper or tire can also be an EXPLICIT target (pk.net = its id) — a
+        // shot deflects off it — but they never auto-attract a shot on their own.
         const nets = pieces.filter(q => q.kind === "net" || q.kind === "passer");
+        const props = pieces.filter(q => q.kind === "bumper" || q.kind === "tire");
         let net, netPiece = null;
-        if (nets.length) {
-          netPiece = pk.net && nets.find(n => n.id === pk.net);   // a specific net by id
-          if (!netPiece) {
-            let cands = pk.net === "left" ? nets.filter(n => n.x < 100)
-              : pk.net === "right" ? nets.filter(n => n.x >= 100) : nets;  // legacy side / nearest
-            if (!cands.length) cands = nets;
-            netPiece = cands.reduce((a, b) =>
-              Math.hypot(b.x - launch.x, b.y - launch.y) < Math.hypot(a.x - launch.x, a.y - launch.y) ? b : a);
-          }
-          net = { x: netPiece.x, y: netPiece.y };
-        } else {
-          net = pk.net === "left" ? { x: 15, y: 42.5 } : pk.net === "right" ? { x: 185, y: 42.5 }
-            : launch.x < 100 ? { x: 15, y: 42.5 } : { x: 185, y: 42.5 };
+        netPiece = pk.net ? [...nets, ...props].find(n => n.id === pk.net) || null : null;
+        if (!netPiece && nets.length) {
+          let cands = pk.net === "left" ? nets.filter(n => n.x < 100)
+            : pk.net === "right" ? nets.filter(n => n.x >= 100) : nets;  // legacy side / nearest
+          if (!cands.length) cands = nets;
+          netPiece = cands.reduce((a, b) =>
+            Math.hypot(b.x - launch.x, b.y - launch.y) < Math.hypot(a.x - launch.x, a.y - launch.y) ? b : a);
         }
+        if (netPiece) net = { x: netPiece.x, y: netPiece.y };
+        else net = pk.net === "left" ? { x: 15, y: 42.5 } : pk.net === "right" ? { x: 185, y: 42.5 }
+          : launch.x < 100 ? { x: 15, y: 42.5 } : { x: 185, y: 42.5 };
         const vShot = pace * SPEED.shot * (pk.speed || 1);
         const inx = net.x - launch.x, iny = net.y - launch.y;
         const mag = Math.hypot(inx, iny) || 1;
@@ -195,10 +195,23 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
           return endPt;
         }
 
-        // save (stopped at the goalie) or no-goalie (varied hit on the mouth, caroms)
-        const hit = goalie
-          ? { x: net.x - ux * GOALIE_DEPTH, y: net.y - uy * GOALIE_DEPTH }
-          : { x: clampX(net.x + px * place * GOAL_HALF), y: clampY(net.y + py * place * GOAL_HALF) };
+        // where the shot strikes. A tire is a circle: the placement spread makes
+        // the puck contact the rubber off-centre, and it deflects off the radial
+        // normal there. Everything else is struck across a flat mouth/face.
+        const isTire = !!(netPiece && netPiece.kind === "tire");
+        let hit, tireNrm = null;
+        if (isTire) {
+          const R = 2.6 * ICON_SCALE * (netPiece.size || 1);    // rubber radius, feet
+          const off = place * R * 0.82;                         // how far off-centre it lands
+          const back = Math.sqrt(Math.max(0, R * R - off * off));
+          hit = { x: net.x - ux * back + px * off, y: net.y - uy * back + py * off };
+          const nm = Math.hypot(hit.x - net.x, hit.y - net.y) || 1;
+          tireNrm = { x: (hit.x - net.x) / nm, y: (hit.y - net.y) / nm };  // outward radial normal
+        } else if (goalie) {
+          hit = { x: net.x - ux * GOALIE_DEPTH, y: net.y - uy * GOALIE_DEPTH };
+        } else {
+          hit = { x: clampX(net.x + px * place * GOAL_HALF), y: clampY(net.y + py * place * GOAL_HALF) };
+        }
         const tArr = launchT + Math.hypot(hit.x - launch.x, hit.y - launch.y) / vShot;
         // a shot on a real net: empty net = goal; a designated rebound (aimPt,
         // carom out to a collector) reads as a save. A passer is a pass, not a
@@ -225,9 +238,12 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
           restPt = { x: clampX(aimPt.x), y: clampY(aimPt.y) };
         } else {
           let bx, by;
-          if (netPiece && netPiece.kind === "passer") {
+          if (tireNrm) {                                      // tire: reflect off the radial normal at the contact point
+            const dot = ux * tireNrm.x + uy * tireNrm.y;
+            bx = ux - 2 * dot * tireNrm.x; by = uy - 2 * dot * tireNrm.y;
+          } else if (netPiece && (netPiece.kind === "passer" || netPiece.kind === "bumper")) {
             const fa = ((netPiece.facing || 0) * Math.PI) / 180;
-            const nx = Math.cos(fa), ny = Math.sin(fa);       // rebound-face normal
+            const nx = Math.cos(fa), ny = Math.sin(fa);       // flat face normal (= its facing)
             const dot = ux * nx + uy * ny;
             bx = ux - 2 * dot * nx; by = uy - 2 * dot * ny;   // r = d − 2(d·n)n
           } else {

@@ -288,9 +288,10 @@ function chain(pk, byId, pieces) {
   let cur = pk.carrier ? byId(pk.carrier) : (pk.pickup && byId(pk.pickup.to));
   if (!cur) return "";
   const nets = pieces.filter(q => q.kind === "net" || q.kind === "passer");
+  const targets = pieces.filter(q => q.kind === "net" || q.kind === "passer" || q.kind === "bumper" || q.kind === "tire");
   const netSh = netShapes(pieces);
   const shotNet = launch => {
-    if (pk.net) { const n = nets.find(x => x.id === pk.net); if (n) return { x: n.x, y: n.y }; }
+    if (pk.net) { const n = targets.find(x => x.id === pk.net); if (n) return { x: n.x, y: n.y }; }  // a bumper/tire can be an explicit target
     if (nets.length) return nets.reduce((a, b) => (Math.hypot(b.x - launch.x, b.y - launch.y) < Math.hypot(a.x - launch.x, a.y - launch.y) ? b : a));
     return launch.x < 100 ? NET_L : NET_R;
   };

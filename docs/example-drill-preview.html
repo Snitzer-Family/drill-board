@@ -814,8 +814,9 @@ function chain(pk, byId, pieces) {
   let cur = pk.carrier ? byId(pk.carrier) : (pk.pickup && byId(pk.pickup.to));
   if (!cur) return "";
   const nets = pieces.filter(q => q.kind === "net" || q.kind === "passer");
+  const targets = pieces.filter(q => q.kind === "net" || q.kind === "passer" || q.kind === "bumper" || q.kind === "tire");
   const shotNet = launch => {
-    if (pk.net) { const n = nets.find(x => x.id === pk.net); if (n) return { x: n.x, y: n.y }; }
+    if (pk.net) { const n = targets.find(x => x.id === pk.net); if (n) return { x: n.x, y: n.y }; }
     if (nets.length) return nets.reduce((a, b) => (Math.hypot(b.x - launch.x, b.y - launch.y) < Math.hypot(a.x - launch.x, a.y - launch.y) ? b : a));
     return launch.x < 100 ? NET_L : NET_R;
   };
@@ -861,6 +862,7 @@ function buildAnim(pieces) {
   const PACE = 22, PASS = 60, SHOT = 95;                 // ft/s
   const players = pieces.filter(p => p.kind === "player");
   const nets = pieces.filter(q => q.kind === "net" || q.kind === "passer");
+  const targets = pieces.filter(q => q.kind === "net" || q.kind === "passer" || q.kind === "bumper" || q.kind === "tire");
   const R = {};
   players.forEach(p => {
     if (!p.path.length) { R[p.id] = { pts: null, total: 0, dur: 0, wpL: [], speed: p.speed || 1, x: p.x, y: p.y }; return; }
@@ -897,7 +899,7 @@ function buildAnim(pieces) {
     return { x: a.x + hx * fwd + px * lat, y: a.y + hy * fwd + py * lat };
   };
   const shotNet = (pk, launch) => {
-    if (pk.net) { const n = nets.find(x => x.id === pk.net); if (n) return { x: n.x, y: n.y }; }
+    if (pk.net) { const n = targets.find(x => x.id === pk.net); if (n) return { x: n.x, y: n.y }; }
     if (nets.length) return nets.reduce((a, b) => Math.hypot(b.x - launch.x, b.y - launch.y) < Math.hypot(a.x - launch.x, a.y - launch.y) ? b : a);
     return launch.x < 100 ? { x: 17, y: 42.5 } : { x: 183, y: 42.5 };
   };
