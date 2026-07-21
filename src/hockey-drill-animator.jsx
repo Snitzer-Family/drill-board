@@ -1109,7 +1109,11 @@ export default function DrillAnimator() {
         // reception waypoint: explicit recvAt, else — for a give-and-go — the
         // waypoint AFTER where they gave it (they skate a leg without it first,
         // so that leg draws straight, and the wiggle resumes once it's back)
-        const R = s === 0 ? -1 : (inc && inc.recvAt != null ? inc.recvAt : prevRelease + 1);
+        // the head carries from the start — UNLESS it's a pickup, which only
+        // starts carrying once it reaches the loose puck at pickup.at (so the
+        // skate over to collect a second puck draws straight, not as a carry)
+        const R = s === 0 ? (pk.pickup && pk.pickup.to === p.id ? pk.pickup.at : -1)
+          : (inc && inc.recvAt != null ? inc.recvAt : prevRelease + 1);
         const L = s < ts.length ? ts[s].at : (termAt != null ? termAt : p.path.length - 1);
         for (let i = Math.max(0, R + 1); i <= Math.min(L, p.path.length - 1); i++) set.add(i);
         prevRelease = s < ts.length ? ts[s].at : L;

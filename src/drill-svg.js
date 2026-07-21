@@ -27,7 +27,9 @@ function carrySegsOf(p, pieces) {
       const inc = s > 0 ? ts[s - 1] : null;
       // give-and-go: reception is the waypoint AFTER the pass, so the leg right
       // after passing draws straight and the wiggle resumes once it's back
-      const R = s === 0 ? -1 : (inc && inc.recvAt != null ? inc.recvAt : prevRelease + 1);
+      // a pickup head only carries once it reaches the loose puck at pickup.at
+      const R = s === 0 ? (pk.pickup && pk.pickup.to === p.id ? pk.pickup.at : -1)
+        : (inc && inc.recvAt != null ? inc.recvAt : prevRelease + 1);
       const L = s < ts.length ? ts[s].at : (termAt != null ? termAt : p.path.length - 1);
       for (let i = Math.max(0, R + 1); i <= Math.min(L, p.path.length - 1); i++) set.add(i);
       prevRelease = s < ts.length ? ts[s].at : L;
