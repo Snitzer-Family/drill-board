@@ -175,6 +175,23 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
         <path d="M -3.9 -1 L -3.9 1 M 0 -1 L 0 1 M 3.9 -1 L 3.9 1" stroke="#565c64" strokeWidth={0.18} opacity={0.5} />
       </g>
     );
+  } else if (p.kind === "stick") {
+    // a hockey stick laid on the ice: shaft along local +x, blade angled off the
+    // toe end; rotate with facing. A subtle ground shadow for depth.
+    const wood = p.color || "#20242a";
+    body = (
+      <g pointerEvents="none">
+        {selected && <rect x={-6.2} y={-2.5} width={12.6} height={5} rx={0.8} fill="none" stroke="#ffd447" strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
+        <ellipse cx={0.5} cy={0.35} rx={6} ry={0.7} fill="#0a0f14" opacity={0.16} />
+        {/* butt knob */}
+        <rect x={-5.85} y={-0.5} width={0.7} height={1} rx={0.3} fill="#e7ebef" stroke="#9aa2ab" strokeWidth={0.1} />
+        {/* shaft */}
+        <rect x={-5.3} y={-0.32} width={9} height={0.64} rx={0.3} fill={wood} stroke="#0c1014" strokeWidth={0.12} />
+        {/* heel + blade angled off the toe (with a slight curve) */}
+        <path d="M 3.5 -0.32 L 6.3 -1.85 Q 6.95 -1.6 6.85 -0.95 L 4.3 0.32 Z" fill={wood} stroke="#0c1014" strokeWidth={0.12} strokeLinejoin="round" />
+        <path d="M 4 -0.05 L 6.2 -1.25" stroke="#4a5058" strokeWidth={0.12} opacity={0.6} />
+      </g>
+    );
   } else if (p.kind === "deker") {
     // stickhandling gate: a hockey stick laid across two pegs — the puck goes
     // UNDER the shaft. The stick runs along local x; rotate with facing.

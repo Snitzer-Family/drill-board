@@ -229,6 +229,10 @@ function piece(p) {
     return `<g transform="${rot()}"><rect x="-7.7" y="-1.35" width="15.4" height="2.7" rx="0.45" fill="${foam}" stroke="#40464e" stroke-width="0.3"/>`
       + `<path d="M -3.9 -1 L -3.9 1 M 0 -1 L 0 1 M 3.9 -1 L 3.9 1" stroke="#565c64" stroke-width="0.18" opacity="0.5"/></g>`;
   }
+  if (p.kind === "stick")
+    return `<g transform="${rot()}"><rect x="-5.85" y="-0.5" width="0.7" height="1" rx="0.3" fill="#e7ebef" stroke="#9aa2ab" stroke-width="0.1"/>`
+      + `<rect x="-5.3" y="-0.32" width="9" height="0.64" rx="0.3" fill="${p.color}" stroke="#0c1014" stroke-width="0.12"/>`
+      + `<path d="M 3.5 -0.32 L 6.3 -1.85 Q 6.95 -1.6 6.85 -0.95 L 4.3 0.32 Z" fill="${p.color}" stroke="#0c1014" stroke-width="0.12" stroke-linejoin="round"/></g>`;
   if (p.kind === "deker")
     return `<g transform="${rot()}"><rect x="-2.7" y="-0.5" width="0.9" height="2.4" rx="0.32" fill="#3a3f47" stroke="#20242a" stroke-width="0.16"/>`
       + `<rect x="1.8" y="-0.5" width="0.9" height="2.4" rx="0.32" fill="#3a3f47" stroke="#20242a" stroke-width="0.16"/>`
@@ -355,7 +359,7 @@ const VIEWS = { full: [0, 0, 200, 85], half: [100, 0, 100, 85], quarter: [100, 0
 export function drillSvg(dsl, opts = {}) {
   const { pieces, rink: rinkMode } = parseDrill(dsl);
   const byId = id => pieces.find(p => p.id === id);
-  const rank = k => (k === "net" || k === "bumper" || k === "deker" || k === "passer" || k === "tire" ? 0 : k === "player" ? 2 : 1);
+  const rank = k => (k === "net" || k === "bumper" || k === "deker" || k === "passer" || k === "tire" || k === "stick" ? 0 : k === "player" ? 2 : 1);
   const defs = `<defs>
       <clipPath id="ice"><rect x="0.6" y="0.6" width="198.8" height="83.8" rx="26"/></clipPath>
       <marker id="arrowR" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="${V("mark", "#cf3346")}"/></marker>

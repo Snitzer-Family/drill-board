@@ -348,11 +348,11 @@ function parseDrill(text) {
       } else if (cmd === "PIECE") {
         const [, id, kind, xs, ys, ...rest] = tok;
         const x = parseFloat(xs), y = parseFloat(ys);
-        if (!id || !["player", "puck", "cone", "net", "bumper", "deker", "passer", "label", "tire"].includes(kind) || isNaN(x) || isNaN(y))
+        if (!id || !["player", "puck", "cone", "net", "bumper", "deker", "passer", "label", "tire", "stick"].includes(kind) || isNaN(x) || isNaN(y))
           throw new Error("PIECE needs: id kind x y");
         let color = kind === "cone" ? "#e0731d" : kind === "puck" ? "#14171a" : kind === "net" ? "#c81e33"
           : kind === "bumper" ? "#1b1e22" : kind === "deker" ? "#c79a4e" : kind === "passer" ? "#57636f"
-          : kind === "label" ? "#14202b" : kind === "tire" ? "#1c1c1e" : "#d7263d";
+          : kind === "label" ? "#14202b" : kind === "tire" ? "#1c1c1e" : kind === "stick" ? "#20242a" : "#d7263d";
         let label = kind === "player" ? id : "";
         let text = "", size = 1;                          // label piece: text + font scale
         let speed = 1, hand = "R", carrier = null, facing = 0, shotAt = null, pickup = null, rimAt = null, chipAt = null, chipAim = null, rimAim = null, chipDist = null, rimDist = null;
@@ -505,7 +505,7 @@ function serializeDrill(rink, pieces, title = "", desc = "") {
     const chT = head && p.chipAt != null ? ` chip=${p.chipAt + 1}${p.chipAim != null ? "~" + f1(p.chipAim) : ""}${p.chipDist != null ? "*" + f1(p.chipDist) : ""}` : "";
     const hasShot = p.kind === "puck" && (p.shotAt != null || (p.transfers || []).some(t => t.kind === "shot"));
     const nt = hasShot && p.net ? ` net=${p.net}` : "";
-    const rotatable = p.kind === "net" || p.kind === "bumper" || p.kind === "deker" || p.kind === "passer" || (p.kind === "player" && !p.path.length);
+    const rotatable = p.kind === "net" || p.kind === "bumper" || p.kind === "deker" || p.kind === "passer" || p.kind === "stick" || (p.kind === "player" && !p.path.length);
     const fac = rotatable && p.facing ? ` face=${f1(p.facing)}` : "";
     const hld = p.kind === "player" && p.holdLine ? " hold=line" : "";
     const gl = p.kind === "net" && p.goalie ? " goalie" : "";
@@ -626,6 +626,10 @@ function piece(p) {
     return `<g transform="${rot()}"><rect x="-7.7" y="-1.35" width="15.4" height="2.7" rx="0.45" fill="${foam}" stroke="#40464e" stroke-width="0.3"/>`
       + `<path d="M -3.9 -1 L -3.9 1 M 0 -1 L 0 1 M 3.9 -1 L 3.9 1" stroke="#565c64" stroke-width="0.18" opacity="0.5"/></g>`;
   }
+  if (p.kind === "stick")
+    return `<g transform="${rot()}"><rect x="-5.85" y="-0.5" width="0.7" height="1" rx="0.3" fill="#e7ebef" stroke="#9aa2ab" stroke-width="0.1"/>`
+      + `<rect x="-5.3" y="-0.32" width="9" height="0.64" rx="0.3" fill="${p.color}" stroke="#0c1014" stroke-width="0.12"/>`
+      + `<path d="M 3.5 -0.32 L 6.3 -1.85 Q 6.95 -1.6 6.85 -0.95 L 4.3 0.32 Z" fill="${p.color}" stroke="#0c1014" stroke-width="0.12" stroke-linejoin="round"/></g>`;
   if (p.kind === "deker")
     return `<g transform="${rot()}"><rect x="-2.7" y="-0.5" width="0.9" height="2.4" rx="0.32" fill="#3a3f47" stroke="#20242a" stroke-width="0.16"/>`
       + `<rect x="1.8" y="-0.5" width="0.9" height="2.4" rx="0.32" fill="#3a3f47" stroke="#20242a" stroke-width="0.16"/>`
@@ -1012,7 +1016,7 @@ function buildAnim(pieces) {
 // the animated diagram: rink + faint routes + still pieces, with the routed
 // players and pucks as .mv groups the loop repositions each frame
 function animScene(pieces, rinkMode) {
-  const rank = k => (k === "net" || k === "bumper" || k === "deker" || k === "passer" || k === "tire" ? 0 : k === "player" ? 2 : 1);
+  const rank = k => (k === "net" || k === "bumper" || k === "deker" || k === "passer" || k === "tire" || k === "stick" ? 0 : k === "player" ? 2 : 1);
   const faint = pieces.filter(p => p.kind === "player" && p.path.length).map(p => {
     let d = `M ${f(p.x)} ${f(p.y)}`; p.path.forEach(s => { d += " " + segCmd(s); });
     return `<path d="${d}" fill="none" stroke="${p.color}" stroke-width="0.6" stroke-linecap="round" opacity="0.28"/>`;
@@ -1092,7 +1096,7 @@ function drillSteps(pieces) {
 function drillSvg(dsl, opts = {}) {
   const { pieces, rink: rinkMode } = parseDrill(dsl);
   const byId = id => pieces.find(p => p.id === id);
-  const rank = k => (k === "net" || k === "bumper" || k === "deker" || k === "passer" || k === "tire" ? 0 : k === "player" ? 2 : 1);
+  const rank = k => (k === "net" || k === "bumper" || k === "deker" || k === "passer" || k === "tire" || k === "stick" ? 0 : k === "player" ? 2 : 1);
   const defs = `<defs>
       <clipPath id="ice"><rect x="0.6" y="0.6" width="198.8" height="83.8" rx="26"/></clipPath>
       <marker id="arrowR" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="${V("mark", "#cf3346")}"/></marker>

@@ -24,6 +24,7 @@ const TOOL_GLYPH = {
   deker: { vb: "-4.1 -1.9 8.4 4.6", color: "#c79a4e" },
   passer: { vb: "-2.3 -3.2 4.6 6.4", color: "#57636f" },
   tire: { vb: "-3.3 -3.3 6.6 6.6", color: "#1c1c1e" },
+  stick: { vb: "-6.4 -2.4 13.4 4.8", color: "#8a929c" },
 };
 const toolImg = kind => {
   const k = kind === "playerpuck" ? "player" : kind;
@@ -1087,7 +1088,7 @@ export default function DrillAnimator() {
   function nextId(kind) {
     const prefix = kind === "player" ? "P" : kind === "puck" ? "PK" : kind === "net" ? "N"
       : kind === "bumper" ? "B" : kind === "deker" ? "DK" : kind === "passer" ? "PS"
-      : kind === "label" ? "L" : kind === "tire" ? "T" : "C";
+      : kind === "label" ? "L" : kind === "tire" ? "T" : kind === "stick" ? "ST" : "C";
     let n = 1;
     while (pieces.some(p => p.id === prefix + n)) n++;
     return prefix + n;
@@ -1589,7 +1590,7 @@ export default function DrillAnimator() {
   // ----- box-select group operations (multiSel) -----
   const idPrefix = kind => (kind === "player" ? "P" : kind === "puck" ? "PK" : kind === "net" ? "N"
     : kind === "bumper" ? "B" : kind === "deker" ? "DK" : kind === "passer" ? "PS"
-    : kind === "label" ? "L" : kind === "tire" ? "T" : "C");
+    : kind === "label" ? "L" : kind === "tire" ? "T" : kind === "stick" ? "ST" : "C");
   const rotatesFacing = p => ["net", "bumper", "deker", "passer", "tire"].includes(p.kind) || (p.kind === "player" && !p.path.length);
   const groupCentroid = sel => sel.length
     ? { x: sel.reduce((a, p) => a + p.x, 0) / sel.length, y: sel.reduce((a, p) => a + p.y, 0) / sel.length } : null;
@@ -1678,12 +1679,18 @@ export default function DrillAnimator() {
     if (!src) return;
     const used = new Set(pieces.map(p => p.id));
     const fresh = () => { let n = 1; while (used.has("PK" + n)) n++; used.add("PK" + n); return "PK" + n; };
-    const offs = [[2, 1.1], [-1.9, 1.3], [0.4, -2], [-1.4, -1.2], [2.2, -0.7]];
-    const extra = offs.map(([dx, dy]) => ({
-      id: fresh(), kind: "puck", color: src.color, x: clampX(src.x + dx), y: clampY(src.y + dy),
-      speed: src.speed || 1, carrier: null, pickup: null, transfers: [], shotAt: null, rimAt: null,
-      chipAt: null, chipAim: null, rimAim: null, chipDist: null, rimDist: null, net: null, path: [],
-    }));
+    // a fresh random scatter each time — 5–7 pucks flung around the source
+    const n = 5 + Math.floor(Math.random() * 3);
+    const extra = [];
+    for (let k = 0; k < n; k++) {
+      const ang = Math.random() * Math.PI * 2, rad = 1.1 + Math.random() * 2.8;
+      extra.push({
+        id: fresh(), kind: "puck", color: src.color,
+        x: clampX(src.x + Math.cos(ang) * rad), y: clampY(src.y + Math.sin(ang) * rad),
+        speed: src.speed || 1, carrier: null, pickup: null, transfers: [], shotAt: null, rimAt: null,
+        chipAt: null, chipAim: null, rimAim: null, chipDist: null, rimDist: null, net: null, path: [],
+      });
+    }
     setPieces(ps => [...ps, ...extra]);
   }
 
@@ -2126,7 +2133,7 @@ export default function DrillAnimator() {
   // the knob sits at the current facing angle, radius 7 ft
   function renderRotateHandle(p, yf = yFix) {
     const hd = (cx, cy, r, props) => hdot(cx, cy, r, props, yf);
-    const rotatable = p.kind === "net" || p.kind === "bumper" || p.kind === "deker" || p.kind === "passer" || (p.kind === "player" && !p.path.length);
+    const rotatable = p.kind === "net" || p.kind === "bumper" || p.kind === "deker" || p.kind === "passer" || p.kind === "stick" || (p.kind === "player" && !p.path.length);
     if (!editing || tool === "draw" || !rotatable) return null;
     const a = ((p.facing || 0) * Math.PI) / 180;
     const R = 7;
@@ -2620,6 +2627,7 @@ export default function DrillAnimator() {
           <button className="hd-tool" onClick={() => addPieceAt("deker", popup.pt)}>{toolImg("deker")}<span>Deker</span></button>
           <button className="hd-tool" onClick={() => addPieceAt("passer", popup.pt)}>{toolImg("passer")}<span>Passer</span></button>
           <button className="hd-tool" onClick={() => addPieceAt("tire", popup.pt)}>{toolImg("tire")}<span>Tire</span></button>
+          <button className="hd-tool" onClick={() => addPieceAt("stick", popup.pt)}>{toolImg("stick")}<span>Stick</span></button>
           <button className="hd-tool" onClick={() => addPieceAt("label", popup.pt)}><span className="hd-toolglyph"><Icon name="label" size={22} /></span><span>Label</span></button>
         </div>
       );
@@ -2628,7 +2636,7 @@ export default function DrillAnimator() {
       title = p.kind === "player" ? `Player ${p.id}` : p.kind === "puck" ? `Puck ${p.id}`
         : p.kind === "net" ? `Net ${p.id}` : p.kind === "bumper" ? `Bumper ${p.id}`
         : p.kind === "deker" ? `Deker ${p.id}` : p.kind === "passer" ? `Passer ${p.id}`
-        : p.kind === "label" ? `Label ${p.id}` : p.kind === "tire" ? `Tire ${p.id}` : `Cone ${p.id}`;
+        : p.kind === "label" ? `Label ${p.id}` : p.kind === "tire" ? `Tire ${p.id}` : p.kind === "stick" ? `Stick ${p.id}` : `Cone ${p.id}`;
       body = (
         <>
           {p.kind === "label" && (
@@ -3361,7 +3369,7 @@ export default function DrillAnimator() {
             {!aiPlay && [...pieces]
               .filter(p => p.kind !== "label")
               .sort((a, b) => {
-                const rank = k => (k === "net" || k === "bumper" || k === "deker" || k === "passer" || k === "tire" ? 0 : k === "player" ? 2 : 1);
+                const rank = k => (k === "net" || k === "bumper" || k === "deker" || k === "passer" || k === "tire" || k === "stick" ? 0 : k === "player" ? 2 : 1);
                 return rank(a.kind) - rank(b.kind);
               })
               .map(p => {
@@ -3599,7 +3607,7 @@ export default function DrillAnimator() {
           <div className="hd-mh">Add to the ice</div>
           <div className="hd-toolgrid">
             {[["player", "Player"], ["playerpuck", "+ Puck"], ["puck", "Puck"], ["cone", "Cone"],
-              ["net", "Net"], ["bumper", "Bumper"], ["deker", "Deker"], ["passer", "Passer"], ["tire", "Tire"]].map(([k, lbl]) => (
+              ["net", "Net"], ["bumper", "Bumper"], ["deker", "Deker"], ["passer", "Passer"], ["tire", "Tire"], ["stick", "Stick"]].map(([k, lbl]) => (
               <button key={k} className={`hd-tool${tool === k ? " on" : ""}`} onClick={() => { setTool(k); setOpenMenu(null); }}>
                 {toolImg(k)}<span>{lbl}</span>
               </button>
