@@ -134,7 +134,7 @@ export default function DrillAnimator() {
   const [drawPreview, setDrawPreview] = useState(null);
   const [loupe, setLoupe] = useState(null);
   const [popOff, setPopOff] = useState({ x: 0, y: 0 });
-  const [popMin, setPopMin] = useState(false);   // player/waypoint popups open collapsed to the header
+  const [popState, setPopState] = useState("mid");   // pinned popup size: "min" (header) | "mid" (small) | "max" (full)
   const [stageSize, setStageSize] = useState({ w: 800, h: 500 });
 
   const svgRef = useRef(null);
@@ -178,12 +178,10 @@ export default function DrillAnimator() {
 
   useEffect(() => { setPopOff({ x: 0, y: 0 }); },
     [popup?.type, popup?.id, popup?.seg, popup?.pt?.x, popup?.pt?.y]);
-  // a player or waypoint popup opens collapsed (header only) so it doesn't cover
-  // the piece + its handles while editing; tap the chevron to expand
-  useEffect(() => {
-    const pc = popup && pieces.find(q => q.id === popup.id);
-    setPopMin(!!popup && (popup.type === "point" || (popup.type === "piece" && pc && pc.kind === "player")));
-  }, [popup?.type, popup?.id, popup?.seg]);
+  // a player or waypoint popup opens pinned + compact ("mid") — open and
+  // scrollable but small and out of the way; minimize to the header or
+  // maximize to fill the height from the popup's own controls
+  useLayoutEffect(() => { setPopState("mid"); }, [popup?.type, popup?.id, popup?.seg]);
 
   // keep popouts fully inside the ice box: after every render, measure the
   // card against its container and pull it back in with a corrective margin
@@ -195,6 +193,9 @@ export default function DrillAnimator() {
     if (!el || !box) return;
     el.style.marginLeft = "0px";
     el.style.marginTop = "0px";
+    // pinned (player/waypoint) popups are already clamped to the top and scroll
+    // internally — skip the pull-in correction so they don't flick on open
+    if (el.classList.contains("pinned")) return;
     const r = el.getBoundingClientRect();
     const b = box.getBoundingClientRect();
     const M = 4;
@@ -2399,9 +2400,16 @@ export default function DrillAnimator() {
             strokeLinecap="round" strokeLinejoin="round" style={{ cursor: "grab" }}
             onPointerDown={e => pieceDown(e, m.id)} />
         )}
-        {edPts && m.pts.map((q, i) => hdot(clampX(q.x), clampY(q.y), 1.7, {
-          key: `mp-${m.id}-${i}`, fill: "#ffd447", stroke: "#14171a", strokeWidth: 0.35,
-          style: { cursor: "grab" }, onPointerDown: e => markPtDown(e, m.id, i) }, yFix))}
+        {edPts && m.pts.map((q, i) => (
+          <g key={`mp-${m.id}-${i}`}>
+            {hdot(clampX(q.x), clampY(q.y), 1.7, {
+              fill: "#ffd447", stroke: "#14171a", strokeWidth: 0.35, pointerEvents: "none" }, yFix)}
+            {/* a larger transparent target so a fingertip can grab the point */}
+            {hdot(clampX(q.x), clampY(q.y), 4.5, {
+              fill: "transparent", style: { cursor: "grab" },
+              onPointerDown: e => markPtDown(e, m.id, i) }, yFix)}
+          </g>
+        ))}
       </g>
     );
   }
@@ -3209,7 +3217,8 @@ export default function DrillAnimator() {
     // that room (with margins for the top play-dock and the bottom) so a tall
     // popup scrolls internally instead of running off the top of the screen
     const minable = !!(popup.type === "point" || (popup.type === "piece" && p && p.kind === "player"));
-    const collapsed = minable && popMin;
+    const collapsed = minable && popState === "min";
+    const maxed = minable && popState === "max";
     const topPad = 12, botPad = 5, gap = 3;           // % of the ice (gap = anchor offset below)
     const roomAbove = a.ty - topPad, roomBelow = 100 - a.ty - botPad;
     let up = roomAbove >= roomBelow;
@@ -3225,7 +3234,10 @@ export default function DrillAnimator() {
         left: `${lx}%`,
         top: `calc(env(safe-area-inset-top) + var(--hd-pintop, 78px))`,
         transform: `translateX(-50%) translate(${popOff.x}px, ${popOff.y}px)`,
-        maxHeight: collapsed ? "none" : "52%",
+        // header only / compact-and-scrollable / fills the height down to the bar
+        maxHeight: collapsed ? "none"
+          : maxed ? "calc(100% - env(safe-area-inset-top) - var(--hd-pintop, 78px) - 62px)"
+          : "38%",
       };
     } else {
       const maxH = Math.max(22, (up ? roomAbove : roomBelow) - gap);
@@ -3245,9 +3257,14 @@ export default function DrillAnimator() {
           onPointerUp={popDragEnd} onPointerCancel={popDragEnd}>
           <span className="hd-grip"><Icon name="grip" size={14} /></span>
           <span>{title}</span>
+          {minable && !collapsed && (
+            <button className="hd-x" onPointerDown={e => e.stopPropagation()} title="Minimize"
+              onClick={() => setPopState("min")}><Icon name="chevronUp" size={15} /></button>
+          )}
           {minable && (
-            <button className="hd-x" onPointerDown={e => e.stopPropagation()} title={collapsed ? "Expand" : "Minimize"}
-              onClick={() => setPopMin(m => !m)}><Icon name={collapsed ? "chevronDown" : "chevronUp"} size={15} /></button>
+            <button className="hd-x" onPointerDown={e => e.stopPropagation()} title={maxed ? "Restore" : "Maximize"}
+              onClick={() => setPopState(maxed ? "mid" : collapsed ? "mid" : "max")}>
+              <Icon name={collapsed ? "chevronDown" : maxed ? "restore" : "expand"} size={15} /></button>
           )}
           <button className="hd-x" onPointerDown={e => e.stopPropagation()}
             onClick={() => setPopup(null)}><Icon name="close" size={15} /></button>
