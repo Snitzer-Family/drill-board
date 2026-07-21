@@ -395,9 +395,12 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           legs.push({ type: "fly", shot: true, [flagKey]: true, ...(air ? (rise ? { rise: true } : { sauce: true }) : {}), by: cur.id,
             x0: launch.x, y0: launch.y, x1: contact.x, y1: contact.y, t0: launchT, t1: tArr });
           const dm = Math.hypot(rollDir.x, rollDir.y) || 1;
-          const poly = boards.slide(contact.x, contact.y, rollDir.x / dm, rollDir.y / dm, 210);
+          // bank off the rink boards, then fold in caroms off the nets/bumpers so a
+          // puck rolling behind the net bounces off the cage instead of sliding
+          // through it
+          const poly = reflectPath(boards.slide(contact.x, contact.y, rollDir.x / dm, rollDir.y / dm, 210), netSh);
           // glide off the contact keeping the entry speed, bleeding it with ice
-          // friction, and losing a chunk (1 − bounce) of speed at every board bank
+          // friction, and losing a chunk (1 − bounce) of speed at every bank
           // (restitution) until it crawls to rest — no elastic same-speed caroms
           let t = tArr, v = entryV, cx = poly[0].x, cy = poly[0].y, stopped = false;
           for (let i = 1; i < poly.length && !stopped; i++) {
@@ -433,7 +436,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
         // OVER: rises above the cage, lands behind the net, then rolls on until the
         // end boards stop it (always airborne to clear the crossbar)
         if (miss === "over") {
-          const landPt = boards.clampInside(net.x + ux * 4, net.y + uy * 4);
+          const landPt = boards.clampInside(net.x + ux * 7, net.y + uy * 7);   // clear the cage back (~3.3 ft)
           return missOut(landPt, { x: ux, y: uy }, "over", true);
         }
 
