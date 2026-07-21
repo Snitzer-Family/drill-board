@@ -6,7 +6,7 @@ export const COLORS = ["#d7263d", "#1f4fa3", "#1f8a4c", "#e0731d", "#22262b", "#
 export const SPEED = { carry: 1, pass: 7, shot: 10 };
 export const vb = m => VIEWS[m].join(" ");
 
-export const APP_VERSION = "4.04";
+export const APP_VERSION = "4.05";
 // visual size of players/pucks/cones relative to true rink-feet scale
 export const ICON_SCALE = 0.8;
 // build stamp injected by vite.config.js `define`; "dev" when run standalone
@@ -23,6 +23,9 @@ export const MISS_OVER = 0.11;
 // odds any shot is taken in the AIR (sauce-style rise + shadow, dropping at the
 // net) vs flat along the ice. An "over the net" miss is always airborne.
 export const SHOT_AIR_PROB = 0.4;
+// fraction of speed a missed puck keeps when it caroms off a board or post
+// (restitution); 1 = perfectly elastic, lower = the boards absorb more energy
+export const BOUNCE_REST = 0.6;
 
 export const DEFAULT_TEXT = `RINK full
 PIECE N1 net 17 42.5

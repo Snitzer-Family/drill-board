@@ -1,7 +1,7 @@
 // Timing & pass-planning engine: leg times, receiver warps, transfer chains,
 // shots, releases, and warp-aware positions. Pure functions over the pieces
 // array; the React component passes its refs in each render.
-import { SPEED, ICON_SCALE, SAVE_PROB, MISS_POST, MISS_WIDE, MISS_OVER, SHOT_AIR_PROB } from "./constants.js";
+import { SPEED, ICON_SCALE, SAVE_PROB, MISS_POST, MISS_WIDE, MISS_OVER, SHOT_AIR_PROB, BOUNCE_REST } from "./constants.js";
 import { clampX, clampY, segEnd, segTangentAngle } from "./geometry.js";
 import * as boards from "./boards.js";
 import { netShapes, solidShapes, bumperShapes, reflectPath, segCrossesNet } from "./net-collide.js";
@@ -54,8 +54,9 @@ const DRIB_LAT = 0.8 * ICON_SCALE;         // lateral sweep (ft)
 const DRIB_SWING = 7;                       // matching stick sweep (deg)
 
 export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, realisticShots = true, detail = true, odds }) {
-  // tunable shot odds (0..1), falling back to the constant defaults
-  const OD = { save: SAVE_PROB, post: MISS_POST, wide: MISS_WIDE, over: MISS_OVER, air: SHOT_AIR_PROB, ...(odds || {}) };
+  // tunable shot odds (0..1), falling back to the constant defaults; `bounce` is
+  // the fraction of speed a missed puck keeps when it caroms off a board or post
+  const OD = { save: SAVE_PROB, post: MISS_POST, wide: MISS_WIDE, over: MISS_OVER, air: SHOT_AIR_PROB, bounce: BOUNCE_REST, ...(odds || {}) };
   // deterministic per-shot randomness — stable within a playback, varies as the
   // play seed changes so replays can produce different saves/goals
   const hashStr = s => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return h; };
@@ -385,28 +386,41 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
         // a missed shot flies to a contact/landing point (carrying the outcome flag
         // for the splash + air lift), then rolls & banks off the boards like a rim,
         // gliding to a stop — a miss doesn't just die behind the net.
-        const missOut = (contact, rollDir, flagKey, air) => {
+        // ice friction (ft/s^2) and the crawl speed (ft/s) below which it's at rest
+        const MISS_FRIC = 62, MISS_STOP = 8;
+        const missOut = (contact, rollDir, flagKey, air, entryV = vShot) => {
           const tArr = launchT + Math.hypot(contact.x - launch.x, contact.y - launch.y) / vShot;
           legs.push({ type: "fly", shot: true, [flagKey]: true, sauce: air, by: cur.id,
             x0: launch.x, y0: launch.y, x1: contact.x, y1: contact.y, t0: launchT, t1: tArr });
           const dm = Math.hypot(rollDir.x, rollDir.y) || 1;
-          const poly = densify(boards.slide(contact.x, contact.y, rollDir.x / dm, rollDir.y / dm, 95));
-          let plen = 0;
-          for (let k = 1; k < poly.length; k++) plen += Math.hypot(poly[k].x - poly[k - 1].x, poly[k].y - poly[k - 1].y);
-          // the miss carries its SHOT speed straight off the contact point — no
-          // abrupt slow-down where the miss registers — and only bleeds off with ice
-          // friction over the final stretch, banking off the boards along the way
-          const { t, end } = pushTravel(poly, tArr, vShot, { easeOut: Math.min(50, plen || 1) });
-          legs.push({ type: "rest", x: end.x, y: end.y, t0: t });
+          const poly = boards.slide(contact.x, contact.y, rollDir.x / dm, rollDir.y / dm, 210);
+          // glide off the contact keeping the entry speed, bleeding it with ice
+          // friction, and losing a chunk (1 − bounce) of speed at every board bank
+          // (restitution) until it crawls to rest — no elastic same-speed caroms
+          let t = tArr, v = entryV, cx = poly[0].x, cy = poly[0].y, stopped = false;
+          for (let i = 1; i < poly.length && !stopped; i++) {
+            const to = poly[i], steps = Math.max(1, Math.round(Math.hypot(to.x - cx, to.y - cy) / 2.5));
+            const sx = (to.x - cx) / steps, sy = (to.y - cy) / steps, d = Math.hypot(sx, sy);
+            for (let s = 0; s < steps; s++) {
+              if (v <= MISS_STOP) { stopped = true; break; }
+              const vNext = Math.sqrt(Math.max(0, v * v - 2 * MISS_FRIC * d));
+              const dt = d / Math.max(MISS_STOP, (v + vNext) / 2);
+              legs.push({ type: "fly", x0: cx, y0: cy, x1: cx + sx, y1: cy + sy, t0: t, t1: t + dt });
+              t += dt; v = vNext; cx += sx; cy += sy;
+            }
+            if (!stopped && i < poly.length - 1) v *= OD.bounce;   // energy lost banking off the boards
+          }
+          legs.push({ type: "rest", x: cx, y: cy, t0: t });
           tBase = t;
-          return end;
+          return { x: cx, y: cy };
         };
         // POST: rings the iron and caroms off it like a wall — out along the goal
-        // line toward the corner, with a touch of kick back toward the slot
+        // line toward the corner, with a touch of kick back toward the slot. The
+        // post takes energy too (enter the glide at bounce × shot speed).
         if (miss === "post") {
           const postPt = { x: clampX(net.x + px * side * GOAL_HALF), y: clampY(net.y + py * side * GOAL_HALF) };
           const defl = { x: px * side - ux * 0.4, y: py * side - uy * 0.4 };   // reflect off the post
-          return missOut(postPt, defl, "post", airborne);
+          return missOut(postPt, defl, "post", airborne, vShot * OD.bounce);
         }
         // WIDE: sails just past the post and keeps going into the corner, banking
         if (miss === "wide") {
