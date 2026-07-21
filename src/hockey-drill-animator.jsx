@@ -334,6 +334,11 @@ export default function DrillAnimator() {
     const sy = rotated ? canvasW / vhF : canvasH / vhF;
     return sy > 0 ? Math.max(0.2, Math.min(5, sx / sy)) : 1;
   })();
+  // a handle dot that stays a true circle on screen despite the fill-mode
+  // stretch: an ellipse whose y-radius is pre-compensated by yFix
+  // yf defaults to the main-scene stretch; the loupe (its own square viewBox is
+  // NOT stretched) passes yf=1 so its handles stay true circles too
+  const hdot = (cx, cy, r, { key, ...props } = {}, yf = yFix) => <ellipse key={key} cx={cx} cy={cy} rx={r} ry={r * yf} {...props} />;
   // screen-true icon frames: the fill-mode stretch (and scene rotation)
   // squish icons and shear them at diagonal headings. Each icon is drawn
   // inside a matrix that cancels the local stretch and re-applies its
@@ -2009,7 +2014,8 @@ export default function DrillAnimator() {
     );
   }
 
-  function renderHandles(p) {
+  function renderHandles(p, yf = yFix) {
+    const hd = (cx, cy, r, props) => hdot(cx, cy, r, props, yf);
     if (!editing || p.id !== selectedId || tool === "draw") return null;
     // the selected waypoint = the leg/point popup that's open (tapping the anchor
     // opens a "point" popup, the line a "line" popup — both carry its seg). Its
@@ -2025,17 +2031,17 @@ export default function DrillAnimator() {
     // at (so dragging keeps that waypoint selected).
     const ctrlPt = (key, cx, cy, kind, seg, wp, ax, ay) => {
       els.push(<line key={key + "l"} x1={ax} y1={ay} x2={cx} y2={cy} stroke="#8fa3b5" strokeWidth={0.25} strokeDasharray="1 1" />);
-      els.push(<circle key={key} cx={cx} cy={cy} r={1.5} fill="#fff" stroke="#5b7d9e" strokeWidth={0.4} pointerEvents="none" />);
-      els.push(<circle key={key + "h"} cx={cx} cy={cy} r={4} fill="transparent" style={{ cursor: "grab" }}
-        onPointerDown={e => handleDown(e, { kind, id: p.id, seg, wp })} />);
+      els.push(hd(cx, cy, 1.5, { key, fill: "#fff", stroke: "#5b7d9e", strokeWidth: 0.4, pointerEvents: "none" }));
+      els.push(hd(cx, cy, 4, { key: key + "h", fill: "transparent", style: { cursor: "grab" },
+        onPointerDown: e => handleDown(e, { kind, id: p.id, seg, wp }) }));
     };
     p.path.forEach((s, i) => {
       if (i === activeWp) {
-        // full anchor grab
-        els.push(<rect key={`a${i}`} x={s.x - 1.4} y={s.y - 1.4} width={2.8} height={2.8}
+        // full anchor grab (square kept square via yFix)
+        els.push(<rect key={`a${i}`} x={s.x - 1.4} y={s.y - 1.4 * yf} width={2.8} height={2.8 * yf}
           fill="#ffd447" stroke="#7a5c00" strokeWidth={0.35} pointerEvents="none" />);
-        els.push(<circle key={`ah${i}`} cx={s.x} cy={s.y} r={4} fill="transparent" style={{ cursor: "grab" }}
-          onPointerDown={e => handleDown(e, { kind: "anchor", id: p.id, seg: i, wp: i })} />);
+        els.push(hd(s.x, s.y, 4, { key: `ah${i}`, fill: "transparent", style: { cursor: "grab" },
+          onPointerDown: e => handleDown(e, { kind: "anchor", id: p.id, seg: i, wp: i }) }));
         // incoming tangent: this leg's control nearest waypoint i
         if (s.type === "C") ctrlPt(`ic${i}`, s.c2x, s.c2y, "c2", i, i, s.x, s.y);
         else if (s.type === "Q") ctrlPt(`iq${i}`, s.cx, s.cy, "q", i, i, s.x, s.y);
@@ -2047,9 +2053,9 @@ export default function DrillAnimator() {
         else if (nx && nx.type === "Q") ctrlPt(`oq${i}`, nx.cx, nx.cy, "q", i + 1, i, s.x, s.y);
       } else {
         // every other waypoint is just a small (still grabbable) dot
-        els.push(<circle key={`am${i}`} cx={s.x} cy={s.y} r={0.9} fill="#ffd447" stroke="#7a5c00" strokeWidth={0.3} pointerEvents="none" />);
-        els.push(<circle key={`amh${i}`} cx={s.x} cy={s.y} r={3.5} fill="transparent" style={{ cursor: "grab" }}
-          onPointerDown={e => handleDown(e, { kind: "anchor", id: p.id, seg: i, wp: i })} />);
+        els.push(hd(s.x, s.y, 0.9, { key: `am${i}`, fill: "#ffd447", stroke: "#7a5c00", strokeWidth: 0.3, pointerEvents: "none" }));
+        els.push(hd(s.x, s.y, 3.5, { key: `amh${i}`, fill: "transparent", style: { cursor: "grab" },
+          onPointerDown: e => handleDown(e, { kind: "anchor", id: p.id, seg: i, wp: i }) }));
       }
     });
     return <g>{els}</g>;
@@ -2057,19 +2063,19 @@ export default function DrillAnimator() {
 
   // rotation ring + knob for a selected stationary player (touch-friendly);
   // the knob sits at the current facing angle, radius 7 ft
-  function renderRotateHandle(p) {
+  function renderRotateHandle(p, yf = yFix) {
+    const hd = (cx, cy, r, props) => hdot(cx, cy, r, props, yf);
     const rotatable = p.kind === "net" || p.kind === "bumper" || p.kind === "deker" || p.kind === "passer" || (p.kind === "player" && !p.path.length);
     if (!editing || tool === "draw" || !rotatable) return null;
     const a = ((p.facing || 0) * Math.PI) / 180;
     const R = 7;
-    const kx = p.x + Math.cos(a) * R, ky = p.y + Math.sin(a) * R;
+    // the knob's y-offset is pre-compensated so it sits on the round ring
+    const kx = p.x + Math.cos(a) * R, ky = p.y + Math.sin(a) * R * yf;
     return (
       <g>
-        <circle cx={p.x} cy={p.y} r={R} fill="none" stroke="#ffd447" strokeWidth={0.25}
-          strokeDasharray="1 1" opacity={0.75} pointerEvents="none" />
-        <circle cx={kx} cy={ky} r={1.6} fill="#ffd447" stroke="#7a5c00" strokeWidth={0.35} pointerEvents="none" />
-        <circle cx={kx} cy={ky} r={4.2} fill="transparent" style={{ cursor: "grab" }}
-          onPointerDown={e => handleDown(e, { kind: "rotate", id: p.id, offset: 0 })} />
+        {hd(p.x, p.y, R, { fill: "none", stroke: "#ffd447", strokeWidth: 0.25, strokeDasharray: "1 1", opacity: 0.75, pointerEvents: "none" })}
+        {hd(kx, ky, 1.6, { fill: "#ffd447", stroke: "#7a5c00", strokeWidth: 0.35, pointerEvents: "none" })}
+        {hd(kx, ky, 4.2, { fill: "transparent", style: { cursor: "grab" }, onPointerDown: e => handleDown(e, { kind: "rotate", id: p.id, offset: 0 }) })}
       </g>
     );
   }
@@ -2078,7 +2084,8 @@ export default function DrillAnimator() {
   // sitting at the puck's landing point: drag it to set BOTH the direction and
   // the distance of the release; the dashed path previews where the puck goes.
   // (Legacy rim/chip transfers keep a simple direction-only aim ring.)
-  function renderAim(p, force) {
+  function renderAim(p, force, yf = yFix) {
+    const hd = (cx, cy, r, props) => hdot(cx, cy, r, props, yf);
     if (!editing || tool === "draw" || p.kind !== "player") return null;
     // prefer the selected puck's handle when p carries more than one
     const pk = pieces.find(q => q.kind === "puck" && q.id === selectedId && puckChain(q).includes(p.id))
@@ -2128,11 +2135,11 @@ export default function DrillAnimator() {
         <g key={`rel-${p.id}-${aimField}`}>
           <polyline points={path.map(q => `${q.x},${q.y}`).join(" ")} fill="none" stroke={col}
             strokeWidth={0.4} strokeDasharray="2 1.4" opacity={0.7} pointerEvents="none" />
-          <circle cx={end.x} cy={end.y} r={1.4} fill="none" stroke={col} strokeWidth={0.35} opacity={0.7} pointerEvents="none" />
-          <circle cx={here.x} cy={here.y} r={1} fill={col} opacity={0.8} pointerEvents="none" />
-          <circle cx={hx} cy={hy} r={1.9} fill={col} stroke="#fff" strokeWidth={0.4} pointerEvents="none" />
-          <circle cx={hx} cy={hy} r={5} fill="transparent" style={{ cursor: "grab" }}
-            onPointerDown={e => handleDown(e, { kind: "release", pkId: pk.id, origin: here, aimField, distField, relKind: kind })} />
+          {hd(end.x, end.y, 1.4, { fill: "none", stroke: col, strokeWidth: 0.35, opacity: 0.7, pointerEvents: "none" })}
+          {hd(here.x, here.y, 1, { fill: col, opacity: 0.8, pointerEvents: "none" })}
+          {hd(hx, hy, 1.9, { fill: col, stroke: "#fff", strokeWidth: 0.4, pointerEvents: "none" })}
+          {hd(hx, hy, 5, { fill: "transparent", style: { cursor: "grab" },
+            onPointerDown: e => handleDown(e, { kind: "release", pkId: pk.id, origin: here, aimField, distField, relKind: kind }) })}
         </g>
       );
     };
@@ -2147,15 +2154,15 @@ export default function DrillAnimator() {
       if (!((tr.kind === "chip" || tr.kind === "rim") && chain[s] === p.id)) return;
       const here = tr.at < 0 ? { x: p.x, y: p.y } : segEnd(p, tr.at);
       const a = tr.aim != null ? (tr.aim * Math.PI) / 180 : defDirAt(tr.at);
-      const kx = here.x + Math.cos(a) * R, ky = here.y + Math.sin(a) * R;
+      const kx = here.x + Math.cos(a) * R, ky = here.y + Math.sin(a) * R * yf;
       const col = tr.aim != null ? "#3a8dff" : "#9fb4c6";
       out.push(
         <g key={`aim-${p.id}-${s}`}>
-          <circle cx={here.x} cy={here.y} r={R} fill="none" stroke={col} strokeWidth={0.25} strokeDasharray="1 1" opacity={0.7} pointerEvents="none" />
+          {hd(here.x, here.y, R, { fill: "none", stroke: col, strokeWidth: 0.25, strokeDasharray: "1 1", opacity: 0.7, pointerEvents: "none" })}
           <line x1={here.x} y1={here.y} x2={kx} y2={ky} stroke={col} strokeWidth={0.35} opacity={0.75} pointerEvents="none" />
-          <circle cx={kx} cy={ky} r={1.6} fill={col} stroke="#12233a" strokeWidth={0.35} pointerEvents="none" />
-          <circle cx={kx} cy={ky} r={4.2} fill="transparent" style={{ cursor: "grab" }}
-            onPointerDown={e => handleDown(e, { kind: "aim", pkId: pk.id, target: { stage: s }, origin: here })} />
+          {hd(kx, ky, 1.6, { fill: col, stroke: "#12233a", strokeWidth: 0.35, pointerEvents: "none" })}
+          {hd(kx, ky, 4.2, { fill: "transparent", style: { cursor: "grab" },
+            onPointerDown: e => handleDown(e, { kind: "aim", pkId: pk.id, target: { stage: s }, origin: here }) })}
         </g>
       );
     });
@@ -2298,14 +2305,15 @@ export default function DrillAnimator() {
     return els;
   }
 
-  function renderStops(p) {
+  function renderStops(p, yf = yFix) {
+    const hd = (cx, cy, r, props) => hdot(cx, cy, r, props, yf);
     const els = [];
     p.path.forEach((s, i) => {
       if (!(s.stop > 0)) return;
       const pt = segEnd(p, i - 1);
       els.push(
         <g key={`st${p.id}${i}`} opacity={0.9} pointerEvents="none">
-          <circle cx={pt.x} cy={pt.y} r={2} fill="#fff" stroke={p.color} strokeWidth={0.35} />
+          {hd(pt.x, pt.y, 2, { fill: "#fff", stroke: p.color, strokeWidth: 0.35 })}
           <line x1={pt.x - 0.6} y1={pt.y - 1} x2={pt.x - 0.6} y2={pt.y + 1} stroke={p.color} strokeWidth={0.5} />
           <line x1={pt.x + 0.6} y1={pt.y - 1} x2={pt.x + 0.6} y2={pt.y + 1} stroke={p.color} strokeWidth={0.5} />
         </g>
@@ -2968,15 +2976,15 @@ export default function DrillAnimator() {
                 : <path key={`${p.id}${i}`} d={d} {...style} />;
             });
           })}
-          {pieces.map(p => <g key={`ls${p.id}`}>{renderStops(p)}</g>)}
+          {pieces.map(p => <g key={`ls${p.id}`}>{renderStops(p, 1)}</g>)}
           {drawPreview && drawPreview.length > 1 && (
             <polyline points={drawPreview.map(q => `${q.x},${q.y}`).join(" ")}
               fill="none" stroke="#ffd447" strokeWidth={0.6} strokeDasharray="1.4 1" opacity={0.9} />
           )}
           {puckPathNodes(true)}
-          {selected && renderHandles(selected)}
-          {selected && renderRotateHandle(selected)}
-          {pieces.map(p => <g key={`ca-${p.id}`}>{renderAim(p, true)}</g>)}
+          {selected && renderHandles(selected, 1)}
+          {selected && renderRotateHandle(selected, 1)}
+          {pieces.map(p => <g key={`ca-${p.id}`}>{renderAim(p, true, 1)}</g>)}
           {pieces.map(p => {
             const dp = displayPos(p);
             return (
@@ -3166,11 +3174,10 @@ export default function DrillAnimator() {
             {showRoutes && pieces.map(p => <g key={`s-${p.id}`}>{renderStops(p)}</g>)}
 
             {editing && pieces.map(p =>
-              p.kind === "puck" && p.carrier && p.path.length > 0 ? (
-                <circle key={`rel-${p.id}`} cx={p.x} cy={p.y} r={2.1} fill="none"
-                  stroke="#14171a" strokeWidth={0.35} strokeDasharray="0.9 0.7"
-                  opacity={0.6} pointerEvents="none" />
-              ) : null
+              p.kind === "puck" && p.carrier && p.path.length > 0
+                ? hdot(p.x, p.y, 2.1, { key: `rel-${p.id}`, fill: "none", stroke: "#14171a",
+                    strokeWidth: 0.35, strokeDasharray: "0.9 0.7", opacity: 0.6, pointerEvents: "none" })
+                : null
             )}
 
             {puckPathNodes(false)}
@@ -3183,8 +3190,8 @@ export default function DrillAnimator() {
             {/* box-select highlights + the marquee rectangle */}
             {multiSel && editing && [...pieces].filter(p => multiSel.has(p.id)).map(p => {
               const dp = displayPos(p);
-              return <circle key={`ms-${p.id}`} cx={dp.x} cy={dp.y} r={5.2} fill="rgba(58,141,255,0.1)"
-                stroke="#3a8dff" strokeWidth={sw(0.6)} strokeDasharray={sdash("1.5 1")} vectorEffect="non-scaling-stroke" pointerEvents="none" />;
+              return hdot(dp.x, dp.y, 5.2, { key: `ms-${p.id}`, fill: "rgba(58,141,255,0.1)",
+                stroke: "#3a8dff", strokeWidth: sw(0.6), strokeDasharray: sdash("1.5 1"), vectorEffect: "non-scaling-stroke", pointerEvents: "none" });
             })}
             {marquee && (
               <rect x={Math.min(marquee.x0, marquee.x1)} y={Math.min(marquee.y0, marquee.y1)}
