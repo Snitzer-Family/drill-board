@@ -136,10 +136,31 @@ export const STYLES = `
         .hd-grip { display:inline-flex; align-items:center; }
         input[type=range] { accent-color:#d7263d; height:30px; }
         .hd-pop.pinned { z-index:43; }   /* just under the play dock, never behind it */
-        .hd-pop { position:absolute; z-index:20; width:220px; background:#1a222c; border:1px solid #33404f;
+        .hd-pop { position:absolute; z-index:20; width:220px; border:1px solid #33404f;
           border-radius:12px; padding:10px 12px; box-shadow:0 8px 24px rgba(0,0,0,.5);
           display:flex; flex-direction:column; gap:8px;
-          max-height:calc(100% - 8px); overflow-y:auto; overscroll-behavior:contain; }
+          max-height:calc(100% - 8px); overflow-y:auto; overscroll-behavior:contain;
+          /* hide the native (flash-and-hide on iOS) bar — we draw our own thumb */
+          scrollbar-width:none; -ms-overflow-style:none;
+          /* pure-CSS scroll shadow: a soft fade appears at the bottom (and top)
+             ONLY while there's more content that way — reinforces the thumb */
+          background:
+            linear-gradient(#1a222c 30%, rgba(26,34,44,0)) center top / 100% 30px,
+            linear-gradient(rgba(26,34,44,0), #1a222c 72%) center bottom / 100% 34px,
+            radial-gradient(farthest-side at 50% 0, rgba(0,0,0,.55), rgba(0,0,0,0)) center top / 100% 13px,
+            radial-gradient(farthest-side at 50% 100%, rgba(0,0,0,.6), rgba(0,0,0,0)) center bottom / 100% 15px,
+            #1a222c;
+          background-repeat:no-repeat;
+          background-attachment:local, local, scroll, scroll, local; }
+        .hd-pop::-webkit-scrollbar { width:0; height:0; display:none; }
+        /* custom always-visible scrollbar: a sticky rail pinned to the card's
+           top edge; the thumb inside is sized/moved imperatively (works on iOS,
+           which ignores ::-webkit-scrollbar for touch overflow) */
+        .hd-sbrail { position:sticky; top:0; align-self:stretch; height:0; z-index:5;
+          pointer-events:none; order:-1; }
+        .hd-sbthumb { position:absolute; top:0; right:-9px; width:5px; border-radius:3px;
+          background:#7d93aa; box-shadow:0 0 0 1px rgba(0,0,0,.35); opacity:0;
+          transition:opacity .18s; will-change:transform,height; }
         .hd-pophead { display:flex; align-items:center; gap:6px; font-size:12px; font-weight:700;
           letter-spacing:.06em; text-transform:uppercase; color:#aab7c4;
           cursor:grab; touch-action:none; user-select:none; -webkit-user-select:none;

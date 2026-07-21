@@ -187,6 +187,22 @@ export default function DrillAnimator() {
   // card against its container and pull it back in with a corrective margin
   // (margins compose with the anchor transform without fighting it)
   const popRef = useRef(null);
+  const sbThumbRef = useRef(null);
+  // draw a real, always-visible scrollbar thumb (iOS ignores ::-webkit-scrollbar
+  // for touch overflow, so this is the only reliable "it scrolls" cue there).
+  // Imperative like the margin correction — no re-render, no loop.
+  function syncPopScroll() {
+    const el = popRef.current, th = sbThumbRef.current;
+    if (!el || !th) return;
+    const ch = el.clientHeight, sh = el.scrollHeight, st = el.scrollTop;
+    if (sh <= ch + 2) { th.style.opacity = "0"; return; }   // nothing to scroll → hide
+    const railTop = 6, railBot = 6, track = ch - railTop - railBot;
+    const h = Math.max(28, track * ch / sh);
+    const top = railTop + (track - h) * (st / (sh - ch));
+    th.style.opacity = "1";
+    th.style.height = h + "px";
+    th.style.transform = `translateY(${top}px)`;   // rail is sticky at the viewport top, so no scroll offset
+  }
   useLayoutEffect(() => {
     const el = popRef.current;
     const box = el && el.parentElement;
@@ -203,6 +219,7 @@ export default function DrillAnimator() {
     else if (r.bottom > b.bottom - M) dy = b.bottom - M - r.bottom;
     if (dx) el.style.marginLeft = dx + "px";
     if (dy) el.style.marginTop = dy + "px";
+    syncPopScroll();
   });
 
   function popDragStart(e) {
@@ -3242,7 +3259,10 @@ export default function DrillAnimator() {
             : "38%" };
     return (
       <div className="hd-pop pinned" style={style} ref={popRef}
-        onPointerDown={e => e.stopPropagation()}>
+        onScroll={syncPopScroll} onPointerDown={e => e.stopPropagation()}>
+        {/* always-visible scrollbar thumb: sticky rail pinned to the viewport
+            top, thumb positioned/sized imperatively in syncPopScroll */}
+        <div className="hd-sbrail" aria-hidden="true"><div className="hd-sbthumb" ref={sbThumbRef} /></div>
         <div className="hd-pophead"
           onPointerDown={popDragStart} onPointerMove={popDragMove}
           onPointerUp={popDragEnd} onPointerCancel={popDragEnd}>
