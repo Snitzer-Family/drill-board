@@ -380,8 +380,10 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           : emptyFree ? !miss : false;
         // flat or airborne (sauce-style rise + shadow) — an over-the-net miss must
         // leave the ice; everything else rolls. Deflect props (tire/passer/bumper)
-        // and blocked rebounds stay flat so their carom geometry reads cleanly.
-        const airborne = miss === "over" || (realisticShots && onNet && rand(`${pk.id}:${legs.length}:air`) < OD.air);
+        // and blocked rebounds stay flat so their carom geometry reads cleanly. The
+        // rising lift is a detailed-animation flourish, so turn it off with `detail`
+        // (an OVER miss still lofts, since it has to clear the cage).
+        const airborne = miss === "over" || (realisticShots && detail && onNet && rand(`${pk.id}:${legs.length}:air`) < OD.air);
 
         // a missed shot flies to a contact/landing point (carrying the outcome flag
         // for the splash + air lift), then rolls & banks off the boards like a rim,

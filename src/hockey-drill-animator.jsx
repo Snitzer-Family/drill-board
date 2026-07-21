@@ -4290,7 +4290,7 @@ export default function DrillAnimator() {
           <div className="hd-poprow">
             <button className={`hd-mini${detailAnim ? " on" : ""}`}
               onClick={() => setDetailAnim(v => !v)}>{detailAnim ? "✓ Detailed animations" : "Detailed animations"}</button>
-            <span style={{ fontSize: 11, color: "#8b99a8" }}>skater stride, stick swing, puck cradle</span>
+            <span style={{ fontSize: 11, color: "#8b99a8" }}>skater stride, stick swing, puck cradle, airborne shots</span>
           </div>
           <div className="hd-poprow">
             <button className={`hd-mini${collisions ? " on" : ""}`}
