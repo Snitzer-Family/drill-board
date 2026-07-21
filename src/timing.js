@@ -4,7 +4,7 @@
 import { SPEED, ICON_SCALE, SAVE_PROB, MISS_POST, MISS_WIDE, MISS_OVER, SHOT_AIR_PROB, BOUNCE_REST } from "./constants.js";
 import { clampX, clampY, segEnd, segTangentAngle } from "./geometry.js";
 import * as boards from "./boards.js";
-import { netShapes, solidShapes, bumperShapes, reflectPath, segCrossesNet } from "./net-collide.js";
+import { netShapes, solidShapes, bumperShapes, reflectPath, segCrossesNet, bounceOffNets } from "./net-collide.js";
 
 // A "nearest" loose-puck collect (pickup.nearest) is a live intent, not a fixed
 // binding: at play/render time the collect grabs whichever loose puck sits
@@ -395,25 +395,32 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           legs.push({ type: "fly", shot: true, [flagKey]: true, ...(air ? (rise ? { rise: true } : { sauce: true }) : {}), by: cur.id,
             x0: launch.x, y0: launch.y, x1: contact.x, y1: contact.y, t0: launchT, t1: tArr });
           const dm = Math.hypot(rollDir.x, rollDir.y) || 1;
-          // bank off the rink boards, then fold in caroms off the nets/bumpers so a
-          // puck rolling behind the net bounces off the cage instead of sliding
-          // through it
-          const poly = reflectPath(boards.slide(contact.x, contact.y, rollDir.x / dm, rollDir.y / dm, 210), netSh);
-          // glide off the contact keeping the entry speed, bleeding it with ice
-          // friction, and losing a chunk (1 − bounce) of speed at every bank
-          // (restitution) until it crawls to rest — no elastic same-speed caroms
-          let t = tArr, v = entryV, cx = poly[0].x, cy = poly[0].y, stopped = false;
-          for (let i = 1; i < poly.length && !stopped; i++) {
-            const to = poly[i], steps = Math.max(1, Math.round(Math.hypot(to.x - cx, to.y - cy) / 2.5));
-            const sx = (to.x - cx) / steps, sy = (to.y - cy) / steps, d = Math.hypot(sx, sy);
-            for (let s = 0; s < steps; s++) {
-              if (v <= MISS_STOP) { stopped = true; break; }
-              const vNext = Math.sqrt(Math.max(0, v * v - 2 * MISS_FRIC * d));
-              const dt = d / Math.max(MISS_STOP, (v + vNext) / 2);
-              legs.push({ type: "fly", x0: cx, y0: cy, x1: cx + sx, y1: cy + sy, t0: t, t1: t + dt });
-              t += dt; v = vNext; cx += sx; cy += sy;
-            }
-            if (!stopped && i < poly.length - 1) v *= OD.bounce;   // energy lost banking off the boards
+          // integrate the roll step by step, caroming off BOTH the rink boards and
+          // the net cages (losing 1−bounce of speed per carom) and bleeding off with
+          // ice friction, until it crawls to rest — so a puck that banks off the net
+          // then a board keeps rebounding instead of leaking through either one
+          let t = tArr, cx = contact.x, cy = contact.y;
+          let vx = (rollDir.x / dm) * entryV, vy = (rollDir.y / dm) * entryV;
+          const STEP = 1.6;
+          const travelTo = (px, py) => {                        // glide to a point, bleeding speed to friction
+            const d = Math.hypot(px - cx, py - cy);
+            if (d < 1e-4) return;
+            const sp = Math.hypot(vx, vy) || 1;
+            const spNext = Math.sqrt(Math.max(0, sp * sp - 2 * MISS_FRIC * d));
+            const dt = d / Math.max(MISS_STOP, (sp + spNext) / 2);
+            legs.push({ type: "fly", x0: cx, y0: cy, x1: px, y1: py, t0: t, t1: t + dt });
+            t += dt; const k = spNext / sp; vx *= k; vy *= k; cx = px; cy = py;
+          };
+          let guard = 0;
+          while (guard++ < 500) {
+            const sp = Math.hypot(vx, vy);
+            if (sp <= MISS_STOP) break;
+            const tx = cx + (vx / sp) * STEP, ty = cy + (vy / sp) * STEP;
+            const nb = bounceOffNets(cx, cy, tx, ty, vx, vy, netSh, OD.bounce);   // carom off a net cage
+            if (nb.hit) { travelTo(nb.x, nb.y); vx = nb.vx; vy = nb.vy; continue; }
+            const bc = boards.contain(tx, ty, vx, vy, OD.bounce);                 // carom off the rink boards
+            if (bc.hit) { travelTo(bc.x, bc.y); vx = bc.vx; vy = bc.vy; continue; }
+            travelTo(tx, ty);                                                     // free glide (friction only)
           }
           legs.push({ type: "rest", x: cx, y: cy, t0: t });
           tBase = t;
