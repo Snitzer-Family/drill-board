@@ -373,9 +373,10 @@ function parseDrill(text) {
             } else if (key === "hand") hand = v.toUpperCase() === "L" ? "L" : "R";
             else if (key === "on") carrier = v;
             else if (key === "pass") {
-              const m2 = /^(\d+):([^@\s]+)(?:@(\d+))?$/.exec(v);
+              const m2 = /^(\d+):([^@\s^]+)(?:@(\d+))?(?:\^(\S+))?$/.exec(v);
               if (m2) transfers.push({ at: parseInt(m2[1], 10) - 1, to: m2[2],
-                recvAt: m2[3] ? parseInt(m2[3], 10) - 1 : null, kind: "pass" });
+                recvAt: m2[3] ? parseInt(m2[3], 10) - 1 : null, kind: "pass",
+                ...(m2[4] ? { via: m2[4] } : {}) });
             } else if (key === "rebound") {
               // shot whose carom is collected by a player: shoot at <pt>, they
               // gather at their @<pt> (else route end / where they stand)
@@ -839,7 +840,8 @@ function chain(pk, byId, pieces) {
       ? returnPoint(rec, giveAt, nextAt)
       : routePoint(rec, tr.recvAt == null ? rec.path.length - 1 : tr.recvAt);
     lastAt[cur.id] = tr.at;                            // the passer just released here
-    if (tr.kind === "shot") out.push(chainLine([launch, shotNet(launch)], "shot"), chainLine([shotNet(launch), anchor], "rebound"));
+    if (tr.via) { const ps = byId(tr.via); const pPt = ps ? { x: ps.x, y: ps.y } : launch; out.push(chainLine([launch, pPt], "pass"), chainLine([pPt, anchor], "pass")); }
+    else if (tr.kind === "shot") out.push(chainLine([launch, shotNet(launch)], "shot"), chainLine([shotNet(launch), anchor], "rebound"));
     else if (tr.kind === "rim") out.push(chainLine(rimPoly(launch, tr.aim, anchor), "pass"));
     else if (tr.kind === "chip") { const h = tr.aim != null ? aimVec(tr.aim) : heading(cur, tr.at); out.push(chainLine(boards.slideTo(launch.x, launch.y, h.x, h.y, anchor), "pass")); }
     else out.push(chainLine([launch, anchor], "pass"));   // pass
@@ -908,6 +910,16 @@ function buildAnim(pieces) {
     for (let s = 0; s < ts.length; s++) {
       const t = ts[s]; if (t.by && t.by !== cur) break;
       const rel = Math.max(carryStart, timeAtWp(cur, t.at)), relPos = bladeOf(cur, rel);
+      if (t.via) {                                          // give-and-go off a passer: in to it, back out
+        const ps = pieces.find(q => q.id === t.via); const pPt = ps ? { x: ps.x, y: ps.y } : relPos;
+        const hit = rel + Math.hypot(pPt.x - relPos.x, pPt.y - relPos.y) / PASS;
+        let tgt = playerAt(t.to, hit), fl = Math.hypot(tgt.x - pPt.x, tgt.y - pPt.y) / PASS, land = hit + fl;
+        tgt = playerAt(t.to, land);
+        ph.push({ type: "carry", id: cur, t0: carryStart, t1: rel });
+        ph.push({ type: "fly", from: relPos, to: pPt, t0: rel, t1: hit });
+        ph.push({ type: "fly", from: pPt, to: tgt, t0: hit, t1: land });
+        cur = t.to; carryStart = land; continue;
+      }
       let target = t.kind === "shot" ? shotNet(pk, relPos) : playerAt(t.to, rel);
       let flight = Math.hypot(target.x - relPos.x, target.y - relPos.y) / PASS, land = rel + flight;
       if (t.kind !== "shot") { target = playerAt(t.to, land); flight = Math.hypot(target.x - relPos.x, target.y - relPos.y) / PASS; land = rel + flight; }
@@ -1005,7 +1017,8 @@ function drillSteps(pieces) {
       }
       if (s < ts.length) {
         const t = ts[s], actor = nameOf(chain[s]), to = nameOf(t.to), wp = wpRef(chain[s], t.at);
-        out.push({ text: (t.kind === "pass" ? `${actor} passes to ${to}`
+        out.push({ text: (t.via ? `${actor} gives it to ${nameOf(t.via)} and takes the give-and-go return`
+          : t.kind === "pass" ? `${actor} passes to ${to}`
           : t.kind === "shot" ? `${actor} shoots — ${to} is there for the rebound`
           : t.kind === "rim" ? `${actor} rims it around to ${to}`
           : t.kind === "chip" ? `${actor} chips it to ${to}` : `${actor} moves it to ${to}`) + wp });

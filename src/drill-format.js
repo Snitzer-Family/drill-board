@@ -63,9 +63,12 @@ export function parseDrill(text) {
             } else if (key === "hand") hand = v.toUpperCase() === "L" ? "L" : "R";
             else if (key === "on") carrier = v;
             else if (key === "pass") {
-              const m2 = /^(\d+):([^@\s]+)(?:@(\d+))?$/.exec(v);
+              // pass=<pt>:<to>[@<recvPt>][^<passer>] — a ^passer makes it a
+              // give-and-go bounced off that passer (returns to <to>)
+              const m2 = /^(\d+):([^@\s^]+)(?:@(\d+))?(?:\^(\S+))?$/.exec(v);
               if (m2) transfers.push({ at: parseInt(m2[1], 10) - 1, to: m2[2],
-                recvAt: m2[3] ? parseInt(m2[3], 10) - 1 : null, kind: "pass" });
+                recvAt: m2[3] ? parseInt(m2[3], 10) - 1 : null, kind: "pass",
+                ...(m2[4] ? { via: m2[4] } : {}) });
             } else if (key === "rebound") {
               // shot whose carom is collected by a player: shoot at <pt>, they
               // gather at their @<pt> (else route end / where they stand)
@@ -191,7 +194,7 @@ export function serializeDrill(rink, pieces, title = "", desc = "") {
     if (p.kind === "puck") for (const t of (p.transfers || [])) { if (t.by && t.by !== lastCarrier) break; vts.push(t); lastCarrier = t.to; }
     const head = p.kind === "puck" && (p.carrier || p.pickup);
     const pas = head && vts.length
-      ? vts.map(t => ` ${kw(t)}=${t.at + 1}:${t.to}${t.recvAt != null ? "@" + (t.recvAt + 1) : ""}${(t.kind === "chip" || t.kind === "rim") && t.aim != null ? "~" + f1(t.aim) : ""}`).join("")
+      ? vts.map(t => ` ${kw(t)}=${t.at + 1}:${t.to}${t.recvAt != null ? "@" + (t.recvAt + 1) : ""}${t.via ? "^" + t.via : ""}${(t.kind === "chip" || t.kind === "rim") && t.aim != null ? "~" + f1(t.aim) : ""}`).join("")
       : "";
     const termOk = !p.termBy || p.termBy === lastCarrier;
     const sht = head && termOk && p.shotAt != null ? ` shoot=${p.shotAt + 1}` : "";

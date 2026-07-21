@@ -316,7 +316,12 @@ function chain(pk, byId, pieces) {
       ? returnPoint(rec, giveAt, nextAt)
       : routePoint(rec, tr.recvAt == null ? rec.path.length - 1 : tr.recvAt);
     lastAt[cur.id] = tr.at;                            // the passer just released here
-    if (tr.kind === "shot") {
+    if (tr.via) {                                      // give-and-go off a passer: in to it, back out
+      const ps = byId(tr.via);
+      const pPt = ps ? { x: ps.x, y: ps.y } : launch;
+      out.push(chainLine([launch, pPt], "pass"), chainLine([pPt, anchor], "pass"));
+    }
+    else if (tr.kind === "shot") {
       const net = shotNet(launch);
       // if the carom to the collector would pass through a net, it can't get
       // there — flag that rebound red instead of drawing it as a clean carom

@@ -255,7 +255,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
         if (tr.by && tr.by !== cur.id) { chainBlocked = true; return; }
         const rec = pieces.find(q => q.id === tr.to && q.kind === "player");
         if (!rec) return;
-        if (tr.kind === "pass" && rec.id === cur.id) return;  // no plain pass to yourself
+        if (tr.kind === "pass" && rec.id === cur.id && !tr.via) return;  // plain pass to yourself is a no-op (a `via` bounce off a passer is not)
         if (tr.kind === "rim" || tr.kind === "chip") {        // rim the boards / chip (to self ok)
           const launchT = (cur.path.length && tr.at >= 0)
             ? Math.max(tBase, routeTimeW(cur, warp, Math.min(tr.at, cur.path.length - 1))) : tBase;
@@ -309,11 +309,22 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
         }
         // at < 0 means "from the starting spot" (before skating); a route-less
         // carrier likewise releases as soon as it has the puck (tBase)
-        const launchMin = (cur.path.length && tr.at >= 0)
+        const launch0T = (cur.path.length && tr.at >= 0)
           ? Math.max(tBase, routeTimeW(cur, warp, Math.min(tr.at, cur.path.length - 1)))
           : tBase;
-        let launchT = launchMin;
-        let launch = bladeAt(cur, launchT, warp);
+        const launch0 = bladeAt(cur, launch0T, warp);
+        // a give-and-go bounced off a stationary passer: the puck flies to the
+        // passer first, then returns to the receiver from the passer's face; a
+        // plain pass launches straight from the carrier's blade
+        let launchMin = launch0T, launchT = launch0T, launch = launch0, byId = cur.id, viaFrom = false;
+        if (tr.via) {
+          const passer = pieces.find(q => q.id === tr.via && (q.kind === "passer" || q.kind === "net" || q.kind === "player"));
+          if (!passer) return;                                  // the passer was removed → drop the play
+          const pPt = { x: passer.x, y: passer.y };
+          const tHit = launch0T + Math.hypot(pPt.x - launch0.x, pPt.y - launch0.y) / vPass();
+          legs.push({ type: "fly", by: cur.id, x0: launch0.x, y0: launch0.y, x1: pPt.x, y1: pPt.y, t0: launch0T, t1: tHit });
+          launchMin = tHit; launchT = tHit; launch = pPt; byId = tr.via; viaFrom = true;
+        }
         let target, tArr;
         if (tr.recvAt != null && rec.path.length) {
           const rj = Math.max(0, Math.min(tr.recvAt, rec.path.length - 1));
@@ -330,7 +341,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
           for (let k = 0; k < 3; k++) {
             const flight = Math.hypot(anchor.x - launch.x, anchor.y - launch.y) / vPass();
             launchT = Math.max(launchMin, tRecvNat - flight);
-            launch = bladeAt(cur, launchT, warp);
+            if (!viaFrom) launch = bladeAt(cur, launchT, warp);  // a via return launches from the fixed passer
           }
           tArr = launchT + Math.hypot(anchor.x - launch.x, anchor.y - launch.y) / vPass();
           // warp only to SLOW an early receiver; never speed them up (f ≤ 1)
@@ -349,7 +360,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
           }
           target = bladeAt(rec, tArr, warp);
         }
-        legs.push({ type: "fly", by: cur.id, x0: launch.x, y0: launch.y, x1: target.x, y1: target.y, t0: launchT, t1: tArr });
+        legs.push({ type: "fly", by: byId, x0: launch.x, y0: launch.y, x1: target.x, y1: target.y, t0: launchT, t1: tArr });
         legs.push({ type: "ride", id: rec.id, t0: tArr, catch: true });
         cur = rec;
         tBase = tArr;

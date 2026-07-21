@@ -1104,11 +1104,13 @@ export default function DrillAnimator() {
     else if (pk.carrier) evs.push({ actor: pk.carrier, desc: `${nameOf(pk.carrier)} carries ${pk.id}`, self: `Start with ${pk.id}`, del: () => makeLoose(pk.id) });
     ts.forEach((t, s) => {
       const actor = chain[s] || pk.carrier, to = nameOf(t.to);
-      const verb = t.kind === "pass" ? `passes to ${to}`
+      const verb = t.via ? `gives to ${nameOf(t.via)} and takes the return`
+        : t.kind === "pass" ? `passes to ${to}`
         : t.kind === "shot" ? `shoots — ${to} takes the rebound`
         : t.kind === "rim" ? `rims to ${to}`
         : t.kind === "chip" ? `chips to ${to}` : `→ ${to}`;
-      const self = t.kind === "pass" ? `Pass to ${to}`
+      const self = t.via ? `Give-and-go off ${nameOf(t.via)}`
+        : t.kind === "pass" ? `Pass to ${to}`
         : t.kind === "shot" ? `Shoot (rebound to ${to})`
         : t.kind === "rim" ? `Rim to ${to}` : t.kind === "chip" ? `Chip to ${to}` : `→ ${to}`;
       evs.push({ actor, desc: `${nameOf(actor)} ${verb}`, self, del: () => setTransfer(pk.id, s, null) });
@@ -1180,9 +1182,10 @@ export default function DrillAnimator() {
         // the receiver shows their side of the action too (at the designated
         // receive waypoint, else at their standing spot i=-1)
         const rSpot = t.recvAt != null ? t.recvAt : -1;
-        const self = t.to === p.id && actor === p.id;   // chip/rim and go retrieve it
-        if (t.to === p.id && (actor !== p.id || (self && t.kind !== "pass")) && rSpot === i) {
-          const rtext = self ? (t.kind === "rim" ? "Collect your own rim" : "Collect your own chip")
+        const self = t.to === p.id && actor === p.id;   // chip/rim and go retrieve it, or a give-and-go via a passer
+        if (t.to === p.id && (actor !== p.id || (self && (t.kind !== "pass" || t.via))) && rSpot === i) {
+          const rtext = t.via ? `Take the return from ${nameOf(t.via)}`
+            : self ? (t.kind === "rim" ? "Collect your own rim" : "Collect your own chip")
             : t.kind === "shot" ? `Collect rebound from ${nameOf(actor)}`
             : t.kind === "rim" ? `Collect ${nameOf(actor)}'s rim`
             : t.kind === "chip" ? `Collect ${nameOf(actor)}'s chip`
@@ -1191,7 +1194,8 @@ export default function DrillAnimator() {
         }
         if (actor === p.id && t.at === i) {
           const to = nameOf(t.to);
-          const txt = self && t.kind === "chip" ? "Chip and skate to retrieve" : self && t.kind === "rim" ? "Rim and skate to retrieve"
+          const txt = t.via ? `Give-and-go off ${nameOf(t.via)}`
+            : self && t.kind === "chip" ? "Chip and skate to retrieve" : self && t.kind === "rim" ? "Rim and skate to retrieve"
             : t.kind === "pass" ? `Pass ${pk.id} to ${to}` : t.kind === "shot" ? `Shoot ${pk.id} — rebound to ${to}` : t.kind === "rim" ? `Hard rim to ${to}` : `Chip to ${to}`;
           steps.push({ ord: s + 1, text: txt, warn: flag(s), del: () => setTransfer(pk.id, s, null) });
         }
@@ -2213,11 +2217,20 @@ export default function DrillAnimator() {
       const from = holds ? ts[stage] : null;
       const incoming = holds && stage >= 1 ? ts[stage - 1] : null;
       const others = pieces.filter(q => q.kind === "player" && q.id !== p.id);
-      const isPass = to => from && from.kind === "pass" && from.at === i && from.to === to;
+      const passers = pieces.filter(q => q.kind === "passer");
+      const isPass = to => from && from.kind === "pass" && from.at === i && !from.via && from.to === to;
+      const isVia = ps => from && from.kind === "pass" && from.at === i && from.via === ps;
       const isTerm = field => holds && stage === ts.length && pk[field] === i && (!pk.termBy || pk.termBy === p.id);
       const doPass = to => {
         if (holds) setTransfer(pk.id, stage, isPass(to) ? null : { at: i, to, recvAt: null, kind: "pass" });
         else appendTransfer(pk.id, { at: i, to, recvAt: null, kind: "pass", by: p.id });
+      };
+      // pass into a stationary passer and get it right back — a give-and-go that
+      // returns to this player at the same spot (default) or a chosen waypoint
+      const doVia = ps => {
+        const tr = { at: i, to: p.id, recvAt: i < 0 ? null : i, kind: "pass", via: ps };
+        if (holds) setTransfer(pk.id, stage, isVia(ps) ? null : tr);
+        else appendTransfer(pk.id, { ...tr, by: p.id });
       };
       const doTerm = field => {
         if (holds && stage === ts.length) setTerminal(pk.id, field, i);
@@ -2226,7 +2239,7 @@ export default function DrillAnimator() {
       };
       return (
         <>
-          {others.length > 0 && (
+          {(others.length > 0 || passers.length > 0) && (
             <div className="hd-poprow">
               <span>Pass {pk.id} to</span>
               {others.map(o => (
@@ -2234,15 +2247,21 @@ export default function DrillAnimator() {
                   {nameOf(o.id)}
                 </button>
               ))}
+              {/* a passer returns it — a give-and-go (⟲) back to this player */}
+              {passers.map(ps => (
+                <button key={ps.id} className={`hd-mini${isVia(ps.id) ? " on" : ""}`} title="give-and-go: passes into the rebounder and comes right back"
+                  onClick={() => doVia(ps.id)}>{nameOf(ps.id)} ⟲</button>
+              ))}
             </div>
           )}
-          {/* the passer designates WHICH waypoint the receiver catches it at */}
+          {/* WHICH waypoint the receiver catches it at — for a via give-and-go the
+              receiver is this player, so it picks where they get it back */}
           {from && from.kind === "pass" && from.at === i && (() => {
             const rec = pieces.find(q => q.id === from.to && q.kind === "player");
             if (!rec || rec.path.length < 2) return null;
             return (
               <div className="hd-poprow">
-                <span>Receive at</span>
+                <span>{from.via ? "Get it back at" : "Receive at"}</span>
                 <button className={`hd-mini${from.recvAt == null ? " on" : ""}`} onClick={() => setRecvAt(pk.id, stage, null)}>auto</button>
                 {rec.path.map((s, wi) => (
                   <button key={wi} className={`hd-mini${from.recvAt === wi ? " on" : ""}`}
@@ -3171,6 +3190,8 @@ export default function DrillAnimator() {
             <code> on=F1</code> rides that player's blade until the carrier reaches the puck's spot.
             <code> pass=2:F2@3</code> passes at the carrier's point 2 to F2, received at F2's
             point 3 — the receiver's pace auto-syncs (omit <code>@3</code> to lead them instead).
+            <code> pass=2:F1@3^PS1</code> is a <b>give-and-go off a passer</b>: F1 passes into
+            rebounder PS1 and gets it right back at point 3 (tap a passer's id — marked ⟲ — in the <b>Pass to</b> row).
             Point <b>0</b> is the starting spot (release before skating to point 1).
             <b>Shoot</b>, <b>Hard rim</b>, and <b>Chip</b> are terminal <b>releases</b> — the puck goes
             into space and lands loose. <code> shoot=4</code> fires at point 4 (targets the nearest
