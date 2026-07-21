@@ -124,8 +124,8 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
   if (p.kind === "puck")
     body = (
       <g pointerEvents="none">
-        {!noShadow && <ellipse cx={0.25} cy={0.65} rx={1.7} ry={1.5} fill="#05080b" opacity={0.22} />}
-        <circle cx={0} cy={0} r={1.5} fill="#14171a" stroke={selected ? "#ffd447" : "#fff"} strokeWidth={0.4} />
+        {!noShadow && <ellipse cx={0.22} cy={0.58} rx={1.48} ry={1.3} fill="#05080b" opacity={0.22} />}
+        <circle cx={0} cy={0} r={1.3} fill="#14171a" stroke={selected ? "#ffd447" : "#fff"} strokeWidth={0.38} />
       </g>
     );
   else if (p.kind === "net") {

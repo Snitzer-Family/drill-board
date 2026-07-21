@@ -439,8 +439,11 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
         // the plane, where it rests in the cage. A tire "goalie" beaten doesn't
         // concede — the puck deflects off the rubber (handled below), so skip it.
         if (isGoal && onNet && !isTire) {                     // in the net — to a post/corner
-          const lat = side * (0.7 + Math.abs(place) * 0.3) * GOAL_HALF;
-          const endPt = { x: clampX(net.x + ux * 1.5 + px * lat), y: clampY(net.y + uy * 1.5 + py * lat) };
+          // spread goals across the mouth (mid-net out to either post) at varying
+          // depth, so repeated goals bury in different spots instead of clustering
+          const lat = side * (0.45 + Math.abs(place) * 0.55) * GOAL_HALF;
+          const depth = 1.1 + rand(`${pk.id}:${legs.length}:d`) * 1.3;   // 1.1–2.4 ft behind the line
+          const endPt = { x: clampX(net.x + ux * depth + px * lat), y: clampY(net.y + uy * depth + py * lat) };
           const tArr = launchT + Math.hypot(endPt.x - launch.x, endPt.y - launch.y) / vShot;
           // goal=true rides through the rest too: the puck sits BEHIND the net
           // plane, so render (via puckInGoal) sinks it under the cage
