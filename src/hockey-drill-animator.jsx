@@ -293,12 +293,23 @@ export default function DrillAnimator() {
   const selected = pieces.find(p => p.id === selectedId) || null;
   const editing = animT === 0 && !playing && !aiPlay;
 
-  useEffect(() => { setPopOff({ x: 0, y: 0 }); },
-    [popup?.type, popup?.id, popup?.seg, popup?.pt?.x, popup?.pt?.y]);
+  // stepping Prev/Next through a piece's waypoints keeps the popup put when it
+  // isn't covering the route (see navPopup); this ref tells the reset effects to
+  // preserve the current position/size for that one navigation
+  const preservePopPos = useRef(false);
   // a player or waypoint popup opens pinned + compact ("mid") — open and
   // scrollable but small and out of the way; minimize to the header or
-  // maximize to fill the height from the popup's own controls
-  useLayoutEffect(() => { setPopState("mid"); setPopBox(null); }, [popup?.type, popup?.id, popup?.seg]);
+  // maximize to fill the height from the popup's own controls. (layout effect
+  // runs first, so it checks the flag but leaves it for the passive effect to
+  // clear last — both must see it on a preserved Prev/Next step)
+  useLayoutEffect(() => {
+    if (preservePopPos.current) return;                 // Prev/Next kept it in place
+    setPopState("mid"); setPopBox(null);
+  }, [popup?.type, popup?.id, popup?.seg]);
+  useEffect(() => {
+    if (preservePopPos.current) { preservePopPos.current = false; return; }
+    setPopOff({ x: 0, y: 0 });
+  }, [popup?.type, popup?.id, popup?.seg, popup?.pt?.x, popup?.pt?.y]);
 
   // keep popouts fully inside the ice box: after every render, measure the
   // card against its container and pull it back in with a corrective margin
@@ -382,6 +393,61 @@ export default function DrillAnimator() {
     setPopBox({ top: b.top, left: b.left, w, h });
   }
   function popResizeEnd() { popResize.current = null; }
+
+  // map a rink-feet point to client px via the scene's live CTM (accounts for
+  // orientation + pinch zoom), so we can test the route against the popup rect
+  function rinkToClient(x, y) {
+    const svg = svgRef.current;
+    const m = (sceneRef.current || svg)?.getScreenCTM?.();
+    if (!svg || !m) return null;
+    const pt = svg.createSVGPoint();
+    pt.x = x; pt.y = y;
+    const q = pt.matrixTransform(m);
+    return { x: q.x, y: q.y };
+  }
+  // sample points along a piece's whole route (its standing spot + every leg) in
+  // client px — the "route chain" we don't want the popup to sit on top of
+  function routeClientPoints(p) {
+    const out = [];
+    const add = (x, y) => { const c = rinkToClient(x, y); if (c) out.push(c); };
+    add(p.x, p.y);
+    (p.path || []).forEach((s, i) => {
+      const el = segRefs.current[`${p.id}/${i}`];
+      let L = 0; try { L = el ? el.getTotalLength() : 0; } catch { L = 0; }
+      if (el && L > 0) {
+        const n = Math.max(2, Math.ceil(L / 6));
+        for (let k = 0; k <= n; k++) { try { const q = el.getPointAtLength((L * k) / n); add(q.x, q.y); } catch { /* skip */ } }
+      } else add(s.x, s.y);
+    });
+    return out;
+  }
+  // does the popup's current on-screen rect sit over any of that route?
+  function popupCoversRoute(id) {
+    const el = popRef.current;
+    const p = pieces.find(q => q.id === id);
+    if (!el || !p) return false;
+    const r = el.getBoundingClientRect();
+    const pad = 10;
+    return routeClientPoints(p).some(c =>
+      c.x >= r.left - pad && c.x <= r.right + pad && c.y >= r.top - pad && c.y <= r.bottom + pad);
+  }
+  // Prev/Next through a piece's waypoints: if the popup is already clear of the
+  // route, freeze it exactly where it is and just swap in the new content;
+  // otherwise fall through to the usual reposition-opposite-the-item behavior.
+  function navPopup(target) {
+    setSelectedId(target.id);
+    const el = popRef.current;
+    if (el && !popupCoversRoute(target.id)) {
+      const par = el.offsetParent || el.parentElement;
+      const pr = par.getBoundingClientRect();
+      const r = el.getBoundingClientRect();
+      preservePopPos.current = true;
+      // width frozen, height left auto (h:null) so new content fits without a jump
+      setPopBox({ top: r.top - pr.top, left: r.left - pr.left, w: r.width, h: null });
+      setPopOff({ x: 0, y: 0 });
+    }
+    setPopup(target);
+  }
 
   // Safari (non-standalone): for a non-scrolling page the layout viewport
   // stays at the toolbar-visible size even in full-screen mode, leaving a
@@ -3061,7 +3127,7 @@ export default function DrillAnimator() {
                 <div className="hd-poprow">
                   <button className="hd-mini" disabled style={{ opacity: 0.4 }}>‹ Prev</button>
                   <span style={{ fontSize: 11, color: "#8b99a8" }}>1 / {p.path.length + 1}</span>
-                  <button className="hd-mini" onClick={() => { setSelectedId(p.id); setPopup({ type: "point", id: p.id, seg: 0 }); }}>Next ›</button>
+                  <button className="hd-mini" onClick={() => navPopup({ type: "point", id: p.id, seg: 0 })}>Next ›</button>
                 </div>
               )}
               <div className="hd-poprow">
@@ -3242,7 +3308,7 @@ export default function DrillAnimator() {
       const next = p.path[i + 1];
       title = `Waypoint ${i + 2} of ${p.path.length + 1}`;
       // step back to waypoint 1 (the player/start popup) at j < 0
-      const goSeg = j => { setSelectedId(p.id); setPopup(j < 0 ? { type: "piece", id: p.id } : { type: "point", id: p.id, seg: j }); };
+      const goSeg = j => navPopup(j < 0 ? { type: "piece", id: p.id } : { type: "point", id: p.id, seg: j });
       body = (
         <>
           {p.path.length > 0 && (
@@ -3371,7 +3437,9 @@ export default function DrillAnimator() {
       );
     }
 
-    const a = popoutAnchor(anchorPt);
+    // a frozen/resized popup keeps its own px position, so a briefly off-screen
+    // anchor (e.g. a far waypoint during Prev/Next) must not blank it out
+    const a = popoutAnchor(anchorPt) || (popBox ? { lx: 50, ty: 50 } : null);
     if (!a) return null;
     // EVERY popup pins to the edge OPPOSITE the item it belongs to so it opens
     // completely clear of what's being selected/edited (and its handles) — no
@@ -3396,10 +3464,16 @@ export default function DrillAnimator() {
             : "38%" };
     // once resized, the popup is a free box anchored top-left; header drag still
     // rides on top via popOff (which we zeroed on detach, then re-accumulates)
+    // once resized/frozen the popup is a free box anchored top-left; a Prev/Next
+    // freeze keeps position + width but leaves height auto (h:null) so the new
+    // waypoint's content fits without a jump, capped by the same preset maxHeight
     const boxed = !collapsed && popBox;
     const finalStyle = boxed
       ? { left: `${popBox.left}px`, top: `${popBox.top}px`, bottom: "auto",
-          width: `${popBox.w}px`, height: `${popBox.h}px`, maxHeight: "none",
+          width: `${popBox.w}px`,
+          ...(popBox.h != null
+            ? { height: `${popBox.h}px`, maxHeight: "none" }
+            : { maxHeight: style.maxHeight }),
           transform: `translate(${popOff.x}px, ${popOff.y}px)` }
       : style;
     const usePreset = () => setPopBox(null);   // presets re-anchor to an edge
