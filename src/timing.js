@@ -7,6 +7,12 @@ import * as boards from "./boards.js";
 import { netShapes, solidShapes, bumperShapes, reflectPath, segCrossesNet } from "./net-collide.js";
 
 const GOALIE_DEPTH = 2.5; // how far out front of the net the goalie plays
+// stickhandling cradle: the carried puck (and the stick, in unison) oscillate as
+// the player dribbles. Same phase drives both so they move together.
+const DRIB_W = 2 * Math.PI * 2.0;          // ~2 cradles per second
+const DRIB_FORE = 0.55 * ICON_SCALE;       // fore-aft cradle (ft)
+const DRIB_LAT = 0.8 * ICON_SCALE;         // lateral sweep (ft)
+const DRIB_SWING = 7;                       // matching stick sweep (deg)
 
 export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
   // deterministic per-shot randomness — stable within a playback, varies as the
@@ -63,6 +69,19 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
     return t;
   }
 
+  // the carried puck's DISPLAY position: rides the blade, plus a dribble cradle
+  // so it stickhandles. Display-only — planning geometry keeps using bladeAt.
+  function carriedPuckAt(car, e, warp) {
+    const te = Math.min(e, routeTimeW(car, warp));
+    const base = bladeAt(car, te, warp);
+    const rad = ((routePosAt(car, te, warp).a || 0) * Math.PI) / 180;
+    const side = car.hand === "L" ? -1 : 1;
+    const ph = e * DRIB_W;
+    const fore = Math.sin(ph) * DRIB_FORE;
+    const lat = Math.sin(ph / 2) * DRIB_LAT * side;
+    return { x: clampX(base.x + Math.cos(rad) * fore - Math.sin(rad) * lat),
+             y: clampY(base.y + Math.sin(rad) * fore + Math.cos(rad) * lat), a: 0 };
+  }
   function bladeAt(pl, e, warp) {
     const cp = routePosAt(pl, e, warp);
     const rad = ((cp.a || 0) * Math.PI) / 180;
@@ -785,7 +804,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
         if (leg.type === "fly" || leg.type === "skid") return { x: leg.x1, y: leg.y1, a: 0 };
         if (leg.type === "rest") return { x: leg.x, y: leg.y, a: 0 };
         const car = pieces.find(q => q.id === leg.id);
-        if (car) return bladeAt(car, Math.min(e, routeTimeW(car, warp)), warp);
+        if (car) return carriedPuckAt(car, e, warp);
         return { x: p.x, y: p.y, a: 0 };
       }
       return routePosAt(p, e, warp);
@@ -801,7 +820,15 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
   function stickSwing(id, e) {
     const { plans } = getPlan();
     let ang = 0, best = Infinity; // pick the most-centered event when several overlap
+    let carrying = false;         // no shot/catch nearby → cradle the puck instead
     for (const pid in plans) {
+      const legs = plans[pid].legs;
+      legs.forEach((leg, k) => {
+        if (leg.type === "ride" && leg.id === id) {
+          const end = k + 1 < legs.length ? legs[k + 1].t0 : Infinity;
+          if (e >= leg.t0 && e < end) carrying = true;
+        }
+      });
       for (const leg of plans[pid].legs) {
         if (leg.type === "fly" && leg.by === id) {
           const shot = !!leg.shot;
@@ -825,6 +852,9 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
         }
       }
     }
+    // stickhandling cradle — same phase as the carried puck's lateral sweep, so
+    // stick and puck move in unison (only when no shot/catch swing is active)
+    if (best === Infinity && carrying) ang = Math.sin((e * DRIB_W) / 2) * DRIB_SWING;
     return ang;
   }
 

@@ -484,25 +484,32 @@ export default function DrillAnimator() {
     const r0 = el.getBoundingClientRect();               // the popup as rendered at its anchor
     const w = r0.width, h = r0.height, pad = 8;
     const { chainPts, otherPts } = obstaclePoints(workingChainIds(popup.id));
-    const hits = (left, top, pts) => pts.some(c =>
+    const allPts = chainPts.concat(otherPts);
+    const covers = (left, top, pts) => pts.some(c =>
       c.x >= left - pad && c.x <= left + w + pad && c.y >= top - pad && c.y <= top + h + pad);
-    // region the popup may occupy: inside the ice, clear of the top dock band and
-    // the bottom play bar
-    const TOP = cr.top + 74, BOT = cr.bottom - 66, LEFT = cr.left + 8, RIGHT = cr.right - 8;
+    // if the natural anchor spot is already clear, keep the responsive anchor
+    if (!covers(r0.left, r0.top, allPts)) return null;
+    // otherwise search open space. INSET keeps a placed popup off the boards
+    // (sitting in from the edge) rather than flush against them.
+    const INSET = 20;
+    const TOP = cr.top + 74 + INSET, BOT = cr.bottom - 66 - INSET, LEFT = cr.left + 8 + INSET, RIGHT = cr.right - 8 - INSET;
     const clampL = x => Math.max(LEFT, Math.min(x, RIGHT - w));
     const clampT = y => Math.max(TOP, Math.min(y, Math.max(TOP, BOT - h)));
-    const cands = [{ left: r0.left, top: r0.top, anchor: true }];       // the natural spot first
-    [TOP, (TOP + BOT - h) / 2, BOT - h].forEach(t =>
-      [LEFT, (LEFT + RIGHT - w) / 2, RIGHT - w].forEach(l =>
-        cands.push({ left: clampL(l), top: clampT(t), anchor: false })));
-    const acx = r0.left + w / 2, acy = r0.top + h / 2;
+    // clearance = distance from the candidate rect to the NEAREST obstacle point;
+    // bigger = more open space, so we bias toward the largest open area
+    const distToRect = (c, left, top) =>
+      Math.hypot(Math.max(left - c.x, 0, c.x - (left + w)), Math.max(top - c.y, 0, c.y - (top + h)));
+    const clearance = (left, top) => allPts.reduce((m, c) => Math.min(m, distToRect(c, left, top)), Infinity);
+    const NX = 6, NY = 4, lefts = [], tops = [];
+    for (let k = 0; k < NX; k++) lefts.push(clampL(LEFT + (RIGHT - w - LEFT) * (NX > 1 ? k / (NX - 1) : 0)));
+    for (let k = 0; k < NY; k++) tops.push(clampT(TOP + (BOT - h - TOP) * (NY > 1 ? k / (NY - 1) : 0)));
     let best = null;
-    cands.forEach(c => {
-      const rank = hits(c.left, c.top, chainPts) ? 2 : hits(c.left, c.top, otherPts) ? 1 : 0;
-      const score = rank * 1e7 + Math.hypot(c.left + w / 2 - acx, c.top + h / 2 - acy);  // stay near the item on ties
-      if (!best || score < best.score) best = { ...c, score };
-    });
-    if (!best || best.anchor) return null;               // natural spot wins → keep the responsive anchor
+    tops.forEach(top => lefts.forEach(left => {
+      const rank = covers(left, top, chainPts) ? 2 : covers(left, top, otherPts) ? 1 : 0;
+      const score = rank * 1e7 - clearance(left, top);   // low rank first, then most open
+      if (!best || score < best.score) best = { left, top, score };
+    }));
+    if (!best) return null;
     return { top: best.top - cr.top, left: best.left - cr.left };
   }
   // Prev/Next through a piece's waypoints: keep the user's size, and keep the
@@ -1638,26 +1645,28 @@ export default function DrillAnimator() {
             : t.kind === "rim" ? `Collect ${nameOf(actor)}'s rim`
             : t.kind === "chip" ? `Collect ${nameOf(actor)}'s chip`
             : `Receive pass from ${nameOf(actor)}`;
-          steps.push({ ord: s + 0.5, text: rtext, warn: flag(s), del: () => setTransfer(pk.id, s, null) });
+          steps.push({ ord: s + 0.5, text: rtext, warn: flag(s), del: () => setTransfer(pk.id, s, null),
+            role: t.kind === "pass" ? "receive" : "collect", kind: t.kind, pk, stage: s, src: actor, via: t.via });
         }
         if (actor === p.id && t.at === i) {
           const to = nameOf(t.to);
           const txt = t.via ? `Give-and-go off ${nameOf(t.via)}`
             : self && t.kind === "chip" ? "Chip and skate to retrieve" : self && t.kind === "rim" ? "Rim and skate to retrieve"
             : t.kind === "pass" ? `Pass ${pk.id} to ${to}` : t.kind === "shot" ? `Shoot ${pk.id} — rebound to ${to}` : t.kind === "rim" ? `Hard rim to ${to}` : `Chip to ${to}`;
-          steps.push({ ord: s + 1, text: txt, warn: flag(s), del: () => setTransfer(pk.id, s, null) });
+          steps.push({ ord: s + 1, text: txt, warn: flag(s), del: () => setTransfer(pk.id, s, null),
+            role: "release", kind: t.kind, pk, stage: s });
         }
       });
       const termActor = pk.termBy || chain[chain.length - 1];
       if (termActor === p.id) {
         const wt = (pk.termBy && pk.termBy !== chain[chain.length - 1]) ? `${nameOf(pk.termBy)} isn't holding the puck here — won't happen`
           : deadFrom < Infinity ? "won't happen — an earlier step is blocked" : null;
-        if (pk.shotAt === i) steps.push({ ord: 900, text: `Shoot ${pk.id} at ${pk.net || "nearest net"}`, warn: wt, del: () => clearTerminal(pk.id) });
-        else if (pk.rimAt === i) steps.push({ ord: 900, text: `Hard rim ${pk.id}`, warn: wt, del: () => clearTerminal(pk.id) });
-        else if (pk.chipAt === i) steps.push({ ord: 900, text: `Chip ${pk.id}`, warn: wt, del: () => clearTerminal(pk.id) });
+        if (pk.shotAt === i) steps.push({ ord: 900, text: `Shoot ${pk.id} at ${pk.net || "nearest net"}`, warn: wt, del: () => clearTerminal(pk.id), role: "terminal", kind: "shot", pk });
+        else if (pk.rimAt === i) steps.push({ ord: 900, text: `Hard rim ${pk.id}`, warn: wt, del: () => clearTerminal(pk.id), role: "terminal", kind: "rim", pk });
+        else if (pk.chipAt === i) steps.push({ ord: 900, text: `Chip ${pk.id}`, warn: wt, del: () => clearTerminal(pk.id), role: "terminal", kind: "chip", pk });
       }
       if (pk.pickup && pk.pickup.to === p.id && pk.pickup.at === (i < 0 ? 0 : i))
-        steps.push({ ord: -1, text: `Collect ${pk.id}`, warn: null, del: () => updateById(pk.id, { pickup: null }) });
+        steps.push({ ord: -1, text: `Collect ${pk.id}`, warn: null, del: () => updateById(pk.id, { pickup: null }), role: "pickup", kind: null, pk });
     }
     steps.sort((a, b) => a.ord - b.ord);
     return steps;
@@ -2341,10 +2350,11 @@ export default function DrillAnimator() {
   // render the drill (via the DSL→SVG renderer) and rasterise it to a PNG
   function exportImage() {
     const dsl = serializeDrill(rink, pieces, drillTitle, drillDesc);
-    // size the raster to the drill's rink mode (full / half / quarter) so the
-    // image is cropped to the same view the diagram uses (PAD = 7 ft margin)
-    const [, , vw, vh] = VIEWS[rink] || VIEWS.full, PAD = 7;
-    const W = 1800, H = Math.round((W * (vh + 2 * PAD)) / (vw + 2 * PAD));
+    // size the raster to the drill's rink mode, matching the diagram's aspect-
+    // preserving viewBox so full ice keeps true 200:85 ice proportions
+    const [, , vw, vh] = VIEWS[rink] || VIEWS.full;
+    const py = 7, px = (vw / vh) * py;
+    const W = 1800, H = Math.round((W * (vh + 2 * py)) / (vw + 2 * px));
     const svg = drillSvg(dsl).replace("<svg ", `<svg width="${W}" height="${H}" `);
     const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml;charset=utf-8" }));
     const img = new Image();
@@ -3838,7 +3848,7 @@ export default function DrillAnimator() {
                         {showRoutes && !bent && (bwd
                           ? <polyline points={zigzagPoints(from, s, strokeAR)} {...style} strokeLinejoin="round" pointerEvents="none" />
                           : wig
-                          ? <polyline points={wigglePoints(from, s, strokeAR)} {...style} strokeLinejoin="round" pointerEvents="none" />
+                          ? <polyline points={wigglePoints(from, s, strokeAR, isLast)} {...style} strokeLinejoin="round" pointerEvents="none" />
                           : <path d={d} {...style} pointerEvents="none" />)}
                         {showRoutes && (
                           <path d={d} fill="none" stroke="transparent" strokeWidth={4}

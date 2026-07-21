@@ -121,7 +121,12 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
   const frame = xf || `translate(${pos.x} ${pos.y}) rotate(${pos.a || 0}) scale(${ICON_SCALE})`;
   let body;
   if (p.kind === "puck")
-    body = <circle cx={0} cy={0} r={1.5} fill="#14171a" stroke={selected ? "#ffd447" : "#fff"} strokeWidth={0.4} pointerEvents="none" />;
+    body = (
+      <g pointerEvents="none">
+        {!noShadow && <ellipse cx={0.25} cy={0.65} rx={1.7} ry={1.5} fill="#05080b" opacity={0.22} />}
+        <circle cx={0} cy={0} r={1.5} fill="#14171a" stroke={selected ? "#ffd447" : "#fff"} strokeWidth={0.4} />
+      </g>
+    );
   else if (p.kind === "net") {
     // top-down hockey goal: the mouth (goal line) faces local +x, the caged
     // frame bows back toward -x with a rounded back. ~±3.75 ≈ a 6 ft mouth.

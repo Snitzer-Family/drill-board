@@ -242,7 +242,7 @@ function piece(p) {
       + `<path d="${CAGE}" fill="none" stroke="${p.color}" stroke-width="0.55" stroke-linejoin="round" stroke-linecap="round"/>`
       + `<line x1="0" y1="-4.05" x2="0" y2="4.05" stroke="${p.color}" stroke-width="0.8" stroke-linecap="round"/>`
       + `<circle cx="0" cy="-3.75" r="0.82" fill="${p.color}"/><circle cx="0" cy="3.75" r="0.82" fill="${p.color}"/>`
-      + (p.goalie ? `<rect x="-1.6" y="-2.4" width="2.4" height="4.8" rx="1.1" fill="#2f9e57" stroke="#fff" stroke-width="0.3"/>` : "") + `</g>`;
+      + (p.goalie ? `<g transform="rotate(${f(-(p.facing || 0))} -0.5 0)"><circle cx="-0.5" cy="0" r="1.55" fill="#2f9e57" stroke="#fff" stroke-width="0.3"/><text x="-0.5" y="0.72" text-anchor="middle" font-size="2.1" font-weight="800" fill="#fff" font-family="system-ui,sans-serif" paint-order="stroke" stroke="rgba(0,0,0,0.35)" stroke-width="0.18">G</text></g>` : "") + `</g>`;
   }
   if (p.kind === "tire") {
     let ticks = "";
@@ -252,7 +252,7 @@ function piece(p) {
       + `<circle cx="0" cy="0" r="2.0" fill="none" stroke="${p.color}" stroke-width="1.55"/>`
       + `<circle cx="0" cy="0" r="2.78" fill="none" stroke="#000" stroke-width="0.2" opacity="0.55"/>`
       + `<circle cx="0" cy="0" r="1.22" fill="none" stroke="#000" stroke-width="0.2" opacity="0.55"/>${ticks}`
-      + (p.goalie ? `<circle cx="0" cy="-3.5" r="1.15" fill="#2f9e57" stroke="#fff" stroke-width="0.3"/>` : "") + `</g>`;
+      + (p.goalie ? `<circle cx="0" cy="-3.5" r="1.4" fill="#2f9e57" stroke="#fff" stroke-width="0.3"/><text x="0" y="-2.85" text-anchor="middle" font-size="1.9" font-weight="800" fill="#fff" font-family="system-ui,sans-serif" paint-order="stroke" stroke="rgba(0,0,0,0.35)" stroke-width="0.16">G</text>` : "") + `</g>`;
   }
   if (p.kind === "bumper") {
     const foam = p.color && p.color !== "#4d6fa6" ? p.color : "#1b1e22";
@@ -292,7 +292,7 @@ function routePath(p, pieces) {
     const s = i === 0 && startTrim ? startTrim.seg : s0;
     const arrow = i === last ? ' marker-end="url(#arrowR)"' : "";
     if (carry.has(i))
-      lines += `<polyline points="${wigglePoints(segPrev, s)}" ${stroke}${arrow}/>`;
+      lines += `<polyline points="${wigglePoints(segPrev, s, 1, i === last)}" ${stroke}${arrow}/>`;
     else
       lines += `<path d="M ${f(segPrev.x)} ${f(segPrev.y)} ${segCmd(s)}" ${stroke}${arrow}/>`;
   });
@@ -412,9 +412,12 @@ export function drillSvg(dsl, opts = {}) {
     + pieces.flatMap(p => (p.path || []).filter(s => s.dmode === "label" && s.desc)
         .map(s => labelSvg(s.x + (s.dox || 0), s.y + (s.doy != null ? s.doy : -5), s.desc, s.dsize, "#14202b"))).join("");
   const wattr = opts.width ? ` width="${opts.width}"` : "";
-  // crop to the drill's rink mode (full / half / quarter) with a 7 ft margin
-  const [vx, vy, vw, vh] = VIEWS[rinkMode] || VIEWS.full, PAD = 7;
-  const viewBox = `${vx - PAD} ${vy - PAD} ${vw + 2 * PAD} ${vh + 2 * PAD}`;
+  // crop to the drill's rink mode (full / half / quarter). Pad preserves the
+  // view's aspect ratio (full ice = 200:85) so the exported image keeps true ice
+  // proportions: a 7 ft vertical margin, horizontal margin scaled to match.
+  const [vx, vy, vw, vh] = VIEWS[rinkMode] || VIEWS.full;
+  const py = 7, px = (vw / vh) * py;
+  const viewBox = `${vx - px} ${vy - py} ${vw + 2 * px} ${vh + 2 * py}`;
   // icons paint over the chain lines; arrowheads are trimmed back so they point
   // at their target instead of vanishing under a circle. Labels stay on top.
   return `<svg class="rink" viewBox="${viewBox}"${wattr} xmlns="http://www.w3.org/2000/svg" role="img">${defs}${rink()}${routes}${chains}${icons}${labels}</svg>`;
