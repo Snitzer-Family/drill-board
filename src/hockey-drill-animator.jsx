@@ -3078,13 +3078,16 @@ export default function DrillAnimator() {
           {selected && renderHandles(selected, 1)}
           {selected && renderRotateHandle(selected, 1)}
           {pieces.map(p => <g key={`ca-${p.id}`}>{renderAim(p, true, 1)}</g>)}
-          {pieces.map(p => {
+          {pieces.filter(p => p.kind !== "label").map(p => {
             const dp = displayPos(p);
             return (
               <PieceIcon key={`lp${p.id}`} p={p} pos={dp} thDeg={(dp.a || 0) + screenRot}
                 selected={p.id === selectedId} dim={animT > 0} onDown={() => {}} swing={displaySwing(p)} />
             );
           })}
+          {/* labels are their own kind — render them as text, not the player fallback */}
+          {pieces.filter(p => p.kind === "label" && p.text).map(p =>
+            labelNode(`lp-lbl-${p.id}`, p.x, p.y, p.text, p.size, p.color, p.id === selectedId, null, null))}
           <circle cx={loupe.x} cy={loupe.y} r={1.1} fill="none" stroke="#d7263d" strokeWidth={0.25} />
           <line x1={loupe.x - 2} y1={loupe.y} x2={loupe.x + 2} y2={loupe.y} stroke="#d7263d" strokeWidth={0.18} />
           <line x1={loupe.x} y1={loupe.y - 2} x2={loupe.x} y2={loupe.y + 2} stroke="#d7263d" strokeWidth={0.18} />
