@@ -2243,6 +2243,17 @@ export default function DrillAnimator() {
         else updateById(pk.id, { shotAt: null, rimAt: null, chipAt: null, [field]: i, termBy: p.id,
           ...(field === "rimAt" ? { rimDist: pk.rimDist || REL_DEFAULT.rimAt } : field === "chipAt" ? { chipDist: pk.chipDist || REL_DEFAULT.chipAt } : {}) });
       };
+      // shooting names its target the same way passing names a receiver: a row of
+      // nets/passers/bumpers/tires (plus "Nearest"). Tapping one sets the shot AND
+      // its target in one go; tapping the active one clears the shot.
+      const shootTargets = pieces.filter(q => q.kind === "net" || q.kind === "passer" || q.kind === "bumper" || q.kind === "tire");
+      const isShootAt = tid => isTerm("shotAt") && (tid == null ? !pk.net : pk.net === tid);
+      const doShootAt = tid => {
+        if (isShootAt(tid)) { updateById(pk.id, { shotAt: null, rimAt: null, chipAt: null }); return; } // toggle off
+        update(q => q.id !== pk.id ? q
+          : { ...q, shotAt: i, rimAt: null, chipAt: null, rimAim: null, chipAim: null, net: tid,
+              ...(holds && stage === ts.length ? {} : { termBy: p.id }) });
+      };
       return (
         <>
           {(others.length > 0 || passers.length > 0) && (
@@ -2276,10 +2287,17 @@ export default function DrillAnimator() {
               </div>
             );
           })()}
+          {/* Shoot names its target like Pass names a receiver */}
           <div className="hd-poprow">
-            <button className={`hd-mini${isTerm("shotAt") ? " on" : ""}`} onClick={() => doTerm("shotAt")}>
-              {isTerm("shotAt") ? `✓ Shooting at ${pk.net || "nearest"}` : "🥅 Shoot"}
-            </button>
+            <span>🥅 Shoot at</span>
+            <button className={`hd-mini${isShootAt(null) ? " on" : ""}`} onClick={() => doShootAt(null)}>Nearest</button>
+            {shootTargets.map(t => (
+              <button key={t.id} className={`hd-mini${isShootAt(t.id) ? " on" : ""}`}
+                title={t.kind === "bumper" ? "mirror deflect" : t.kind === "tire" ? "deflects off the rubber" : t.kind === "passer" ? "rebounds off the face" : ""}
+                onClick={() => doShootAt(t.id)}>{t.id}</button>
+            ))}
+          </div>
+          <div className="hd-poprow">
             <button className={`hd-mini${isTerm("rimAt") ? " on" : ""}`} onClick={() => doTerm("rimAt")}>
               {isTerm("rimAt") ? "✓ Hard rim" : "Hard rim"}
             </button>
@@ -2292,7 +2310,8 @@ export default function DrillAnimator() {
               <span style={{ fontSize: 11, color: "#8b99a8" }}>drag the handle on the ice to aim &amp; set distance</span>
             </div>
           )}
-          {(isTerm("shotAt") || (from && from.kind === "shot" && from.at === i)) && netRow(pk)}
+          {/* a rebound shot (a handoff to a collector) still picks its target here */}
+          {(from && from.kind === "shot" && from.at === i) && netRow(pk)}
           {incoming && incoming.kind === "pass" && (
             <div className="hd-poprow">
               <button className={`hd-mini${incoming.recvAt === i ? " on" : ""}`}
