@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useLayoutEffect } from "react";
 import { VIEWS, COLORS, vb, APP_VERSION, ICON_SCALE, BUILD_STAMP, DEFAULT_TEXT } from "./constants.js";
 import { parseDrill, serializeDrill, extractDrill } from "./drill-format.js";
 import { drillSvg } from "./drill-svg.js";
-import { clampX, clampY, segEnd, segD, nearestT, splitSeg, zigzagPoints, wigglePoints, convertSeg, fitRoute, evalSeg } from "./geometry.js";
+import { clampX, clampY, segEnd, segD, nearestT, splitSeg, zigzagPoints, wigglePoints, convertSeg, fitRoute, evalSeg, rdp, catmullToBezier } from "./geometry.js";
 import * as boards from "./boards.js";
 import { netShapes, bumperShapes, solidShapes, detourRoute, segCrossesNet } from "./net-collide.js";
 import { RinkMarkings } from "./rink.jsx";
@@ -100,6 +100,8 @@ export default function DrillAnimator() {
   const [markColor, setMarkColor] = useState("#ffd447");
   const [markWidth, setMarkWidth] = useState(1.1);   // rink feet
   const [markStyle, setMarkStyle] = useState("solid"); // solid | dashed | dotted | wavy
+  const [markEdit, setMarkEdit] = useState(false);   // show draggable control points on the selected mark
+  useEffect(() => { setMarkEdit(false); }, [selectedId]);   // leaving a mark exits point-edit mode
   const markerDraw = useRef(false);
   const [openMenu, setOpenMenu] = useState(null); // settings | rinkmenu | tools | text
   const [textDraft, setTextDraft] = useState(DEFAULT_TEXT);
@@ -1521,7 +1523,12 @@ export default function DrillAnimator() {
       markerDraw.current = false;
       setTool("select");
       if (raw.length < 2) return;
-      const pts = raw.map(q => ({ x: q.x, y: q.y }));
+      // thin the freehand trail, then RDP-simplify to a handful of control points
+      // so the stroke renders as a smooth curve you can later re-shape by its points
+      const trail = raw.map(q => ({ x: q.x, y: q.y }))
+        .filter((q, i, a) => i === 0 || Math.hypot(q.x - a[i - 1].x, q.y - a[i - 1].y) > 1.2);
+      const pts = trail.length > 3 ? rdp(trail, 1.3) : trail;
+      if (pts.length < 2) return;
       const id = nextId("mark");
       setPieces(ps => [...ps, { id, kind: "mark", pts, x: pts[0].x, y: pts[0].y,
         color: markColor, width: markWidth, style: markStyle, path: [] }]);
@@ -1755,6 +1762,16 @@ export default function DrillAnimator() {
     svgRef.current.setPointerCapture?.(e.pointerId);
   }
 
+  function markPtDown(e, id, idx) {
+    if (playing || pinchRef.current) return;
+    e.stopPropagation();
+    if (wakeEdit()) return;
+    setOpenMenu(null);
+    setSelectedId(id);
+    drag.current = { kind: "markpt", id, idx, touch: e.pointerType !== "mouse" };
+    svgRef.current.setPointerCapture?.(e.pointerId);
+  }
+
   function lineDown(e, id, segIdx) {
     if (playing || pinchRef.current) return;
     e.stopPropagation();
@@ -1834,6 +1851,15 @@ export default function DrillAnimator() {
     if (d.kind === "aim") {
       const ang = Math.round((Math.atan2(pt.y - d.origin.y, pt.x - d.origin.x) * 180) / Math.PI);
       setAim(d.pkId, d.target, ang);
+      return;
+    }
+    if (d.kind === "markpt") {
+      const cp = boards.clampInside(pt.x, pt.y);
+      update(p => {
+        if (p.id !== d.id || p.kind !== "mark") return p;
+        const pts = p.pts.map((q, i) => (i === d.idx ? { x: cp.x, y: cp.y } : q));
+        return { ...p, pts, x: pts[0].x, y: pts[0].y };
+      });
       return;
     }
     if (d.kind === "release") {
@@ -2337,13 +2363,28 @@ export default function DrillAnimator() {
     }
     return out;
   };
+  // sample a smooth Catmull-Rom curve through the mark's control points so a
+  // stroke reads as a curve (and stays smooth when its points are re-shaped)
+  const markCurve = cp => {
+    if (!cp || cp.length < 3) return cp || [];
+    const segs = catmullToBezier(cp);
+    let prev = cp[0]; const out = [{ x: cp[0].x, y: cp[0].y }];
+    segs.forEach(s => {
+      const n = Math.max(2, Math.round(Math.hypot(s.x - prev.x, s.y - prev.y) / 0.6));
+      for (let k = 1; k <= n; k++) out.push(evalSeg(prev, s, k / n));
+      prev = { x: s.x, y: s.y };
+    });
+    return out;
+  };
   function renderMark(m, hit) {
     if (!m.pts || m.pts.length < 2) return null;
-    const pts = m.style === "wavy" ? wavyPts(m.pts, Math.max(0.5, m.width * 0.9), 2.8) : m.pts;
+    const base = markCurve(m.pts);
+    const pts = m.style === "wavy" ? wavyPts(base, Math.max(0.5, m.width * 0.9), 2.8) : base;
     const w = m.width || 1.1;
     const dash = m.style === "dashed" ? `${(w * 2.6).toFixed(2)} ${(w * 1.9).toFixed(2)}`
       : m.style === "dotted" ? `0.02 ${(w * 2).toFixed(2)}` : undefined;
     const line = pts.map(q => `${clampX(q.x)},${clampY(q.y)}`).join(" ");
+    const edPts = hit && editing && m.id === selectedId && markEdit;
     return (
       <g key={`mk-${m.id}`}>
         <polyline points={line} fill="none" stroke={m.color} strokeWidth={w} strokeDasharray={dash}
@@ -2353,11 +2394,14 @@ export default function DrillAnimator() {
           <polyline points={line} fill="none" stroke="#ffd447" strokeWidth={w + 1.1}
             strokeLinecap="round" strokeLinejoin="round" opacity={0.35} pointerEvents="none" />
         )}
-        {hit && editing && (
+        {hit && editing && !markEdit && (
           <polyline points={line} fill="none" stroke="transparent" strokeWidth={Math.max(4, w + 3)}
             strokeLinecap="round" strokeLinejoin="round" style={{ cursor: "grab" }}
             onPointerDown={e => pieceDown(e, m.id)} />
         )}
+        {edPts && m.pts.map((q, i) => hdot(clampX(q.x), clampY(q.y), 1.7, {
+          key: `mp-${m.id}-${i}`, fill: "#ffd447", stroke: "#14171a", strokeWidth: 0.35,
+          style: { cursor: "grab" }, onPointerDown: e => markPtDown(e, m.id, i) }, yFix))}
       </g>
     );
   }
@@ -2807,6 +2851,12 @@ export default function DrillAnimator() {
                 <span>Thickness</span>
                 <input type="range" min={0.5} max={3} step={0.1} value={p.width || 1.1} style={{ flex: 1, minWidth: 80 }}
                   onChange={e => updateById(p.id, { width: parseFloat(e.target.value) })} />
+              </div>
+              <div className="hd-poprow">
+                <button className={`hd-mini${markEdit ? " on" : ""}`} onClick={() => setMarkEdit(v => !v)}>
+                  {markEdit ? "Done editing" : "Edit points"}
+                </button>
+                {markEdit && <span style={{ fontSize: 11, color: "#8b99a8" }}>drag a dot to re-shape</span>}
               </div>
             </>
           )}

@@ -197,7 +197,24 @@ function rink() {
 function markMarkup(m) {
   if (!m.pts || m.pts.length < 2) return "";
   const w = m.width || 1.1;
-  let pts = m.pts;
+  // smooth the control points into a Catmull-Rom curve (matches the app)
+  const smooth = cp => {
+    if (cp.length < 3) return cp;
+    const out = [{ x: cp[0].x, y: cp[0].y }];
+    for (let i = 0; i < cp.length - 1; i++) {
+      const p0 = cp[Math.max(0, i - 1)], p1 = cp[i], p2 = cp[i + 1], p3 = cp[Math.min(cp.length - 1, i + 2)];
+      const n = Math.max(2, Math.round(Math.hypot(p2.x - p1.x, p2.y - p1.y) / 0.6));
+      for (let k = 1; k <= n; k++) {
+        const t = k / n, t2 = t * t, t3 = t2 * t;
+        out.push({
+          x: 0.5 * ((2 * p1.x) + (-p0.x + p2.x) * t + (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 + (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3),
+          y: 0.5 * ((2 * p1.y) + (-p0.y + p2.y) * t + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 + (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3),
+        });
+      }
+    }
+    return out;
+  };
+  let pts = smooth(m.pts);
   if (m.style === "wavy") {
     const d = []; for (let i = 1; i < pts.length; i++) { const a = pts[i - 1], b = pts[i], n = Math.max(1, Math.round(Math.hypot(b.x - a.x, b.y - a.y) / 0.4)); for (let k = i === 1 ? 0 : 1; k <= n; k++) d.push({ x: a.x + (b.x - a.x) * k / n, y: a.y + (b.y - a.y) * k / n }); }
     let acc = 0; const amp = Math.max(0.5, w * 0.9); pts = d.map((pt, i) => { const p0 = d[Math.max(0, i - 1)], p1 = d[Math.min(d.length - 1, i + 1)]; const dx = p1.x - p0.x, dy = p1.y - p0.y, mm = Math.hypot(dx, dy) || 1; if (i > 0) acc += Math.hypot(d[i].x - d[i - 1].x, d[i].y - d[i - 1].y); const edge = Math.min(1, i / 3, (d.length - 1 - i) / 3); const off = Math.sin((acc / 2.8) * Math.PI * 2) * amp * edge; return { x: pt.x + (-dy / mm) * off, y: pt.y + (dx / mm) * off }; });
