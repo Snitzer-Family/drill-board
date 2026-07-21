@@ -136,7 +136,7 @@ export const STYLES = `
         .hd-grip { display:inline-flex; align-items:center; }
         input[type=range] { accent-color:#d7263d; height:30px; }
         .hd-pop.pinned { z-index:43; }   /* just under the play dock, never behind it */
-        .hd-pop { position:absolute; z-index:20; width:220px; border:1px solid #33404f;
+        .hd-pop { position:absolute; z-index:20; box-sizing:border-box; width:256px; border:1px solid #33404f;
           border-radius:12px; padding:10px 12px; box-shadow:0 8px 24px rgba(0,0,0,.5);
           display:flex; flex-direction:column; gap:8px;
           max-height:calc(100% - 8px); overflow-y:auto; overscroll-behavior:contain;
@@ -171,6 +171,24 @@ export const STYLES = `
           margin:-10px -12px 0; padding:10px 12px 6px;
           position:sticky; top:-10px; z-index:2; background:#1a222c; }
         .hd-pophead:active { cursor:grabbing; }
+        /* title: shrink + single-line (ellipsis) so it never spills to 2 rows */
+        .hd-poptitle { flex:1 1 auto; min-width:0; white-space:nowrap; overflow:hidden;
+          text-overflow:ellipsis; font-size:11px; letter-spacing:.03em; }
+        /* resize handles: a bottom bar (height) + a bottom-right corner (both).
+           Sticky so they ride the popup's visible bottom edge while it scrolls;
+           margin-top:auto pins the bar to the bottom when the box is taller than
+           its content. */
+        .hd-resizebar { position:sticky; bottom:-4px; order:99; margin:4px -12px -4px;
+          margin-top:auto; align-self:stretch; height:15px; z-index:6;
+          pointer-events:none; display:flex; align-items:center; justify-content:center; }
+        .hd-resize-h { pointer-events:auto; width:48px; height:15px; cursor:ns-resize;
+          touch-action:none; display:flex; align-items:center; justify-content:center; }
+        .hd-resize-h::before { content:""; width:40px; height:4px; border-radius:2px; background:#5b6c7d; }
+        .hd-resize-h:active::before, .hd-resize-c:active::after { background:#9fb2c6; border-color:#9fb2c6; }
+        .hd-resize-c { pointer-events:auto; position:absolute; right:0; bottom:0;
+          width:22px; height:15px; cursor:nwse-resize; touch-action:none; }
+        .hd-resize-c::after { content:""; position:absolute; right:5px; bottom:4px; width:7px; height:7px;
+          border-right:2px solid #7d93aa; border-bottom:2px solid #7d93aa; }
         .hd-grip { color:#5b6c7d; font-size:13px; letter-spacing:0; }
         .hd-poprow { display:flex; align-items:center; gap:7px; flex-wrap:wrap; font-size:12.5px; color:#cdd8e2; }
         .hd-mini { padding:6px 10px; font-size:12.5px; border:1px solid #2c3846; background:#212b36;

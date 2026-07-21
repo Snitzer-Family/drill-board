@@ -249,6 +249,9 @@ export default function DrillAnimator() {
   const [loupe, setLoupe] = useState(null);
   const [popOff, setPopOff] = useState({ x: 0, y: 0 });
   const [popState, setPopState] = useState("mid");   // pinned popup size: "min" (header) | "mid" (small) | "max" (full)
+  // once the user drags a resize handle, the popup detaches to an explicit
+  // top/left/width/height box (px, relative to .hd-canvas) so it grows freely
+  const [popBox, setPopBox] = useState(null);
   const [stageSize, setStageSize] = useState({ w: 800, h: 500 });
 
   const svgRef = useRef(null);
@@ -295,7 +298,7 @@ export default function DrillAnimator() {
   // a player or waypoint popup opens pinned + compact ("mid") — open and
   // scrollable but small and out of the way; minimize to the header or
   // maximize to fill the height from the popup's own controls
-  useLayoutEffect(() => { setPopState("mid"); }, [popup?.type, popup?.id, popup?.seg]);
+  useLayoutEffect(() => { setPopState("mid"); setPopBox(null); }, [popup?.type, popup?.id, popup?.seg]);
 
   // keep popouts fully inside the ice box: after every render, measure the
   // card against its container and pull it back in with a corrective margin
@@ -348,6 +351,37 @@ export default function DrillAnimator() {
     setPopOff({ x: d.ox + e.clientX - d.sx, y: d.oy + e.clientY - d.sy });
   }
   function popDragEnd() { popDrag.current = null; }
+
+  // resize handles: "h" (bottom bar → height only) or "wh" (corner → both). The
+  // first grab detaches the popup from its auto edge-anchor into an explicit
+  // top/left box that grows down/right, so the bottom + corner handles are
+  // always on a free edge no matter which edge the popup opened against.
+  const popResize = useRef(null);
+  function popResizeStart(e, mode) {
+    e.stopPropagation();
+    e.preventDefault();
+    const el = popRef.current;
+    if (!el) return;
+    e.currentTarget.setPointerCapture?.(e.pointerId);   // capture on the handle so moves keep firing
+    const par = el.offsetParent || el.parentElement;
+    const pr = par.getBoundingClientRect();
+    const r = el.getBoundingClientRect();               // includes the current popOff translate
+    const box = { top: r.top - pr.top, left: r.left - pr.left, w: r.width, h: r.height };
+    popResize.current = { sx: e.clientX, sy: e.clientY, box, mode };
+    setPopOff({ x: 0, y: 0 });                          // popOff is folded into box.top/left
+    setPopBox(box);
+  }
+  function popResizeMove(e) {
+    const d = popResize.current;
+    if (!d) return;
+    const b = d.box;
+    const w = d.mode === "wh"
+      ? Math.max(190, Math.min(b.w + (e.clientX - d.sx), canvasW - 16))
+      : b.w;
+    const h = Math.max(56, Math.min(b.h + (e.clientY - d.sy), canvasH - 16));
+    setPopBox({ top: b.top, left: b.left, w, h });
+  }
+  function popResizeEnd() { popResize.current = null; }
 
   // Safari (non-standalone): for a non-scrolling page the layout viewport
   // stays at the toolbar-visible size even in full-screen mode, leaving a
@@ -3360,8 +3394,17 @@ export default function DrillAnimator() {
           maxHeight: collapsed ? "none"
             : maxed ? "calc(100% - env(safe-area-inset-top) - var(--hd-pintop, 78px) - var(--hd-b) - 60px)"
             : "38%" };
+    // once resized, the popup is a free box anchored top-left; header drag still
+    // rides on top via popOff (which we zeroed on detach, then re-accumulates)
+    const boxed = !collapsed && popBox;
+    const finalStyle = boxed
+      ? { left: `${popBox.left}px`, top: `${popBox.top}px`, bottom: "auto",
+          width: `${popBox.w}px`, height: `${popBox.h}px`, maxHeight: "none",
+          transform: `translate(${popOff.x}px, ${popOff.y}px)` }
+      : style;
+    const usePreset = () => setPopBox(null);   // presets re-anchor to an edge
     return (
-      <div className="hd-pop pinned" style={style} ref={popRef}
+      <div className="hd-pop pinned" style={finalStyle} ref={popRef}
         onScroll={syncPopScroll} onPointerDown={e => e.stopPropagation()}>
         {/* always-visible scrollbar thumb: sticky rail pinned to the viewport
             top, thumb positioned/sized imperatively in syncPopScroll */}
@@ -3370,18 +3413,30 @@ export default function DrillAnimator() {
           onPointerDown={popDragStart} onPointerMove={popDragMove}
           onPointerUp={popDragEnd} onPointerCancel={popDragEnd}>
           <span className="hd-grip"><Icon name="grip" size={14} /></span>
-          <span>{title}</span>
+          <span className="hd-poptitle">{title}</span>
           {!collapsed && (
             <button className="hd-x" onPointerDown={e => e.stopPropagation()} title="Minimize"
-              onClick={() => setPopState("min")}><Icon name="chevronUp" size={15} /></button>
+              onClick={() => { usePreset(); setPopState("min"); }}><Icon name="chevronUp" size={15} /></button>
           )}
           <button className="hd-x" onPointerDown={e => e.stopPropagation()} title={maxed ? "Restore" : "Maximize"}
-            onClick={() => setPopState(maxed ? "mid" : collapsed ? "mid" : "max")}>
-            <Icon name={collapsed ? "chevronDown" : maxed ? "restore" : "expand"} size={15} /></button>
+            onClick={() => { usePreset(); setPopState(maxed && !boxed ? "mid" : collapsed ? "mid" : "max"); }}>
+            <Icon name={collapsed ? "chevronDown" : (maxed && !boxed) ? "restore" : "expand"} size={15} /></button>
           <button className="hd-x" onPointerDown={e => e.stopPropagation()}
             onClick={() => setPopup(null)}><Icon name="close" size={15} /></button>
         </div>
         {!collapsed && body}
+        {!collapsed && (
+          // resize: a bottom bar (height) + a bottom-right corner (both). Sticky
+          // so they ride the popup's visible bottom edge even while it scrolls.
+          <div className="hd-resizebar">
+            <div className="hd-resize-h" title="Drag to resize height"
+              onPointerDown={e => popResizeStart(e, "h")} onPointerMove={popResizeMove}
+              onPointerUp={popResizeEnd} onPointerCancel={popResizeEnd} />
+            <div className="hd-resize-c" title="Drag to resize"
+              onPointerDown={e => popResizeStart(e, "wh")} onPointerMove={popResizeMove}
+              onPointerUp={popResizeEnd} onPointerCancel={popResizeEnd} />
+          </div>
+        )}
       </div>
     );
   }
