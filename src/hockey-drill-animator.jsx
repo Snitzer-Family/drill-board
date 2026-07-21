@@ -1035,6 +1035,34 @@ export default function DrillAnimator() {
     const head = pk.carrier || (pk.pickup && pk.pickup.to) || null;
     return [head, ...(pk.transfers || []).map(t => t.to)].filter(Boolean);
   }
+  // Which puck does player p actually hold at waypoint i? A player can be in
+  // several puck chains at once (shoot one, then pick up another). Resolve the
+  // one whose possession window [gained, released] contains i, preferring the
+  // possession that started latest — so acting on p at a spot targets the puck
+  // in their hands there, not just the first chain that mentions them.
+  function heldPuckAt(p, i) {
+    const pucks = pieces.filter(q => q.kind === "puck" && puckChain(q).includes(p.id));
+    let best = null, bestStart = -Infinity;
+    for (const pk of pucks) {
+      const chain = puckChain(pk);
+      const ts = pk.transfers || [];
+      for (let s = 0; s < chain.length; s++) {
+        if (chain[s] !== p.id) continue;
+        // when p gains it at stage s
+        const inAt = s === 0 ? (pk.pickup ? pk.pickup.at : -1)
+          : (ts[s - 1].recvAt != null ? ts[s - 1].recvAt : ts[s - 1].at);
+        // when p releases it (a pass/shot out, else the terminal, else never)
+        let outAt = Infinity;
+        if (s < ts.length) outAt = ts[s].at;
+        else {
+          const tf = pk.shotAt != null ? pk.shotAt : pk.rimAt != null ? pk.rimAt : pk.chipAt != null ? pk.chipAt : null;
+          if (tf != null && (!pk.termBy || pk.termBy === p.id)) outAt = tf;
+        }
+        if (i >= inAt && i <= outAt && inAt >= bestStart) { bestStart = inAt; best = pk; }
+      }
+    }
+    return best;
+  }
   const nameOf = id => { const q = pieces.find(x => x.id === id); return (q && q.label) || id; };
   // which of player p's route segments are skated WITH the puck (→ wiggle line).
   // A carrier holds it from where they get it (reception waypoint, or the start
@@ -1860,7 +1888,9 @@ export default function DrillAnimator() {
   // (Legacy rim/chip transfers keep a simple direction-only aim ring.)
   function renderAim(p) {
     if (!editing || tool === "draw" || p.kind !== "player") return null;
-    const pk = pieces.find(q => q.kind === "puck" && puckChain(q).includes(p.id));
+    // prefer the selected puck's handle when p carries more than one
+    const pk = pieces.find(q => q.kind === "puck" && q.id === selectedId && puckChain(q).includes(p.id))
+      || pieces.find(q => q.kind === "puck" && puckChain(q).includes(p.id));
     if (!pk) return null;
     // only show the release/aim handle when this player (or its puck) is selected
     if (p.id !== selectedId && pk.id !== selectedId) return null;
@@ -2163,7 +2193,9 @@ export default function DrillAnimator() {
     // still recorded (tagged with its intended actor) and shows flagged in the
     // Steps list rather than being hidden.
     const chainControls = (p, i) => {
-      let pk = pieces.find(q => q.kind === "puck" && puckChain(q).includes(p.id));
+      // target the puck p holds at THIS spot (so shoot/pass act on the right one
+      // when p is in more than one chain), then any chain mentioning p, else any
+      let pk = heldPuckAt(p, i) || pieces.find(q => q.kind === "puck" && puckChain(q).includes(p.id));
       if (!pk) pk = pieces.find(q => q.kind === "puck");
       if (!pk) return null;
       const chain = puckChain(pk);
