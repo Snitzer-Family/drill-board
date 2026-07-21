@@ -788,7 +788,8 @@ export default function DrillAnimator() {
               : leg.wide ? " — wide!" : leg.over ? " — over the net!" : "";
             evs.push({ t: leg.t0, key: `${pk.id}:shot:${i}`, auto: `${nameOf(leg.by)} shoots on net${out}` });
           }
-          else {
+          else if (leg.by) {   // a real pass leg names its passer; loose roll legs (a
+                               // miss gliding to rest) have none — don't caption those
             const next = plan.legs[i + 1];
             const to = next && next.id ? ` to ${nameOf(next.id)}` : "";
             evs.push({ t: leg.t0, key: `${pk.id}:pass:${i}`, auto: `${nameOf(leg.by)} passes${to}` });
