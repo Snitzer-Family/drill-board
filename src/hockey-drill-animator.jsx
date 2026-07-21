@@ -2834,10 +2834,11 @@ export default function DrillAnimator() {
     return els;
   }
 
-  // Save!/Goal! splash for each net's latest shot. It parks in an open area near
-  // the net (clear of players/routes) and, once the animation settles at the
-  // end, holds the final result at full strength so a last-instant goal isn't
-  // cut off. Stretch-cancelled via the icon frame like a label.
+  // Result splash for each net's latest shot (GOAL/SAVE/POST/WIDE/OVER). Parks in
+  // an open area near the net (clear of players/routes) and flashes with an
+  // outcome-specific motion (see the per-type block below); once the drill has
+  // finished it holds the final result at full strength so a last-instant goal
+  // isn't cut off. Stretch-cancelled via the icon frame like a label.
   function renderResultSplash() {
     if (!showResult || aiPlay || animT <= 0) return null;
     const DUR = 1.5, e = animT * totalTime, finished = animT >= 1;
@@ -2875,25 +2876,39 @@ export default function DrillAnimator() {
     for (const [side, { L, key }] of byNet) {
       const dt = e - L.t1;
       if (!finished && (dt < 0 || dt > DUR)) continue;      // faded, no newer shot to replace it
-      const goal = !!L.goal;
+      const type = L.goal ? "goal" : L.post ? "post" : "grow";
       const s = spot(side);
-      // pop in, hold, fade out — but once settled at the end, hold full
-      let op = 1, pop = 1;
+      // per-outcome flash: GOAL pops in, tilts back-and-forth, pops out; POST
+      // fades in and violently shakes; a miss (save / wide / over) fades in, grows,
+      // and fades out. Held static once the drill has finished on this result.
+      let op = 1, scale = 1, rot = 0, dx = 0, dy = 0;
       if (!finished) {
-        const inT = 0.16, outT = DUR - 0.4;
-        if (dt < inT) { const f = dt / inT; op = f; pop = 0.55 + 0.45 * f + 0.18 * Math.sin(f * Math.PI); }
-        else if (dt > outT) { const f = (dt - outT) / (DUR - outT); op = 1 - f; pop = 1 + 0.12 * f; }
+        const inT = 0.14, outT = 0.34;
+        op = dt < inT ? dt / inT : dt > DUR - outT ? Math.max(0, (DUR - dt) / outT) : 1;
+        if (type === "goal") {
+          const eob = f => { const c1 = 1.9, c3 = c1 + 1, g = f - 1; return 1 + c3 * g * g * g + c1 * g * g; };
+          scale = dt < 0.22 ? eob(dt / 0.22) : 1;                          // pop in w/ overshoot
+          if (dt > DUR - outT) scale = 1 + 0.6 * (1 - (DUR - dt) / outT);  // pop out bigger
+          rot = 13 * Math.max(0, 1 - dt / DUR) * Math.sin(dt * 13);        // tilt back and forth
+        } else if (type === "post") {
+          const sd = Math.max(0, 1 - dt / 0.6);                            // shake decays over ~0.6s
+          dx = 3.0 * sd * Math.sin(dt * 58);
+          dy = 2.2 * sd * Math.cos(dt * 65);
+          rot = 7 * sd * Math.sin(dt * 50);
+        } else {
+          scale = 0.85 + 0.6 * (dt / DUR);                                 // fade in + grow, then out
+        }
       }
       const fx = iconXf({ x: s.x, y: s.y, a: 0 });
       // GOAL is a hit; SAVE/POST/WIDE/OVER are all misses (post & wide share the
       // amber "iron/off-target" look, over is a deeper miss, save stays blue)
-      const text = goal ? "GOAL!" : L.save ? "SAVE!" : L.post ? "POST!" : L.wide ? "WIDE!" : "OVER!";
-      const fill = goal ? "#ff3b52" : L.save ? "#2b8cff" : L.over ? "#8a5a2b" : "#e0902b";
-      const fs = 7 * pop / ICON_SCALE;
+      const text = L.goal ? "GOAL!" : L.save ? "SAVE!" : L.post ? "POST!" : L.wide ? "WIDE!" : "OVER!";
+      const fill = L.goal ? "#ff3b52" : L.save ? "#2b8cff" : L.over ? "#8a5a2b" : "#e0902b";
+      const fs = 7 / ICON_SCALE;
       const w = text.length * fs * 0.6 + fs * 0.8, h = fs * 1.5;
       els.push(
         <g key={`rs-${key}`} transform={fx.t} opacity={op} pointerEvents="none">
-          <g transform={`rotate(${-fx.th})`}>
+          <g transform={`rotate(${-fx.th}) translate(${dx.toFixed(2)} ${dy.toFixed(2)}) rotate(${rot.toFixed(2)}) scale(${scale.toFixed(3)})`}>
             <rect x={-w / 2} y={-h / 2} width={w} height={h} rx={h * 0.28}
               fill={fill} stroke="rgba(255,255,255,0.9)" strokeWidth={0.6} />
             <text textAnchor="middle" y={fs * 0.36} fontSize={fs} fontWeight={900} fill="#fff"
