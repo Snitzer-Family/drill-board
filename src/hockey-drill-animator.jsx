@@ -208,6 +208,7 @@ export default function DrillAnimator() {
   const [selectedId, setSelectedId] = useState(null);
   const [multiSel, setMultiSel] = useState(null);  // Set<id> from a box-select, or null
   const [marquee, setMarquee] = useState(null);    // {x0,y0,x1,y1} while dragging a box
+  const [groupInput, setGroupInput] = useState(null);   // pending group-name text while naming, or null
   const [popup, setPopup] = useState(null);
   const [tool, setTool] = useState("select");
   // freehand marker (annotation) settings, remembered between strokes
@@ -1668,7 +1669,11 @@ export default function DrillAnimator() {
       if (pk.pickup && pk.pickup.to === p.id && pk.pickup.at === (i < 0 ? 0 : i))
         steps.push({ ord: -1, text: `Collect ${pk.id}`, warn: null, del: () => updateById(pk.id, { pickup: null }), role: "pickup", kind: null, pk });
     }
-    steps.sort((a, b) => a.ord - b.ord);
+    // order by puck first (each puck's collect→…→shoot stays together and
+    // interleaves with the next puck's), then by chain order within a puck — so
+    // collect→shoot→collect→shoot reads in sequence instead of all the collects
+    // bunching ahead of all the shots
+    steps.sort((a, b) => (pieces.indexOf(a.pk) - pieces.indexOf(b.pk)) || (a.ord - b.ord));
     return steps;
   }
   function setTransfer(pkId, stage, tr) {
@@ -1957,11 +1962,11 @@ export default function DrillAnimator() {
   const rotatesFacing = p => ["net", "bumper", "deker", "passer", "tire"].includes(p.kind) || (p.kind === "player" && !p.path.length);
   const groupCentroid = sel => sel.length
     ? { x: sel.reduce((a, p) => a + p.x, 0) / sel.length, y: sel.reduce((a, p) => a + p.y, 0) / sel.length } : null;
-  // slide every selected piece (and its route) by dx,dy
-  const moveGroupBy = (dx, dy) => {
+  // slide a set of pieces (and their routes) by dx,dy
+  const moveMembersBy = (has, dx, dy) => {
     const ci = (x, y) => boards.clampInside(x, y);
     update(p => {
-      if (!multiSel || !multiSel.has(p.id)) return p;
+      if (!has(p.id)) return p;
       const np = ci(p.x + dx, p.y + dy);
       const path = (p.path || []).map(s => {
         const q = ci(s.x + dx, s.y + dy), s2 = { ...s, x: q.x, y: q.y };
@@ -1972,6 +1977,22 @@ export default function DrillAnimator() {
       return { ...p, x: np.x, y: np.y, path };
     });
   };
+  const moveGroupBy = (dx, dy) => moveMembersBy(id => !!multiSel && multiSel.has(id), dx, dy);
+  // ----- named groups (persistent, saved as group= on each piece) -----
+  const groupMembers = name => new Set(pieces.filter(q => q.group === name).map(q => q.id));
+  // the shared group name of the current box-selection, or null if mixed/none
+  const selGroupName = () => {
+    if (!multiSel || !multiSel.size) return null;
+    const sel = pieces.filter(p => multiSel.has(p.id));
+    const g = sel[0] && sel[0].group;
+    return g && sel.every(p => p.group === g) ? g : null;
+  };
+  const createGroup = name => {
+    const nm = (name || "").trim();
+    if (!nm || !multiSel || !multiSel.size) return;
+    update(p => (multiSel.has(p.id) ? { ...p, group: nm } : p));
+  };
+  const ungroup = name => update(p => (p.group === name ? { ...p, group: undefined } : p));
   // rotate the whole selection around its centroid (positions, routes, facings)
   function rotateGroup(deg) {
     if (!multiSel || !multiSel.size) return;
@@ -2025,6 +2046,13 @@ export default function DrillAnimator() {
       }
       return c;
     });
+    // a duplicated group becomes its own independent named group ("X copy")
+    const names = new Set(pieces.map(p => p.group).filter(Boolean)), gmap = {};
+    copies.forEach(c => {
+      if (!c.group) return;
+      if (!gmap[c.group]) { let n = c.group + " copy", k = 2; while (names.has(n)) n = `${c.group} copy ${k++}`; names.add(n); gmap[c.group] = n; }
+      c.group = gmap[c.group];
+    });
     setPieces(ps => [...ps, ...copies]);
     setSelectedId(null); setPopup(null);
     setMultiSel(new Set(copies.map(c => c.id)));
@@ -2076,6 +2104,16 @@ export default function DrillAnimator() {
     // if this piece is part of a box-selection, drag the whole group together
     if (multiSel && multiSel.has(id)) {
       drag.current = { kind: "group", start: pt, last: pt, moved: false, touch: e.pointerType !== "mouse" };
+      svgRef.current.setPointerCapture?.(e.pointerId);
+      return;
+    }
+    // a piece in a NAMED group: dragging any member slides the whole formation;
+    // a plain tap still selects/edits just this piece
+    const pc = pieces.find(q => q.id === id);
+    if (pc && pc.group) {
+      setMultiSel(null);
+      setSelectedId(id);
+      drag.current = { kind: "gmove", id, members: groupMembers(pc.group), start: pt, last: pt, moved: false, touch: e.pointerType !== "mouse" };
       svgRef.current.setPointerCapture?.(e.pointerId);
       return;
     }
@@ -2165,6 +2203,8 @@ export default function DrillAnimator() {
     if (d.kind === "marquee") { d.last = pt; setMarquee({ x0: d.start.x, y0: d.start.y, x1: pt.x, y1: pt.y }); return; }
     // group move: slide every selected piece by the pointer delta
     if (d.kind === "group") { const dx = pt.x - d.last.x, dy = pt.y - d.last.y; d.last = pt; moveGroupBy(dx, dy); if (d.touch) setLoupe(pt); return; }
+    // named-group move: slide the whole formation by dragging one member
+    if (d.kind === "gmove") { const dx = pt.x - d.last.x, dy = pt.y - d.last.y; d.last = pt; moveMembersBy(id => d.members.has(id), dx, dy); if (d.touch) setLoupe(pt); return; }
     if (d.touch) setLoupe(pt);
     if (d.kind === "rotate") {
       update(p => {
@@ -2279,6 +2319,7 @@ export default function DrillAnimator() {
       return;
     }
     if (d.kind === "group") return;   // group move already applied live
+    if (d.kind === "gmove") { if (!d.moved) setPopup({ type: "piece", id: d.id }); return; }   // tap a grouped piece = edit it
     // snap a dropped net into a standard goal position if it's near one
     if (d.kind === "piece" && d.moved && d.line == null) {
       const pc = pieces.find(q => q.id === d.id);
@@ -3309,6 +3350,15 @@ export default function DrillAnimator() {
                 onChange={e => updateById(p.id, { label: e.target.value.replace(/[\s,]+/g, "_") })} />
             </div>
           )}
+          {p.group && (
+            <div className="hd-poprow">
+              <span>◇ {p.group}</span>
+              <button className="hd-mini" title="Select the whole group"
+                onClick={() => { setPopup(null); setSelectedId(null); setMultiSel(groupMembers(p.group)); }}>Select group</button>
+              <button className="hd-mini" title="Remove this piece from the group"
+                onClick={() => updateById(p.id, { group: undefined })}>Leave</button>
+            </div>
+          )}
           <div className="hd-poprow">
             {p.path.length > 0 && (
               <button className="hd-mini" onClick={() => { updateById(p.id, { path: [] }); setPopup(null); }}>Clear route</button>
@@ -3832,6 +3882,34 @@ export default function DrillAnimator() {
                     fill="none" stroke="#ffd447" strokeWidth={sw(0.6)} strokeDasharray={sdash("1.4 1")} opacity={0.9} />
             )}
 
+            {/* named-group outline + label: shown for the selected piece's group
+                and the currently multi-selected group */}
+            {editing && !playing && (() => {
+              const shown = new Set();
+              const selP = pieces.find(p => p.id === selectedId);
+              if (selP && selP.group) shown.add(selP.group);
+              const mg = selGroupName();
+              if (mg) shown.add(mg);
+              return [...shown].map(name => {
+                const mem = pieces.filter(p => p.group === name);
+                if (!mem.length) return null;
+                let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+                const acc = (x, y) => { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); };
+                mem.forEach(p => { const dp = displayPos(p); acc(dp.x, dp.y); (p.path || []).forEach(s => acc(s.x, s.y)); });
+                const PAD = 6.5; x0 -= PAD; y0 -= PAD; x1 += PAD; y1 += PAD;
+                const xf = iconXf({ x: x0 + 2.5, y: y0 + 1, a: 0 });
+                return (
+                  <g key={`grp-${name}`} pointerEvents="none">
+                    <rect x={x0} y={y0} width={x1 - x0} height={y1 - y0} rx={2.5} ry={2.5 * yFix}
+                      fill="none" stroke="#8b6ff0" strokeWidth={sw(0.55)} strokeDasharray={sdash("2 1.5")} vectorEffect="non-scaling-stroke" opacity={0.9} />
+                    <g transform={xf.t}>
+                      <text transform={`rotate(${-xf.th})`} fontSize={2.6} fontWeight={800} fill="#a48cf5"
+                        style={{ userSelect: "none", fontFamily: "system-ui, sans-serif", paintOrder: "stroke", stroke: "rgba(8,12,18,0.65)", strokeWidth: 0.55 }}>◇ {name}</text>
+                    </g>
+                  </g>
+                );
+              });
+            })()}
             {/* box-select highlights + the marquee rectangle */}
             {multiSel && editing && [...pieces].filter(p => multiSel.has(p.id)).map(p => {
               const dp = displayPos(p);
@@ -3905,13 +3983,29 @@ export default function DrillAnimator() {
               transform: "translateX(-50%)", zIndex: 48, display: "flex", alignItems: "center", gap: 6,
               padding: "7px 9px", background: "rgba(20,24,30,0.94)", border: "1px solid rgba(255,255,255,0.12)",
               borderRadius: 999, boxShadow: "0 6px 22px rgba(0,0,0,0.45)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)" }}>
-              <span style={{ color: "#cdd6df", fontSize: 12, fontWeight: 700, padding: "0 4px", whiteSpace: "nowrap" }}>{multiSel.size} selected</span>
+              <span style={{ color: "#cdd6df", fontSize: 12, fontWeight: 700, padding: "0 4px", whiteSpace: "nowrap" }}>
+                {selGroupName() ? `◇ ${selGroupName()}` : `${multiSel.size} selected`}
+              </span>
               <button style={mbtn} onClick={() => rotateGroup(-15)} title="Rotate left 15°"><Icon name="rotateCcw" /></button>
               <button style={mbtn} onClick={() => rotateGroup(15)} title="Rotate right 15°"><Icon name="rotateCw" /></button>
               <button style={{ ...mbtn, fontSize: 12 }} onClick={() => rotateGroup(90)} title="Rotate 90°">90°</button>
               <button style={mbtn} onClick={duplicateGroup} title="Duplicate the selection"><Icon name="duplicate" /></button>
+              {/* named-group controls: name the selection, or ungroup it */}
+              {groupInput != null ? (
+                <>
+                  <input autoFocus value={groupInput} onChange={e => setGroupInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter") { createGroup(groupInput); setGroupInput(null); } if (e.key === "Escape") setGroupInput(null); }}
+                    placeholder="group name" style={{ width: 96, padding: "5px 7px", fontSize: 12, borderRadius: 7, border: "1px solid #33404f", background: "#0f141a", color: "#e8edf2" }} />
+                  <button style={{ ...mbtn, color: "#7fe0a3" }} title="Create group"
+                    onClick={() => { createGroup(groupInput); setGroupInput(null); }}><Icon name="check" size={15} /></button>
+                </>
+              ) : selGroupName() ? (
+                <button style={{ ...mbtn, fontSize: 11.5 }} title="Ungroup" onClick={() => { ungroup(selGroupName()); }}>Ungroup</button>
+              ) : (
+                <button style={{ ...mbtn, fontSize: 11.5 }} title="Group the selection" onClick={() => setGroupInput(selGroupName() || "")}>◇ Group</button>
+              )}
               <button style={{ ...mbtn, color: "#ff7a7a", borderColor: "rgba(255,90,90,0.35)" }} onClick={deleteGroup} title="Delete the selection"><Icon name="trash" /></button>
-              <button style={mbtn} onClick={() => setMultiSel(null)} title="Clear selection"><Icon name="close" /></button>
+              <button style={mbtn} onClick={() => { setMultiSel(null); setGroupInput(null); }} title="Clear selection"><Icon name="close" /></button>
             </div>
           )}
           {view.s > 1.02 && (
