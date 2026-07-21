@@ -1469,6 +1469,19 @@ export default function DrillAnimator() {
     setSelectedId(np.id);
     setPopup({ type: "piece", id: np.id });
   }
+  // bump the number embedded in a name to the next one not already taken, so
+  // duplicating P1 (with P2 around) yields P3, not another P1. No number → as-is.
+  function bumpLabel(label, used) {
+    const m = /^(.*?)(\d+)(\D*)$/.exec(label || "");
+    if (!m) return label;
+    const pre = m[1], suf = m[3];
+    let n = parseInt(m[2], 10) + 1;
+    while (used.has(pre + n + suf)) n++;
+    const nl = pre + n + suf;
+    used.add(nl);
+    return nl;
+  }
+  const playerLabels = () => new Set(pieces.filter(p => p.kind === "player").map(p => p.label));
   // copy a piece (with its route/props) to a fresh id, offset so it's visible
   function duplicatePiece(id) {
     const src = pieces.find(p => p.id === id);
@@ -1476,6 +1489,7 @@ export default function DrillAnimator() {
     const off = 9, nid = nextId(src.kind);
     const copy = JSON.parse(JSON.stringify(src));
     copy.id = nid;
+    if (src.kind === "player") copy.label = bumpLabel(src.label, playerLabels());
     copy.x = clampX(src.x + off); copy.y = clampY(src.y + off);
     if (Array.isArray(copy.path)) copy.path = copy.path.map(s => {
       const t = { ...s };
@@ -1539,9 +1553,11 @@ export default function DrillAnimator() {
     const used = new Set(pieces.map(p => p.id)), idMap = {};
     const fresh = kind => { const pre = idPrefix(kind); let n = 1; while (used.has(pre + n)) n++; used.add(pre + n); return pre + n; };
     for (const p of src) idMap[p.id] = fresh(p.kind);
+    const usedLabels = playerLabels();          // bump player names in order (P1,P2 → P3,P4)
     const copies = src.map(p => {
       const c = JSON.parse(JSON.stringify(p));
       c.id = idMap[p.id];
+      if (c.kind === "player") c.label = bumpLabel(p.label, usedLabels);
       c.x = clampX(p.x + off); c.y = clampY(p.y + off);
       if (Array.isArray(c.path)) c.path = c.path.map(s => {
         const t = { ...s };
