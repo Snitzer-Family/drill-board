@@ -1660,6 +1660,22 @@ export default function DrillAnimator() {
     setMultiSel(null); setSelectedId(null); setPopup(null);
   }
 
+  // turn one puck into a pile: scatter a few more loose, individual pucks in a
+  // tight cluster around it (each its own selectable piece)
+  function makePuckPile(pkId) {
+    const src = pieces.find(p => p.id === pkId && p.kind === "puck");
+    if (!src) return;
+    const used = new Set(pieces.map(p => p.id));
+    const fresh = () => { let n = 1; while (used.has("PK" + n)) n++; used.add("PK" + n); return "PK" + n; };
+    const offs = [[2, 1.1], [-1.9, 1.3], [0.4, -2], [-1.4, -1.2], [2.2, -0.7]];
+    const extra = offs.map(([dx, dy]) => ({
+      id: fresh(), kind: "puck", color: src.color, x: clampX(src.x + dx), y: clampY(src.y + dy),
+      speed: src.speed || 1, carrier: null, pickup: null, transfers: [], shotAt: null, rimAt: null,
+      chipAt: null, chipAim: null, rimAim: null, chipDist: null, rimDist: null, net: null, path: [],
+    }));
+    setPieces(ps => [...ps, ...extra]);
+  }
+
   function addPlayerWithPuck(pt, showPopup) {
     const pl = makePiece("player", pt);
     const pk = makePiece("puck", pt);
@@ -2764,6 +2780,14 @@ export default function DrillAnimator() {
             </>
           )}
           {p.kind === "puck" && chainEvents(p).length > 0 && chainList(p, null)}
+          {p.kind === "puck" && (
+            <div className="hd-poprow">
+              <button className="hd-mini" onClick={() => makePuckPile(p.id)}>
+                <Icon name="puck" size={13} /> Make a pile
+              </button>
+              <span style={{ fontSize: 11, color: "#8b99a8" }}>scatters a few loose pucks here</span>
+            </div>
+          )}
           {p.kind === "puck" && pieces.some(q => q.kind === "player") && (
             <>
               <div className="hd-poprow">
