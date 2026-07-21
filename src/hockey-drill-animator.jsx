@@ -1517,7 +1517,11 @@ export default function DrillAnimator() {
     });
   }
   function deleteSeg(id, i) {
-    update(p => (p.id === id ? { ...p, path: p.path.filter((_, j) => j !== i) } : p));
+    setPieces(ps => {
+      // removing waypoint i pulls this player's later waypoints down by one
+      const shifted = shiftActionWaypoints(ps, id, i + 1, -1);
+      return shifted.map(p => (p.id === id ? { ...p, path: p.path.filter((_, j) => j !== i) } : p));
+    });
     setPopup(null);
   }
 
@@ -1525,6 +1529,38 @@ export default function DrillAnimator() {
   function puckChain(pk) {
     const head = pk.carrier || (pk.pickup && pk.pickup.to) || null;
     return [head, ...(pk.transfers || []).map(t => t.to)].filter(Boolean);
+  }
+  // When a player's path gains/loses a waypoint, re-pin every puck-action index
+  // that points at THAT player's waypoints so the action follows its physical
+  // waypoint (instead of sliding onto an inserted point or duplicating). `bump`
+  // shifts any index >= fromIdx by delta. Actions are: the head's pickup, each
+  // transfer's release (by its carrier) and reception (recvAt), and the terminal.
+  function shiftActionWaypoints(list, playerId, fromIdx, delta) {
+    const bump = v => (v != null && v >= fromIdx ? v + delta : v);
+    return list.map(pk => {
+      if (pk.kind !== "puck") return pk;
+      const chain = puckChain(pk);
+      let np = pk;
+      if (pk.pickup && pk.pickup.to === playerId && bump(pk.pickup.at) !== pk.pickup.at)
+        np = { ...np, pickup: { ...pk.pickup, at: bump(pk.pickup.at) } };
+      if ((pk.transfers || []).length) {
+        let touched = false;
+        const ts = pk.transfers.map((t, s) => {
+          let nt = t;
+          const actor = t.by || chain[s];                       // who releases at t.at
+          if (actor === playerId && bump(t.at) !== t.at) { nt = { ...nt, at: bump(t.at) }; touched = true; }
+          if (t.to === playerId && t.recvAt != null && bump(t.recvAt) !== t.recvAt) { nt = { ...nt, recvAt: bump(t.recvAt) }; touched = true; }
+          return nt;
+        });
+        if (touched) np = { ...np, transfers: ts };
+      }
+      const termActor = pk.termBy || chain[chain.length - 1];
+      if (termActor === playerId) {
+        for (const f of ["shotAt", "rimAt", "chipAt"])
+          if (np[f] != null && bump(np[f]) !== np[f]) np = { ...np, [f]: bump(np[f]) };
+      }
+      return np;
+    });
   }
   // Which puck does player p actually hold at waypoint i? A player can be in
   // several puck chains at once (shoot one, then pick up another). Resolve the
@@ -1847,13 +1883,18 @@ export default function DrillAnimator() {
   }
 
   function addPointAt(id, segIdx, pt) {
-    update(p => {
-      if (p.id !== id) return p;
-      const s = p.path[segIdx];
-      if (!s) return p;
-      const prev = segEnd(p, segIdx - 1);
-      const parts = splitSeg(prev, s, nearestT(prev, s, pt));
-      return { ...p, path: [...p.path.slice(0, segIdx), ...parts, ...p.path.slice(segIdx + 1)] };
+    setPieces(ps => {
+      // inserting a waypoint at segIdx pushes this player's later waypoints up by
+      // one — shift their actions first so each stays on its own waypoint
+      const shifted = shiftActionWaypoints(ps, id, segIdx, +1);
+      return shifted.map(p => {
+        if (p.id !== id) return p;
+        const s = p.path[segIdx];
+        if (!s) return p;
+        const prev = segEnd(p, segIdx - 1);
+        const parts = splitSeg(prev, s, nearestT(prev, s, pt));
+        return { ...p, path: [...p.path.slice(0, segIdx), ...parts, ...p.path.slice(segIdx + 1)] };
+      });
     });
     setSelectedId(id);
     setPopup({ type: "point", id, seg: segIdx });
