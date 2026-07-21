@@ -147,6 +147,16 @@ export function parseDrill(text) {
           else if (t === "C") push({ type: "C", c1x: num(), c1y: num(), c2x: num(), c2y: num(), x: num(), y: num() });
           else throw new Error(`unknown token "${t}" (use L Q C, PASS SHOT CARRY, FWD BWD, STOP n, RATE n)`);
         }
+      } else if (cmd === "MARK") {
+        // MARK <id> <color> <width> <style> x1,y1 x2,y2 ...  (a freehand ink annotation)
+        const mid = tok[1], mcol = tok[2] || "#ffd447", mw = parseFloat(tok[3]) || 1.1, mst = (tok[4] || "solid").toLowerCase();
+        const nums = tok.slice(5).map(Number).filter(n => !isNaN(n));
+        const pts = [];
+        for (let k = 0; k + 1 < nums.length; k += 2) pts.push({ x: nums[k], y: nums[k + 1] });
+        if (mid && pts.length >= 2) {
+          const m = { id: mid, kind: "mark", color: mcol, width: mw, style: ["dashed", "dotted", "wavy"].includes(mst) ? mst : "solid", x: pts[0].x, y: pts[0].y, pts, path: [] };
+          pieces.push(m); byId[mid] = m;
+        }
       } else throw new Error(`unknown command "${tok[0]}"`);
     } catch (e) { errors.push(`line ${i + 1}: ${e.message}`); }
   });
@@ -189,6 +199,10 @@ export function serializeDrill(rink, pieces, title = "", desc = "") {
     if (p.kind === "label") {
       const sz = p.size && p.size !== 1 ? ` size=${f2(p.size)}` : "";
       out.push(`PIECE ${p.id} label ${f1(p.x)} ${f1(p.y)} ${p.color}${sz} ${qesc(p.text || "")}`);
+      return;
+    }
+    if (p.kind === "mark") {
+      out.push(`MARK ${p.id} ${p.color} ${f2(p.width || 1.1)} ${p.style || "solid"} ${(p.pts || []).map(q => `${f1(q.x)},${f1(q.y)}`).join(" ")}`);
       return;
     }
     const lbl = p.label ? " " + String(p.label).replace(/[\s,]+/g, "_") : "";

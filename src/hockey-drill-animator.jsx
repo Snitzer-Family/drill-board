@@ -96,6 +96,11 @@ export default function DrillAnimator() {
   const [marquee, setMarquee] = useState(null);    // {x0,y0,x1,y1} while dragging a box
   const [popup, setPopup] = useState(null);
   const [tool, setTool] = useState("select");
+  // freehand marker (annotation) settings, remembered between strokes
+  const [markColor, setMarkColor] = useState("#ffd447");
+  const [markWidth, setMarkWidth] = useState(1.1);   // rink feet
+  const [markStyle, setMarkStyle] = useState("solid"); // solid | dashed | dotted | wavy
+  const markerDraw = useRef(false);
   const [openMenu, setOpenMenu] = useState(null); // settings | rinkmenu | tools | text
   const [textDraft, setTextDraft] = useState(DEFAULT_TEXT);
   const [textError, setTextError] = useState("");
@@ -1095,7 +1100,7 @@ export default function DrillAnimator() {
   function nextId(kind) {
     const prefix = kind === "player" ? "P" : kind === "puck" ? "PK" : kind === "net" ? "N"
       : kind === "bumper" ? "B" : kind === "deker" ? "DK" : kind === "passer" ? "PS"
-      : kind === "label" ? "L" : kind === "tire" ? "T" : kind === "stick" ? "ST" : "C";
+      : kind === "label" ? "L" : kind === "tire" ? "T" : kind === "stick" ? "ST" : kind === "mark" ? "MK" : "C";
     let n = 1;
     while (pieces.some(p => p.id === prefix + n)) n++;
     return prefix + n;
@@ -1498,12 +1503,32 @@ export default function DrillAnimator() {
     svgRef.current.setPointerCapture?.(e.pointerId);
   }
 
+  // start a freehand marker stroke (an ink annotation, not a route)
+  function beginMark(e) {
+    const pt = svgPt(e);
+    drawRaw.current = [pt];
+    setDrawPreview([pt]);
+    markerDraw.current = true;
+    drag.current = { kind: "drawing", marker: true, touch: e.pointerType !== "mouse" };
+    svgRef.current.setPointerCapture?.(e.pointerId);
+  }
+
   function finishDraw() {
-    const id = drawTarget.current;
     const raw = drawRaw.current;
-    drawTarget.current = null;
     drawRaw.current = [];
     setDrawPreview(null);
+    if (markerDraw.current) {                       // freehand ink annotation
+      markerDraw.current = false;
+      setTool("select");
+      if (raw.length < 2) return;
+      const pts = raw.map(q => ({ x: q.x, y: q.y }));
+      const id = nextId("mark");
+      setPieces(ps => [...ps, { id, kind: "mark", pts, x: pts[0].x, y: pts[0].y,
+        color: markColor, width: markWidth, style: markStyle, path: [] }]);
+      return;
+    }
+    const id = drawTarget.current;
+    drawTarget.current = null;
     setTool("select");
     if (!id || raw.length < 3) return;
     setPieces(ps => ps.map(p => {
@@ -1522,6 +1547,7 @@ export default function DrillAnimator() {
     setOpenMenu(null);
     const pt = svgPt(e);
     if (tool === "draw") { setPopup(null); beginDraw(e); return; }
+    if (tool === "marker") { setPopup(null); beginMark(e); return; }
     if (tool === "playerpuck") {
       addPlayerWithPuck(pt, false);
       setTool("select");
@@ -1597,7 +1623,7 @@ export default function DrillAnimator() {
   // ----- box-select group operations (multiSel) -----
   const idPrefix = kind => (kind === "player" ? "P" : kind === "puck" ? "PK" : kind === "net" ? "N"
     : kind === "bumper" ? "B" : kind === "deker" ? "DK" : kind === "passer" ? "PS"
-    : kind === "label" ? "L" : kind === "tire" ? "T" : kind === "stick" ? "ST" : "C");
+    : kind === "label" ? "L" : kind === "tire" ? "T" : kind === "stick" ? "ST" : kind === "mark" ? "MK" : "C");
   const rotatesFacing = p => ["net", "bumper", "deker", "passer", "tire"].includes(p.kind) || (p.kind === "player" && !p.path.length);
   const groupCentroid = sel => sel.length
     ? { x: sel.reduce((a, p) => a + p.x, 0) / sel.length, y: sel.reduce((a, p) => a + p.y, 0) / sel.length } : null;
@@ -1844,6 +1870,10 @@ export default function DrillAnimator() {
       const ci = (x, y) => boards.clampInside(x, y);    // clamp to the rounded boards
       update(p => {
         if (p.id !== d.id) return p;
+        if (p.kind === "mark") {   // a marker annotation moves all its points together
+          const pts = p.pts.map(q => ci(q.x + dx, q.y + dy));
+          return { ...p, pts, x: pts[0].x, y: pts[0].y };
+        }
         if (d.line == null) {
           // dragging the piece itself moves only the route's start point —
           // the piece is waypoint zero; the rest of the route stays anchored
@@ -2284,6 +2314,53 @@ export default function DrillAnimator() {
   }
 
   // standalone label pieces + every "label"-mode waypoint description
+  // freehand marker annotations: a coloured polyline in the chosen style
+  const densifyPts = (pts, step) => {
+    const out = [pts[0]];
+    for (let i = 1; i < pts.length; i++) {
+      const a = out[out.length - 1], b = pts[i], d = Math.hypot(b.x - a.x, b.y - a.y);
+      const n = Math.max(1, Math.round(d / step));
+      for (let k = 1; k <= n; k++) out.push({ x: a.x + (b.x - a.x) * k / n, y: a.y + (b.y - a.y) * k / n });
+    }
+    return out;
+  };
+  const wavyPts = (pts, amp, wl) => {
+    const d = densifyPts(pts, 0.4); if (d.length < 3) return pts;
+    let acc = 0; const out = [];
+    for (let i = 0; i < d.length; i++) {
+      const prev = d[Math.max(0, i - 1)], next = d[Math.min(d.length - 1, i + 1)];
+      const dx = next.x - prev.x, dy = next.y - prev.y, m = Math.hypot(dx, dy) || 1;
+      if (i > 0) acc += Math.hypot(d[i].x - d[i - 1].x, d[i].y - d[i - 1].y);
+      const edge = Math.min(1, i / 3, (d.length - 1 - i) / 3);   // taper the ends
+      const off = Math.sin((acc / wl) * Math.PI * 2) * amp * edge;
+      out.push({ x: d[i].x + (-dy / m) * off, y: d[i].y + (dx / m) * off });
+    }
+    return out;
+  };
+  function renderMark(m, hit) {
+    if (!m.pts || m.pts.length < 2) return null;
+    const pts = m.style === "wavy" ? wavyPts(m.pts, Math.max(0.5, m.width * 0.9), 2.8) : m.pts;
+    const w = m.width || 1.1;
+    const dash = m.style === "dashed" ? `${(w * 2.6).toFixed(2)} ${(w * 1.9).toFixed(2)}`
+      : m.style === "dotted" ? `0.02 ${(w * 2).toFixed(2)}` : undefined;
+    const line = pts.map(q => `${clampX(q.x)},${clampY(q.y)}`).join(" ");
+    return (
+      <g key={`mk-${m.id}`}>
+        <polyline points={line} fill="none" stroke={m.color} strokeWidth={w} strokeDasharray={dash}
+          strokeLinecap="round" strokeLinejoin="round" opacity={0.94}
+          pointerEvents={hit ? "none" : undefined} />
+        {m.id === selectedId && (
+          <polyline points={line} fill="none" stroke="#ffd447" strokeWidth={w + 1.1}
+            strokeLinecap="round" strokeLinejoin="round" opacity={0.35} pointerEvents="none" />
+        )}
+        {hit && editing && (
+          <polyline points={line} fill="none" stroke="transparent" strokeWidth={Math.max(4, w + 3)}
+            strokeLinecap="round" strokeLinejoin="round" style={{ cursor: "grab" }}
+            onPointerDown={e => pieceDown(e, m.id)} />
+        )}
+      </g>
+    );
+  }
   function renderLabels() {
     const canEdit = editing && tool !== "draw";
     const els = [];
@@ -2643,7 +2720,8 @@ export default function DrillAnimator() {
       title = p.kind === "player" ? `Player ${p.id}` : p.kind === "puck" ? `Puck ${p.id}`
         : p.kind === "net" ? `Net ${p.id}` : p.kind === "bumper" ? `Bumper ${p.id}`
         : p.kind === "deker" ? `Deker ${p.id}` : p.kind === "passer" ? `Passer ${p.id}`
-        : p.kind === "label" ? `Label ${p.id}` : p.kind === "tire" ? `Tire ${p.id}` : p.kind === "stick" ? `Stick ${p.id}` : `Cone ${p.id}`;
+        : p.kind === "label" ? `Label ${p.id}` : p.kind === "tire" ? `Tire ${p.id}` : p.kind === "stick" ? `Stick ${p.id}`
+        : p.kind === "mark" ? `Mark ${p.id}` : `Cone ${p.id}`;
       body = (
         <>
           {p.kind === "label" && (
@@ -2710,6 +2788,27 @@ export default function DrillAnimator() {
                 {p.kind === "deker" ? "stickhandle under the stick · " : p.kind === "passer" ? "pucks rebound off the face · " : ""}drag to move · ring to rotate
               </span>
             </div>
+          )}
+          {p.kind === "mark" && (
+            <>
+              <div className="hd-poprow">
+                {["#ffd447", "#d7263d", "#1f8a4c", "#3a8dff", "#e0731d", "#ffffff", "#14202b"].map(c => (
+                  <div key={c} className={`hd-swatch${p.color === c ? " on" : ""}`} style={{ background: c }}
+                    onClick={() => updateById(p.id, { color: c })} />
+                ))}
+              </div>
+              <div className="hd-poprow">
+                <span>Style</span>
+                {[["solid", "Solid"], ["dashed", "Dashed"], ["dotted", "Dotted"], ["wavy", "Wavy"]].map(([s, lbl]) => (
+                  <button key={s} className={`hd-mini${(p.style || "solid") === s ? " on" : ""}`} onClick={() => updateById(p.id, { style: s })}>{lbl}</button>
+                ))}
+              </div>
+              <div className="hd-poprow">
+                <span>Thickness</span>
+                <input type="range" min={0.5} max={3} step={0.1} value={p.width || 1.1} style={{ flex: 1, minWidth: 80 }}
+                  onChange={e => updateById(p.id, { width: parseFloat(e.target.value) })} />
+              </div>
+            </>
           )}
           {p.kind === "player" && (
             <>
@@ -3165,7 +3264,7 @@ export default function DrillAnimator() {
           {selected && renderHandles(selected, 1)}
           {selected && renderRotateHandle(selected, 1)}
           {pieces.map(p => <g key={`ca-${p.id}`}>{renderAim(p, true, 1)}</g>)}
-          {pieces.filter(p => p.kind !== "label").map(p => {
+          {pieces.filter(p => p.kind !== "label" && p.kind !== "mark").map(p => {
             const dp = displayPos(p);
             return (
               <PieceIcon key={`lp${p.id}`} p={p} pos={dp} thDeg={(dp.a || 0) + screenRot}
@@ -3187,6 +3286,7 @@ export default function DrillAnimator() {
   const toolHint =
     tool === "draw"
       ? (selected ? `Drawing ${selected.id}'s route — drag across the ice` : "Drag on the ice — creates a player")
+      : tool === "marker" ? "Marker — drag on the ice to draw"
       : tool !== "select" ? "Tap the ice to place" : null;
 
   const mbtn = { display: "flex", alignItems: "center", justifyContent: "center", minWidth: 34, height: 34,
@@ -3220,6 +3320,9 @@ export default function DrillAnimator() {
             <g transform={zoomXf}>
             <g ref={sceneRef} transform={sceneTransform}>
             <RinkMarkings yFix={yFix} />
+
+            {/* freehand marker annotations sit on the ice, under the drill */}
+            {pieces.filter(p => p.kind === "mark").map(m => renderMark(m, true))}
 
             {showZones && (
               <g pointerEvents="none">
@@ -3366,8 +3469,11 @@ export default function DrillAnimator() {
             {puckPathNodes(false)}
 
             {drawPreview && drawPreview.length > 1 && (
-              <polyline points={drawPreview.map(q => `${q.x},${q.y}`).join(" ")} vectorEffect="non-scaling-stroke"
-                fill="none" stroke="#ffd447" strokeWidth={sw(0.6)} strokeDasharray={sdash("1.4 1")} opacity={0.9} />
+              tool === "marker"
+                ? <polyline points={drawPreview.map(q => `${q.x},${q.y}`).join(" ")} fill="none" stroke={markColor}
+                    strokeWidth={markWidth} strokeLinecap="round" strokeLinejoin="round" opacity={0.85} pointerEvents="none" />
+                : <polyline points={drawPreview.map(q => `${q.x},${q.y}`).join(" ")} vectorEffect="non-scaling-stroke"
+                    fill="none" stroke="#ffd447" strokeWidth={sw(0.6)} strokeDasharray={sdash("1.4 1")} opacity={0.9} />
             )}
 
             {/* box-select highlights + the marquee rectangle */}
@@ -3388,7 +3494,7 @@ export default function DrillAnimator() {
             {/* nets sit on the ice (bottom); players paint above pucks so a
                carried puck can't steal the grab; rotate ring is drawn last */}
             {!aiPlay && [...pieces]
-              .filter(p => p.kind !== "label")
+              .filter(p => p.kind !== "label" && p.kind !== "mark")
               .sort((a, b) => {
                 const rank = k => (k === "net" || k === "bumper" || k === "deker" || k === "passer" || k === "tire" || k === "stick" ? 0 : k === "player" ? 2 : 1);
                 return rank(a.kind) - rank(b.kind);
@@ -3640,6 +3746,32 @@ export default function DrillAnimator() {
           <button className="hd-item" onClick={() => { resetAnim(); setPlaying(false); setPopup(null); setTool("draw"); setOpenMenu(null); }}>
             <Icon name="pencil" size={16} /> Draw a route
           </button>
+          <button className={`hd-item${tool === "marker" ? " on" : ""}`} onClick={() => { resetAnim(); setPlaying(false); setPopup(null); setTool("marker"); }}>
+            <Icon name="marker" size={16} /> Marker — draw on the ice
+          </button>
+          {/* marker style/colour/thickness, shown once the marker is picked */}
+          {tool === "marker" && (
+            <>
+              <div className="hd-poprow">
+                {["#ffd447", "#d7263d", "#1f8a4c", "#3a8dff", "#e0731d", "#ffffff", "#14202b"].map(c => (
+                  <div key={c} className={`hd-swatch${markColor === c ? " on" : ""}`} style={{ background: c }}
+                    onClick={() => setMarkColor(c)} />
+                ))}
+              </div>
+              <div className="hd-poprow">
+                <span>Style</span>
+                {[["solid", "Solid"], ["dashed", "Dashed"], ["dotted", "Dotted"], ["wavy", "Wavy"]].map(([s, lbl]) => (
+                  <button key={s} className={`hd-mini${markStyle === s ? " on" : ""}`} onClick={() => setMarkStyle(s)}>{lbl}</button>
+                ))}
+              </div>
+              <div className="hd-poprow">
+                <span>Thickness</span>
+                <input type="range" min={0.5} max={3} step={0.1} value={markWidth} style={{ flex: 1, minWidth: 80 }}
+                  onChange={e => setMarkWidth(parseFloat(e.target.value))} />
+              </div>
+              <span style={{ fontSize: 11, color: "#8b99a8", padding: "0 2px" }}>drag on the ice to draw; tap a mark to restyle or delete</span>
+            </>
+          )}
           {tool !== "select" && (
             <button className="hd-item" onClick={() => { setTool("select"); setOpenMenu(null); }}><Icon name="close" size={16} /> Cancel tool</button>
           )}

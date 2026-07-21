@@ -24,6 +24,8 @@ const ICONS = {
   plus: <path d="M12 5v14M5 12h14" />,
   chevronUp: <path d="M6 15l6-6 6 6" />,
   chevronDown: <path d="M6 9.5l6 6 6-6" />,
+  // freehand marker: a pen over a wavy stroke
+  marker: <><path d="M15.5 4.2l4.3 4.3L11 17.3l-4.3.9.9-4.3z" /><path d="M13.4 6.3l4.3 4.3" /><path d="M3 21c1.4-2 2.8-2 4.2 0" /></>,
   // hockey net (mouth + mesh) for "shoot at"
   net: <><path d="M4 19V8h16v11" /><path d="M4 8l3-2.5h10L20 8" /><path d="M8 8v11M12 8v11M16 8v11M4 13.5h16" /></>,
   // a puck dropping into a tray = collect a loose puck

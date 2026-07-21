@@ -193,8 +193,21 @@ function rink() {
 }
 
 /* ------------------------------------------------------------------ */
+// freehand marker annotation → a coloured polyline in its style
+function markMarkup(m) {
+  if (!m.pts || m.pts.length < 2) return "";
+  const w = m.width || 1.1;
+  let pts = m.pts;
+  if (m.style === "wavy") {
+    const d = []; for (let i = 1; i < pts.length; i++) { const a = pts[i - 1], b = pts[i], n = Math.max(1, Math.round(Math.hypot(b.x - a.x, b.y - a.y) / 0.4)); for (let k = i === 1 ? 0 : 1; k <= n; k++) d.push({ x: a.x + (b.x - a.x) * k / n, y: a.y + (b.y - a.y) * k / n }); }
+    let acc = 0; const amp = Math.max(0.5, w * 0.9); pts = d.map((pt, i) => { const p0 = d[Math.max(0, i - 1)], p1 = d[Math.min(d.length - 1, i + 1)]; const dx = p1.x - p0.x, dy = p1.y - p0.y, mm = Math.hypot(dx, dy) || 1; if (i > 0) acc += Math.hypot(d[i].x - d[i - 1].x, d[i].y - d[i - 1].y); const edge = Math.min(1, i / 3, (d.length - 1 - i) / 3); const off = Math.sin((acc / 2.8) * Math.PI * 2) * amp * edge; return { x: pt.x + (-dy / mm) * off, y: pt.y + (dx / mm) * off }; });
+  }
+  const dash = m.style === "dashed" ? ` stroke-dasharray="${f(w * 2.6)} ${f(w * 1.9)}"` : m.style === "dotted" ? ` stroke-dasharray="0.02 ${f(w * 2)}"` : "";
+  return `<polyline points="${pts.map(q => `${f(q.x)},${f(q.y)}`).join(" ")}" fill="none" stroke="${m.color}" stroke-width="${f(w)}"${dash} stroke-linecap="round" stroke-linejoin="round" opacity="0.94"/>`;
+}
 /* piece icons                                                         */
 function piece(p) {
+  if (p.kind === "mark") return markMarkup(p);
   const rot = (a = p.facing || 0) => `translate(${f(p.x)} ${f(p.y)}) rotate(${f(a)})`;
   if (p.kind === "player")
     return `<g><ellipse cx="${f(p.x)}" cy="${f(p.y + 0.5)}" rx="3.7" ry="3.9" fill="#0a1016" opacity="0.15"/>`
@@ -359,7 +372,7 @@ const VIEWS = { full: [0, 0, 200, 85], half: [100, 0, 100, 85], quarter: [100, 0
 export function drillSvg(dsl, opts = {}) {
   const { pieces, rink: rinkMode } = parseDrill(dsl);
   const byId = id => pieces.find(p => p.id === id);
-  const rank = k => (k === "net" || k === "bumper" || k === "deker" || k === "passer" || k === "tire" || k === "stick" ? 0 : k === "player" ? 2 : 1);
+  const rank = k => (k === "net" || k === "bumper" || k === "deker" || k === "passer" || k === "tire" || k === "stick" || k === "mark" ? 0 : k === "player" ? 2 : 1);
   const defs = `<defs>
       <clipPath id="ice"><rect x="0.6" y="0.6" width="198.8" height="83.8" rx="26"/></clipPath>
       <marker id="arrowR" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="${V("mark", "#cf3346")}"/></marker>

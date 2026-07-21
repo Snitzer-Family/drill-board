@@ -195,3 +195,10 @@ PIECE PK1 puck 46 26 on=F1 chip=2:F1@3~-60
 - A chip follows the chipping player's facing unless you append `~<deg>`; in the
   app you can also drag the on-ice **aim ring** at the chip's release point.
 - The format round-trips: what you Export is what Loads back.
+
+## Marker annotations
+
+`MARK <id> <color> <width> <style> x1,y1 x2,y2 …` draws a freehand ink line on
+the ice (not part of the drill logic). `style` is `solid` · `dashed` · `dotted`
+· `wavy`; `width` is in feet. In the app: **☰ tools → Marker**, pick a colour /
+style / thickness, then drag on the ice. Tap a mark to restyle or delete it.
