@@ -390,8 +390,13 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           legs.push({ type: "fly", shot: true, [flagKey]: true, sauce: air, by: cur.id,
             x0: launch.x, y0: launch.y, x1: contact.x, y1: contact.y, t0: launchT, t1: tArr });
           const dm = Math.hypot(rollDir.x, rollDir.y) || 1;
-          const poly = densify(boards.slide(contact.x, contact.y, rollDir.x / dm, rollDir.y / dm, 70));
-          const { t, end } = pushTravel(poly, tArr, pace * 4, { easeOut: 70 });
+          const poly = densify(boards.slide(contact.x, contact.y, rollDir.x / dm, rollDir.y / dm, 95));
+          let plen = 0;
+          for (let k = 1; k < poly.length; k++) plen += Math.hypot(poly[k].x - poly[k - 1].x, poly[k].y - poly[k - 1].y);
+          // the miss carries its SHOT speed straight off the contact point — no
+          // abrupt slow-down where the miss registers — and only bleeds off with ice
+          // friction over the final stretch, banking off the boards along the way
+          const { t, end } = pushTravel(poly, tArr, vShot, { easeOut: Math.min(50, plen || 1) });
           legs.push({ type: "rest", x: end.x, y: end.y, t0: t });
           tBase = t;
           return end;
