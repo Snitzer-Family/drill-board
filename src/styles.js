@@ -128,8 +128,10 @@ export const STYLES = `
         .hd-swatch.on { border-color:#ffd447; }
         .hd-input { background:#0f141a; border:1px solid #2c3846; color:#e8edf2; border-radius:8px;
           padding:7px 9px; font-size:14px; }
-        .hd-x { margin-left:auto; background:none; border:none; color:#8b99a8; cursor:pointer;
-          font-size:16px; padding:2px 6px; }
+        .hd-x { background:none; border:none; color:#8b99a8; cursor:pointer;
+          font-size:16px; padding:2px 5px; display:inline-flex; align-items:center; justify-content:center; }
+        .hd-x:first-of-type { margin-left:auto; }
+        .hd-grip { display:inline-flex; align-items:center; }
         input[type=range] { accent-color:#d7263d; height:30px; }
         .hd-pop { position:absolute; z-index:20; width:220px; background:#1a222c; border:1px solid #33404f;
           border-radius:12px; padding:10px 12px; box-shadow:0 8px 24px rgba(0,0,0,.5);

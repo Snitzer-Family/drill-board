@@ -127,6 +127,7 @@ export default function DrillAnimator() {
   const [drawPreview, setDrawPreview] = useState(null);
   const [loupe, setLoupe] = useState(null);
   const [popOff, setPopOff] = useState({ x: 0, y: 0 });
+  const [popMin, setPopMin] = useState(false);   // player/waypoint popups open collapsed to the header
   const [stageSize, setStageSize] = useState({ w: 800, h: 500 });
 
   const svgRef = useRef(null);
@@ -170,6 +171,12 @@ export default function DrillAnimator() {
 
   useEffect(() => { setPopOff({ x: 0, y: 0 }); },
     [popup?.type, popup?.id, popup?.seg, popup?.pt?.x, popup?.pt?.y]);
+  // a player or waypoint popup opens collapsed (header only) so it doesn't cover
+  // the piece + its handles while editing; tap the chevron to expand
+  useEffect(() => {
+    const pc = popup && pieces.find(q => q.id === popup.id);
+    setPopMin(!!popup && (popup.type === "point" || (popup.type === "piece" && pc && pc.kind === "player")));
+  }, [popup?.type, popup?.id, popup?.seg]);
 
   // keep popouts fully inside the ice box: after every render, measure the
   // card against its container and pull it back in with a corrective margin
@@ -2710,7 +2717,7 @@ export default function DrillAnimator() {
               {p.path.length > 0 && (
                 <div className="hd-poprow">
                   <button className="hd-mini" disabled style={{ opacity: 0.4 }}>‹ Prev</button>
-                  <span style={{ fontSize: 11, color: "#8b99a8" }}>waypoint 1 / {p.path.length + 1}</span>
+                  <span style={{ fontSize: 11, color: "#8b99a8" }}>1 / {p.path.length + 1}</span>
                   <button className="hd-mini" onClick={() => { setSelectedId(p.id); setPopup({ type: "point", id: p.id, seg: 0 }); }}>Next ›</button>
                 </div>
               )}
@@ -2912,7 +2919,7 @@ export default function DrillAnimator() {
           {p.path.length > 0 && (
             <div className="hd-poprow">
               <button className="hd-mini" onClick={() => goSeg(i - 1)}>‹ Prev</button>
-              <span style={{ fontSize: 11, color: "#8b99a8" }}>waypoint {i + 2} / {p.path.length + 1}</span>
+              <span style={{ fontSize: 11, color: "#8b99a8" }}>{i + 2} / {p.path.length + 1}</span>
               <button className="hd-mini" disabled={i >= p.path.length - 1} style={{ opacity: i >= p.path.length - 1 ? 0.4 : 1 }}
                 onClick={() => goSeg(i + 1)}>Next ›</button>
             </div>
@@ -3063,18 +3070,24 @@ export default function DrillAnimator() {
       maxHeight: `${maxH}%`,
       ...(up ? { bottom: `${100 - a.ty + gap}%` } : { top: `${a.ty + gap}%` }),
     };
+    const minable = !!(popup.type === "point" || (popup.type === "piece" && p && p.kind === "player"));
+    const collapsed = minable && popMin;
     return (
-      <div className={`hd-pop${up ? " up" : ""}`} style={style} ref={popRef}
+      <div className={`hd-pop${up ? " up" : ""}`} style={collapsed ? { ...style, maxHeight: "none" } : style} ref={popRef}
         onPointerDown={e => e.stopPropagation()}>
         <div className="hd-pophead"
           onPointerDown={popDragStart} onPointerMove={popDragMove}
           onPointerUp={popDragEnd} onPointerCancel={popDragEnd}>
-          <span className="hd-grip">⠿</span>
+          <span className="hd-grip"><Icon name="grip" size={14} /></span>
           <span>{title}</span>
+          {minable && (
+            <button className="hd-x" onPointerDown={e => e.stopPropagation()} title={collapsed ? "Expand" : "Minimize"}
+              onClick={() => setPopMin(m => !m)}><Icon name={collapsed ? "chevronDown" : "chevronUp"} size={15} /></button>
+          )}
           <button className="hd-x" onPointerDown={e => e.stopPropagation()}
-            onClick={() => setPopup(null)}>✕</button>
+            onClick={() => setPopup(null)}><Icon name="close" size={15} /></button>
         </div>
-        {body}
+        {!collapsed && body}
       </div>
     );
   }
