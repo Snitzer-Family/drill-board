@@ -46,7 +46,7 @@ export function parseDrill(text) {
         let label = kind === "player" ? id : "";
         let text = "", size = 1;                          // label piece: text + font scale
         let speed = 1, hand = "R", carrier = null, facing = 0, shotAt = null, pickup = null, rimAt = null, chipAt = null, chipAim = null, rimAim = null, chipDist = null, rimDist = null;
-        let net = null, holdLine = false, goalie = false, defense = false, wait = null, group = null;
+        let net = null, holdLine = false, goalie = false, defense = false, wait = null, group = null, crease = false;
         const transfers = [];
         rest.forEach(r => {
           if (quoted(r)) { text = unq(r); }              // a "quoted string" → label text
@@ -113,10 +113,11 @@ export function parseDrill(text) {
               if (!isNaN(n)) facing = n;
             } else if (key === "group") group = v.replace(/_/g, " ").trim() || null;   // named group membership
           } else if (r === "goalie") goalie = true;
+          else if (r === "crease") crease = true;
           else if (r === "defense") defense = true;
           else label = r;
         });
-        const p = { id, kind, x, y, color, label, text, size, speed, hand, carrier, facing, transfers, shotAt, pickup, rimAt, chipAt, chipAim, rimAim, chipDist, rimDist, net, holdLine, goalie, defense, wait, group, path: [] };
+        const p = { id, kind, x, y, color, label, text, size, speed, hand, carrier, facing, transfers, shotAt, pickup, rimAt, chipAt, chipAim, rimAim, chipDist, rimDist, net, holdLine, goalie, defense, wait, group, crease, path: [] };
         pieces.push(p); byId[id] = p;
       } else if (cmd === "PATH") {
         const id = tok[1];
@@ -243,10 +244,11 @@ export function serializeDrill(rink, pieces, title = "", desc = "") {
           : ` wait=${p.wait.on}@${(p.wait.at ?? 0) + 1}`)
       : "";
     const gl = (p.kind === "net" || p.kind === "tire") && p.goalie ? " goalie" : "";
+    const crs = p.kind === "net" && p.crease ? " crease" : "";
     const df = p.kind === "player" && p.defense ? " defense" : "";
     const siz = (p.kind === "net" || p.kind === "tire") && p.size && p.size !== 1 ? ` size=${f2(p.size)}` : "";
     const grp = p.group ? ` group=${String(p.group).trim().replace(/\s+/g, "_")}` : "";
-    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${car}${gp}${pas}${sht}${rmT}${chT}${nt}${hld}${wt}${fac}${gl}${df}${siz}${grp}${spd}`);
+    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${car}${gp}${pas}${sht}${rmT}${chT}${nt}${hld}${wt}${fac}${gl}${crs}${df}${siz}${grp}${spd}`);
     if (p.path.length) out.push(`PATH ${p.id} ${p.path.map(segToStr).join(" ")}`);
   });
   return out.join("\n") + "\n";

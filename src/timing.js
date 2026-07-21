@@ -478,7 +478,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
         // plain pass launches straight from the carrier's blade
         let launchMin = launch0T, launchT = launch0T, launch = launch0, byId = cur.id, viaFrom = false;
         if (tr.via) {
-          const passer = pieces.find(q => q.id === tr.via && (q.kind === "passer" || q.kind === "net" || q.kind === "player"));
+          const passer = pieces.find(q => q.id === tr.via && (q.kind === "passer" || q.kind === "net" || q.kind === "player" || q.kind === "tire" || q.kind === "bumper"));
           if (!passer) return;                                  // the passer was removed → drop the play
           const pPt = { x: passer.x, y: passer.y };
           const tHit = launch0T + Math.hypot(pPt.x - launch0.x, pPt.y - launch0.y) / vPass();

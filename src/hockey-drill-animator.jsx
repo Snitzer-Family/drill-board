@@ -1772,6 +1772,10 @@ export default function DrillAnimator() {
     } else {
       updateById(target.id, { pickup: { to: playerId, at: cAt < 0 ? 0 : cAt } });
     }
+    // steps are ordered by puck array position, so move the just-collected puck
+    // to the end — its collect (and any release) then sits at the END of the
+    // action chain, in build order, instead of bunching behind an earlier action
+    setPieces(ps => { const k = ps.findIndex(q => q.id === target.id); if (k < 0) return ps; const c = ps.slice(); const [t] = c.splice(k, 1); c.push(t); return c; });
     setSelectedId(playerId);
   }
   function setRecvAt(pkId, trIdx, idx) {
@@ -2954,7 +2958,9 @@ export default function DrillAnimator() {
     const ActionSteps = (p, i) => {
       const steps = stepsAt(p, i);
       const others = pieces.filter(q => q.kind === "player" && q.id !== p.id);
-      const passers = pieces.filter(q => q.kind === "passer");
+      // give-and-go bounce targets: passers, tires, bumpers (the puck rebounds
+      // off them back to this player) — available even with no other player
+      const viaTargets = pieces.filter(q => q.kind === "passer" || q.kind === "tire" || q.kind === "bumper");
       const defaultPasser = () => ((others.find(o => pieces.some(q => q.kind === "puck" && puckChain(q).includes(o.id))) || others[0] || {}).id) || null;
       // the puck p is holding, unreleased, ready to act on — works at ANY spot
       // (including a stationary i=-1, where index bookkeeping differs): p is the
@@ -2979,6 +2985,8 @@ export default function DrillAnimator() {
         return { pk, last: ch[ch.length - 1] === p.id };
       };
       const addPass = to => { const h = heldRelease(); if (h) appendTransfer(h.pk.id, { at: i, to, recvAt: null, kind: "pass", ...(h.last ? {} : { by: p.id }) }); };
+      // give-and-go: bounce off a passer/tire/bumper back to this player
+      const addVia = via => { const h = heldRelease(); if (h) appendTransfer(h.pk.id, { at: i, to: p.id, recvAt: i < 0 ? null : i, kind: "pass", via, ...(h.last ? {} : { by: p.id }) }); };
       const addTerminal = (field, net) => {
         const h = heldRelease(); if (!h) return;
         updateById(h.pk.id, { shotAt: null, rimAt: null, chipAt: null, [field]: i,
@@ -2989,7 +2997,7 @@ export default function DrillAnimator() {
       const createType = t => {
         if (t === "receive") { const src = defaultPasser(); if (src) doReceiveFrom(p.id, i, src); else flash("Add another player to pass from"); }
         else if (t === "collect") collectPuckAt(p.id, i);
-        else if (t === "pass") { const to = (others[0] || {}).id; if (to) addPass(to); else flash("Add another player to pass to"); }
+        else if (t === "pass") { const to = (others[0] || {}).id; if (to) addPass(to); else if (viaTargets[0]) addVia(viaTargets[0].id); else flash("Add a player, passer, tire, or bumper to pass to"); }
         else if (t === "shoot") addTerminal("shotAt", null);
         else if (t === "chip") addTerminal("chipAt");
         else if (t === "rim") addTerminal("rimAt");
@@ -3022,7 +3030,7 @@ export default function DrillAnimator() {
               if (v[0] === "v") setTransfer(pk.id, st.stage, { at: i, to: p.id, recvAt: i < 0 ? null : i, kind: "pass", via: v.slice(2) });
               else setTransfer(pk.id, st.stage, { ...tr, to: v.slice(2), via: undefined, at: i, kind: "pass" }); }}>
               {others.map(o => <option key={o.id} value={"p:" + o.id}>{nameOf(o.id)}</option>)}
-              {passers.map(ps => <option key={ps.id} value={"v:" + ps.id}>{nameOf(ps.id)} — give &amp; go ⟲</option>)}
+              {viaTargets.map(v => <option key={v.id} value={"v:" + v.id}>{nameOf(v.id)}{v.kind === "tire" ? " (tire)" : v.kind === "bumper" ? " (bumper)" : ""} — give &amp; go ⟲</option>)}
             </select>
           );
         }
@@ -3042,7 +3050,7 @@ export default function DrillAnimator() {
           const src = st.via || st.src || "";
           return (
             <select className="hd-select on" value={src} onChange={e => { const v = e.target.value; st.del(); if (v) doReceiveFrom(p.id, i, v); }}>
-              {[...others, ...passers].map(o => <option key={o.id} value={o.id}>{nameOf(o.id)}</option>)}
+              {[...others, ...viaTargets].map(o => <option key={o.id} value={o.id}>{nameOf(o.id)}</option>)}
             </select>
           );
         }
@@ -3089,10 +3097,13 @@ export default function DrillAnimator() {
           {rows.length > 0 && addRow("addtop")}
           {rows.map(({ st, opts }, n) => {
             const t = typeOfStep(st);
+            const accent = t === "shoot" ? "#d7263d" : t === "pass" ? "#1f8a4c" : t === "chip" || t === "rim" ? "#e0731d" : "#2f7fd6";
             return (
-              <div key={n}>
-                <div className="hd-poprow" style={{ opacity: st.warn ? 0.65 : 1 }}>
-                  <span style={{ minWidth: 46, fontWeight: 700, color: "#8b99a8", fontSize: 12 }}>Step {n + 1}</span>
+              <div key={n} style={{ margin: "5px 0", padding: "5px 7px 5px 8px", borderRadius: 8,
+                background: "rgba(20,26,34,0.6)", border: "1px solid #2c3846", borderLeft: `3px solid ${accent}`,
+                opacity: st.warn ? 0.7 : 1 }}>
+                <div className="hd-poprow">
+                  <span style={{ minWidth: 46, fontWeight: 700, color: "#9fb0c0", fontSize: 11.5 }}>Step {n + 1}</span>
                   {typeSelect(t, opts, v => changeType(st, v), n)}
                   {secondary(st)}
                   <button className="hd-mini danger" style={{ padding: "3px 8px", minHeight: 0 }} title="Remove step" onClick={st.del}>✕</button>
@@ -3168,6 +3179,13 @@ export default function DrillAnimator() {
                   {p.goalie ? "✓ Goalie in net" : "🥅 Goalie in net"}
                 </button>
                 <span style={{ fontSize: 11, color: "#8b99a8" }}>drag to move · ring to rotate</span>
+              </div>
+              <div className="hd-poprow">
+                <button className={`hd-mini${p.crease ? " on" : ""}`}
+                  onClick={() => updateById(p.id, { crease: !p.crease })}>
+                  {p.crease ? "✓ Crease drawn" : "◗ Draw crease"}
+                </button>
+                <span style={{ fontSize: 11, color: "#8b99a8" }}>an arc in front — for a net off the goal line</span>
               </div>
               <div className="hd-poprow">
                 <span>Size</span>

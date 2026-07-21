@@ -237,6 +237,7 @@ function piece(p) {
   if (p.kind === "net") {
     const CAGE = "M 0 -3.75 L -1.7 -3.75 Q -4.15 -3.75 -4.15 -1.5 L -4.15 1.5 Q -4.15 3.75 -1.7 3.75 L 0 3.75";
     return `<g transform="${rot()} scale(${p.size || 1})">`
+      + (p.crease ? `<path d="M 0 -7.5 A 7.5 7.5 0 0 1 0 7.5" fill="none" stroke="#d7263d" stroke-width="0.42" opacity="0.85" stroke-linecap="round"/>` : "")
       + `<path d="${CAGE} Z" fill="rgba(230,238,246,0.3)" stroke="none"/>`
       + `<g stroke="#9fb0c0" stroke-width="0.13" opacity="0.85" fill="none"><path d="M -0.4 -2.9 L -3.7 -1.7 M -0.4 -1.45 L -3.95 -0.85 M -0.4 1.45 L -3.95 0.85 M -0.4 2.9 L -3.7 1.7"/><path d="M -1.2 -3.3 L -1.2 3.3 M -2.4 -3.1 L -2.4 3.1 M -3.4 -2 L -3.4 2"/><path d="M -0.2 0 L -4.0 0"/></g>`
       + `<path d="${CAGE}" fill="none" stroke="${p.color}" stroke-width="0.55" stroke-linejoin="round" stroke-linecap="round"/>`

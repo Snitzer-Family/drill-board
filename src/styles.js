@@ -56,6 +56,13 @@ export const STYLES = `
           /* no floating top dock on desktop — pinned popups can ride the top edge */
           :root { --hd-pintop: 10px; }
         }
+        /* landscape on a touch phone/tablet: vertical room is tight, so dock the
+           play controls into the bottom bar instead of the floating top dock */
+        @media (pointer: coarse) and (orientation: landscape) {
+          .hd-playdock { display:none; }
+          .hd-barplay { display:flex; }
+          :root { --hd-pintop: 10px; }
+        }
         .hd-barhint { flex:1 1 0; min-width:0; font-size:12px; color:#8b99a8; text-align:right;
           white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
         /* the version never runs off the edge: vN stays put, only the build

@@ -136,6 +136,9 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
     body = (
       <g pointerEvents="none">
         {selected && <rect x={-4.8} y={-4.5} width={5.4} height={9} rx={1} fill="none" stroke="#ffd447" strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
+        {/* a drawn goalie crease: an unfilled arch in front of the mouth (for a
+            net placed away from the standard crease). ~6 ft radius (7.5 local). */}
+        {p.crease && <path d="M 0 -7.5 A 7.5 7.5 0 0 1 0 7.5" fill="none" stroke="#d7263d" strokeWidth={0.42} opacity={0.85} strokeLinecap="round" />}
         {/* mesh backing + crosshatch netting + centre seam */}
         <path d={CAGE + " Z"} fill="rgba(230,238,246,0.3)" stroke="none" />
         <g stroke="#9fb0c0" strokeWidth={0.13} opacity={0.85} fill="none">
