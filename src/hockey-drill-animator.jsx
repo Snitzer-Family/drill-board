@@ -2742,6 +2742,30 @@ export default function DrillAnimator() {
     );
   }
 
+  // the planned puck lines (pass / shot / chip / rim travel) drawn from the
+  // timing legs. `flat` = plain rink-unit widths for the loupe (which has no
+  // non-scaling-stroke context); the main scene uses screen-constant widths.
+  function puckPathNodes(flat) {
+    if (!showPuckPaths) return null;
+    const W = w => (flat ? w : sw(w));
+    const D = d => (flat ? d : sdash(d));
+    const ve = flat ? undefined : "non-scaling-stroke";
+    const { plans } = getPlan();
+    return pieces
+      .filter(q => q.kind === "puck" && plans[q.id])
+      .map(q => plans[q.id].legs
+        .filter(L => L.type === "fly")
+        .map((L, k) => (
+          <g key={`pf-${q.id}-${k}`} pointerEvents="none" opacity={0.6}>
+            <line x1={L.x0} y1={L.y0} x2={L.x1} y2={L.y1} vectorEffect={ve}
+              stroke="#14171a" strokeWidth={W(L.shot ? 1.1 : 0.55)}
+              strokeDasharray={L.shot ? undefined : D("2.4 1.8")} />
+            <circle cx={L.x1} cy={L.y1} r={1.1} fill="none" vectorEffect={ve}
+              stroke="#14171a" strokeWidth={W(0.3)} />
+          </g>
+        )));
+  }
+
   /* ----- touch loupe ----- */
   function renderLoupe() {
     if (!loupe) return null;
@@ -2787,6 +2811,7 @@ export default function DrillAnimator() {
             <polyline points={drawPreview.map(q => `${q.x},${q.y}`).join(" ")}
               fill="none" stroke="#ffd447" strokeWidth={0.6} strokeDasharray="1.4 1" opacity={0.9} />
           )}
+          {puckPathNodes(true)}
           {selected && renderHandles(selected)}
           {selected && renderRotateHandle(selected)}
           {pieces.map(p => <g key={`ca-${p.id}`}>{renderAim(p, true)}</g>)}
@@ -2982,22 +3007,7 @@ export default function DrillAnimator() {
               ) : null
             )}
 
-            {showPuckPaths && (() => {
-              const { plans } = getPlan();
-              return pieces
-                .filter(q => q.kind === "puck" && plans[q.id])
-                .map(q => plans[q.id].legs
-                  .filter(L => L.type === "fly")
-                  .map((L, k) => (
-                    <g key={`pf-${q.id}-${k}`} pointerEvents="none" opacity={0.6}>
-                      <line x1={L.x0} y1={L.y0} x2={L.x1} y2={L.y1} vectorEffect="non-scaling-stroke"
-                        stroke="#14171a" strokeWidth={sw(L.shot ? 1.1 : 0.55)}
-                        strokeDasharray={L.shot ? undefined : sdash("2.4 1.8")} />
-                      <circle cx={L.x1} cy={L.y1} r={1.1} fill="none" vectorEffect="non-scaling-stroke"
-                        stroke="#14171a" strokeWidth={sw(0.3)} />
-                    </g>
-                  )));
-            })()}
+            {puckPathNodes(false)}
 
             {drawPreview && drawPreview.length > 1 && (
               <polyline points={drawPreview.map(q => `${q.x},${q.y}`).join(" ")} vectorEffect="non-scaling-stroke"
