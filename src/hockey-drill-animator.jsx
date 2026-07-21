@@ -2706,6 +2706,14 @@ export default function DrillAnimator() {
           )}
           {p.kind === "player" && (
             <>
+              {/* the player is waypoint 1 (the start) — step into the route */}
+              {p.path.length > 0 && (
+                <div className="hd-poprow">
+                  <button className="hd-mini" disabled style={{ opacity: 0.4 }}>‹ Prev</button>
+                  <span style={{ fontSize: 11, color: "#8b99a8" }}>waypoint 1 / {p.path.length + 1}</span>
+                  <button className="hd-mini" onClick={() => { setSelectedId(p.id); setPopup({ type: "point", id: p.id, seg: 0 }); }}>Next ›</button>
+                </div>
+              )}
               <div className="hd-poprow">
                 <span>Name</span>
                 <input className="hd-input" style={{ width: 56 }} value={p.label} maxLength={3}
@@ -2897,13 +2905,13 @@ export default function DrillAnimator() {
       anchorPt = { x: s.x, y: s.y };
       const next = p.path[i + 1];
       title = `Waypoint ${i + 2} of ${p.path.length + 1}`;
-      const goSeg = j => { setSelectedId(p.id); setPopup({ type: "point", id: p.id, seg: j }); };
+      // step back to waypoint 1 (the player/start popup) at j < 0
+      const goSeg = j => { setSelectedId(p.id); setPopup(j < 0 ? { type: "piece", id: p.id } : { type: "point", id: p.id, seg: j }); };
       body = (
         <>
-          {p.path.length > 1 && (
+          {p.path.length > 0 && (
             <div className="hd-poprow">
-              <button className="hd-mini" disabled={i <= 0} style={{ opacity: i <= 0 ? 0.4 : 1 }}
-                onClick={() => goSeg(i - 1)}>‹ Prev</button>
+              <button className="hd-mini" onClick={() => goSeg(i - 1)}>‹ Prev</button>
               <span style={{ fontSize: 11, color: "#8b99a8" }}>waypoint {i + 2} / {p.path.length + 1}</span>
               <button className="hd-mini" disabled={i >= p.path.length - 1} style={{ opacity: i >= p.path.length - 1 ? 0.4 : 1 }}
                 onClick={() => goSeg(i + 1)}>Next ›</button>
