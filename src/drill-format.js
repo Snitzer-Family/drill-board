@@ -41,7 +41,7 @@ export function parseDrill(text) {
         if (!id || !["player", "puck", "cone", "net", "bumper", "deker", "passer", "label", "tire"].includes(kind) || isNaN(x) || isNaN(y))
           throw new Error("PIECE needs: id kind x y");
         let color = kind === "cone" ? "#e0731d" : kind === "puck" ? "#14171a" : kind === "net" ? "#c81e33"
-          : kind === "bumper" ? "#4d6fa6" : kind === "deker" ? "#c79a4e" : kind === "passer" ? "#57636f"
+          : kind === "bumper" ? "#1b1e22" : kind === "deker" ? "#c79a4e" : kind === "passer" ? "#57636f"
           : kind === "label" ? "#14202b" : kind === "tire" ? "#1c1c1e" : "#d7263d";
         let label = kind === "player" ? id : "";
         let text = "", size = 1;                          // label piece: text + font scale

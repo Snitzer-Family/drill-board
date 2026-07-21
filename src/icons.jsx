@@ -104,28 +104,33 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
         fill={p.color} stroke={selected ? "#ffd447" : "#fff"} strokeWidth={0.35} strokeLinejoin="round" pointerEvents="none" />
     );
   else if (p.kind === "bumper") {
-    // foam barrier pad laid on the ice; runs along local +x, rotate with facing
-    // (drawn oversize vs true 6 ft so it reads on the full-sheet canvas)
-    const foam = p.color || "#4d6fa6";
+    // solid barrier laid on the ice — a black rectangle; runs along local +x,
+    // rotate with facing (drawn oversize vs true 6 ft so it reads on the sheet)
+    const foam = p.color && p.color !== "#4d6fa6" ? p.color : "#1b1e22";
     body = (
       <g pointerEvents="none">
-        {selected && <rect x={-7.6} y={-1.5} width={15.2} height={3} rx={1.5} fill="none" stroke="#ffd447" strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
-        <rect x={-7} y={-0.95} width={14} height={1.9} rx={0.95} fill={foam} stroke="#fff" strokeWidth={0.3} />
-        <path d="M -3.5 -0.75 L -3.5 0.75 M 0 -0.75 L 0 0.75 M 3.5 -0.75 L 3.5 0.75" stroke="#fff" strokeWidth={0.18} opacity={0.4} />
+        {selected && <rect x={-8.1} y={-1.9} width={16.2} height={3.8} rx={0.9} fill="none" stroke="#ffd447" strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
+        <ellipse cx={0} cy={1.55} rx={7.6} ry={0.7} fill="#0a0f14" opacity={0.22} />
+        <rect x={-7.7} y={-1.35} width={15.4} height={2.7} rx={0.45} fill={foam} stroke="#40464e" strokeWidth={0.3} />
+        <rect x={-7.7} y={-1.35} width={15.4} height={0.9} rx={0.45} fill="#ffffff" opacity={0.06} />
+        <path d="M -3.9 -1 L -3.9 1 M 0 -1 L 0 1 M 3.9 -1 L 3.9 1" stroke="#565c64" strokeWidth={0.18} opacity={0.5} />
       </g>
     );
   } else if (p.kind === "deker") {
-    // stickhandling gate: a stick shaft on two pegs; puck goes under it, across
-    // the gap (local x). the shaft runs along local y, rotate with facing.
+    // stickhandling gate: a hockey stick laid across two pegs — the puck goes
+    // UNDER the shaft. The stick runs along local x; rotate with facing.
     const wood = p.color || "#c79a4e";
     body = (
       <g pointerEvents="none">
-        {selected && <rect x={-2.5} y={-3.1} width={5} height={6.2} rx={0.8} fill="none" stroke="#ffd447" strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
-        <line x1={-2.6} y1={0} x2={2.6} y2={0} stroke="#1d2126" strokeWidth={0.22} opacity={0.32} strokeDasharray="0.6 0.5" />
-        <circle cx={0} cy={-1.6} r={0.55} fill="#e0731d" stroke="#fff" strokeWidth={0.2} />
-        <circle cx={0} cy={1.6} r={0.55} fill="#e0731d" stroke="#fff" strokeWidth={0.2} />
-        <rect x={-0.32} y={-2.6} width={0.64} height={5.2} rx={0.32} fill={wood} stroke="#5a4420" strokeWidth={0.2} />
-        <path d="M -0.15 -2.5 Q 1.25 -2.85 1.55 -1.7" fill="none" stroke={wood} strokeWidth={0.65} strokeLinecap="round" />
+        {selected && <rect x={-3.6} y={-2.4} width={7.2} height={4.8} rx={0.8} fill="none" stroke="#ffd447" strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
+        {/* two pegs the stick rests on (with a small ground shadow) */}
+        <ellipse cx={-2.25} cy={2.05} rx={1} ry={0.42} fill="#0a0f14" opacity={0.28} />
+        <ellipse cx={2.25} cy={2.05} rx={1} ry={0.42} fill="#0a0f14" opacity={0.28} />
+        <rect x={-2.7} y={-0.5} width={0.9} height={2.4} rx={0.32} fill="#3a3f47" stroke="#20242a" strokeWidth={0.16} />
+        <rect x={1.8} y={-0.5} width={0.9} height={2.4} rx={0.32} fill="#3a3f47" stroke="#20242a" strokeWidth={0.16} />
+        {/* the stick shaft across the pegs, blade hooking down off the right end */}
+        <rect x={-3.35} y={-1.2} width={6.1} height={0.82} rx={0.4} fill={wood} stroke="#5a4420" strokeWidth={0.2} />
+        <path d="M 2.55 -1.1 Q 3.75 -0.95 3.8 0.25" fill="none" stroke={wood} strokeWidth={0.75} strokeLinecap="round" />
       </g>
     );
   } else if (p.kind === "passer") {

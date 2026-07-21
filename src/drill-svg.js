@@ -224,13 +224,16 @@ function piece(p) {
       + `<circle cx="0" cy="0" r="1.22" fill="none" stroke="#000" stroke-width="0.2" opacity="0.55"/>${ticks}`
       + (p.goalie ? `<circle cx="0" cy="-3.5" r="1.15" fill="#2f9e57" stroke="#fff" stroke-width="0.3"/>` : "") + `</g>`;
   }
-  if (p.kind === "bumper")
-    return `<g transform="${rot()}"><rect x="-7" y="-0.95" width="14" height="1.9" rx="0.95" fill="${p.color}" stroke="#fff" stroke-width="0.3"/>`
-      + `<path d="M -3.5 -0.75 L -3.5 0.75 M 0 -0.75 L 0 0.75 M 3.5 -0.75 L 3.5 0.75" stroke="#fff" stroke-width="0.18" opacity="0.4"/></g>`;
+  if (p.kind === "bumper") {
+    const foam = p.color && p.color !== "#4d6fa6" ? p.color : "#1b1e22";
+    return `<g transform="${rot()}"><rect x="-7.7" y="-1.35" width="15.4" height="2.7" rx="0.45" fill="${foam}" stroke="#40464e" stroke-width="0.3"/>`
+      + `<path d="M -3.9 -1 L -3.9 1 M 0 -1 L 0 1 M 3.9 -1 L 3.9 1" stroke="#565c64" stroke-width="0.18" opacity="0.5"/></g>`;
+  }
   if (p.kind === "deker")
-    return `<g transform="${rot()}"><line x1="-2.6" y1="0" x2="2.6" y2="0" stroke="#1d2126" stroke-width="0.22" opacity="0.32" stroke-dasharray="0.6 0.5"/>`
-      + `<circle cx="0" cy="-1.6" r="0.55" fill="#e0731d" stroke="#fff" stroke-width="0.2"/><circle cx="0" cy="1.6" r="0.55" fill="#e0731d" stroke="#fff" stroke-width="0.2"/>`
-      + `<rect x="-0.32" y="-2.6" width="0.64" height="5.2" rx="0.32" fill="${p.color}" stroke="#5a4420" stroke-width="0.2"/></g>`;
+    return `<g transform="${rot()}"><rect x="-2.7" y="-0.5" width="0.9" height="2.4" rx="0.32" fill="#3a3f47" stroke="#20242a" stroke-width="0.16"/>`
+      + `<rect x="1.8" y="-0.5" width="0.9" height="2.4" rx="0.32" fill="#3a3f47" stroke="#20242a" stroke-width="0.16"/>`
+      + `<rect x="-3.35" y="-1.2" width="6.1" height="0.82" rx="0.4" fill="${p.color}" stroke="#5a4420" stroke-width="0.2"/>`
+      + `<path d="M 2.55 -1.1 Q 3.75 -0.95 3.8 0.25" fill="none" stroke="${p.color}" stroke-width="0.75" stroke-linecap="round"/></g>`;
   if (p.kind === "passer")
     return `<g transform="${rot()}"><rect x="-1.6" y="-2.6" width="3.2" height="5.2" rx="0.5" fill="rgba(210,225,240,0.14)" stroke="${p.color}" stroke-width="0.5"/>`
       + `<rect x="0.85" y="-2.6" width="0.75" height="5.2" rx="0.3" fill="${p.color}"/></g>`;

@@ -33,8 +33,8 @@ export function netShapes(pieces) {
 // A bumper is a solid rectangular barrier: all four edges are solid (no open
 // mouth), so pucks carom off any side and players route around the whole bar.
 // It's long along its local x; its faces' normal is perpendicular to `facing`.
-const BUMP_HALF_L = 7.0 * ICON;   // half-length, along the bar
-const BUMP_HALF_T = 1.15 * ICON;  // half-thickness (a touch proud for the puck radius)
+const BUMP_HALF_L = 7.7 * ICON;   // half-length, along the bar
+const BUMP_HALF_T = 1.55 * ICON;  // half-thickness (a touch proud for the puck radius)
 export function bumperShape(b) {
   const a = ((b.facing || 0) * Math.PI) / 180, c = Math.cos(a), si = Math.sin(a);
   const toWorld = (lx, ly) => ({ x: b.x + lx * c - ly * si, y: b.y + lx * si + ly * c });

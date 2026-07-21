@@ -10,21 +10,32 @@ import { ZONES, zoneAt } from "./zones.js";
 import { PieceIcon, Stepper, DiagPanel } from "./icons.jsx";
 import { createTiming } from "./timing.js";
 import { newGame, stepGame } from "./ai-game.js";
-import icoPlayer from "./tool-icons/player.png";
-import icoPuck from "./tool-icons/puck.png";
-import icoCone from "./tool-icons/cone.png";
-import icoNet from "./tool-icons/net.png";
-import icoBumper from "./tool-icons/bumper.png";
-import icoDeker from "./tool-icons/deker.png";
-import icoPasser from "./tool-icons/passer.png";
-import icoTire from "./tool-icons/tire.png";
-
-// photo icons sliced from the equipment sprite, keyed by the add-tool
-const TOOL_ICONS = { player: icoPlayer, playerpuck: icoPlayer, puck: icoPuck, cone: icoCone,
-  net: icoNet, bumper: icoBumper, deker: icoDeker, passer: icoPasser, tire: icoTire };
-const toolImg = kind => TOOL_ICONS[kind]
-  ? <img src={TOOL_ICONS[kind]} alt="" aria-hidden="true" className="hd-toolimg" draggable="false" /> : null;
 import { STYLES } from "./styles.js";
+
+// the add-tool buttons show the SAME vector sprite the piece uses on the ice.
+// Each kind renders a mini PieceIcon in a viewBox tight to its body (raw icon
+// units, since we pass a scale-1 frame) so it fills the tile.
+const TOOL_GLYPH = {
+  player: { vb: "-4.4 -4 10.6 8", color: "#d7263d" },
+  puck: { vb: "-2 -2 4 4", color: "#14171a" },
+  cone: { vb: "-2.7 -2.9 5.4 5.2", color: "#e0731d" },
+  net: { vb: "-4.7 -4.3 5.7 8.6", color: "#c81e33" },
+  bumper: { vb: "-8.4 -2.4 16.8 4.8", color: "#1b1e22" },
+  deker: { vb: "-4.1 -1.9 8.4 4.6", color: "#c79a4e" },
+  passer: { vb: "-2.3 -3.2 4.6 6.4", color: "#57636f" },
+  tire: { vb: "-3.3 -3.3 6.6 6.6", color: "#1c1c1e" },
+};
+const toolImg = kind => {
+  const k = kind === "playerpuck" ? "player" : kind;
+  const g = TOOL_GLYPH[k];
+  if (!g) return null;
+  const p = { kind: k, color: g.color, label: "", facing: 0, hand: "R", size: 1, path: [] };
+  return (
+    <svg className="hd-toolimg" viewBox={g.vb} aria-hidden="true" preserveAspectRatio="xMidYMid meet">
+      <PieceIcon p={p} pos={{ x: 0, y: 0, a: 0 }} xf="translate(0 0)" thDeg={0} onDown={() => {}} />
+    </svg>
+  );
+};
 
 // swatch palette for on-ice text labels (dark ink first — labels sit on light ice)
 const LABEL_COLORS = ["#14202b", "#d7263d", "#1f4fa3", "#1f8a4c", "#e0731d", "#7a3fa8"];
@@ -1058,7 +1069,7 @@ export default function DrillAnimator() {
       id, kind, x: pt.x, y: pt.y, speed: kind === "player" ? 1.5 : 1, hand: "R", carrier: null,
       facing: kind === "net" && pt.x >= 100 ? 180 : 0, transfers: [], shotAt: null, rimAt: null, chipAt: null, chipAim: null, rimAim: null, chipDist: null, rimDist: null, pickup: null, net: null, holdLine: false, goalie: false, defense: false,
       color: kind === "player" ? COLORS[colorIdx] : kind === "cone" ? "#e0731d" : kind === "net" ? "#c81e33"
-        : kind === "bumper" ? "#4d6fa6" : kind === "deker" ? "#c79a4e" : kind === "passer" ? "#57636f"
+        : kind === "bumper" ? "#1b1e22" : kind === "deker" ? "#c79a4e" : kind === "passer" ? "#57636f"
         : kind === "label" ? "#14202b" : kind === "tire" ? "#1c1c1e" : "#14171a",
       label: kind === "player" ? id : "", text: kind === "label" ? "Label" : "", size: 1, path: [],
     };
