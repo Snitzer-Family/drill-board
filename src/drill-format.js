@@ -95,8 +95,10 @@ export function parseDrill(text) {
                 else { chipAt = parseInt(m5[1], 10) - 1; chipAim = aim; chipDist = dist; }
               }
             } else if (key === "pickup") {
-              const m3 = /^([^@\s]+)@(\d+)$/.exec(v);
-              if (m3) pickup = { to: m3[1], at: parseInt(m3[2], 10) - 1 };
+              // pickup=<player>@<pt>[*] — trailing * = a live "nearest loose puck"
+              // collect that re-resolves at play time instead of a fixed puck
+              const m3 = /^([^@\s]+)@(\d+)(\*)?$/.exec(v);
+              if (m3) pickup = { to: m3[1], at: parseInt(m3[2], 10) - 1, ...(m3[3] ? { nearest: true } : {}) };
             } else if (key === "net") {
               net = v;                                   // a net piece id (or left/right for legacy)
             } else if (key === "hold") {
@@ -217,7 +219,7 @@ export function serializeDrill(rink, pieces, title = "", desc = "") {
     const spd = p.speed && p.speed !== 1 ? ` speed=${f2(p.speed)}` : "";
     const hnd = p.kind === "player" && p.hand === "L" ? " hand=L" : "";
     const car = p.kind === "puck" && p.carrier ? ` on=${p.carrier}` : "";
-    const gp = p.kind === "puck" && !p.carrier && p.pickup ? ` pickup=${p.pickup.to}@${p.pickup.at + 1}` : "";
+    const gp = p.kind === "puck" && !p.carrier && p.pickup ? ` pickup=${p.pickup.to}@${p.pickup.at + 1}${p.pickup.nearest ? "*" : ""}` : "";
     // chain transfers in order: pass= passes, rebound= shot handoffs, rim=/chip= board plays.
     // Only the VALID prefix is saved: an impossible step (an actor that never has
     // the puck) and everything after it is dropped, and the intended-actor tags

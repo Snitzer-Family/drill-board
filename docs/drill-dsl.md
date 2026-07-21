@@ -108,7 +108,7 @@ Places a piece. `id` is any unique token (e.g. `F1`, `PK1`, `N2`).
 | `shoot=<pt>` | Terminal shot at point `pt` — the puck caroms off the net and lands loose |
 | `rim=<pt>[~<deg>][*<ft>]` | Hard-rim **release** around the boards. `~<deg>` sets the direction, `*<ft>` the distance — or drag the on-ice handle at the end of the rim to set both. The puck lands loose. |
 | `chip=<pt>[~<deg>][*<ft>]` | Chip **release** into space (banks off the boards). `~<deg>` sets the direction (default: the chipper's facing), `*<ft>` the distance — or drag the on-ice handle. The puck lands loose. |
-| `pickup=<to>@<pt>` | A loose puck hops onto player `to`'s blade at their point `pt` |
+| `pickup=<to>@<pt>[*]` | A loose puck hops onto player `to`'s blade at their point `pt`. A trailing `*` marks a **nearest** collect: instead of binding to this specific puck, it re-resolves to whichever loose puck sits closest to `to`'s gather spot each time the drill plays or is edited (the app's default *Collect puck → Nearest puck*). |
 
 **Releases + Collect puck.** `shoot` / `rim` / `chip` are *releases*: the puck
 travels and lands loose. Any player then **collects** it — in the app, *Collect

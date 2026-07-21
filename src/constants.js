@@ -6,7 +6,7 @@ export const COLORS = ["#d7263d", "#1f4fa3", "#1f8a4c", "#e0731d", "#22262b", "#
 export const SPEED = { carry: 1, pass: 7, shot: 10 };
 export const vb = m => VIEWS[m].join(" ");
 
-export const APP_VERSION = "3.99";
+export const APP_VERSION = "4.00";
 // visual size of players/pucks/cones relative to true rink-feet scale
 export const ICON_SCALE = 0.8;
 // build stamp injected by vite.config.js `define`; "dev" when run standalone
@@ -14,6 +14,15 @@ export const BUILD_STAMP = typeof __BUILD_STAMP__ !== "undefined" ? __BUILD_STAM
 
 // odds a shot on a goalie is stopped (else it beats the goalie for a goal)
 export const SAVE_PROB = 0.5;
+// a free shot on an EMPTY net usually scores; these are the miss odds (the rest
+// of the probability mass is a goal). A miss rings the post and rebounds, sails
+// wide into the corner, or flies over the net.
+export const MISS_POST = 0.12;
+export const MISS_WIDE = 0.11;
+export const MISS_OVER = 0.11;
+// odds any shot is taken in the AIR (sauce-style rise + shadow, dropping at the
+// net) vs flat along the ice. An "over the net" miss is always airborne.
+export const SHOT_AIR_PROB = 0.4;
 
 export const DEFAULT_TEXT = `RINK full
 PIECE N1 net 17 42.5

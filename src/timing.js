@@ -1,10 +1,49 @@
 // Timing & pass-planning engine: leg times, receiver warps, transfer chains,
 // shots, releases, and warp-aware positions. Pure functions over the pieces
 // array; the React component passes its refs in each render.
-import { SPEED, ICON_SCALE, SAVE_PROB } from "./constants.js";
+import { SPEED, ICON_SCALE, SAVE_PROB, MISS_POST, MISS_WIDE, MISS_OVER, SHOT_AIR_PROB } from "./constants.js";
 import { clampX, clampY, segEnd, segTangentAngle } from "./geometry.js";
 import * as boards from "./boards.js";
 import { netShapes, solidShapes, bumperShapes, reflectPath, segCrossesNet } from "./net-collide.js";
+
+// A "nearest" loose-puck collect (pickup.nearest) is a live intent, not a fixed
+// binding: at play/render time the collect grabs whichever loose puck sits
+// closest to the collector's gather spot — re-resolving as the drill is edited.
+// This rewrites the pieces array so each nearest intent's whole action-chain
+// (pickup → transfers → terminal) rides the actually-nearest loose puck, while
+// the puck it was authored on becomes plain loose. Ids and positions are left
+// untouched, so rendering (keyed by id) and serialization stay on the raw array.
+export function resolveNearest(pieces) {
+  const intents = pieces.filter(p => p.kind === "puck" && p.pickup && p.pickup.nearest);
+  if (!intents.length) return pieces;
+  const looseOK = q => !q.carrier && !q.pickup && !(q.transfers || []).length
+    && q.shotAt == null && q.rimAt == null && q.chipAt == null;
+  let out = pieces;                       // clone lazily, only if something migrates
+  const claimed = new Set();              // pucks already assigned to a collector
+  for (const owner of intents) {
+    const pl = pieces.find(q => q.id === owner.pickup.to && q.kind === "player");
+    if (!pl) continue;
+    const spot = pl.path.length ? segEnd(pl, Math.min(owner.pickup.at, pl.path.length - 1)) : { x: pl.x, y: pl.y };
+    // candidates: the puck it was authored on (its position) + any plain loose
+    // puck not already claimed by an earlier nearest collect
+    const cands = pieces.filter(q => q.kind === "puck" && !claimed.has(q.id)
+      && (q.id === owner.id || looseOK(q)));
+    if (!cands.length) { claimed.add(owner.id); continue; }
+    const d = q => Math.hypot(q.x - spot.x, q.y - spot.y);
+    const near = cands.reduce((b, q) => (d(q) < d(b) ? q : b));
+    claimed.add(near.id);
+    if (near.id === owner.id) continue;   // already sits nearest — nothing to move
+    if (out === pieces) out = pieces.slice();
+    const oi = out.findIndex(q => q.id === owner.id), ni = out.findIndex(q => q.id === near.id);
+    out[ni] = { ...out[ni], carrier: null, pickup: { ...owner.pickup },
+      transfers: owner.transfers || [], shotAt: owner.shotAt, rimAt: owner.rimAt, chipAt: owner.chipAt,
+      rimAim: owner.rimAim, chipAim: owner.chipAim, chipDist: owner.chipDist, rimDist: owner.rimDist,
+      net: owner.net, termBy: owner.termBy };
+    out[oi] = { ...out[oi], carrier: null, pickup: null, transfers: [], shotAt: null, rimAt: null,
+      chipAt: null, rimAim: null, chipAim: null, chipDist: null, rimDist: null, net: null, termBy: null };
+  }
+  return out;
+}
 
 const GOALIE_DEPTH = 2.5; // how far out front of the net the goalie plays
 // stickhandling cradle: the carried puck (and the stick, in unison) oscillate as
@@ -309,24 +348,64 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
         const ux = inx / mag, uy = iny / mag;                 // unit vector toward the net
         const goalie = !!(netPiece && netPiece.goalie);
         const isTire = !!(netPiece && netPiece.kind === "tire");
-        // a rebound-designated shot (aimPt = a collector's gather spot) must be
-        // saved so the rebound actually comes out; only free shots roll goal/save
-        const isGoal = goalie && !aimPt ? rand(`${pk.id}:${legs.length}`) >= SAVE_PROB : false;
+        const onNet = !!(netPiece && netPiece.kind === "net");
         // randomize placement across the ~6 ft mouth: posts / sides / center
         const px = -uy, py = ux;                              // lateral (across the mouth)
         const GOAL_HALF = 2.6;
         const place = rand(`${pk.id}:${legs.length}:p`) * 2 - 1; // −1..1 across the net
+        const side = place >= 0 ? 1 : -1;                     // which post / side missed toward
+        // a rebound-designated shot (aimPt = a collector's gather spot) must be
+        // saved so the rebound actually comes out; only free shots roll an outcome.
+        // On an EMPTY net a free shot usually scores, but can miss: ring the post
+        // (rebounds), sail wide into the corner, or fly over the net.
+        const emptyFree = onNet && !goalie && !aimPt;
+        let miss = null;                                      // "post" | "wide" | "over"
+        if (emptyFree) {
+          const r = rand(`${pk.id}:${legs.length}:out`);
+          if (r < MISS_POST) miss = "post";
+          else if (r < MISS_POST + MISS_WIDE) miss = "wide";
+          else if (r < MISS_POST + MISS_WIDE + MISS_OVER) miss = "over";
+        }
+        const postMiss = miss === "post";
+        const isGoal = goalie && !aimPt ? rand(`${pk.id}:${legs.length}`) >= SAVE_PROB
+          : emptyFree ? !miss : false;
+        // flat or airborne (sauce-style rise + shadow) — an over-the-net miss must
+        // leave the ice; everything else rolls. Deflect props (tire/passer/bumper)
+        // and blocked rebounds stay flat so their carom geometry reads cleanly.
+        const airborne = miss === "over" || (onNet && rand(`${pk.id}:${legs.length}:air`) < SHOT_AIR_PROB);
 
-        // a NET goalie who is beaten lets it into a post/corner (a goal). A tire
-        // goalie who is beaten doesn't concede a goal — the puck just gets past
-        // and deflects off the rubber (handled below), so skip the corner here.
-        if (goalie && isGoal && !isTire) {                    // beats the goalie — to a post/corner
-          const side = place >= 0 ? 1 : -1;
+        // WIDE: sails past a post into the corner and settles — never touches the net
+        if (miss === "wide") {
+          const widePt = boards.clampInside(net.x + ux * 3 + px * side * (GOAL_HALF + 5.5),
+            net.y + uy * 3 + py * side * (GOAL_HALF + 5.5));
+          const tArr = launchT + Math.hypot(widePt.x - launch.x, widePt.y - launch.y) / vShot;
+          legs.push({ type: "fly", shot: true, wide: true, sauce: airborne, by: cur.id, x0: launch.x, y0: launch.y, x1: widePt.x, y1: widePt.y, t0: launchT, t1: tArr });
+          legs.push({ type: "rest", x: widePt.x, y: widePt.y, t0: tArr });
+          tBase = tArr;
+          return widePt;
+        }
+        // OVER: rises above the cage and lands loose behind the net (rendered over
+        // the net, since it's airborne and not a goal)
+        if (miss === "over") {
+          const overPt = boards.clampInside(net.x + ux * 7, net.y + uy * 7);
+          const tArr = launchT + Math.hypot(overPt.x - launch.x, overPt.y - launch.y) / vShot;
+          legs.push({ type: "fly", shot: true, over: true, sauce: true, by: cur.id, x0: launch.x, y0: launch.y, x1: overPt.x, y1: overPt.y, t0: launchT, t1: tArr });
+          legs.push({ type: "rest", x: overPt.x, y: overPt.y, t0: tArr });
+          tBase = tArr;
+          return overPt;
+        }
+
+        // a scored shot on a NET (goalie beaten, or an empty net) buries it BEHIND
+        // the plane, where it rests in the cage. A tire "goalie" beaten doesn't
+        // concede — the puck deflects off the rubber (handled below), so skip it.
+        if (isGoal && onNet && !isTire) {                     // in the net — to a post/corner
           const lat = side * (0.7 + Math.abs(place) * 0.3) * GOAL_HALF;
           const endPt = { x: clampX(net.x + ux * 1.5 + px * lat), y: clampY(net.y + uy * 1.5 + py * lat) };
           const tArr = launchT + Math.hypot(endPt.x - launch.x, endPt.y - launch.y) / vShot;
-          legs.push({ type: "fly", shot: true, goal: true, by: cur.id, x0: launch.x, y0: launch.y, x1: endPt.x, y1: endPt.y, t0: launchT, t1: tArr });
-          legs.push({ type: "rest", x: endPt.x, y: endPt.y, t0: tArr });
+          // goal=true rides through the rest too: the puck sits BEHIND the net
+          // plane, so render (via puckInGoal) sinks it under the cage
+          legs.push({ type: "fly", shot: true, goal: true, sauce: airborne, by: cur.id, x0: launch.x, y0: launch.y, x1: endPt.x, y1: endPt.y, t0: launchT, t1: tArr });
+          legs.push({ type: "rest", goal: true, x: endPt.x, y: endPt.y, t0: tArr });
           tBase = tArr;
           return endPt;
         }
@@ -349,17 +428,19 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
           hit = { x: net.x - ux * (R + 1.3), y: net.y - uy * (R + 1.3) };
         } else if (goalie) {
           hit = { x: net.x - ux * GOALIE_DEPTH, y: net.y - uy * GOALIE_DEPTH };
+        } else if (postMiss) {                                  // rings a post and kicks back out
+          hit = { x: clampX(net.x + px * side * GOAL_HALF), y: clampY(net.y + py * side * GOAL_HALF) };
         } else {
           hit = { x: clampX(net.x + px * place * GOAL_HALF), y: clampY(net.y + py * place * GOAL_HALF) };
         }
         const tArr = launchT + Math.hypot(hit.x - launch.x, hit.y - launch.y) / vShot;
-        // a shot on a real net: empty net = goal; a designated rebound (aimPt,
-        // carom out to a collector) reads as a save. A passer is a pass, not a
+        // scored shots on a real net already returned (buried in the cage); what
+        // reaches here on a net is a goalie save, an empty-net POST miss, or a
+        // designated rebound (aimPt) reading as a save. A passer is a pass, not a
         // shot on net, so it stays quiet either way.
-        const onNet = !!(netPiece && netPiece.kind === "net");
-        const scored = onNet && !goalie && !aimPt;
         const saved = (goalie && !isGoal) || (onNet && !!aimPt);
-        const flyLeg = { type: "fly", shot: true, save: saved, goal: scored, by: cur.id, x0: launch.x, y0: launch.y, x1: hit.x, y1: hit.y, t0: launchT, t1: tArr };
+        // a blocked designated rebound stays flat (its carom is cut off at the net)
+        const flyLeg = { type: "fly", shot: true, save: saved, post: postMiss, goal: false, sauce: airborne && !aimPt, by: cur.id, x0: launch.x, y0: launch.y, x1: hit.x, y1: hit.y, t0: launchT, t1: tArr };
         legs.push(flyLeg);
         // a designated rebound whose collection spot sits behind/through the net
         // can never get there — stop the puck dead at the net and break the chain
@@ -819,6 +900,18 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
     return routePosAt(p, e, warp);
   }
 
+  // true while a puck sits in / crosses the net as a goal (its active leg is
+  // flagged goal) — the renderer sinks it under the cage so it reads as "in"
+  function puckInGoal(p, e) {
+    if (p.kind !== "puck") return false;
+    const { plans } = getPlan();
+    const pl = plans[p.id];
+    if (!pl) return false;
+    let leg = pl.legs[0];
+    for (const L of pl.legs) { if (e >= L.t0) leg = L; else break; }
+    return !!leg.goal;
+  }
+
   // stick-motion angle (deg) for a player at elapsed e: 0 except in the brief
   // window of one of their stick events —
   //   shot:  hard wind-back then snap through the puck
@@ -868,5 +961,5 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
   // warped arrival time at a player's waypoint index (for movement captions)
   function waypointTime(p, i) { const { warp } = getPlan(); return routeTimeW(p, warp, i); }
 
-  return { getPlan, pieceTime, displayPosAt, stickSwing, waypointTime };
+  return { getPlan, pieceTime, displayPosAt, stickSwing, waypointTime, puckInGoal };
 }

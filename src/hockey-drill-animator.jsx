@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useLayoutEffect } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useMemo } from "react";
 import { VIEWS, COLORS, vb, APP_VERSION, ICON_SCALE, BUILD_STAMP, DEFAULT_TEXT } from "./constants.js";
 import { parseDrill, serializeDrill, extractDrill } from "./drill-format.js";
 import { drillSvg } from "./drill-svg.js";
@@ -8,7 +8,7 @@ import { netShapes, bumperShapes, solidShapes, detourRoute, segCrossesNet } from
 import { RinkMarkings } from "./rink.jsx";
 import { ZONES, zoneAt } from "./zones.js";
 import { PieceIcon, Stepper, DiagPanel, Icon } from "./icons.jsx";
-import { createTiming } from "./timing.js";
+import { createTiming, resolveNearest } from "./timing.js";
 import { newGame, stepGame } from "./ai-game.js";
 import { STYLES } from "./styles.js";
 
@@ -718,9 +718,13 @@ export default function DrillAnimator() {
 
   /* ----- timing & pass planning (see timing.js) ----- */
   const planCache = useRef({ key: null, pace: 0, sig: -1, warp: {}, plans: {}, rel: {} });
-  const { getPlan, pieceTime, displayPosAt, stickSwing, waypointTime } = createTiming({ pieces, pace, segRefs, planCache, seed: playSeed });
+  // timing runs on the nearest-resolved model: any "Collect nearest puck" intent
+  // re-binds to whichever loose puck is actually closest right now. Rendering &
+  // editing stay on raw `pieces` (displayPosAt keys plans by id, so it lines up).
+  const rpieces = useMemo(() => resolveNearest(pieces), [pieces]);
+  const { getPlan, pieceTime, displayPosAt, stickSwing, waypointTime, puckInGoal } = createTiming({ pieces: rpieces, pace, segRefs, planCache, seed: playSeed });
 
-  const totalTime = Math.max(0.1, ...pieces.map(pieceTime));
+  const totalTime = Math.max(0.1, ...rpieces.map(pieceTime));
   totalRef.current = totalTime;
 
   // natural phrase for an area name mid-sentence ("Dot lane" -> "the dot lane")
@@ -770,7 +774,8 @@ export default function DrillAnimator() {
           // a normal pass reception (prev is a pass fly) is covered by its pass step
         } else if (leg.type === "fly") {
           if (leg.shot) {
-            const out = leg.goal ? " — scores!" : leg.save ? " — save!" : "";
+            const out = leg.goal ? " — scores!" : leg.save ? " — save!" : leg.post ? " — off the post!"
+              : leg.wide ? " — wide!" : leg.over ? " — over the net!" : "";
             evs.push({ t: leg.t0, key: `${pk.id}:shot:${i}`, auto: `${nameOf(leg.by)} shoots on net${out}` });
           }
           else {
@@ -1667,7 +1672,7 @@ export default function DrillAnimator() {
         else if (pk.chipAt === i) steps.push({ ord: 900, text: `Chip ${pk.id}`, warn: wt, del: () => clearTerminal(pk.id), role: "terminal", kind: "chip", pk });
       }
       if (pk.pickup && pk.pickup.to === p.id && pk.pickup.at === (i < 0 ? 0 : i))
-        steps.push({ ord: -1, text: `Collect ${pk.id}`, warn: null, del: () => updateById(pk.id, { pickup: null }), role: "pickup", kind: null, pk });
+        steps.push({ ord: -1, text: pk.pickup.nearest ? "Collect nearest puck" : `Collect ${pk.id}`, warn: null, del: () => updateById(pk.id, { pickup: null }), role: "pickup", kind: null, pk });
     }
     // order by puck first (each puck's collect→…→shoot stays together and
     // interleaves with the next puck's), then by chain order within a puck — so
@@ -1770,7 +1775,9 @@ export default function DrillAnimator() {
       setTransfer(target.id, (target.transfers || []).length,
         { at: target[field], to: playerId, recvAt: cAt < 0 ? null : cAt, kind, ...(aim != null ? { aim } : {}) });
     } else {
-      updateById(target.id, { pickup: { to: playerId, at: cAt < 0 ? 0 : cAt } });
+      // no explicit id → a live "nearest" collect: re-resolves to the closest
+      // loose puck at play time (see resolveNearest). A chosen id stays fixed.
+      updateById(target.id, { pickup: { to: playerId, at: cAt < 0 ? 0 : cAt, ...(targetId ? {} : { nearest: true }) } });
     }
     // steps are ordered by puck array position, so move the just-collected puck
     // to the end — its collect (and any release) then sits at the END of the
@@ -2833,7 +2840,7 @@ export default function DrillAnimator() {
       const plan = plans[q.id];
       if (!plan) continue;
       plan.legs.forEach((L, i) => {
-        if (L.type !== "fly" || !L.shot || (!L.goal && !L.save)) return;
+        if (L.type !== "fly" || !L.shot || (!L.goal && !L.save && !L.post && !L.wide && !L.over)) return;
         const side = L.x1 < 100 ? "L" : "R";
         const cur = byNet.get(side);
         // keep only the latest shot on this net that has already arrived, so a
@@ -2869,14 +2876,17 @@ export default function DrillAnimator() {
         else if (dt > outT) { const f = (dt - outT) / (DUR - outT); op = 1 - f; pop = 1 + 0.12 * f; }
       }
       const fx = iconXf({ x: s.x, y: s.y, a: 0 });
-      const text = goal ? "GOAL!" : "SAVE!";
+      // GOAL is a hit; SAVE/POST/WIDE/OVER are all misses (post & wide share the
+      // amber "iron/off-target" look, over is a deeper miss, save stays blue)
+      const text = goal ? "GOAL!" : L.save ? "SAVE!" : L.post ? "POST!" : L.wide ? "WIDE!" : "OVER!";
+      const fill = goal ? "#ff3b52" : L.save ? "#2b8cff" : L.over ? "#8a5a2b" : "#e0902b";
       const fs = 7 * pop / ICON_SCALE;
       const w = text.length * fs * 0.6 + fs * 0.8, h = fs * 1.5;
       els.push(
         <g key={`rs-${key}`} transform={fx.t} opacity={op} pointerEvents="none">
           <g transform={`rotate(${-fx.th})`}>
             <rect x={-w / 2} y={-h / 2} width={w} height={h} rx={h * 0.28}
-              fill={goal ? "#ff3b52" : "#2b8cff"} stroke="rgba(255,255,255,0.9)" strokeWidth={0.6} />
+              fill={fill} stroke="rgba(255,255,255,0.9)" strokeWidth={0.6} />
             <text textAnchor="middle" y={fs * 0.36} fontSize={fs} fontWeight={900} fill="#fff"
               style={{ fontFamily: "system-ui, sans-serif", userSelect: "none", letterSpacing: fs * 0.02 }}>
               {text}
@@ -3055,7 +3065,9 @@ export default function DrillAnimator() {
           );
         }
         if (t === "collect") {
-          const cur = st.pk ? st.pk.id : "nearest";
+          // a nearest pickup keeps the dynamic "Nearest puck" selection; a fixed
+          // pickup or rebound-collect shows its concrete puck id
+          const cur = st.pk && !(st.pk.pickup && st.pk.pickup.nearest) ? st.pk.id : "nearest";
           return (
             <select className="hd-select on" value={cur}
               onChange={e => { const v = e.target.value; st.del(); collectPuckAt(p.id, i, v === "nearest" ? undefined : v); }}>
@@ -3987,12 +3999,15 @@ export default function DrillAnimator() {
             {renderMarkHandles()}
 
             {/* nets sit on the ice (bottom); players paint above pucks so a
-               carried puck can't steal the grab; rotate ring is drawn last */}
+               carried puck can't steal the grab; rotate ring is drawn last. A
+               puck IN the net (a goal) sinks below the cage (rank −1). */}
             {!aiPlay && [...pieces]
               .filter(p => p.kind !== "label" && p.kind !== "mark")
               .sort((a, b) => {
-                const rank = k => (k === "net" || k === "bumper" || k === "deker" || k === "passer" || k === "tire" || k === "stick" ? 0 : k === "player" ? 2 : 1);
-                return rank(a.kind) - rank(b.kind);
+                const goalE = animT <= 0 ? 0 : animT * totalTime;
+                const rank = p => (p.kind === "puck" && puckInGoal(p, goalE) ? -1
+                  : p.kind === "net" || p.kind === "bumper" || p.kind === "deker" || p.kind === "passer" || p.kind === "tire" || p.kind === "stick" ? 0 : p.kind === "player" ? 2 : 1);
+                return rank(a) - rank(b);
               })
               .map(p => {
               const dp = displayPos(p);
@@ -4335,13 +4350,21 @@ export default function DrillAnimator() {
             into space and lands loose. <code> shoot=4</code> fires at point 4 (targets the nearest
             net/passer, or <code>net=N2</code>/<code>net=PS1</code> — or a <b>bumper</b> (mirror deflect) or
             <b>tire</b> (deflects by where it strikes the round rubber), which must be named explicitly).
+            Shots randomly rip along the ice or rise in the air (sauce look, shadow underneath). On a
+            goalie it's <b>SAVE!</b> or <b>GOAL!</b>; on an <b>empty net</b> it usually buries (rests in the
+            cage, under the mesh) but can ring the <b>POST!</b>, sail <b>WIDE!</b>, or go <b>OVER!</b> — each
+            re-rolls every replay.
             <code> rim=4~90*80</code> hard-rims around the
             boards and <code>chip=4~-45*30</code> chips into space; the <code>~deg</code> is the direction and
             <code>*ft</code> the distance — or just drag the on-ice <b>handle</b> at the end of the release
             to set both. Any player then uses <b>Collect puck</b> (in their popup, or at a waypoint) to
-            grab the nearest loose puck at that spot. (The handoff forms <code>chip=4:F1</code> /
+            grab the nearest loose puck at that spot. <b>Collect puck</b> defaults to <b>Nearest puck</b> —
+            a live pick that re-resolves to whichever loose puck is closest each time you play or edit
+            (serialized as a trailing <code>*</code>); choose a specific puck id in the dropdown to lock it.
+            (The handoff forms <code>chip=4:F1</code> /
             <code>rim=4:F2</code> that carry straight to a collector still load and play.)
-            <code> pickup=F2@3</code> — a loose puck hops onto F2's blade at their point 3.
+            <code> pickup=F2@3</code> — a loose puck hops onto F2's blade at their point 3
+            (<code>pickup=F2@3*</code> = nearest-puck, re-resolved live).
             <code> face=45</code> sets a stationary player's heading (degrees).
             <code> hold=line</code> makes a player wait at the blue line until the puck enters the zone.
             <b> Delay trigger</b> (on the player popup, and any waypoint) holds the route until a
