@@ -92,6 +92,7 @@ Places a piece. `id` is any unique token (e.g. `F1`, `PK1`, `N2`).
 | `face=<deg>` | route-less player, net, bumper, deker, passer | Facing angle (0 = +x / toward the right) |
 | `defense` | player | Auto-reacting defenceman (holds the slot, stays goal-side) |
 | `hold=line` | player | Wait at the blue line until the puck enters the zone |
+| `wait=<player>[@<pt>]` | player | Hold at the start until `<player>` reaches point `<pt>` (i.e. after they pass/shoot/arrive there), then run the route. Chains resolve (A waits for B waits for C). In the app: *Waits for* on the player popup. |
 | `net=<id>` | puck | What a shot targets (default: nearest net/passer). Can be a `bumper` id (the puck mirror-deflects off its face) or a `tire` id (the puck deflects off the round rubber by where it strikes) — bumpers/tires never auto-attract a shot; they must be named. |
 | `goalie` | net, tire | A keeper defends shots. On a net it plays post-to-post; on a `tire` it works the full circle — a save stops the puck out front, a beaten keeper lets it deflect off the rubber. |
 | `on=<playerId>` | puck | The puck starts on that player's blade (carried) |

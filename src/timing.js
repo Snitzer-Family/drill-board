@@ -44,9 +44,13 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
   // seconds, until the puck first crosses into the zone they're entering.
   let currentHolds = {};
   const holdAt = (p, i) => { const h = currentHolds[p.id]; return h && h.seg === i ? h.dur : 0; };
+  // per-player start delay: the player waits this many seconds before beginning
+  // their route (until a trigger — another player reaching a waypoint — fires)
+  let currentStartWait = {};
+  const startWaitOf = p => currentStartWait[p.id] || 0;
 
   function routeTimeW(p, warp, upto = Infinity) {
-    let t = 0;
+    let t = startWaitOf(p);
     for (let i = 0; i < p.path.length; i++) {
       if (i > upto) break;
       t += (p.path[i].stop || 0) + holdAt(p, i) + effMove(p, p.path[i], i, warp);
@@ -68,10 +72,29 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
 
   function getPlan() {
     const pc = planCache.current;
-    if (pc.key === pieces && pc.pace === pace && pc.sig === lenSig && pc.seed === seed) { currentHolds = pc.holds || {}; return pc; }
+    if (pc.key === pieces && pc.pace === pace && pc.sig === lenSig && pc.seed === seed) { currentHolds = pc.holds || {}; currentStartWait = pc.startWait || {}; return pc; }
     const warp = {};
     const plans = {};
     const rel = {};
+    // resolve per-player start waits BEFORE the puck plans (a waiting player's
+    // passes/shots must launch at their delayed time). A wait fires when the
+    // trigger player reaches waypoint `at`; chains (A waits B waits C) resolve
+    // over a few passes. rawTo ignores start-waits so the base times are stable.
+    const rawTo = (p, at) => { let t = 0; for (let i = 0; i < p.path.length; i++) { if (i > at) break; t += (p.path[i].stop || 0) + effMove(p, p.path[i], i, warp); } return t; };
+    const sw = {};
+    for (let pass = 0; pass <= pieces.length; pass++) {
+      let changed = false;
+      pieces.forEach(p => {
+        if (p.kind !== "player" || !p.wait || !p.wait.on) return;
+        const trig = pieces.find(q => q.id === p.wait.on && q.kind === "player");
+        if (!trig || trig.id === p.id) return;
+        const at = p.wait.at == null ? trig.path.length - 1 : Math.max(-1, Math.min(p.wait.at, trig.path.length - 1));
+        const w = (sw[trig.id] || 0) + (at < 0 ? 0 : rawTo(trig, at));
+        if (Math.abs((sw[p.id] || 0) - w) > 1e-6) { sw[p.id] = w; changed = true; }
+      });
+      if (!changed) break;
+    }
+    currentStartWait = sw;
     const netSh = solidShapes(pieces);        // solid obstacles pucks carom off (nets + bumpers)
     const bumpSh = bumperShapes(pieces);      // a flat pass across a bumper auto-lifts (sauces) over it
     pieces.forEach(pk => {
@@ -431,7 +454,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
       plans[pk.id] = { legs, final: cur.id };
       rel[pk.id] = relT;
     });
-    planCache.current = { key: pieces, pace, sig: lenSig, seed, warp, plans, rel, holds: {} };
+    planCache.current = { key: pieces, pace, sig: lenSig, seed, warp, plans, rel, holds: {}, startWait: sw };
     currentHolds = {};
 
     // blue-line entry holds: a "hold=line" player waits at their last neutral
@@ -541,6 +564,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
   function routePosAt(p, e, warp) {
     const flip = s => (s.dir === "bwd" ? 180 : 0);
     if (!p.path.length) return { x: p.x, y: p.y, a: p.facing || 0, v: 0, dist: 0 };
+    e -= startWaitOf(p);   // hold at the start until the trigger fires (e<=0 → start pose below)
     // Sharp interior corners get a speed dip (carve the turn) so the skater
     // decelerates in and accelerates out instead of pivoting at full speed.
     const dirN = (dx, dy) => { const m = Math.hypot(dx, dy) || 1; return [dx / m, dy / m]; };

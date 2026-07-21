@@ -981,6 +981,8 @@ export default function DrillAnimator() {
   // starts the chain (carrier/pickup) the whole chain goes; if it's a transfer
   // target, that action and everything downstream (incl. the terminal) is dropped
   const scrubRefs = (list, goneId) => list.map(q => {
+    // a player whose start-trigger was the removed player just starts normally
+    if (q.kind === "player" && q.wait && q.wait.on === goneId) return { ...q, wait: null };
     if (q.kind !== "puck") return q;
     if (q.carrier === goneId || (q.pickup && q.pickup.to === goneId)) return { ...q, ...looseFields };
     const idx = (q.transfers || []).findIndex(t => t.to === goneId);
@@ -2681,6 +2683,38 @@ export default function DrillAnimator() {
                   <span style={{ fontSize: 11, color: "#8b99a8" }}>waits for the puck to enter the zone</span>
                 </div>
               )}
+              {/* start trigger: hold at the start until another player reaches a
+                  waypoint (i.e. after they pass / shoot / arrive there) */}
+              {p.path.length > 0 && !p.defense && (() => {
+                const others = pieces.filter(q => q.kind === "player" && q.id !== p.id && q.path.length > 0);
+                if (!others.length) return null;
+                const w = p.wait;
+                const trig = w && pieces.find(q => q.id === w.on && q.kind === "player");
+                return (
+                  <>
+                    <div className="hd-poprow">
+                      <span>Waits for</span>
+                      <button className={`hd-mini${!w ? " on" : ""}`} onClick={() => updateById(p.id, { wait: null })}>None</button>
+                      {others.map(o => (
+                        <button key={o.id} className={`hd-mini${w && w.on === o.id ? " on" : ""}`}
+                          onClick={() => updateById(p.id, { wait: w && w.on === o.id ? null : { on: o.id, at: Math.max(0, o.path.length - 1) } })}>
+                          {nameOf(o.id)}
+                        </button>
+                      ))}
+                    </div>
+                    {trig && trig.path.length > 0 && (
+                      <div className="hd-poprow">
+                        <span>to reach</span>
+                        <button className={`hd-mini${w.at < 0 ? " on" : ""}`} onClick={() => updateById(p.id, { wait: { ...w, at: -1 } })}>start</button>
+                        {trig.path.map((s, wi) => (
+                          <button key={wi} className={`hd-mini${w.at === wi ? " on" : ""}`}
+                            onClick={() => updateById(p.id, { wait: { ...w, at: wi } })}>{wi + 2}</button>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
               <div className="hd-poprow">
                 <button className={`hd-mini${p.defense ? " on" : ""}`}
                   onClick={() => updateById(p.id, { defense: !p.defense })}>
