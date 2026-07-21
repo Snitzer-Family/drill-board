@@ -310,6 +310,10 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
         let seq = 0;
         for (const q of pieces) { if (q === pk) break;
           if (q.kind === "puck" && q.pickup && q.pickup.to === pk.pickup.to && q.pickup.at === pk.pickup.at) seq++; }
+        // a STATIONARY collector who ALSO starts with a puck in hand must release
+        // it before collecting — otherwise the held shot and the first collect both
+        // fire at t0 (two pucks at once). Queue the collects past that first release.
+        if (!pl.path.length && pieces.some(q => q.kind === "puck" && q.carrier === pk.pickup.to)) seq++;
         tPick += seq * 1.6;
         legs.push({ type: "free", t0: 0 });
         legs.push({ type: "ride", id: pl.id, t0: tPick, catch: true });
