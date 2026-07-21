@@ -71,13 +71,20 @@ export const STYLES = `
           cursor:pointer; text-align:left; }
         .hd-item.on { background:#1f4fa3; border-color:#1f4fa3; color:#fff; }
         .hd-item.danger { color:#ff8d9c; border-color:#4a2a30; }
-        /* sliced photo icons on the add-tool buttons */
-        .hd-toolitem { padding:6px 10px; }
-        .hd-toolitem .hd-toolimg { width:34px; height:30px; }
-        .hd-toolmini { gap:6px; padding-left:6px; }
-        .hd-toolmini .hd-toolimg { width:22px; height:20px; }
-        .hd-toolimg { object-fit:contain; border-radius:5px; background:#0e131a;
-          flex:0 0 auto; pointer-events:none; box-shadow:inset 0 0 0 1px rgba(255,255,255,0.06); }
+        /* icon-forward add-tool grid: the photo fills the tile, label underneath */
+        .hd-toolgrid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; }
+        .hd-toolgrid.compact { grid-template-columns:repeat(4,minmax(0,1fr)); gap:5px; }
+        .hd-tool { display:flex; flex-direction:column; align-items:center; justify-content:flex-end; gap:4px;
+          padding:8px 5px 6px; border:1px solid #2c3846; background:#0e141c; color:#d3dce6;
+          border-radius:10px; cursor:pointer; }
+        .hd-tool .hd-toolimg { width:100%; height:46px; object-fit:contain; pointer-events:none;
+          filter:drop-shadow(0 1px 2px rgba(0,0,0,.55)); }
+        .hd-toolgrid.compact .hd-tool { padding:6px 4px 5px; }
+        .hd-toolgrid.compact .hd-tool .hd-toolimg { height:34px; }
+        .hd-tool .hd-toolglyph { height:46px; display:flex; align-items:center; justify-content:center; font-size:26px; }
+        .hd-toolgrid.compact .hd-tool .hd-toolglyph { height:34px; font-size:20px; }
+        .hd-tool span:last-child { font-size:10.5px; font-weight:600; line-height:1; text-align:center; }
+        .hd-tool:active, .hd-tool.on { background:#1f4fa3; border-color:#1f4fa3; color:#fff; }
         .hd-note { font-size:11.5px; color:#7d8b99; line-height:1.5; }
         .hd-note code { color:#a8c3da; }
         /* hint text lives in the bottom bar */
