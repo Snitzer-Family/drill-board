@@ -1766,7 +1766,10 @@ export default function DrillAnimator() {
     if (wakeEdit()) return;
     setOpenMenu(null);
     setSelectedId(id);
-    drag.current = { kind: "markpt", id, idx, touch: e.pointerType !== "mouse" };
+    const pt = svgPt(e);
+    // start/last/moved are required by onSvgMove's tap-threshold guard —
+    // without them it dereferences d.start.x and throws, killing the drag
+    drag.current = { kind: "markpt", id, idx, start: pt, last: pt, moved: false, touch: e.pointerType !== "mouse" };
     svgRef.current.setPointerCapture?.(e.pointerId);
   }
 
