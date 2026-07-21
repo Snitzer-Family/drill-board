@@ -2841,7 +2841,7 @@ export default function DrillAnimator() {
   // isn't cut off. Stretch-cancelled via the icon frame like a label.
   function renderResultSplash() {
     if (!showResult || aiPlay || animT <= 0) return null;
-    const DUR = 1.5, e = animT * totalTime, finished = animT >= 1;
+    const DUR = 0.9, e = animT * totalTime, finished = animT >= 1;
     const { plans } = getPlan();
     // gather every shot result, grouped by which net it hit (left vs right)
     const byNet = new Map();
@@ -2859,62 +2859,65 @@ export default function DrillAnimator() {
       });
     }
     if (!byNet.size) return null;
-    // drill markers to keep clear of: players, their route waypoints, and pucks
-    const obst = [];
-    pieces.forEach(p => {
-      if (p.kind === "player") { obst.push({ x: p.x, y: p.y }); (p.path || []).forEach(s => obst.push({ x: s.x, y: s.y })); }
-      else if (p.kind === "puck") obst.push({ x: p.x, y: p.y });
-    });
-    const clearOf = (x, y) => obst.reduce((m, o) => Math.min(m, Math.hypot(o.x - x, o.y - y)), Infinity);
-    // pick the emptier of the high/low lane beside the net
-    const spot = side => {
-      const nx = side === "L" ? 17 : 183, dir = side === "L" ? 1 : -1, x = nx + dir * 12;
-      const cands = [{ x, y: 13 }, { x, y: 72 }];
-      return cands.reduce((b, c) => (clearOf(c.x, c.y) > clearOf(b.x, b.y) ? c : b));
+    const nets = pieces.filter(q => q.kind === "net" || q.kind === "passer" || q.kind === "tire" || q.kind === "bumper");
+    const ld = liftDir();                                    // screen-up, for floating the splash above the net
+    // darken a hex toward black (for the extruded 3D side of the letters)
+    const darken = (hex, f) => {
+      const n = parseInt(hex.slice(1), 16);
+      const r = Math.round(((n >> 16) & 255) * f), g = Math.round(((n >> 8) & 255) * f), b = Math.round((n & 255) * f);
+      return `#${((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1)}`;
     };
+    const LAB = { fontFamily: "system-ui, sans-serif", userSelect: "none" };
     const els = [];
     for (const [side, { L, key }] of byNet) {
       const dt = e - L.t1;
       if (!finished && (dt < 0 || dt > DUR)) continue;      // faded, no newer shot to replace it
       const type = L.goal ? "goal" : L.post ? "post" : "grow";
-      const s = spot(side);
+      // pop right at the net the shot is on, floated a touch up-screen so it
+      // clears the cage and puck
+      const netP = nets.length ? nets.reduce((a, b) => Math.hypot(b.x - L.x1, b.y - L.y1) < Math.hypot(a.x - L.x1, a.y - L.y1) ? b : a) : null;
+      const ax = (netP ? netP.x : L.x1) + ld.x * 8, ay = (netP ? netP.y : L.y1) + ld.y * 8;
       // per-outcome flash: GOAL pops in, tilts back-and-forth, pops out; POST
-      // fades in and violently shakes; a miss (save / wide / over) fades in, grows,
-      // and fades out. Held static once the drill has finished on this result.
+      // fades in and violently shakes; a miss (save / wide / over) fades in, grows.
+      // Held static once the drill has finished on this result.
       let op = 1, scale = 1, rot = 0, dx = 0, dy = 0;
       if (!finished) {
-        const inT = 0.14, outT = 0.34;
+        const inT = 0.1, outT = 0.28;                       // quick in, quick fade out
         op = dt < inT ? dt / inT : dt > DUR - outT ? Math.max(0, (DUR - dt) / outT) : 1;
         if (type === "goal") {
           const eob = f => { const c1 = 1.9, c3 = c1 + 1, g = f - 1; return 1 + c3 * g * g * g + c1 * g * g; };
-          scale = dt < 0.22 ? eob(dt / 0.22) : 1;                          // pop in w/ overshoot
-          if (dt > DUR - outT) scale = 1 + 0.6 * (1 - (DUR - dt) / outT);  // pop out bigger
-          rot = 13 * Math.max(0, 1 - dt / DUR) * Math.sin(dt * 13);        // tilt back and forth
+          scale = dt < 0.18 ? eob(dt / 0.18) : 1;                          // pop in w/ overshoot
+          if (dt > DUR - outT) scale = 1 + 0.5 * (1 - (DUR - dt) / outT);  // pop out bigger
+          rot = 12 * Math.max(0, 1 - dt / DUR) * Math.sin(dt * 16);        // tilt back and forth
         } else if (type === "post") {
-          const sd = Math.max(0, 1 - dt / 0.6);                            // shake decays over ~0.6s
-          dx = 3.0 * sd * Math.sin(dt * 58);
-          dy = 2.2 * sd * Math.cos(dt * 65);
-          rot = 7 * sd * Math.sin(dt * 50);
+          const sd = Math.max(0, 1 - dt / 0.45);                           // shake decays over ~0.45s
+          dx = 1.6 * sd * Math.sin(dt * 60);
+          dy = 1.2 * sd * Math.cos(dt * 67);
+          rot = 7 * sd * Math.sin(dt * 52);
         } else {
-          scale = 0.85 + 0.6 * (dt / DUR);                                 // fade in + grow, then out
+          scale = 0.85 + 0.5 * (dt / DUR);                                 // fade in + grow
         }
       }
-      const fx = iconXf({ x: s.x, y: s.y, a: 0 });
+      const fx = iconXf({ x: clampX(ax), y: clampY(ay), a: 0 });
       // GOAL is a hit; SAVE/POST/WIDE/OVER are all misses (post & wide share the
       // amber "iron/off-target" look, over is a deeper miss, save stays blue)
       const text = L.goal ? "GOAL!" : L.save ? "SAVE!" : L.post ? "POST!" : L.wide ? "WIDE!" : "OVER!";
       const fill = L.goal ? "#ff3b52" : L.save ? "#2b8cff" : L.over ? "#8a5a2b" : "#e0902b";
-      const fs = 7 / ICON_SCALE;
-      const w = text.length * fs * 0.6 + fs * 0.8, h = fs * 1.5;
+      const dk = darken(fill, 0.42);
+      const fs = 4.6 / ICON_SCALE;                          // smaller than before
+      const dep = fs * 0.1;                                 // extrusion step
       els.push(
         <g key={`rs-${key}`} transform={fx.t} opacity={op} pointerEvents="none">
           <g transform={`rotate(${-fx.th}) translate(${dx.toFixed(2)} ${dy.toFixed(2)}) rotate(${rot.toFixed(2)}) scale(${scale.toFixed(3)})`}>
-            <rect x={-w / 2} y={-h / 2} width={w} height={h} rx={h * 0.28}
-              fill={fill} stroke="rgba(255,255,255,0.9)" strokeWidth={0.6} />
-            <text textAnchor="middle" y={fs * 0.36} fontSize={fs} fontWeight={900} fill="#fff"
-              style={{ fontFamily: "system-ui, sans-serif", userSelect: "none", letterSpacing: fs * 0.02 }}>
-              {text}
-            </text>
+            {/* extruded 3D depth: dark copies stacked down-screen behind the face */}
+            {[5, 4, 3, 2, 1].map(k => (
+              <text key={k} textAnchor="middle" y={fs * 0.34 + k * dep} fontSize={fs} fontWeight={900}
+                fill={dk} style={{ ...LAB, letterSpacing: fs * 0.02 }}>{text}</text>
+            ))}
+            {/* bright face with a white outline for pop against the ice */}
+            <text textAnchor="middle" y={fs * 0.34} fontSize={fs} fontWeight={900} fill={fill}
+              stroke="#fff" strokeWidth={fs * 0.05} paintOrder="stroke"
+              style={{ ...LAB, letterSpacing: fs * 0.02 }}>{text}</text>
           </g>
         </g>
       );
