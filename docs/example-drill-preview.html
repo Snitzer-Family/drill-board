@@ -373,10 +373,10 @@ function parseDrill(text) {
             } else if (key === "hand") hand = v.toUpperCase() === "L" ? "L" : "R";
             else if (key === "on") carrier = v;
             else if (key === "pass") {
-              const m2 = /^(\d+):([^@\s^]+)(?:@(\d+))?(?:\^(\S+))?$/.exec(v);
+              const m2 = /^(\d+):([^@\s^!]+)(?:@(\d+))?(?:\^([^!\s]+))?(!)?$/.exec(v);
               if (m2) transfers.push({ at: parseInt(m2[1], 10) - 1, to: m2[2],
                 recvAt: m2[3] ? parseInt(m2[3], 10) - 1 : null, kind: "pass",
-                ...(m2[4] ? { via: m2[4] } : {}) });
+                ...(m2[4] ? { via: m2[4] } : {}), ...(m2[5] ? { sauce: true } : {}) });
             } else if (key === "rebound") {
               // shot whose carom is collected by a player: shoot at <pt>, they
               // gather at their @<pt> (else route end / where they stand)

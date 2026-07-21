@@ -387,7 +387,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
           }
           target = bladeAt(rec, tArr, warp);
         }
-        legs.push({ type: "fly", by: byId, x0: launch.x, y0: launch.y, x1: target.x, y1: target.y, t0: launchT, t1: tArr });
+        legs.push({ type: "fly", by: byId, x0: launch.x, y0: launch.y, x1: target.x, y1: target.y, t0: launchT, t1: tArr, sauce: !!tr.sauce });
         legs.push({ type: "ride", id: rec.id, t0: tArr, catch: true });
         cur = rec;
         tBase = tArr;

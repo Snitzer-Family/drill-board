@@ -920,6 +920,23 @@ export default function DrillAnimator() {
     return onArc(Math.atan2(aim.y - net.y, aim.x - net.x), R);
   }
 
+  // airborne height (0..1) of a sauced puck this frame — for the fake-3D lift +
+  // shadow. Peaks at mid-flight, then a small hop as it lands and settles.
+  function sauceLift(pk) {
+    if (animT <= 0 || pk.kind !== "puck") return 0;
+    const e = animT * totalTime;
+    const plan = getPlan().plans[pk.id];
+    if (!plan) return 0;
+    for (const leg of plan.legs) {
+      if (leg.type !== "fly" || !leg.sauce) continue;
+      if (e >= leg.t0 && e <= leg.t1) { const u = (e - leg.t0) / ((leg.t1 - leg.t0) || 1); return Math.sin(Math.PI * u); }
+      if (e > leg.t1 && e < leg.t1 + 0.22) { const u = (e - leg.t1) / 0.22; return Math.sin(Math.PI * u) * 0.22; } // landing bounce
+    }
+    return 0;
+  }
+  const LIFT_MAX = 4.6;                         // peak visual height, feet
+  const liftDir = () => { const r = (screenRot * Math.PI) / 180; return { x: -Math.sin(r), y: -Math.cos(r) }; };
+
   /* ----- coords ----- */
   function svgPt(evt) {
     const svg = svgRef.current;
@@ -2244,6 +2261,11 @@ export default function DrillAnimator() {
         if (holds) setTransfer(pk.id, stage, isVia(ps) ? null : tr);
         else appendTransfer(pk.id, { ...tr, by: p.id });
       };
+      // sauce (raised) pass: the puck arcs up and over ice obstacles, bouncing
+      // when it lands — toggled on the active pass at this waypoint
+      const isSauce = !!(from && from.kind === "pass" && from.at === i && from.sauce);
+      const doSauce = () => update(q => q.id !== pk.id ? q
+        : { ...q, transfers: (q.transfers || []).map((t, s) => s === stage ? { ...t, sauce: !t.sauce } : t) });
       const doTerm = field => {
         if (holds && stage === ts.length) setTerminal(pk.id, field, i);
         else updateById(pk.id, { shotAt: null, rimAt: null, chipAt: null, [field]: i, termBy: p.id,
@@ -2293,6 +2315,15 @@ export default function DrillAnimator() {
               </div>
             );
           })()}
+          {/* a sauce pass lifts the puck over ice obstacles and bounces on landing */}
+          {from && from.kind === "pass" && from.at === i && (
+            <div className="hd-poprow">
+              <button className={`hd-mini${isSauce ? " on" : ""}`} onClick={doSauce}>
+                {isSauce ? "✓ Sauce pass ⤴" : "Sauce pass ⤴"}
+              </button>
+              <span style={{ fontSize: 11, color: "#8b99a8" }}>arcs up &amp; over obstacles</span>
+            </div>
+          )}
           {/* Shoot names its target like Pass names a receiver */}
           <div className="hd-poprow">
             <span>🥅 Shoot at</span>
@@ -2983,6 +3014,27 @@ export default function DrillAnimator() {
               })
               .map(p => {
               const dp = displayPos(p);
+              const lift = p.kind === "puck" ? sauceLift(p) : 0;
+              if (lift > 0.002) {
+                // a sauced puck floats above its shadow, riding higher + a touch
+                // bigger toward the peak; the shadow shrinks + fades as it rises
+                const ld = liftDir(), off = lift * LIFT_MAX;
+                const lp = { ...dp, x: dp.x + ld.x * off, y: dp.y + ld.y * off };
+                const gfx = iconXf(dp), lfx = iconXf(lp);
+                const k = 1 + 0.4 * lift;
+                return (
+                  <g key={p.id}>
+                    <g transform={gfx.t}>
+                      <ellipse cx={0} cy={0} rx={2.1 * (1 - 0.22 * lift)} ry={2.1 * (1 - 0.22 * lift)}
+                        fill="#0a0f14" opacity={0.24 * (1 - 0.5 * lift)} pointerEvents="none" />
+                    </g>
+                    <g transform={`translate(${lp.x} ${lp.y}) scale(${k}) translate(${-lp.x} ${-lp.y})`}>
+                      <PieceIcon p={p} pos={lp} xf={lfx.t} thDeg={lfx.th}
+                        selected={p.id === selectedId} swing={0} dim={animT > 0} onDown={e => pieceDown(e, p.id)} />
+                    </g>
+                  </g>
+                );
+              }
               const fx = iconXf(dp);
               return (
                 <PieceIcon key={p.id} p={p} pos={dp} xf={fx.t} thDeg={fx.th}
@@ -3231,6 +3283,8 @@ export default function DrillAnimator() {
             point 3 — the receiver's pace auto-syncs (omit <code>@3</code> to lead them instead).
             <code> pass=2:F1@3^PS1</code> is a <b>give-and-go off a passer</b>: F1 passes into
             rebounder PS1 and gets it right back at point 3 (tap a passer's id — marked ⟲ — in the <b>Pass to</b> row).
+            A trailing <code>!</code> (<code>pass=2:F2@3!</code>) is a <b>sauce pass</b> — the puck arcs up over ice obstacles
+            and bounces on landing (toggle <b>Sauce pass ⤴</b>).
             Point <b>0</b> is the starting spot (release before skating to point 1).
             <b>Shoot</b>, <b>Hard rim</b>, and <b>Chip</b> are terminal <b>releases</b> — the puck goes
             into space and lands loose. <code> shoot=4</code> fires at point 4 (targets the nearest

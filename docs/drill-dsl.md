@@ -102,6 +102,7 @@ Places a piece. `id` is any unique token (e.g. `F1`, `PK1`, `N2`).
 |---|---|
 | `pass=<pt>:<to>[@<recv>]` | Pass at point `pt` to player `to`, caught at their point `recv` |
 | `pass=<pt>:<to>[@<recv>]^<passer>` | Give-and-go: pass at `pt` into passer `<passer>`, which returns it to `to` (usually the passer themselves) at their point `recv`. In the app, tap a passer's id in the *Pass to* row (marked ⟲). |
+| `pass=<pt>:<to>[@<recv>]!` | Sauce (raised) pass — a trailing `!`. The puck arcs up over ice obstacles and bounces on landing (with a shadow under it in flight). Toggle *Sauce pass ⤴* on the pass. |
 | `shoot=<pt>` | Terminal shot at point `pt` — the puck caroms off the net and lands loose |
 | `rim=<pt>[~<deg>][*<ft>]` | Hard-rim **release** around the boards. `~<deg>` sets the direction, `*<ft>` the distance — or drag the on-ice handle at the end of the rim to set both. The puck lands loose. |
 | `chip=<pt>[~<deg>][*<ft>]` | Chip **release** into space (banks off the boards). `~<deg>` sets the direction (default: the chipper's facing), `*<ft>` the distance — or drag the on-ice handle. The puck lands loose. |
