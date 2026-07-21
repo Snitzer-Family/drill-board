@@ -101,10 +101,13 @@ export function parseDrill(text) {
               net = v;                                   // a net piece id (or left/right for legacy)
             } else if (key === "hold") {
               if (v.toLowerCase() === "line") holdLine = true;
-            } else if (key === "wait") {
-              // wait=<player>[@<pt>] — hold until that player reaches point <pt>
+            } else if (key === "wait" || key === "act") {
+              // wait=<player>[@<pt>] — hold until that player REACHES point <pt>.
+              // act=<player>[@<pt>] — hold until that player RELEASES the puck
+              // (pass/chip/rim/shot) at <pt>; no @<pt> = at any of their actions.
               const mw = /^([^@\s]+)(?:@(\d+))?$/.exec(v);
-              if (mw) wait = { on: mw[1], at: mw[2] ? parseInt(mw[2], 10) - 1 : 0 };
+              if (mw) wait = { on: mw[1], mode: key === "act" ? "action" : "waypoint",
+                at: mw[2] ? parseInt(mw[2], 10) - 1 : (key === "act" ? null : 0) };
             } else if (key === "face") {
               const n = parseFloat(v);
               if (!isNaN(n)) facing = n;
@@ -135,7 +138,9 @@ export function parseDrill(text) {
           if (t === "FWD" || t === "BWD") { dir = t.toLowerCase(); continue; }
           if (t === "STOP") { stop = num(); continue; }
           if (t === "JUMP") { jump = true; continue; }
-          if (t === "WAIT") { const on = tok[j++]; const at = parseInt(tok[j++], 10); waitOn = { on, at: (isNaN(at) ? 1 : at) - 1 }; continue; }
+          if (t === "WAIT") { const on = tok[j++]; const at = parseInt(tok[j++], 10); waitOn = { on, at: (isNaN(at) ? 1 : at) - 1, mode: "waypoint" }; continue; }
+          // WACT <player> <pt> — pause until that player releases the puck at <pt> (0 = any action)
+          if (t === "WACT") { const on = tok[j++]; const at = parseInt(tok[j++], 10); waitOn = { on, at: (isNaN(at) || at === 0) ? null : at - 1, mode: "action" }; continue; }
           if (t === "RATE") { rate = Math.max(0.1, num()); continue; }
           if (t === "NAME") { name = (tok[j++] || "").replace(/_/g, " ").trim() || null; continue; }
           if (t === "DESC") { dsc = unq(tok[j++]) || null; continue; }        // "free text" description
@@ -181,7 +186,9 @@ function segToStr(s) {
   }
   if (s.stop > 0) pre += `STOP ${f1(s.stop)} `;
   if (s.jump) pre += "JUMP ";
-  if (s.waitOn && s.waitOn.on) pre += `WAIT ${s.waitOn.on} ${(s.waitOn.at ?? 0) + 1} `;
+  if (s.waitOn && s.waitOn.on) pre += s.waitOn.mode === "action"
+    ? `WACT ${s.waitOn.on} ${s.waitOn.at != null ? s.waitOn.at + 1 : 0} `
+    : `WAIT ${s.waitOn.on} ${(s.waitOn.at ?? 0) + 1} `;
   if (s.rate && s.rate !== 1) pre += `RATE ${f2(s.rate)} `;
   if (s.dir === "bwd") pre += "BWD ";
   if (s.mode && s.mode !== "carry") pre += s.mode.toUpperCase() + " ";
@@ -230,7 +237,11 @@ export function serializeDrill(rink, pieces, title = "", desc = "") {
     const rotatable = p.kind === "net" || p.kind === "bumper" || p.kind === "deker" || p.kind === "passer" || p.kind === "stick" || (p.kind === "player" && !p.path.length);
     const fac = rotatable && p.facing ? ` face=${f1(p.facing)}` : "";
     const hld = p.kind === "player" && p.holdLine ? " hold=line" : "";
-    const wt = p.kind === "player" && p.wait && p.wait.on ? ` wait=${p.wait.on}@${(p.wait.at ?? 0) + 1}` : "";
+    const wt = p.kind === "player" && p.wait && p.wait.on
+      ? (p.wait.mode === "action"
+          ? ` act=${p.wait.on}${p.wait.at != null ? "@" + (p.wait.at + 1) : ""}`
+          : ` wait=${p.wait.on}@${(p.wait.at ?? 0) + 1}`)
+      : "";
     const gl = (p.kind === "net" || p.kind === "tire") && p.goalie ? " goalie" : "";
     const df = p.kind === "player" && p.defense ? " defense" : "";
     const siz = (p.kind === "net" || p.kind === "tire") && p.size && p.size !== 1 ? ` size=${f2(p.size)}` : "";

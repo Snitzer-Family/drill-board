@@ -45,6 +45,109 @@ const LABEL_COLORS = ["#14202b", "#d7263d", "#1f4fa3", "#1f8a4c", "#e0731d", "#7
 // actual travel, so a small drag near the player controls a long release
 const REL_MULT = 2.5;
 
+// player ids that RELEASE a puck somewhere (pass / chip / rim / shot) — the
+// candidates an Action delay trigger can fire on. A holder releases if it passes
+// the chain onward, or is the last holder and does the terminal action.
+function puckActors(pieces) {
+  const players = new Set(pieces.filter(p => p.kind === "player").map(p => p.id));
+  const out = new Set();
+  pieces.forEach(pk => {
+    if (pk.kind !== "puck") return;
+    const head = pk.carrier || (pk.pickup && pk.pickup.to);
+    const seq = head ? [head, ...(pk.transfers || []).map(t => t.to)] : (pk.transfers || []).map(t => t.to);
+    const nTrans = (pk.transfers || []).length;
+    const hasTerm = pk.shotAt != null || pk.rimAt != null || pk.chipAt != null;
+    seq.forEach((id, k) => { if ((k < nTrans || (k === nTrans && hasTerm)) && players.has(id)) out.add(id); });
+  });
+  return out;
+}
+
+// A reusable "Delay trigger" control shown under both players (delay the whole
+// route) and waypoints (pause mid-route). Three trigger types:
+//   timer    — wait a fixed number of seconds
+//   waypoint — wait until another player REACHES a chosen waypoint (arrival)
+//   action   — wait until another player RELEASES the puck (pass/chip/rim/shot)
+// `value` is normalized { mode, secs, on, at }; `onChange` gets the same shape.
+// `players` = every eligible trigger player (self excluded); `actorIds` = the
+// subset that release a puck (for Action mode).
+function DelayTrigger({ value, onChange, sub, players, actorIds, nameOf }) {
+  // mode is UI-local so switching to a type with no candidates still shows its
+  // hint; storage (via onChange) follows once a real trigger is chosen
+  const [uiMode, setUiMode] = useState(value.mode || "timer");
+  const mode = uiMode;
+  const wpPlayers = players.filter(q => q.path && q.path.length > 0);
+  const actPlayers = players.filter(q => actorIds.has(q.id));
+  const trig = value.on ? players.find(q => q.id === value.on) : null;
+
+  const pickMode = m => {
+    setUiMode(m);
+    if (m === "timer") { onChange({ mode: "timer", secs: value.secs || 0 }); return; }
+    const pool = m === "action" ? actPlayers : wpPlayers;
+    const on = (value.on && pool.some(q => q.id === value.on)) ? value.on : (pool[0] && pool[0].id) || null;
+    if (!on) return;                                     // empty pool → show the hint, leave storage
+    const tp = pool.find(q => q.id === on);
+    const at = m === "action" ? null : (tp ? Math.max(0, tp.path.length - 1) : -1);
+    onChange({ mode: m, on, at });
+  };
+  const setOn = id => {
+    const tp = players.find(q => q.id === id);
+    const at = mode === "action" ? null : Math.max(0, ((tp && tp.path.length) || 1) - 1);
+    onChange({ ...value, mode, on: id, at });
+  };
+  const hint = t => <div className="hd-poprow"><span style={{ fontSize: 11, color: "#8b99a8" }}>{t}</span></div>;
+  const wpSelect = () => (
+    <select className="hd-select on" value={value.at == null ? -1 : value.at}
+      onChange={e => onChange({ ...value, at: parseInt(e.target.value, 10) })} disabled={!trig}>
+      <option value={-1}>start</option>
+      {trig && trig.path.map((s, wi) => <option key={wi} value={wi}>{wi + 2}</option>)}
+    </select>
+  );
+
+  return (
+    <>
+      <div className="hd-poprow">
+        <span>Delay trigger</span>
+        {[["timer", "Timer"], ["waypoint", "Waypoint"], ["action", "Action"]].map(([m, lab]) => (
+          <button key={m} className={`hd-mini${mode === m ? " on" : ""}`} onClick={() => pickMode(m)}>{lab}</button>
+        ))}
+      </div>
+      {mode === "timer" && (
+        <div className="hd-poprow">
+          <span>{sub} for</span>
+          <Stepper value={value.secs || 0} onChange={v => onChange({ mode: "timer", secs: v })} />
+          <span style={{ fontSize: 11, color: "#8b99a8" }}>seconds</span>
+        </div>
+      )}
+      {mode === "waypoint" && (wpPlayers.length ? (
+        <div className="hd-poprow">
+          <span>until</span>
+          <select className="hd-select on" value={value.on || ""} onChange={e => setOn(e.target.value)}>
+            {!value.on && <option value="" disabled>— player —</option>}
+            {wpPlayers.map(o => <option key={o.id} value={o.id}>{nameOf(o.id)}</option>)}
+          </select>
+          <span>reaches</span>
+          {wpSelect()}
+        </div>
+      ) : hint("Add another player with a route to trigger off."))}
+      {mode === "action" && (actPlayers.length ? (
+        <div className="hd-poprow">
+          <span>until</span>
+          <select className="hd-select on" value={value.on || ""} onChange={e => setOn(e.target.value)}>
+            {!value.on && <option value="" disabled>— player —</option>}
+            {actPlayers.map(o => <option key={o.id} value={o.id}>{nameOf(o.id)}</option>)}
+          </select>
+          <span>releases at</span>
+          <select className="hd-select on" value={value.at == null ? "any" : value.at}
+            onChange={e => onChange({ ...value, at: e.target.value === "any" ? null : parseInt(e.target.value, 10) })}>
+            <option value="any">Any action</option>
+            {trig && trig.path.map((s, wi) => <option key={wi} value={wi}>{wi + 2}</option>)}
+          </select>
+        </div>
+      ) : hint("No player releases a puck yet (add a pass, shot, rim, or chip)."))}
+    </>
+  );
+}
+
 /* ============================================================
    HOCKEY DRILL ANIMATOR — v5 (full-screen ice)
    Coordinates: real feet. x 0..200 (goal line to goal line),
@@ -60,6 +163,8 @@ const REL_MULT = 2.5;
      PASS / SHOT / CARRY   puck speed class (3x / 6x / 1x)
      BWD / FWD             skating direction (BWD draws zigzag)
      STOP <sec>            hold at this leg's START point
+     WAIT <player> <pt>    hold until that player REACHES <pt>
+     WACT <player> <pt>    hold until that player RELEASES the puck at <pt> (0 = any action)
      RATE <mult>           speed multiplier for this leg
    hand=L mirrors the player's stick. on=F1 puts a puck on that
    player's blade; it releases when the carrier reaches the
@@ -2969,38 +3074,24 @@ export default function DrillAnimator() {
                   <span style={{ fontSize: 11, color: "#8b99a8" }}>waits for the puck to enter the zone</span>
                 </div>
               )}
-              {/* start trigger: hold at the start until another player reaches a
-                  waypoint (i.e. after they pass / shoot / arrive there) */}
-              {p.path.length > 0 && !p.defense && (() => {
-                const others = pieces.filter(q => q.kind === "player" && q.id !== p.id && q.path.length > 0);
-                if (!others.length) return null;
-                const w = p.wait;
-                const trig = w && pieces.find(q => q.id === w.on && q.kind === "player");
-                return (
-                  <>
-                    <div className="hd-poprow">
-                      <span>Waits for</span>
-                      <button className={`hd-mini${!w ? " on" : ""}`} onClick={() => updateById(p.id, { wait: null })}>None</button>
-                      {others.map(o => (
-                        <button key={o.id} className={`hd-mini${w && w.on === o.id ? " on" : ""}`}
-                          onClick={() => updateById(p.id, { wait: w && w.on === o.id ? null : { on: o.id, at: Math.max(0, o.path.length - 1) } })}>
-                          {nameOf(o.id)}
-                        </button>
-                      ))}
-                    </div>
-                    {trig && trig.path.length > 0 && (
-                      <div className="hd-poprow">
-                        <span>to reach</span>
-                        <button className={`hd-mini${w.at < 0 ? " on" : ""}`} onClick={() => updateById(p.id, { wait: { ...w, at: -1 } })}>start</button>
-                        {trig.path.map((s, wi) => (
-                          <button key={wi} className={`hd-mini${w.at === wi ? " on" : ""}`}
-                            onClick={() => updateById(p.id, { wait: { ...w, at: wi } })}>{wi + 2}</button>
-                        ))}
-                      </div>
-                    )}
-                  </>
-                );
-              })()}
+              {/* unified delay trigger: hold the whole route at the start until a
+                  timer, another player's arrival, or another player's puck action */}
+              {p.path.length > 0 && !p.defense && (
+                <DelayTrigger
+                  sub="Delay start"
+                  players={pieces.filter(q => q.kind === "player" && q.id !== p.id)}
+                  actorIds={puckActors(pieces)}
+                  nameOf={nameOf}
+                  value={p.wait && p.wait.on
+                    ? { mode: p.wait.mode || "waypoint", on: p.wait.on, at: p.wait.at, secs: 0 }
+                    : { mode: "timer", secs: (p.path[0] && p.path[0].stop) || 0 }}
+                  onChange={v => {
+                    if (v.mode === "timer") { updateById(p.id, { wait: null }); updateSeg(p.id, 0, { stop: v.secs || 0 }); }
+                    else if (v.on) { updateById(p.id, { wait: { on: v.on, at: v.at, mode: v.mode } }); updateSeg(p.id, 0, { stop: 0 }); }
+                    else updateById(p.id, { wait: null });
+                  }}
+                />
+              )}
               <div className="hd-poprow">
                 <button className={`hd-mini${p.defense ? " on" : ""}`}
                   onClick={() => updateById(p.id, { defense: !p.defense })}>
@@ -3065,7 +3156,7 @@ export default function DrillAnimator() {
                 onChange={e => updateById(p.id, { speed: parseFloat(e.target.value) })} />
             </div>
           )}
-          {p.path.length > 0 && (
+          {p.kind !== "player" && p.path.length > 0 && (
             <div className="hd-poprow">
               <span>Start delay</span>
               <Stepper value={p.path[0].stop || 0} onChange={v => updateSeg(p.id, 0, { stop: v })} />
@@ -3158,43 +3249,31 @@ export default function DrillAnimator() {
           )}
           {next ? (
             <>
-              {/* Pause here: a fixed time, or hold until another player reaches a
-                  waypoint (i.e. after they pass / shoot / arrive there) */}
-              {(() => {
-                const others = p.kind === "player" ? pieces.filter(q => q.kind === "player" && q.id !== p.id && q.path.length > 0) : [];
-                const w = next.waitOn;
-                const trig = w && pieces.find(q => q.id === w.on && q.kind === "player");
-                return (
-                  <>
-                    <div className="hd-poprow">
-                      <span>Pause here</span>
-                      <button className={`hd-mini${!w ? " on" : ""}`} onClick={() => updateSeg(p.id, i + 1, { waitOn: null })}>Time</button>
-                      {others.map(o => (
-                        <button key={o.id} className={`hd-mini${w && w.on === o.id ? " on" : ""}`}
-                          onClick={() => updateSeg(p.id, i + 1, { waitOn: w && w.on === o.id ? null : { on: o.id, at: Math.max(0, o.path.length - 1) }, stop: 0 })}>
-                          {nameOf(o.id)}
-                        </button>
-                      ))}
-                    </div>
-                    {!w ? (
-                      <div className="hd-poprow">
-                        <span>for</span>
-                        <Stepper value={next.stop || 0} onChange={v => updateSeg(p.id, i + 1, { stop: v })} />
-                        <span style={{ fontSize: 11, color: "#8b99a8" }}>seconds</span>
-                      </div>
-                    ) : trig && trig.path.length > 0 && (
-                      <div className="hd-poprow">
-                        <span>until {nameOf(w.on)} reaches</span>
-                        <button className={`hd-mini${w.at < 0 ? " on" : ""}`} onClick={() => updateSeg(p.id, i + 1, { waitOn: { ...w, at: -1 } })}>start</button>
-                        {trig.path.map((s, wi) => (
-                          <button key={wi} className={`hd-mini${w.at === wi ? " on" : ""}`}
-                            onClick={() => updateSeg(p.id, i + 1, { waitOn: { ...w, at: wi } })}>{wi + 2}</button>
-                        ))}
-                      </div>
-                    )}
-                  </>
-                );
-              })()}
+              {/* unified delay trigger: pause here on a timer, another player's
+                  arrival, or another player's puck action (players only — a
+                  puck's mid-route waitOn isn't resolved by the timing engine) */}
+              {p.kind === "player" ? (
+                <DelayTrigger
+                  sub="Pause here"
+                  players={pieces.filter(q => q.kind === "player" && q.id !== p.id)}
+                  actorIds={puckActors(pieces)}
+                  nameOf={nameOf}
+                  value={next.waitOn && next.waitOn.on
+                    ? { mode: next.waitOn.mode || "waypoint", on: next.waitOn.on, at: next.waitOn.at, secs: 0 }
+                    : { mode: "timer", secs: next.stop || 0 }}
+                  onChange={v => {
+                    if (v.mode === "timer") updateSeg(p.id, i + 1, { waitOn: null, stop: v.secs || 0 });
+                    else if (v.on) updateSeg(p.id, i + 1, { waitOn: { on: v.on, at: v.at, mode: v.mode }, stop: 0 });
+                    else updateSeg(p.id, i + 1, { waitOn: null });
+                  }}
+                />
+              ) : (
+                <div className="hd-poprow">
+                  <span>Pause here for</span>
+                  <Stepper value={next.stop || 0} onChange={v => updateSeg(p.id, i + 1, { stop: v })} />
+                  <span style={{ fontSize: 11, color: "#8b99a8" }}>seconds</span>
+                </div>
+              )}
               {p.kind === "player" && (
                 <div className="hd-poprow">
                   <button className={`hd-mini${next.jump ? " on" : ""}`}
@@ -3924,7 +4003,7 @@ export default function DrillAnimator() {
             (a <b>net</b> takes <code>face=deg</code>, <code>goalie</code>, and <code>size</code> — <code>1</code> NHL / <code>0.62</code> mite; pucks
             enter only from the front and bounce off its sides/back) ·
             <b> PATH</b> id segments (<b>L</b> x,y · <b>Q</b> cx,cy x,y · <b>C</b> c1x,c1y c2x,c2y x,y).
-            Modifiers before a segment: <b>PASS</b>/<b>SHOT</b>, <b>BWD</b>, <b>STOP n</b>, <b>RATE n</b>,
+            Modifiers before a segment: <b>PASS</b>/<b>SHOT</b>, <b>BWD</b>, <b>STOP n</b>, <b>WAIT p n</b>, <b>WACT p n</b>, <b>RATE n</b>,
             <b> NAME word</b> (names that waypoint for presentation text; underscores show as spaces),
             <b> DESC "text"</b> (a waypoint description) with <b>SHOW</b> auto|preso|label — <b>auto</b> names it
             in the play's captions, <b>preso</b> reads it out during presentation, <b>label</b> pins it on the
@@ -3950,6 +4029,10 @@ export default function DrillAnimator() {
             <code> pickup=F2@3</code> — a loose puck hops onto F2's blade at their point 3.
             <code> face=45</code> sets a stationary player's heading (degrees).
             <code> hold=line</code> makes a player wait at the blue line until the puck enters the zone.
+            <b> Delay trigger</b> (on the player popup, and any waypoint) holds the route until a
+            <b> Timer</b> (n seconds), a <b>Waypoint</b> (another player reaches a point — <code>wait=F2@3</code> /
+            <code>WAIT F2 3</code>), or an <b>Action</b> (another player passes/chips/rims/shoots — <code>act=F2</code> /
+            <code>WACT F2 0</code>) fires.
           </div>
         </div>
       )}

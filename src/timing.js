@@ -81,32 +81,68 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
     const warp = {};
     const plans = {};
     const rel = {};
-    // resolve per-player start waits BEFORE the puck plans (a waiting player's
-    // passes/shots must launch at their delayed time). A wait fires when the
-    // trigger player reaches waypoint `at`; chains (A waits B waits C) resolve
-    // over a few passes. rawTo ignores start-waits so the base times are stable.
+    // A delay trigger can fire on a puck ACTION (pass/chip/rim/shot). Those
+    // release times come out of the puck plan, which itself depends on the holds
+    // — so resolve holds → plan pucks → feed the releases back, in a bounded
+    // fixpoint. A drill with no action trigger runs a single pass (identical to
+    // the old one-shot ordering); the loop only iterates when an action trigger
+    // needs the previous plan's release times.
+    const hasActionTrigger = pieces.some(p => p.kind === "player" && (
+      (p.wait && p.wait.on && p.wait.mode === "action") ||
+      p.path.some(s => s.waitOn && s.waitOn.on && s.waitOn.mode === "action")));
+    let sw = {}, tp = {};
+    let events = [];            // puck releases from the last plan: { by, at, t, kind }
+    const evSig = a => a.map(e => `${e.by}/${e.at}/${e.kind}/${(e.t || 0).toFixed(3)}`).sort().join("|");
+    // earliest release by actor `on` (optionally at a specific waypoint `at`);
+    // null → that actor never performs a matching action, so the hold is 0
+    const actionTimeOf = (on, at) => {
+      let best = Infinity;
+      events.forEach(e => { if (e.by === on && (at == null || e.at === at) && e.t < best) best = e.t; });
+      return isFinite(best) ? best : null;
+    };
     const rawTo = (p, at) => { let t = 0; for (let i = 0; i < p.path.length; i++) { if (i > at) break; t += (p.path[i].stop || 0) + effMove(p, p.path[i], i, warp); } return t; };
-    const sw = {};
+    let newEvents = [];
+    for (let outer = 0, OUTER = hasActionTrigger ? 6 : 1; outer < OUTER; outer++) {
+    // fresh warp/plans each pass so hold resolution always starts from the same
+    // (empty-warp) point the old single-pass code did
+    for (const k in warp) delete warp[k];
+    for (const k in plans) delete plans[k];
+    for (const k in rel) delete rel[k];
+    // resolve per-player start waits BEFORE the puck plans (a waiting player's
+    // passes/shots must launch at their delayed time). A waypoint trigger fires
+    // when the trigger player reaches waypoint `at`; an action trigger fires at
+    // that player's release time (from the previous pass's plan). Chains
+    // (A waits B waits C) resolve over a few passes.
+    const swNew = {};
     for (let pass = 0; pass <= pieces.length; pass++) {
       let changed = false;
       pieces.forEach(p => {
         if (p.kind !== "player" || !p.wait || !p.wait.on) return;
-        const trig = pieces.find(q => q.id === p.wait.on && q.kind === "player");
-        if (!trig || trig.id === p.id) return;
-        const at = p.wait.at == null ? trig.path.length - 1 : Math.max(-1, Math.min(p.wait.at, trig.path.length - 1));
-        const w = (sw[trig.id] || 0) + (at < 0 ? 0 : rawTo(trig, at));
-        if (Math.abs((sw[p.id] || 0) - w) > 1e-6) { sw[p.id] = w; changed = true; }
+        let w;
+        if (p.wait.mode === "action") {
+          if (p.wait.on === p.id) return;                  // no self-trigger
+          const t = actionTimeOf(p.wait.on, p.wait.at);   // absolute release time
+          w = t == null ? 0 : t;                           // we sit at the start, so the hold IS t
+        } else {
+          const trig = pieces.find(q => q.id === p.wait.on && q.kind === "player");
+          if (!trig || trig.id === p.id) return;
+          const at = p.wait.at == null ? trig.path.length - 1 : Math.max(-1, Math.min(p.wait.at, trig.path.length - 1));
+          w = (swNew[trig.id] || 0) + (at < 0 ? 0 : rawTo(trig, at));
+        }
+        if (Math.abs((swNew[p.id] || 0) - w) > 1e-6) { swNew[p.id] = w; changed = true; }
       });
       if (!changed) break;
     }
+    sw = swNew;
     currentStartWait = sw;
-    // trigger pauses: a waypoint holds until another player reaches a waypoint.
-    // The pause length = max(0, trigger-arrival − our-arrival at that waypoint).
-    // rawArr includes start-waits + fixed stops + already-resolved trig pauses.
-    const tp = {};
+    // trigger pauses: a waypoint holds until the trigger player reaches a
+    // waypoint (arrival) or performs a puck action (release). The pause length
+    // = max(0, trigger-time − our-arrival at that waypoint). rawArr includes
+    // start-waits + fixed stops + already-resolved trig pauses.
+    const tpNew = {};
     const rawArr = (p, at) => {
       let t = (sw[p.id] || 0);
-      for (let i = 0; i < p.path.length; i++) { if (i > at) break; t += (p.path[i].stop || 0) + (tp[p.id + "/" + i] || 0) + effMove(p, p.path[i], i, warp); }
+      for (let i = 0; i < p.path.length; i++) { if (i > at) break; t += (p.path[i].stop || 0) + (tpNew[p.id + "/" + i] || 0) + effMove(p, p.path[i], i, warp); }
       return t;
     };
     for (let pass = 0; pass <= pieces.length + 1; pass++) {
@@ -115,19 +151,29 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
         if (p.kind !== "player" || !p.path.length) return;
         p.path.forEach((s, i) => {
           if (!s.waitOn || !s.waitOn.on) return;
-          const trig = pieces.find(q => q.id === s.waitOn.on && q.kind === "player");
-          if (!trig || trig.id === p.id) return;
-          const at = s.waitOn.at == null ? trig.path.length - 1 : Math.max(-1, Math.min(s.waitOn.at, trig.path.length - 1));
-          const trigT = at < 0 ? (sw[trig.id] || 0) : rawArr(trig, at);
+          const key = p.id + "/" + i;
+          let trigT;
+          if (s.waitOn.mode === "action") {
+            if (s.waitOn.on === p.id) return;              // no self-trigger
+            const t = actionTimeOf(s.waitOn.on, s.waitOn.at);
+            if (t == null) { if (tpNew[key]) { tpNew[key] = 0; changed = true; } return; }
+            trigT = t;
+          } else {
+            const trig = pieces.find(q => q.id === s.waitOn.on && q.kind === "player");
+            if (!trig || trig.id === p.id) return;
+            const at = s.waitOn.at == null ? trig.path.length - 1 : Math.max(-1, Math.min(s.waitOn.at, trig.path.length - 1));
+            trigT = at < 0 ? (sw[trig.id] || 0) : rawArr(trig, at);
+          }
           const arriveT = rawArr(p, i - 1);        // the pause sits at the start of segment i (= the prior waypoint)
           const dur = Math.max(0, trigT - arriveT);
-          const key = p.id + "/" + i;
-          if (Math.abs((tp[key] || 0) - dur) > 1e-6) { tp[key] = dur; changed = true; }
+          if (Math.abs((tpNew[key] || 0) - dur) > 1e-6) { tpNew[key] = dur; changed = true; }
         });
       });
       if (!changed) break;
     }
+    tp = tpNew;
     currentTrigPause = tp;
+    newEvents = [];    // puck releases collected as the plans below fire them
     const netSh = solidShapes(pieces);        // solid obstacles pucks carom off (nets + bumpers)
     const bumpSh = bumperShapes(pieces);      // a flat pass across a bumper auto-lifts (sauces) over it
     pieces.forEach(pk => {
@@ -211,6 +257,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
         const launchT = (cur.path.length && shootIdx >= 0)
           ? Math.max(tBase, routeTimeW(cur, warp, Math.min(shootIdx, cur.path.length - 1)))
           : tBase;
+        newEvents.push({ by: cur.id, at: shootIdx, t: launchT, kind: "shot" });
         const launch = bladeAt(cur, launchT, warp);
         // target the nearest net or passer (respecting a forced side), else default;
         // a passer has no goalie, so shots at it always take the carom/rebound path.
@@ -345,6 +392,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
         if (tr.kind === "rim" || tr.kind === "chip") {        // rim the boards / chip (to self ok)
           const launchT = (cur.path.length && tr.at >= 0)
             ? Math.max(tBase, routeTimeW(cur, warp, Math.min(tr.at, cur.path.length - 1))) : tBase;
+          newEvents.push({ by: cur.id, at: tr.at, t: launchT, kind: tr.kind });
           const lb = bladeAt(cur, launchT, warp);
           const launch = boards.clampInside(lb.x, lb.y);       // a blade past the boards → no path
           let anchor, gj = -1;
@@ -450,6 +498,9 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
         const sauce = !!tr.sauce || (bumpSh.length > 0 && segCrossesNet(launch, target, bumpSh));
         legs.push({ type: "fly", by: byId, x0: launch.x, y0: launch.y, x1: target.x, y1: target.y, t0: launchT, t1: tArr, sauce });
         legs.push({ type: "ride", id: rec.id, t0: tArr, catch: true });
+        // the carrier's own release (a `via` bounces off a passer first, so the
+        // carrier lets go earlier, at launch0T)
+        newEvents.push({ by: cur.id, at: tr.at, t: tr.via ? launch0T : launchT, kind: "pass" });
         cur = rec;
         tBase = tArr;
       });
@@ -459,6 +510,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
       else if (pk.rimAt != null && cur) {              // terminal hard rim around the boards
         const at = pk.rimAt;
         const launchT = (cur.path.length && at >= 0) ? Math.max(tBase, routeTimeW(cur, warp, Math.min(at, cur.path.length - 1))) : tBase;
+        newEvents.push({ by: cur.id, at, t: launchT, kind: "rim" });
         const lb = bladeAt(cur, launchT, warp);
         const launch = boards.clampInside(lb.x, lb.y);           // a blade past the boards → no path
         const dist = pk.rimDist != null ? pk.rimDist : 65;       // handle-set travel distance
@@ -467,6 +519,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
       } else if (pk.chipAt != null && cur) {           // terminal chip into space (bounces)
         const at = pk.chipAt;
         const launchT = (cur.path.length && at >= 0) ? Math.max(tBase, routeTimeW(cur, warp, Math.min(at, cur.path.length - 1))) : tBase;
+        newEvents.push({ by: cur.id, at, t: launchT, kind: "chip" });
         const lb = bladeAt(cur, launchT, warp);
         const launch = boards.clampInside(lb.x, lb.y);           // a blade past the boards → no path
         const h = chipHeading(cur, launchT, pk.chipAim);
@@ -487,6 +540,11 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
       plans[pk.id] = { legs, final: cur.id };
       rel[pk.id] = relT;
     });
+    // action triggers fire on these releases; loop until the fed-back times settle
+    const converged = evSig(newEvents) === evSig(events);
+    events = newEvents;
+    if (converged) break;
+    }   // end action-trigger fixpoint loop
     planCache.current = { key: pieces, pace, sig: lenSig, seed, warp, plans, rel, holds: {}, startWait: sw, trigPause: tp };
     currentHolds = {};
 
