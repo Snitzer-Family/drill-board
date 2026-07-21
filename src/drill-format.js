@@ -119,14 +119,14 @@ export function parseDrill(text) {
         const id = tok[1];
         const p = byId[id];
         if (!p) throw new Error(`PATH for unknown piece "${id}"`);
-        let j = 2, mode = "carry", dir = "fwd", stop = 0, rate = 1, name = null, waitOn = null;
+        let j = 2, mode = "carry", dir = "fwd", stop = 0, rate = 1, name = null, waitOn = null, jump = false;
         let dsc = null, dmode = null, dsize = null, dox = null, doy = null;   // waypoint description/label
         const num = () => { const v = parseFloat(tok[j++]); if (isNaN(v)) throw new Error("bad number in PATH"); return v; };
         const push = seg => {
-          p.path.push({ ...seg, mode, dir, stop, rate, ...(name ? { name } : {}), ...(waitOn ? { waitOn } : {}),
+          p.path.push({ ...seg, mode, dir, stop, rate, ...(name ? { name } : {}), ...(waitOn ? { waitOn } : {}), ...(jump ? { jump: true } : {}),
             ...(dsc ? { desc: dsc } : {}), ...(dmode ? { dmode } : {}), ...(dsize != null ? { dsize } : {}),
             ...(dox != null ? { dox, doy } : {}) });
-          mode = "carry"; dir = "fwd"; stop = 0; rate = 1; name = null; waitOn = null;
+          mode = "carry"; dir = "fwd"; stop = 0; rate = 1; name = null; waitOn = null; jump = false;
           dsc = null; dmode = null; dsize = null; dox = null; doy = null;
         };
         while (j < tok.length) {
@@ -134,6 +134,7 @@ export function parseDrill(text) {
           if (t === "CARRY" || t === "PASS" || t === "SHOT") { mode = t.toLowerCase(); continue; }
           if (t === "FWD" || t === "BWD") { dir = t.toLowerCase(); continue; }
           if (t === "STOP") { stop = num(); continue; }
+          if (t === "JUMP") { jump = true; continue; }
           if (t === "WAIT") { const on = tok[j++]; const at = parseInt(tok[j++], 10); waitOn = { on, at: (isNaN(at) ? 1 : at) - 1 }; continue; }
           if (t === "RATE") { rate = Math.max(0.1, num()); continue; }
           if (t === "NAME") { name = (tok[j++] || "").replace(/_/g, " ").trim() || null; continue; }
@@ -169,6 +170,7 @@ function segToStr(s) {
     }
   }
   if (s.stop > 0) pre += `STOP ${f1(s.stop)} `;
+  if (s.jump) pre += "JUMP ";
   if (s.waitOn && s.waitOn.on) pre += `WAIT ${s.waitOn.on} ${(s.waitOn.at ?? 0) + 1} `;
   if (s.rate && s.rate !== 1) pre += `RATE ${f2(s.rate)} `;
   if (s.dir === "bwd") pre += "BWD ";

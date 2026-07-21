@@ -970,6 +970,20 @@ export default function DrillAnimator() {
   }
   const LIFT_MAX = 4.6;                         // peak visual height, feet
   const liftDir = () => { const r = (screenRot * Math.PI) / 180; return { x: -Math.sin(r), y: -Math.cos(r) }; };
+  // a player's jump hop (0..1..0) at the current frame: a waypoint marked `jump`
+  // makes them leap as they pass it — they grow over a sticky ground shadow, then
+  // shrink back. Centred on the arrival time at that waypoint.
+  const JUMP_DUR = 0.62;
+  function jumpLift(p) {
+    if (animT <= 0 || p.kind !== "player" || !p.path.length) return 0;
+    const e = animT * totalTime;
+    for (let i = 0; i < p.path.length; i++) {
+      if (!p.path[i].jump) continue;
+      const tw = waypointTime(p, i - 1);        // the jump sits at the start of segment i
+      if (e >= tw - JUMP_DUR / 2 && e <= tw + JUMP_DUR / 2) return Math.sin(Math.PI * ((e - (tw - JUMP_DUR / 2)) / JUMP_DUR));
+    }
+    return 0;
+  }
 
   /* ----- coords ----- */
   function svgPt(evt) {
@@ -2919,6 +2933,15 @@ export default function DrillAnimator() {
                   </>
                 );
               })()}
+              {p.kind === "player" && (
+                <div className="hd-poprow">
+                  <button className={`hd-mini${next.jump ? " on" : ""}`}
+                    onClick={() => updateSeg(p.id, i + 1, { jump: !next.jump })}>
+                    <Icon name={next.jump ? "check" : "sauce"} size={15} /> Jump here
+                  </button>
+                  <span style={{ fontSize: 11, color: "#8b99a8" }}>hops as they pass this spot</span>
+                </div>
+              )}
               <div className="hd-poprow">
                 <span>Speed after ×{(next.rate || 1).toFixed(2)}</span>
                 <input type="range" min={0.5} max={2} step={0.05} value={next.rate || 1} style={{ flex: 1, minWidth: 70 }}
@@ -3308,23 +3331,26 @@ export default function DrillAnimator() {
               })
               .map(p => {
               const dp = displayPos(p);
-              const lift = p.kind === "puck" ? sauceLift(p) : 0;
+              const isJump = p.kind === "player";
+              const lift = p.kind === "puck" ? sauceLift(p) : isJump ? jumpLift(p) : 0;
               if (lift > 0.002) {
-                // a sauced puck floats above its shadow, riding higher + a touch
-                // bigger toward the peak; the shadow shrinks + fades as it rises
-                const ld = liftDir(), off = lift * LIFT_MAX;
+                // a sauced puck / jumping player floats above a sticky ground
+                // shadow, riding higher + bigger toward the peak; the shadow
+                // shrinks + fades as it rises. A jump grows the player more.
+                const ld = liftDir(), off = lift * (isJump ? 2.8 : LIFT_MAX);
                 const lp = { ...dp, x: dp.x + ld.x * off, y: dp.y + ld.y * off };
                 const gfx = iconXf(dp), lfx = iconXf(lp);
-                const k = 1 + 0.4 * lift;
+                const k = 1 + (isJump ? 0.55 : 0.4) * lift;
+                const shR = isJump ? 3.7 : 2.1, shOp = (isJump ? 0.2 : 0.24) * (1 - 0.55 * lift);
                 return (
                   <g key={p.id}>
                     <g transform={gfx.t}>
-                      <ellipse cx={0} cy={0} rx={2.1 * (1 - 0.22 * lift)} ry={2.1 * (1 - 0.22 * lift)}
-                        fill="#0a0f14" opacity={0.24 * (1 - 0.5 * lift)} pointerEvents="none" />
+                      <ellipse cx={isJump ? -0.5 : 0} cy={0} rx={shR * (1 - 0.2 * lift)} ry={shR * (1 - 0.2 * lift)}
+                        fill="#0a0f14" opacity={shOp} pointerEvents="none" />
                     </g>
                     <g transform={`translate(${lp.x} ${lp.y}) scale(${k}) translate(${-lp.x} ${-lp.y})`}>
-                      <PieceIcon p={p} pos={lp} xf={lfx.t} thDeg={lfx.th}
-                        selected={p.id === selectedId} swing={0} dim={animT > 0} onDown={e => pieceDown(e, p.id)} />
+                      <PieceIcon p={p} pos={lp} xf={lfx.t} thDeg={lfx.th} noShadow={isJump}
+                        selected={p.id === selectedId} swing={isJump ? displaySwing(p) : 0} dim={animT > 0} onDown={e => pieceDown(e, p.id)} />
                     </g>
                   </g>
                 );
