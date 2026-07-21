@@ -3166,14 +3166,16 @@ export default function DrillAnimator() {
     let style;
     if (minable) {
       // player/waypoint popups pin to the TOP of the ice, clear of the piece +
-      // its handles so curve handles are reachable; drag the header to move it
+      // its handles so curve handles are reachable; drag the header to move it.
+      // The mobile play dock floats top-centre (~62px tall), so drop the header
+      // just BELOW it — never directly behind the transport controls.
       up = false;
       const lx = Math.max(16, Math.min(84, a.lx));
       style = {
         left: `${lx}%`,
-        top: `calc(6px + env(safe-area-inset-top))`,
+        top: `calc(env(safe-area-inset-top) + var(--hd-pintop, 78px))`,
         transform: `translateX(-50%) translate(${popOff.x}px, ${popOff.y}px)`,
-        maxHeight: collapsed ? "none" : "58%",
+        maxHeight: collapsed ? "none" : "52%",
       };
     } else {
       const maxH = Math.max(22, (up ? roomAbove : roomBelow) - gap);

@@ -53,6 +53,8 @@ export const STYLES = `
         @media (pointer: fine) and (min-width: 760px) {
           .hd-playdock { display:none; }
           .hd-barplay { display:flex; }
+          /* no floating top dock on desktop — pinned popups can ride the top edge */
+          :root { --hd-pintop: 10px; }
         }
         .hd-barhint { flex:1 1 0; min-width:0; font-size:12px; color:#8b99a8; text-align:right;
           white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -133,7 +135,7 @@ export const STYLES = `
         .hd-x:first-of-type { margin-left:auto; }
         .hd-grip { display:inline-flex; align-items:center; }
         input[type=range] { accent-color:#d7263d; height:30px; }
-        .hd-pop.pinned { z-index:43; }   /* over the play dock while editing */
+        .hd-pop.pinned { z-index:43; }   /* just under the play dock, never behind it */
         .hd-pop { position:absolute; z-index:20; width:220px; background:#1a222c; border:1px solid #33404f;
           border-radius:12px; padding:10px 12px; box-shadow:0 8px 24px rgba(0,0,0,.5);
           display:flex; flex-direction:column; gap:8px;
