@@ -3158,21 +3158,35 @@ export default function DrillAnimator() {
     // open toward the side of the anchor with more room, and cap the height to
     // that room (with margins for the top play-dock and the bottom) so a tall
     // popup scrolls internally instead of running off the top of the screen
-    const topPad = 12, botPad = 5, gap = 3;           // % of the ice (gap = anchor offset below)
-    const roomAbove = a.ty - topPad, roomBelow = 100 - a.ty - botPad;
-    const up = roomAbove >= roomBelow;
-    const maxH = Math.max(22, (up ? roomAbove : roomBelow) - gap);
-    const shift = a.lx < 22 ? "-12%" : a.lx > 78 ? "-88%" : "-50%";
-    const style = {
-      left: `${a.lx}%`,
-      transform: `translateX(${shift}) translate(${popOff.x}px, ${popOff.y}px)`,
-      maxHeight: `${maxH}%`,
-      ...(up ? { bottom: `${100 - a.ty + gap}%` } : { top: `${a.ty + gap}%` }),
-    };
     const minable = !!(popup.type === "point" || (popup.type === "piece" && p && p.kind === "player"));
     const collapsed = minable && popMin;
+    const topPad = 12, botPad = 5, gap = 3;           // % of the ice (gap = anchor offset below)
+    const roomAbove = a.ty - topPad, roomBelow = 100 - a.ty - botPad;
+    let up = roomAbove >= roomBelow;
+    let style;
+    if (minable) {
+      // player/waypoint popups pin to the TOP of the ice, clear of the piece +
+      // its handles so curve handles are reachable; drag the header to move it
+      up = false;
+      const lx = Math.max(16, Math.min(84, a.lx));
+      style = {
+        left: `${lx}%`,
+        top: `calc(6px + env(safe-area-inset-top))`,
+        transform: `translateX(-50%) translate(${popOff.x}px, ${popOff.y}px)`,
+        maxHeight: collapsed ? "none" : "58%",
+      };
+    } else {
+      const maxH = Math.max(22, (up ? roomAbove : roomBelow) - gap);
+      const shift = a.lx < 22 ? "-12%" : a.lx > 78 ? "-88%" : "-50%";
+      style = {
+        left: `${a.lx}%`,
+        transform: `translateX(${shift}) translate(${popOff.x}px, ${popOff.y}px)`,
+        maxHeight: `${maxH}%`,
+        ...(up ? { bottom: `${100 - a.ty + gap}%` } : { top: `${a.ty + gap}%` }),
+      };
+    }
     return (
-      <div className={`hd-pop${up ? " up" : ""}`} style={collapsed ? { ...style, maxHeight: "none" } : style} ref={popRef}
+      <div className={`hd-pop${up ? " up" : ""}${minable ? " pinned" : ""}`} style={style} ref={popRef}
         onPointerDown={e => e.stopPropagation()}>
         <div className="hd-pophead"
           onPointerDown={popDragStart} onPointerMove={popDragMove}
