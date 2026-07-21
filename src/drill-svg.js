@@ -5,7 +5,7 @@
 // it; pieces use their own DSL colours.
 import { parseDrill } from "./drill-format.js";
 import { evalSeg, wigglePoints } from "./geometry.js";
-import { netShapes, segCrossesNet } from "./net-collide.js";
+import { solidShapes, segCrossesNet } from "./net-collide.js";
 import * as boards from "./boards.js";
 
 // which of player p's route segments are skated WITH the puck (→ wiggle line):
@@ -290,7 +290,7 @@ function chain(pk, byId, pieces) {
   if (!cur) return "";
   const nets = pieces.filter(q => q.kind === "net" || q.kind === "passer");
   const targets = pieces.filter(q => q.kind === "net" || q.kind === "passer" || q.kind === "bumper" || q.kind === "tire");
-  const netSh = netShapes(pieces);
+  const netSh = solidShapes(pieces);
   const shotNet = launch => {
     if (pk.net) { const n = targets.find(x => x.id === pk.net); if (n) return { x: n.x, y: n.y }; }  // a bumper/tire can be an explicit target
     if (nets.length) return nets.reduce((a, b) => (Math.hypot(b.x - launch.x, b.y - launch.y) < Math.hypot(a.x - launch.x, a.y - launch.y) ? b : a));

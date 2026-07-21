@@ -74,7 +74,7 @@ Drill name and description (everything to the end of the line). Optional.
 ### `PIECE <id> <kind> <x> <y> [modifiers…]`
 Places a piece. `id` is any unique token (e.g. `F1`, `PK1`, `N2`).
 
-**Kinds:** `player` · `puck` · `cone` · `net` · `bumper` (foam barrier) ·
+**Kinds:** `player` · `puck` · `cone` · `net` · `bumper` (solid barrier — players route around it, pucks carom off it) ·
 `deker` (stickhandling gate) · `passer` (rebounder box) · `tire` (agility prop) ·
 `label` (a movable, resizable on-ice text note).
 

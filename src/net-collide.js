@@ -30,6 +30,33 @@ export function netShapes(pieces) {
   return (pieces || []).filter(p => p.kind === "net").map(netShape);
 }
 
+// A bumper is a solid rectangular barrier: all four edges are solid (no open
+// mouth), so pucks carom off any side and players route around the whole bar.
+// It's long along its local x; its faces' normal is perpendicular to `facing`.
+const BUMP_HALF_L = 7.0 * ICON;   // half-length, along the bar
+const BUMP_HALF_T = 1.15 * ICON;  // half-thickness (a touch proud for the puck radius)
+export function bumperShape(b) {
+  const a = ((b.facing || 0) * Math.PI) / 180, c = Math.cos(a), si = Math.sin(a);
+  const toWorld = (lx, ly) => ({ x: b.x + lx * c - ly * si, y: b.y + lx * si + ly * c });
+  const corners = [[-BUMP_HALF_L, -BUMP_HALF_T], [BUMP_HALF_L, -BUMP_HALF_T], [BUMP_HALF_L, BUMP_HALF_T], [-BUMP_HALF_L, BUMP_HALF_T]];
+  const pts = corners.map(([lx, ly]) => toWorld(lx, ly));
+  const solid = [];
+  for (let i = 0; i < pts.length; i++) solid.push([pts[i], pts[(i + 1) % pts.length]]); // closed loop — every edge solid
+  const r = Math.hypot(BUMP_HALF_L, BUMP_HALF_T);
+  // capsule spine (the two ends along the long axis) for player route avoidance
+  const spine = [toWorld(-BUMP_HALF_L, 0), toWorld(BUMP_HALF_L, 0)];
+  return { pts, solid, mouth: null, cx: b.x, cy: b.y, r, spine, capR: BUMP_HALF_T, bumper: true };
+}
+
+export function bumperShapes(pieces) {
+  return (pieces || []).filter(p => p.kind === "bumper").map(bumperShape);
+}
+
+// every solid puck obstacle (nets + bumpers) — pucks carom off these
+export function solidShapes(pieces) {
+  return [...netShapes(pieces), ...bumperShapes(pieces)];
+}
+
 // point-in-polygon (cage closed by the mouth)
 export function inNet(sh, x, y) {
   const p = sh.pts; let inside = false;

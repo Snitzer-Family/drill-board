@@ -4,7 +4,7 @@
 import { SPEED, ICON_SCALE, SAVE_PROB } from "./constants.js";
 import { clampX, clampY, segEnd, segTangentAngle } from "./geometry.js";
 import * as boards from "./boards.js";
-import { netShapes, reflectPath, segCrossesNet } from "./net-collide.js";
+import { netShapes, solidShapes, reflectPath, segCrossesNet } from "./net-collide.js";
 
 const GOALIE_DEPTH = 2.5; // how far out front of the net the goalie plays
 
@@ -72,7 +72,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
     const warp = {};
     const plans = {};
     const rel = {};
-    const netSh = netShapes(pieces);          // solid net obstacles for puck caroms
+    const netSh = solidShapes(pieces);        // solid obstacles pucks carom off (nets + bumpers)
     pieces.forEach(pk => {
       if (pk.kind !== "puck") return;
       const vPass = () => pace * SPEED.pass * (pk.speed || 1);
@@ -251,7 +251,10 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0 }) {
             bx = ux - 2 * dot * tireNrm.x; by = uy - 2 * dot * tireNrm.y;
           } else if (netPiece && (netPiece.kind === "passer" || netPiece.kind === "bumper")) {
             const fa = ((netPiece.facing || 0) * Math.PI) / 180;
-            const nx = Math.cos(fa), ny = Math.sin(fa);       // flat face normal (= its facing)
+            // a passer is long across its facing (face normal = facing); a bumper
+            // is long ALONG its facing, so its face normal is perpendicular to it
+            const nx = netPiece.kind === "bumper" ? -Math.sin(fa) : Math.cos(fa);
+            const ny = netPiece.kind === "bumper" ? Math.cos(fa) : Math.sin(fa);
             const dot = ux * nx + uy * ny;
             bx = ux - 2 * dot * nx; by = uy - 2 * dot * ny;   // r = d − 2(d·n)n
           } else {

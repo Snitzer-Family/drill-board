@@ -4,7 +4,7 @@ import { parseDrill, serializeDrill, extractDrill } from "./drill-format.js";
 import { drillSvg } from "./drill-svg.js";
 import { clampX, clampY, segEnd, segD, nearestT, splitSeg, zigzagPoints, wigglePoints, convertSeg, fitRoute, evalSeg } from "./geometry.js";
 import * as boards from "./boards.js";
-import { netShapes, detourRoute, segCrossesNet } from "./net-collide.js";
+import { netShapes, bumperShapes, solidShapes, detourRoute, segCrossesNet } from "./net-collide.js";
 import { RinkMarkings } from "./rink.jsx";
 import { ZONES, zoneAt } from "./zones.js";
 import { PieceIcon, Stepper, DiagPanel } from "./icons.jsx";
@@ -708,12 +708,16 @@ export default function DrillAnimator() {
   });
   // obstacles a given piece's route should detour around (nets fused with their
   // goalie + parked players, minus itself)
+  // a bumper is a long bar — routes arc around a keep-out disc that encloses it
+  const bumperDiscs = () => bumperShapes(pieces).map(sh => ({ cx: sh.cx, cy: sh.cy, r: sh.r }));
   const detourObstaclesFor = id => {
     const self = pieces.find(q => q.id === id);
     const mine = self && !self.path.length ? [{ cx: self.x, cy: self.y }] : [];
     const discs = stationaryDiscs.filter(d => !mine.some(m => m.cx === d.cx && m.cy === d.cy));
     const nets = detourNetDiscs();
-    return nets.length || discs.length ? [...nets, ...discs] : [];
+    const bumps = bumperDiscs();
+    const all = [...nets, ...bumps, ...discs];
+    return all.length ? all : [];
   };
   // A route sampled then re-routed to arc smoothly around any net it crosses.
   // Returns { pts, origLen } (origLen = the straight-sampled length, for mapping
@@ -1153,7 +1157,7 @@ export default function DrillAnimator() {
   // pull off — a rebound that must pass through a net, or a step downstream of one
   // — is flagged "won't complete" so the user sees it plainly.
   function stepsAt(p, i) {
-    const shapes = netShapes(pieces);
+    const shapes = solidShapes(pieces);
     const nets = pieces.filter(q => q.kind === "net" || q.kind === "passer");
     const steps = [];
     for (const pk of pieces) {
@@ -3209,7 +3213,7 @@ export default function DrillAnimator() {
           <div className="hd-note">
             Feet: x 0–200, y 0–85. <b>RINK</b> full|half|quarter ·
             <b> PIECE</b> id player|puck|cone|net|bumper|deker|passer|label|tire x y [#color] [label] [speed=1.2] [hand=L] [on=F1]
-            (a <b>bumper</b> is a foam barrier, a <b>deker</b> a stickhandling gate, a <b>passer</b> a rebounder box — all take <code>face=deg</code>)
+            (a <b>bumper</b> is a solid barrier — players skate around it and pucks carom off it; a <b>deker</b> a stickhandling gate, a <b>passer</b> a rebounder box — all take <code>face=deg</code>)
             (a <b>tire</b> is an agility prop — <code>size=1</code> large / <code>size=0.55</code> small; add <code>goalie</code> for a keeper that works the full circle to defend shots at it)
             (a <b>label</b> is a movable/resizable text note: <code>PIECE L1 label 100 40 size=1.2 "Regroup here"</code>)
             (a <b>net</b> takes <code>face=deg</code>, <code>goalie</code>, and <code>size</code> — <code>1</code> NHL / <code>0.62</code> mite; pucks
