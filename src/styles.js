@@ -142,16 +142,20 @@ export const STYLES = `
           max-height:calc(100% - 8px); overflow-y:auto; overscroll-behavior:contain;
           /* hide the native (flash-and-hide on iOS) bar — we draw our own thumb */
           scrollbar-width:none; -ms-overflow-style:none;
-          /* pure-CSS scroll shadow: a soft fade appears at the bottom (and top)
-             ONLY while there's more content that way — reinforces the thumb */
-          background:
-            linear-gradient(#1a222c 30%, rgba(26,34,44,0)) center top / 100% 30px,
-            linear-gradient(rgba(26,34,44,0), #1a222c 72%) center bottom / 100% 34px,
-            radial-gradient(farthest-side at 50% 0, rgba(0,0,0,.55), rgba(0,0,0,0)) center top / 100% 13px,
-            radial-gradient(farthest-side at 50% 100%, rgba(0,0,0,.6), rgba(0,0,0,0)) center bottom / 100% 15px,
-            #1a222c;
+          /* solid fill via background-COLOR so it always covers the box (never
+             scrolls, even on the iOS rubber-band overscroll). Only the fade
+             covers + shadows are images: a soft scroll shadow that appears at an
+             edge ONLY while there's more content that way — reinforces the thumb */
+          background-color:#1a222c;
+          background-image:
+            linear-gradient(#1a222c 30%, rgba(26,34,44,0)),
+            linear-gradient(rgba(26,34,44,0), #1a222c 72%),
+            radial-gradient(farthest-side at 50% 0, rgba(0,0,0,.55), rgba(0,0,0,0)),
+            radial-gradient(farthest-side at 50% 100%, rgba(0,0,0,.6), rgba(0,0,0,0));
+          background-position:center top, center bottom, center top, center bottom;
+          background-size:100% 30px, 100% 34px, 100% 13px, 100% 15px;
           background-repeat:no-repeat;
-          background-attachment:local, local, scroll, scroll, local; }
+          background-attachment:local, local, scroll, scroll; }
         .hd-pop::-webkit-scrollbar { width:0; height:0; display:none; }
         /* custom always-visible scrollbar: a sticky rail pinned to the card's
            top edge; the thumb inside is sized/moved imperatively (works on iOS,
