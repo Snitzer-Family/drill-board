@@ -218,7 +218,8 @@ function piece(p) {
     return `<g transform="translate(${f(p.x)} ${f(p.y)}) scale(${p.size || 1})">`
       + `<circle cx="0" cy="0" r="2.0" fill="none" stroke="${p.color}" stroke-width="1.55"/>`
       + `<circle cx="0" cy="0" r="2.78" fill="none" stroke="#000" stroke-width="0.2" opacity="0.55"/>`
-      + `<circle cx="0" cy="0" r="1.22" fill="none" stroke="#000" stroke-width="0.2" opacity="0.55"/>${ticks}</g>`;
+      + `<circle cx="0" cy="0" r="1.22" fill="none" stroke="#000" stroke-width="0.2" opacity="0.55"/>${ticks}`
+      + (p.goalie ? `<circle cx="0" cy="-3.5" r="1.15" fill="#2f9e57" stroke="#fff" stroke-width="0.3"/>` : "") + `</g>`;
   }
   if (p.kind === "bumper")
     return `<g transform="${rot()}"><rect x="-7" y="-0.95" width="14" height="1.9" rx="0.95" fill="${p.color}" stroke="#fff" stroke-width="0.3"/>`
