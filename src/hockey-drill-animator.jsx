@@ -1265,17 +1265,61 @@ export default function DrillAnimator() {
   function branchPoint(p) {
     return p.path && p.path.length ? { x: p.path[p.path.length - 1].x, y: p.path[p.path.length - 1].y } : { x: p.x, y: p.y };
   }
-  const forkEq = (a, b) => (!a && !b) || sameColor(a, b);
-  const forkOf = (p, color) => (p.forks || []).find(f => sameColor(f.color, color)) || null;
-  // a synthetic "route piece" whose path is a fork and whose origin is the branch,
-  // so all the base-route editing math (segEnd/convertSeg/splitSeg) works unchanged
-  function forkPiece(p, color) {
-    const f = forkOf(p, color), b = branchPoint(p);
-    return { ...p, x: b.x, y: b.y, path: f ? f.path : [] };
+  /* ----- fork tree (reactions can nest: a "skate" reaction chains another) -----
+     A fork is addressed by a colour-PATH ref like "#green" or "#green/#red" (the
+     red reaction nested under the green one), since the same cue colour can recur
+     at different depths. */
+  const forkParts = ref => String(ref).split("/");
+  const forkEq = (a, b) => (!a && !b) || (!!a && !!b && String(a).toLowerCase() === String(b).toLowerCase());
+  // walk the tree by a ref → the leaf fork node (or null)
+  function forkAt(p, ref) {
+    if (!ref) return null;
+    let list = p.forks || [], node = null;
+    for (const c of forkParts(ref)) { node = (list || []).find(f => sameColor(f.color, c)); if (!node) return null; list = node.forks; }
+    return node;
   }
-  // read/write the active editing route (base path or a fork's path) of a piece
-  const routeSegs = (p, fork) => fork ? (forkOf(p, fork)?.path || []) : p.path;
+  const forkOf = forkAt;   // single-colour refs are just a 1-part path
+  // the point a fork forks FROM: its parent fork's end, or the base branch (top level)
+  function forkOriginPoint(p, ref) {
+    const parts = forkParts(ref);
+    if (parts.length <= 1) return branchPoint(p);
+    const parent = forkAt(p, parts.slice(0, -1).join("/"));
+    if (parent && parent.path && parent.path.length) { const s = parent.path[parent.path.length - 1]; return { x: s.x, y: s.y }; }
+    return branchPoint(p);
+  }
+  // a synthetic "route piece" whose path is a fork and whose origin is where it
+  // forks from, so the base-route editing math (segEnd/convertSeg/splitSeg) is reused
+  function forkPiece(p, ref) {
+    const f = forkAt(p, ref), o = forkOriginPoint(p, ref);
+    return { ...p, x: o.x, y: o.y, path: f ? f.path : [] };
+  }
+  const routeSegs = (p, fork) => fork ? (forkAt(p, fork)?.path || []) : p.path;
   const routePiece = (p, fork) => fork ? forkPiece(p, fork) : p;
+  // immutable tree edits by ref: map the leaf through fn / remove it / ensure it exists
+  function mapForkAt(forks, ref, fn) {
+    const parts = forkParts(ref);
+    const go = (list, d) => (list || []).map(f => !sameColor(f.color, parts[d]) ? f
+      : (d === parts.length - 1 ? fn(f) : { ...f, forks: go(f.forks, d + 1) }));
+    return go(forks, 0);
+  }
+  function removeForkAt(forks, ref) {
+    const parts = forkParts(ref);
+    const go = (list, d) => d === parts.length - 1
+      ? (list || []).filter(f => !sameColor(f.color, parts[d]))
+      : (list || []).map(f => sameColor(f.color, parts[d]) ? { ...f, forks: go(f.forks, d + 1) } : f);
+    return go(forks, 0);
+  }
+  function ensureForkAt(forks, ref, make) {
+    const parts = forkParts(ref);
+    const go = (list, d) => {
+      list = list || [];
+      const c = parts[d], idx = list.findIndex(f => sameColor(f.color, c));
+      if (d === parts.length - 1) return idx >= 0 ? list : [...list, make(c)];
+      if (idx < 0) return [...list, { color: c, action: "skate", forks: go([], d + 1), path: [] }];
+      return list.map((f, k) => k === idx ? { ...f, forks: go(f.forks, d + 1) } : f);
+    };
+    return go(forks, 0);
+  }
   // seconds for a player to skate their BASE route to the branch — the same arc-
   // length ÷ pace formula the timing engine uses (measured off the rendered path
   // refs), so the fork choice lines up with where the light actually is on arrival.
@@ -1293,12 +1337,25 @@ export default function DrillAnimator() {
   }
   // the light that governs a player's reaction: the nearest one that has a cue
   // timeline (to its branch point). null if there are no cue lights.
-  function governingLight(ps, p) {
+  function governingLightNear(ps, pt) {
     const lights = ps.filter(q => q.kind === "light" && (q.cues || []).length);
     if (!lights.length) return null;
-    const b = branchPoint(p);
-    const d = q => Math.hypot(q.x - b.x, q.y - b.y);
+    const d = q => Math.hypot(q.x - pt.x, q.y - pt.y);
     return lights.reduce((a, q) => (d(q) < d(a) ? q : a));
+  }
+  function governingLight(ps, p) { return governingLightNear(ps, branchPoint(p)); }
+  // seconds to skate a run of segments sitting at effective indices startIdx.. (the
+  // same arc-length ÷ pace formula, measured off the rendered refs) — used to find
+  // when a chained reaction's next branch is reached.
+  function pathSegTime(p, segs, startIdx) {
+    let t = 0;
+    for (let k = 0; k < segs.length; k++) {
+      const s = segs[k], el = segRefs.current[`${p.id}/${startIdx + k}`];
+      let L = 0; try { L = el ? el.getTotalLength() : 0; } catch { L = 0; }
+      const v = pace * SPEED[s.mode || "carry"] * (p.speed || 1) * (s.rate || 1);
+      t += (s.stop || 0) + (v > 0 ? L / v : 0);
+    }
+    return t;
   }
   // the puck a player carries into a reaction: one they hold at the branch with no
   // action of its own yet (so the reaction's action decides what happens to it).
@@ -1307,35 +1364,44 @@ export default function DrillAnimator() {
     return ps.find(q => q.kind === "puck" && q.carrier === playerId
       && q.shotAt == null && q.rimAt == null && q.chipAt == null && !(q.transfers || []).length) || null;
   }
-  // splice each branching player's chosen fork onto their base path (the fork whose
-  // colour matches the governing light's cue at their branch arrival), and apply the
-  // fork's action (shoot/chip/rim/pass) to the puck they carry into it.
+  // Walk each branching player's CHOSEN chain of reactions and splice it onto their
+  // path. At each branch (base end, then each skate reaction's end) the governing
+  // light's cue at the arrival time picks the next reaction; a non-skate action ends
+  // the chain and is applied to the puck the player carries into it. This is what
+  // makes chained "read the light again" reactions play back deterministically.
   function resolveForks(ps) {
     const branching = ps.filter(p => p.kind === "player" && (p.forks || []).length);
     if (!branching.length) return ps;
     let out = ps;
     for (const p of branching) {
-      const light = governingLight(ps, p);
-      if (!light) continue;
-      const color = cueColorAt(light.cues, baseRouteTime(p), cueSeed(light));
-      const fork = (p.forks || []).find(f => sameColor(f.color, color));
-      if (!fork || !fork.path || !fork.path.length) continue;
+      let effPath = p.path.slice(), arrivalT = baseRouteTime(p), branchPt = branchPoint(p);
+      let forks = p.forks, terminal = null, terminalIdx = -1, guard = 0;
+      while (forks && forks.length && guard++ < 16) {
+        const light = governingLightNear(ps, branchPt);
+        if (!light) break;
+        const color = cueColorAt(light.cues, arrivalT, cueSeed(light));
+        const fork = forks.find(f => sameColor(f.color, color));
+        if (!fork || !fork.path || !fork.path.length) break;
+        const startIdx = effPath.length;
+        effPath = effPath.concat(fork.path);
+        arrivalT += pathSegTime(p, fork.path, startIdx);
+        const last = fork.path[fork.path.length - 1];
+        branchPt = { x: last.x, y: last.y };
+        if ((fork.action || "skate") !== "skate") { terminal = fork; terminalIdx = effPath.length - 1; break; }
+        forks = fork.forks;                                  // a skate reaction chains onward
+      }
+      if (effPath.length <= p.path.length) continue;         // no reaction fired
       if (out === ps) out = ps.slice();
-      const i = out.findIndex(q => q.id === p.id);
-      const baseLen = out[i].path.length;
-      out[i] = { ...out[i], path: [...out[i].path, ...fork.path] };
-      // apply the reaction's action to the puck the player carries into it
-      const act = fork.action || "skate";
-      if (act !== "skate") {
+      out[out.findIndex(q => q.id === p.id)] = { ...out.find(q => q.id === p.id), path: effPath };
+      if (terminal) {                                        // apply the ending action to the carried puck
         const pk = reactionPuck(out, p.id);
         if (pk) {
-          const pj = out.findIndex(q => q.id === pk.id);
-          const at = baseLen + fork.path.length - 1;    // the reaction's end waypoint (effective index)
+          const pj = out.findIndex(q => q.id === pk.id), act = terminal.action, at = terminalIdx;
           const patch = { shotAt: null, rimAt: null, chipAt: null };
-          if (act === "shoot") { patch.shotAt = at; patch.net = fork.net || null; }
-          else if (act === "chip") { patch.chipAt = at; patch.chipAim = fork.aim ?? null; patch.chipDist = fork.dist ?? null; }
-          else if (act === "rim") { patch.rimAt = at; patch.rimAim = fork.aim ?? null; patch.rimDist = fork.dist ?? null; }
-          else if (act === "pass" && fork.to) { patch.transfers = [...(pk.transfers || []), { at, to: fork.to, recvAt: null, kind: "pass" }]; }
+          if (act === "shoot") { patch.shotAt = at; patch.net = terminal.net || null; }
+          else if (act === "chip") { patch.chipAt = at; patch.chipAim = terminal.aim ?? null; patch.chipDist = terminal.dist ?? null; }
+          else if (act === "rim") { patch.rimAt = at; patch.rimAim = terminal.aim ?? null; patch.rimDist = terminal.dist ?? null; }
+          else if (act === "pass" && terminal.to) { patch.transfers = [...(pk.transfers || []), { at, to: terminal.to, recvAt: null, kind: "pass" }]; }
           out[pj] = { ...out[pj], ...patch };
         }
       }
@@ -1347,22 +1413,21 @@ export default function DrillAnimator() {
     resetAnim(); setPlaying(false); setPopup(null); setSelectedId(id); setEditingFork(null);
     forkTarget.current = { id, color }; setForkDrawColor(color); setTool("draw");
   }
-  function clearFork(id, color) {
-    updateById(id, { forks: (pieces.find(p => p.id === id)?.forks || []).filter(f => !sameColor(f.color, color)) });
+  function clearFork(id, ref) {
+    updateById(id, { forks: removeForkAt(pieces.find(p => p.id === id)?.forks || [], ref) });
   }
   // create-or-extend a reaction fork with a segment of the given type, continuing
   // from its current end (or the branch), then open the new waypoint for editing.
   // The icon-based counterpart to freehand beginForkDraw.
-  function addForkSegment(id, color, type) {
+  function addForkSegment(id, ref, type) {
     const piece = pieces.find(q => q.id === id); if (!piece) return;
-    const newIdx = (forkOf(piece, color)?.path.length) || 0;   // where the new point lands
+    const newIdx = (forkAt(piece, ref)?.path.length) || 0;   // where the new point lands
     update(p => {
       if (p.id !== id) return p;
-      const forks = forkOf(p, color) ? (p.forks || []) : [...(p.forks || []), { color, action: "skate", forks: [], path: [] }];
-      const b = branchPoint(p);
-      return { ...p, forks: forks.map(f => {
-        if (!sameColor(f.color, color)) return f;
-        const rp = { ...p, x: b.x, y: b.y, path: f.path };
+      const forks = ensureForkAt(p.forks, ref, c => ({ color: c, action: "skate", forks: [], path: [] }));
+      const o = forkOriginPoint({ ...p, forks }, ref);
+      return { ...p, forks: mapForkAt(forks, ref, f => {
+        const rp = { ...p, x: o.x, y: o.y, path: f.path };
         const n = rp.path.length;
         const prev = n ? segEnd(rp, n - 1) : { x: rp.x, y: rp.y };
         const before = n >= 2 ? segEnd(rp, n - 2) : { x: rp.x, y: rp.y };
@@ -1373,19 +1438,20 @@ export default function DrillAnimator() {
         return { ...f, path: [...f.path, seg] };
       }) };
     });
-    setSelectedId(id); setEditingFork({ id, color });
-    setPopup({ type: "point", id, seg: newIdx, fork: color });
+    setSelectedId(id); setEditingFork({ id, color: ref });
+    setPopup({ type: "point", id, seg: newIdx, fork: ref });
   }
   // set the action a reaction performs (skate / pass / shoot / chip / rim); pass
-  // defaults its target to the first other player
-  function setForkAction(id, color, action) {
+  // defaults its target to the first other player. Switching to skate keeps any
+  // chained nested reactions; a terminal action can't chain, so nesting is ignored.
+  function setForkAction(id, ref, action) {
     const pl = pieces.find(p => p.id === id); if (!pl) return;
     const others = pieces.filter(q => q.kind === "player" && q.id !== id);
-    updateById(id, { forks: (pl.forks || []).map(f => !sameColor(f.color, color) ? f : {
+    updateById(id, { forks: mapForkAt(pl.forks, ref, f => ({
       ...f, action,
       net: action === "shoot" ? (f.net || null) : undefined,
       to: action === "pass" ? (f.to || (others[0] || {}).id || null) : undefined,
-    }) });
+    })) });
   }
   // the shared "curve set" of route buttons: straight / curve / S-curve, plus a
   // 4th freehand-draw button. onType(t) adds a segment of that type; onDraw()
@@ -1404,33 +1470,37 @@ export default function DrillAnimator() {
     resetAnim(); setPlaying(false); setPopup(null); setSelectedId(id); setEditingFork(null); setTool("draw");
   }
   // the reaction-authoring controls (curve buttons + action + Edit/Clear per cue
-  // colour) — shown on the branch waypoint (the route's end, nearest the light), or
-  // the player popup when there's no route yet. Null if no governing cue-light.
-  function renderLightReactions(p) {
-    const light = governingLight(pieces, p);
+  // colour). `parentRef` null = the base branch (route end); a fork ref = a chained
+  // reaction off that (skate) reaction's end. Null if no governing cue-light.
+  function renderLightReactions(p, parentRef = null) {
+    const branchPt = parentRef
+      ? (() => { const f = forkAt(p, parentRef); return f && f.path.length ? { x: f.path[f.path.length - 1].x, y: f.path[f.path.length - 1].y } : branchPoint(p); })()
+      : branchPoint(p);
+    const light = governingLightNear(pieces, branchPt);
     if (!light) return null;
     const colors = [...new Set((light.cues || []).map(c => c.color))];
+    const selStyle = { background: "#1b2530", color: "#eaf0f6", border: "1px solid rgba(255,255,255,0.16)",
+      borderRadius: 6, padding: "3px 6px", fontSize: 13, cursor: "pointer" };
     return (
       <>
         <div className="hd-poprow">
           <span style={{ fontSize: 11, color: "#8b99a8" }}>
-            Light reactions ({light.id}) — a route per cue, forking from here
+            {parentRef ? "Chain a reaction" : "Light reactions"} ({light.id}) — a route per cue, from here
           </span>
         </div>
         {colors.map(c => {
-          const fk = forkOf(p, c);
+          const ref = parentRef ? parentRef + "/" + c : c;
+          const fk = forkAt(p, ref);
           const has = !!fk;
-          const isEditing = editingFork && editingFork.id === p.id && sameColor(editingFork.color, c);
-          const selStyle = { background: "#1b2530", color: "#eaf0f6", border: "1px solid rgba(255,255,255,0.16)",
-            borderRadius: 6, padding: "3px 6px", fontSize: 13, cursor: "pointer" };
+          const isEditing = editingFork && editingFork.id === p.id && forkEq(editingFork.color, ref);
           return (
-            <div className="hd-poprow" key={c}>
+            <div className="hd-poprow" key={ref}>
               <div className="hd-swatch on" style={{ background: c, cursor: "default" }} />
-              {curveButtons(t => addForkSegment(p.id, c, t), () => beginForkDraw(p.id, c))}
+              {curveButtons(t => addForkSegment(p.id, ref, t), () => beginForkDraw(p.id, ref))}
               {has ? (
                 <>
                   <select value={fk.action || "skate"} style={selStyle}
-                    onChange={e => setForkAction(p.id, c, e.target.value)}>
+                    onChange={e => setForkAction(p.id, ref, e.target.value)}>
                     <option value="skate">Skate</option>
                     <option value="pass">Pass</option>
                     <option value="shoot">Shoot</option>
@@ -1438,8 +1508,8 @@ export default function DrillAnimator() {
                     <option value="rim">Rim</option>
                   </select>
                   <button className={`hd-mini${isEditing ? " on" : ""}`}
-                    onClick={() => setEditingFork(isEditing ? null : { id: p.id, color: c })}>{isEditing ? "✓ Editing" : "Edit"}</button>
-                  <button className="hd-mini" onClick={() => { if (isEditing) setEditingFork(null); clearFork(p.id, c); }}>Clear</button>
+                    onClick={() => setEditingFork(isEditing ? null : { id: p.id, color: ref })}>{isEditing ? "✓ Editing" : "Edit"}</button>
+                  <button className="hd-mini" onClick={() => { if (isEditing) setEditingFork(null); clearFork(p.id, ref); }}>Clear</button>
                 </>
               ) : (
                 <span style={{ fontSize: 11, color: "#8b99a8" }}>add a reaction</span>
@@ -1450,12 +1520,29 @@ export default function DrillAnimator() {
       </>
     );
   }
-  // which fork colour a player will take (the governing light's cue at their branch
-  // arrival) — for highlighting the active reaction path. null if none applies.
-  function chosenForkColor(p) {
-    if (!(p.forks || []).length) return null;
-    const light = governingLight(pieces, p);
-    return light ? cueColorAt(light.cues, baseRouteTime(p), cueSeed(light)) : null;
+  // the set of fork refs (lower-cased) on a player's CHOSEN reaction chain — for
+  // highlighting the reaction path they'll actually take (walks the same chain
+  // resolveForks does, tracking effective indices for the branch arrival times).
+  function chosenForkRefs(p) {
+    const set = new Set();
+    if (!(p.forks || []).length) return set;
+    let effLen = p.path.length, arrivalT = baseRouteTime(p), branchPt = branchPoint(p), forks = p.forks, prefix = "", guard = 0;
+    while (forks && forks.length && guard++ < 16) {
+      const light = governingLightNear(pieces, branchPt);
+      if (!light) break;
+      const color = cueColorAt(light.cues, arrivalT, cueSeed(light));
+      const fork = forks.find(f => sameColor(f.color, color));
+      if (!fork || !fork.path || !fork.path.length) break;
+      const ref = prefix ? prefix + "/" + fork.color : fork.color;
+      set.add(String(ref).toLowerCase());
+      arrivalT += pathSegTime(p, fork.path, effLen);
+      effLen += fork.path.length;
+      const last = fork.path[fork.path.length - 1];
+      branchPt = { x: last.x, y: last.y };
+      if ((fork.action || "skate") !== "skate") break;
+      forks = fork.forks; prefix = ref;
+    }
+    return set;
   }
 
   function displayPos(p) {
@@ -1736,7 +1823,7 @@ export default function DrillAnimator() {
     update(p => {
       if (p.id !== id) return p;
       const edit = arr => { const path = arr.slice(); path[i] = { ...path[i], ...patch }; return path; };
-      if (fork) return { ...p, forks: (p.forks || []).map(f => sameColor(f.color, fork) ? { ...f, path: edit(f.path) } : f) };
+      if (fork) return { ...p, forks: mapForkAt(p.forks, fork, f => ({ ...f, path: edit(f.path) })) };
       return { ...p, path: edit(p.path) };
     });
 
@@ -1778,7 +1865,7 @@ export default function DrillAnimator() {
       const m = Math.hypot(dx, dy);
       if (m < 0.5) { dx = 22; dy = 0; } else { dx = (dx / m) * 22; dy = (dy / m) * 22; }
       const seg = convertSeg({ type, x: clampX(prev.x + dx), y: clampY(prev.y + dy) }, prev);
-      if (fork) return { ...p, forks: (p.forks || []).map(f => sameColor(f.color, fork) ? { ...f, path: [...f.path, seg] } : f) };
+      if (fork) return { ...p, forks: mapForkAt(p.forks, fork, f => ({ ...f, path: [...f.path, seg] })) };
       return { ...p, path: [...p.path, seg] };
     });
     setSelectedId(id);
@@ -1789,14 +1876,14 @@ export default function DrillAnimator() {
       if (p.id !== id) return p;
       const rp = routePiece(p, fork);
       const conv = arr => { const path = arr.slice(); path[i] = convertSeg({ ...path[i], type }, segEnd(rp, i - 1)); return path; };
-      if (fork) return { ...p, forks: (p.forks || []).map(f => sameColor(f.color, fork) ? { ...f, path: conv(f.path) } : f) };
+      if (fork) return { ...p, forks: mapForkAt(p.forks, fork, f => ({ ...f, path: conv(f.path) })) };
       return { ...p, path: conv(p.path) };
     });
   }
   function deleteSeg(id, i, fork = null) {
     if (fork) {
       setPieces(ps => ps.map(p => p.id === id
-        ? { ...p, forks: (p.forks || []).map(f => sameColor(f.color, fork) ? { ...f, path: f.path.filter((_, j) => j !== i) } : f) } : p));
+        ? { ...p, forks: mapForkAt(p.forks, fork, f => ({ ...f, path: f.path.filter((_, j) => j !== i) })) } : p));
       setPopup(null);
       return;
     }
@@ -2184,7 +2271,7 @@ export default function DrillAnimator() {
         const prev = segEnd(rp, segIdx - 1);
         const parts = splitSeg(prev, s, nearestT(prev, s, pt));
         const next = [...rp.path.slice(0, segIdx), ...parts, ...rp.path.slice(segIdx + 1)];
-        if (fork) return { ...p, forks: (p.forks || []).map(f => sameColor(f.color, fork) ? { ...f, path: next } : f) };
+        if (fork) return { ...p, forks: mapForkAt(p.forks, fork, f => ({ ...f, path: next })) };
         return { ...p, path: next };
       });
     });
@@ -2240,18 +2327,19 @@ export default function DrillAnimator() {
     // a light-reaction fork: fit a route from the player's branch point through the
     // drawn trail, and store it (replacing any existing fork of the same colour)
     if (forkTarget.current) {
-      const { id, color } = forkTarget.current;
+      const { id, color: ref } = forkTarget.current;
       forkTarget.current = null; setForkDrawColor(null); setTool("select");
       if (raw.length < 3) return;
       setPieces(ps => ps.map(p => {
         if (p.id !== id) return p;
-        const route = fitRoute(branchPoint(p), raw);
+        const route = fitRoute(forkOriginPoint(p, ref), raw);
         if (!route.length) return p;
-        const prev = (p.forks || []).find(f => sameColor(f.color, color));   // redraw keeps the action + nested reactions
-        const forks = (p.forks || []).filter(f => !sameColor(f.color, color))
-          .concat([{ color, path: route, action: prev?.action || "skate",
-            ...(prev?.net ? { net: prev.net } : {}), ...(prev?.to ? { to: prev.to } : {}), forks: prev?.forks || [] }]);
-        return { ...p, forks };
+        const prev = forkAt(p, ref);   // redraw keeps the action + nested reactions
+        const forks = ensureForkAt(p.forks, ref, c => ({ color: c, action: "skate", forks: [], path: [] }));
+        return { ...p, forks: mapForkAt(forks, ref, f => ({
+          ...f, path: route, action: prev?.action || f.action || "skate",
+          ...(prev?.net ? { net: prev.net } : {}), ...(prev?.to ? { to: prev.to } : {}), forks: prev?.forks || f.forks || [],
+        })) };
       }));
       return;
     }
@@ -2710,7 +2798,7 @@ export default function DrillAnimator() {
         path[d.seg] = s;
         return path;
       };
-      if (d.fork) return { ...p, forks: (p.forks || []).map(f => sameColor(f.color, d.fork) ? { ...f, path: edit(f.path) } : f) };
+      if (d.fork) return { ...p, forks: mapForkAt(p.forks, d.fork, f => ({ ...f, path: edit(f.path) })) };
       return { ...p, path: edit(p.path) };
     });
   }
@@ -3967,9 +4055,11 @@ export default function DrillAnimator() {
                 onClick={() => goSeg(i + 1)}>Next ›</button>
             </div>
           )}
-          {/* the branch waypoint (route end, nearest the light) carries the reaction
-              controls — one route per cue colour forks from here */}
-          {p.kind === "player" && !fork && i === route.length - 1 && renderLightReactions(p)}
+          {/* the branch waypoint carries the reaction controls: the base route's end
+              (light reactions), or a SKATE reaction's end (chain another reaction) */}
+          {p.kind === "player" && i === route.length - 1 && (!fork
+            ? renderLightReactions(p, null)
+            : (forkAt(p, fork)?.action || "skate") === "skate" ? renderLightReactions(p, fork) : null)}
           <div className="hd-poprow">
             <span>Note</span>
             <input className="hd-input" style={{ flex: 1, minWidth: 90 }}
@@ -4439,39 +4529,40 @@ export default function DrillAnimator() {
             })}
             {showRoutes && !aiPlay && pieces.map(p => {
               if (p.kind !== "player" || !(p.forks || []).length) return null;
-              const chosen = chosenForkColor(p);
-              return (
-                <g key={`fkv-${p.id}`}>
-                  {p.forks.map((f, fi) => {
-                    if (!f.path || !f.path.length) return null;
-                    const editThis = editingFork && editingFork.id === p.id && sameColor(editingFork.color, f.color);
-                    let prev = branchPoint(p);
-                    const active = sameColor(f.color, chosen);
-                    return (
-                      <g key={fi}>
-                        {f.path.map((s, i) => {
-                          const d = segD(prev, s);
-                          prev = { x: s.x, y: s.y };
-                          return (
-                            <g key={i}>
-                              <path d={d} fill="none" stroke={f.color}
-                                strokeWidth={sw(editThis || active ? 0.55 : 0.42)} vectorEffect="non-scaling-stroke"
-                                strokeDasharray={editThis || active ? undefined : sdash("1.6 1.1")}
-                                strokeLinecap="round" strokeLinejoin="round"
-                                opacity={editThis ? 1 : active ? 0.95 : 0.5} pointerEvents="none" />
-                              {/* tappable whenever editing — tapping a reaction route opens it for editing */}
-                              {editing && !playing && (
-                                <path d={d} fill="none" stroke="transparent" strokeWidth={4}
-                                  onPointerDown={e => lineDown(e, p.id, i, f.color)} style={{ cursor: "pointer" }} />
-                              )}
-                            </g>
-                          );
-                        })}
-                      </g>
-                    );
-                  })}
-                </g>
-              );
+              const chosen = chosenForkRefs(p);
+              // draw each reaction from where it forks; recurse into nested reactions
+              // (a skate reaction's end) so a whole chained tree renders
+              const renderLevel = (forks, origin, prefix) => (forks || []).map(f => {
+                if (!f.path || !f.path.length) return null;
+                const ref = prefix ? prefix + "/" + f.color : f.color;
+                const editThis = editingFork && editingFork.id === p.id && forkEq(editingFork.color, ref);
+                const active = chosen.has(String(ref).toLowerCase());
+                const end = f.path[f.path.length - 1];
+                let prev = origin;
+                return (
+                  <g key={ref}>
+                    {f.path.map((s, i) => {
+                      const d = segD(prev, s);
+                      prev = { x: s.x, y: s.y };
+                      return (
+                        <g key={i}>
+                          <path d={d} fill="none" stroke={f.color}
+                            strokeWidth={sw(editThis || active ? 0.55 : 0.42)} vectorEffect="non-scaling-stroke"
+                            strokeDasharray={editThis || active ? undefined : sdash("1.6 1.1")}
+                            strokeLinecap="round" strokeLinejoin="round"
+                            opacity={editThis ? 1 : active ? 0.95 : 0.5} pointerEvents="none" />
+                          {editing && !playing && (
+                            <path d={d} fill="none" stroke="transparent" strokeWidth={4}
+                              onPointerDown={e => lineDown(e, p.id, i, ref)} style={{ cursor: "pointer" }} />
+                          )}
+                        </g>
+                      );
+                    })}
+                    {(f.action || "skate") === "skate" ? renderLevel(f.forks, { x: end.x, y: end.y }, ref) : null}
+                  </g>
+                );
+              });
+              return <g key={`fkv-${p.id}`}>{renderLevel(p.forks, branchPoint(p), "")}</g>;
             })}
 
             {showRoutes && pieces.map(p => <g key={`s-${p.id}`}>{renderStops(p)}</g>)}

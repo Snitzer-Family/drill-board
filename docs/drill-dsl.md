@@ -174,15 +174,29 @@ A waypoint **description** (`DESC "…"`) can be surfaced three ways via `SHOW`:
 Standalone text notes use the `label` **piece** instead:
 `PIECE L1 label 100 40 size=1.2 "Regroup here"`.
 
-### `FORK <player> <hex> [<action>[:target]] <segments…>`
+### `FORK <player> <ref> [<action>[:target]] <segments…>`
 A **light-reaction** branch for a player: a continuation route (same segment
-grammar as `PATH`) that begins at the player's **branch point** — the end of their
-base `PATH` (or their start if they have none). An optional **action** right after
-the colour says what the player does on that reaction (a dropdown per cue colour
-in the app): `skate` (default — just move) · `shoot[:<net>]` · `chip` · `rim` ·
-`pass:<player>`. A non-`skate` action is applied to the puck the player carries
-into the reaction, at the reaction's end. (A `skate` reaction is what a chained
-follow-up light reaction hangs off of.) Give a player one `FORK` per cue
+grammar as `PATH`) that begins at a **branch point** and continues per the light's
+cue. An optional **action** right after the ref says what the player does on that
+reaction (a dropdown per cue colour in the app): `skate` (default — just move) ·
+`shoot[:<net>]` · `chip` · `rim` · `pass:<player>`. A non-`skate` action is applied
+to the puck the player carries into the reaction, at the reaction's end.
+
+**Chaining.** A `skate` reaction can chain **another** light reaction off its end,
+recursively. The `ref` is therefore a **slash-path of cue colours** (hex, no `#`):
+`2ea043` is a top-level reaction to green; `2ea043/e5342b` is the reaction to red
+*after* taking the green (skate) one. At playback the player reads the nearest
+cue-light at each branch (the base route's end, then each skate reaction's end),
+takes the matching reaction, and repeats until a non-skate action ends the chain.
+Branch arrival times depend only on the chosen prefix, so the whole chain is
+deterministic. Parent reactions are emitted before their children.
+
+```drill
+FORK P1 2ea043 skate C 100,30 120,30 130,42     # green → skate to the slot…
+FORK P1 2ea043/e5342b shoot L 165,42            #   …then red → shoot
+FORK P1 2ea043/2f6df6 skate L 160,60            #   …or blue → skate to the corner (chains again)
+FORK P1 e5342b chip L 120,20                     # red at the first branch → chip
+``` Give a player one `FORK` per cue
 colour of the governing light (the nearest `light` with a `cues=` timeline). The
 hex has no leading `#`.
 
