@@ -5,6 +5,7 @@
 //   node scripts/build-drill-preview.mjs [initial.md] [out.html]
 import { readFileSync, writeFileSync } from "fs";
 import { extractDrill } from "../src/drill-format.js";
+import { DSL_VERSION } from "../src/constants.js";
 
 const src = process.argv[2] || "docs/example-drill.md";
 const out = process.argv[3] || "docs/example-drill-preview.html";
@@ -14,11 +15,16 @@ const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(
 // ---- inline bundle: constants(VIEWS) + boards + drill-format + drill-svg ----
 const strip = c => c.replace(/^\s*import\s.*$/gm, "").replace(/^export\s+/gm, "");
 const bundle = [
-  `const VIEWS = { full:[0,0,200,85], half:[100,0,100,85], quarter:[100,0,100,42.5] };`,
+  `const VIEWS = { full:[0,0,200,85], half:[100,0,100,85], quarter:[100,0,100,42.5] };\nconst RINK = { W:200, H:85 };\nconst DSL_VERSION = ${DSL_VERSION};`,
   strip(read("src/boards.js")),
   `const boards = { isInside, clampInside, contain, tangentToward, edgeDist, pointAt, project, rimPath, rimAround, rimTo, slide, slideTo, PERIM };`,
+  strip(read("src/geometry.js")),
+  strip(read("src/net-collide.js")),
   strip(read("src/drill-format.js")),
-  strip(read("src/drill-svg.js")),
+  strip(read("src/md.js")),
+  // drill-svg.js self-declares `const VIEWS` for standalone use; drop it here so
+  // it doesn't collide with the bundle's own VIEWS (above).
+  strip(read("src/drill-svg.js")).replace(/^const VIEWS = \{[^}]*\};.*$/m, ""),
 ].join("\n\n");
 
 const initial = extractDrill(read(src));
@@ -60,18 +66,45 @@ const CSS = `
   textarea:focus{outline:2px solid var(--red);outline-offset:2px}
   .err{margin-top:10px;min-height:1.3em;color:#e2475a;font:500 13px/1.5 var(--font-mono);white-space:pre-wrap}
   .foot{margin-top:36px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:14px}
-  .foot code{font-family:var(--font-mono);color:var(--ink)}`;
+  .foot code{font-family:var(--font-mono);color:var(--ink)}
+  .sec{margin-top:clamp(24px,4vw,38px)}
+  .sec-h{font:700 13px/1 var(--font-body);letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin:0 0 12px}
+  .notes h1{font-size:24px;text-transform:none;letter-spacing:0;margin:16px 0 8px;line-height:1.15}
+  .notes h2,.notes h3{text-transform:none;letter-spacing:0;font-size:18px;margin:14px 0 6px}
+  .notes p{margin:8px 0}.notes ul,.notes ol{margin:8px 0 8px 24px}.notes li{margin:4px 0}
+  .notes code,.steps code{background:var(--surface);border:1px solid var(--hair);padding:1px 6px;border-radius:6px;font:500 13px var(--font-mono)}
+  .notes a,.steps a{color:var(--red)}
+  table.inv{border-collapse:collapse;min-width:min(340px,100%)}
+  table.inv th,table.inv td{border:1px solid var(--line);padding:8px 16px;text-align:left}
+  table.inv th{background:var(--surface);font:700 12px/1 var(--font-body);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+  table.inv td:last-child,table.inv th:last-child{text-align:right;font-variant-numeric:tabular-nums;width:70px}
+  ol.steps{margin:0;padding-left:24px}ol.steps li{margin:7px 0;padding-left:4px}
+  @media print{
+    :root{--ice:#fff;--panel:#fff;--ink:#111;--muted:#555;--line:#bbb;--hair:#ddd;--surface:#f4f4f4;--shadow:none}
+    body{background:#fff}
+    .wrap{max-width:none;padding:0}
+    .topbar button,#print,.edit,.foot{display:none!important}
+    .card,.sec{page-break-inside:avoid;box-shadow:none}
+    .card{margin-top:14px}
+  }`;
 
-const html = `<title>DrillBoard · live drill card</title>
+const html = `<meta charset="utf-8">
+<title>DrillBoard · live drill card</title>
 <style>${CSS}</style>
 <div class="wrap">
   <header>
     <div class="topbar">
       <span class="eyebrow"><span class="rule"></span>DrillBoard · Live drill card</span>
+      <span style="display:inline-flex;gap:8px">
+      <button id="print" class="copybtn" type="button" title="Print this drill sheet">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+        <span>Print</span>
+      </button>
       <button id="copy" class="copybtn" type="button" title="Copy a link that reopens this exact drill">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>
         <span class="lbl">Copy link</span>
       </button>
+      </span>
     </div>
     <h1 id="title">Drill</h1>
     <p class="lede" id="lede"></p>
@@ -81,6 +114,9 @@ const html = `<title>DrillBoard · live drill card</title>
     <div class="rinkbox" id="diagram"></div>
     <div class="legend" id="legend"></div>
   </section>
+  <section class="sec notes" id="notes-sec" hidden><div class="sec-h">Notes</div><div class="notes" id="notes"></div></section>
+  <section class="sec" id="inv-sec" hidden><div class="sec-h">What you need</div><div id="inventory"></div></section>
+  <section class="sec" id="steps-sec" hidden><div class="sec-h">Steps</div><div id="steps"></div></section>
   <section class="edit">
     <div class="edit-h"><h2>Edit the drill</h2><span class="hint">the rink redraws as you type</span></div>
     <textarea id="dsl" spellcheck="false" autocomplete="off" autocapitalize="off">${esc(initial)}</textarea>
@@ -93,7 +129,10 @@ ${bundle}
 (function(){
   var ta=document.getElementById('dsl'),dia=document.getElementById('diagram'),err=document.getElementById('err'),
       title=document.getElementById('title'),lede=document.getElementById('lede'),leg=document.getElementById('legend'),meta=document.getElementById('meta'),
-      copy=document.getElementById('copy');
+      copy=document.getElementById('copy'),printBtn=document.getElementById('print'),
+      notesEl=document.getElementById('notes'),notesSec=document.getElementById('notes-sec'),
+      invEl=document.getElementById('inventory'),invSec=document.getElementById('inv-sec'),
+      stepsEl=document.getElementById('steps'),stepsSec=document.getElementById('steps-sec');
   function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
   // URL-safe base64 of UTF-8 text, for sharing the current drill in the link.
   function enc(s){try{return btoa(unescape(encodeURIComponent(s))).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,'');}catch(e){return '';}}
@@ -111,6 +150,19 @@ ${bundle}
     L.push('<span><span class="solid"></span>skating route</span>','<span><span class="dash"></span>puck path</span>');
     leg.innerHTML=L.join('');
     meta.textContent=players.length+' skater'+(players.length===1?'':'s')+' \\u00b7 live';
+    // coaching notes (markdown)
+    if(r.notes&&r.notes.trim()){ notesEl.innerHTML=mdBlock(r.notes); notesSec.hidden=false; } else { notesEl.innerHTML=''; notesSec.hidden=true; }
+    // inventory / recipe table
+    var rows=deriveInventory(r.pieces,r.items).filter(function(x){return !x.hide;});
+    if(rows.length){
+      invEl.innerHTML='<table class="inv"><thead><tr><th>Item</th><th>Qty</th></tr></thead><tbody>'+
+        rows.map(function(x){return '<tr><td>'+esc(x.label)+'</td><td>'+x.count+'</td></tr>';}).join('')+'</tbody></table>';
+      invSec.hidden=false;
+    } else { invEl.innerHTML=''; invSec.hidden=true; }
+    // authored presentation steps → numbered list (markdown inline)
+    var st=(r.steps||[]).filter(function(s){return (s.text||'').trim();});
+    if(st.length){ stepsEl.innerHTML='<ol class="steps">'+st.map(function(s){return '<li>'+mdInline(esc(s.text))+'</li>';}).join('')+'</ol>'; stepsSec.hidden=false; }
+    else { stepsEl.innerHTML=''; stepsSec.hidden=true; }
     syncHash();
   }
   // A shared link carries the drill in #d=… — prefer it over the built-in default.
@@ -123,6 +175,7 @@ ${bundle}
     if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(url).then(done,function(){ fallbackCopy(url); done(); }); }
     else { fallbackCopy(url); done(); }
   });
+  printBtn.addEventListener('click',function(){ window.print(); });
   ta.addEventListener('input',render); render();
 })();
 </script>

@@ -150,6 +150,14 @@ export const STYLES = `
           padding-top:calc(16px + env(safe-area-inset-top)); }
         .hd-ta { flex:1; min-height:120px; background:#0f141a; color:#cfe0ee; border:1px solid #2c3846;
           border-radius:8px; font-family:ui-monospace, monospace; font-size:12.5px; padding:8px; resize:none; }
+        /* live markdown preview of the coaching notes */
+        .hd-mdprev { background:#0f141a; border:1px solid #2c3846; border-radius:8px; padding:10px 12px;
+          color:#dbe6f0; font-size:13px; line-height:1.5; max-height:34vh; overflow-y:auto; }
+        .hd-mdprev h1,.hd-mdprev h2,.hd-mdprev h3,.hd-mdprev h4 { margin:8px 0 5px; color:#fff; line-height:1.2; }
+        .hd-mdprev h1 { font-size:17px; } .hd-mdprev h2 { font-size:15px; } .hd-mdprev h3 { font-size:14px; }
+        .hd-mdprev p { margin:6px 0; } .hd-mdprev ul,.hd-mdprev ol { margin:6px 0 6px 20px; }
+        .hd-mdprev code { background:#1b232c; padding:1px 5px; border-radius:5px; font-size:12px; color:#a8c3da; }
+        .hd-mdprev a { color:#6ea8ff; }
         .hd-err { color:#ff8d9c; font-size:12px; white-space:pre-wrap; }
         .hd-row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
         .hd-btn { padding:9px 16px; font-size:13.5px; font-weight:600; border:1px solid #2c3846;

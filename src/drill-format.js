@@ -1,6 +1,42 @@
 // Drill text format: parser and serializer. See the DSL spec in App header.
 import { VIEWS, DSL_VERSION } from "./constants.js";
 
+/* ---------------- inventory ---------------- */
+
+// Canonical inventory rows (a "recipe" of what a drill needs), in display order.
+// A goalie is a person, so goalie-flagged nets/tires are counted under `goalie`
+// (NOT under net/tire) — the one non-obvious rule. `label`/`mark` are excluded.
+export const INV_KINDS = ["player", "goalie", "puck", "cone", "net", "tire", "stick", "bumper", "deker", "passer", "light"];
+const INV_LABELS = {
+  player: "Players", goalie: "Goalies", puck: "Pucks", cone: "Cones", net: "Nets",
+  tire: "Tires", stick: "Sticks", bumper: "Bumpers", deker: "Deker gates", passer: "Rebounders", light: "Lights",
+};
+
+// Merge auto-counted pieces with stored ITEM overrides into display rows:
+//   { key, label, custom, autoCount, count, hide }
+// autoCount is the count on the ice; count is what's shown (an override or the
+// auto count); hide drops the row from the printed table only.
+export function deriveInventory(pieces, items = []) {
+  const isGoalie = p => (p.kind === "net" || p.kind === "tire") && p.goalie;
+  const auto = {};
+  (pieces || []).forEach(p => {
+    if (p.kind === "label" || p.kind === "mark") return;
+    const k = isGoalie(p) ? "goalie" : p.kind;
+    if (!INV_KINDS.includes(k)) return;
+    auto[k] = (auto[k] || 0) + 1;
+  });
+  const ov = k => (items || []).find(it => !it.custom && it.key === k);
+  const rows = INV_KINDS.filter(k => auto[k] || ov(k)).map(k => {
+    const o = ov(k) || {};
+    return { key: k, label: o.label || INV_LABELS[k], custom: false,
+      autoCount: auto[k] || 0, count: o.count != null ? o.count : (auto[k] || 0), hide: !!o.hide };
+  });
+  const custom = (items || []).filter(it => it.custom).map(it => ({
+    key: it.key, label: it.label || it.key, custom: true,
+    autoCount: null, count: it.count != null ? it.count : 0, hide: !!it.hide }));
+  return [...rows, ...custom];
+}
+
 /* ---------------- text format ---------------- */
 
 // Pull the drill DSL out of a markdown ```drill fenced block, so a drill pasted
@@ -58,8 +94,23 @@ export function parseDrill(text) {
   // the DSL schema version the drill declares (a `DSL <n>` header). Absent → treat
   // as the current version (no back-compat gating yet); a reader may branch on it.
   let dslVersion = DSL_VERSION;
+  // coaching writeup: a multi-line markdown NOTES … END NOTES block, captured
+  // verbatim (see serializeDrill). `items` holds inventory overrides / custom
+  // gear rows; auto counts derive from the pieces at render time.
+  let notes = null, capturingNotes = false;
+  const noteBuf = [];
+  const items = [];
   const errors = [];
   text.split(/\r?\n/).forEach((raw, i) => {
+    // NOTES block capture mode: pipe-prefixed body lines are taken verbatim
+    // (no comment-strip / tokenize) until a bare `END NOTES`. The `| ` prefix on
+    // every body line means a coach's own `END NOTES` line can never terminate it.
+    if (capturingNotes) {
+      if (raw.trim() === "END NOTES") { notes = noteBuf.join("\n"); capturingNotes = false; }
+      else { const m = /^\|( (.*))?$/.exec(raw); noteBuf.push(m ? (m[2] || "") : raw); }
+      return;
+    }
+    if (/^\s*NOTES\s*$/.test(raw)) { capturingNotes = true; noteBuf.length = 0; return; }
     // TITLE/DESC take the whole rest of the line (may contain spaces or #)
     const meta = /^\s*(title|desc)\b\s*(.*)$/i.exec(raw);
     if (meta) { if (meta[1].toLowerCase() === "title") title = meta[2].trim(); else desc = meta[2].trim(); return; }
@@ -230,10 +281,24 @@ export function parseDrill(text) {
         });
         const anchor = on ? { on } : at != null ? { at } : null;
         if (anchor) steps.push({ text: txt, ...anchor, ...(pos ? { pos } : {}) });
+      } else if (cmd === "ITEM") {
+        // ITEM <key> [count=<n>] [hide] ["Label"] — an inventory row. A canonical
+        // <key> overrides/hides its auto-derived row; any other key is a custom
+        // off-ice gear row (whistles, pinnies, water) carrying its own label.
+        const key = tok[1];
+        let count = null, hide = false, label = "";
+        tok.slice(2).forEach(r => {
+          if (quoted(r)) label = unq(r);
+          else if (/^count=/i.test(r)) { const n = parseInt(r.slice(6), 10); if (!isNaN(n) && n >= 0) count = n; }
+          else if (r.toLowerCase() === "hide") hide = true;
+        });
+        if (key) items.push({ key, ...(count != null ? { count } : {}), ...(hide ? { hide: true } : {}),
+          ...(label ? { label } : {}), ...(INV_KINDS.includes(key) ? {} : { custom: true }) });
       } else throw new Error(`unknown command "${tok[0]}"`);
     } catch (e) { errors.push(`line ${i + 1}: ${e.message}`); }
   });
-  return { rink, pieces, errors, title, desc, dslVersion, steps };
+  if (capturingNotes) notes = noteBuf.join("\n");   // unterminated NOTES: flush what we have
+  return { rink, pieces, errors, title, desc, dslVersion, steps, notes: notes || "", items };
 }
 
 const f1 = n => (Math.round(n * 10) / 10).toString();
@@ -265,12 +330,19 @@ function segToStr(s) {
   return `${pre}C ${f1(s.c1x)},${f1(s.c1y)} ${f1(s.c2x)},${f1(s.c2y)} ${f1(s.x)},${f1(s.y)}`;
 }
 
-export function serializeDrill(rink, pieces, title = "", desc = "", steps = []) {
+export function serializeDrill(rink, pieces, title = "", desc = "", steps = [], notes = "", items = []) {
   // stamp the schema version that wrote this text (first line, so a reader can
   // branch before parsing the body). Always the current DSL_VERSION on save.
   const out = [`DSL ${DSL_VERSION}`, `RINK ${rink}`];
   if (title && title.trim()) out.push(`TITLE ${title.trim()}`);
   if (desc && desc.trim()) out.push(`DESC ${desc.trim()}`);
+  // coaching writeup: pipe-prefix every body line so nothing in the markdown
+  // (blank lines, a literal `END NOTES`) can collide with the terminator.
+  if (notes && notes.trim()) {
+    out.push("NOTES");
+    notes.replace(/\r\n?/g, "\n").split("\n").forEach(l => out.push(l === "" ? "|" : "| " + l));
+    out.push("END NOTES");
+  }
   out.push("");
   pieces.forEach(p => {
     if (p.kind === "label") {
@@ -343,6 +415,15 @@ export function serializeDrill(rink, pieces, title = "", desc = "", steps = []) 
     const anchor = s.on ? `on=${s.on.piece}:${s.on.wp + 1}` : `at=${f2(s.at || 0)}`;
     const pos = s.pos ? ` pos=${f2(s.pos.x)}:${f2(s.pos.y)}` : "";
     out.push(`STEP ${anchor}${pos} ${qesc(s.text || "")}`);
+  });
+  // inventory: only rows the coach touched (overrides / hides / custom gear) are
+  // written; a pristine drill emits none and the table stays fully auto-derived.
+  (items || []).forEach(it => {
+    const parts = [`ITEM ${it.key}`];
+    if (it.count != null) parts.push(`count=${it.count}`);
+    if (it.hide) parts.push("hide");
+    if (it.label) parts.push(qesc(it.label));
+    out.push(parts.join(" "));
   });
   return out.join("\n") + "\n";
 }

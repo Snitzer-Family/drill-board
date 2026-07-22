@@ -5,8 +5,9 @@ format and for the **markdown embed** convention that lets you drop a drill into
 a note or a web page.
 
 - Live app: <https://snitzer-family.github.io/drill-board/>
-- In the app: **☰ → Text editor** (edit/paste), **Export .txt / .md**,
-  **Copy markdown**, **Load .txt / .md**.
+- In the app: **☰ → Text editor** (edit/paste), **Notes / writeup**,
+  **Inventory / gear**, **Print sheet**, **Export .txt / .md**, **Copy markdown**,
+  **Load .txt / .md**.
 
 ---
 
@@ -77,6 +78,31 @@ The ice surface shown. Defaults to `full`.
 
 ### `TITLE <text>` · `DESC <text>`
 Drill name and description (everything to the end of the line). Optional.
+
+### `NOTES … END NOTES`
+A **multi-line markdown coaching writeup** — headings, numbered/bulleted steps,
+bold/italic, inline `code`, links. Shown on the **print sheet** and the standalone
+**preview page** (and included in `Export .md` / `Copy markdown`). In the app:
+**☰ → Notes / writeup…** (with a live preview).
+
+Every body line is stored with a leading `| ` (a blank line is just `|`). The
+block opens on a line that is exactly `NOTES` and closes on a line that is exactly
+`END NOTES`. The pipe prefix is what makes the block **collision-proof**: a coach's
+own `END NOTES` line is serialized as `| END NOTES` and read back as content, so it
+can never truncate the block. The format round-trips byte-for-byte.
+
+```drill
+NOTES
+| ## Coaching points
+|
+| A **delayed** neutral-zone entry that beats a standing-up D.
+|
+| 1. F1 carries hard up the wall to draw the D up.
+| 2. **Chip** off the glass past the D (aim `~-60`).
+|
+| - Cue: *sell the carry* before the chip.
+END NOTES
+```
 
 ### `PIECE <id> <kind> <x> <y> [modifiers…]`
 Places a piece. `id` is any unique token (e.g. `F1`, `PK1`, `N2`).
@@ -259,6 +285,30 @@ When a drill has **no** `STEP` lines, presentation mode falls back to the
 auto-generated captions (including per-waypoint `SHOW preso`); the first authored
 step switches it fully to authored captions.
 
+Caption text accepts **inline markdown** (`**bold**`, `*italic*`, `` `code` ``,
+`[links](https://…)`) — rendered in the caption bubble and on the print sheet.
+
+### `ITEM <key> [count=<n>] [hide] ["Label"]`
+A row of the drill's **inventory** — the "what you need to run this" recipe. The
+table is **auto-counted** from the pieces on the ice (players, pucks, cones, nets,
+goalies, tires, sticks, bumpers, deker gates, rebounders, lights); a goalie-flagged
+`net`/`tire` counts as a **goalie**, not a net/tire. In the app: **☰ → Inventory /
+gear…**. Shown on the print sheet and preview page.
+
+`ITEM` lines are written **only for what you change** — a pristine drill has none:
+
+| Form | Meaning |
+|---|---|
+| `ITEM <key> count=<n>` | Override the auto count for a canonical row (`player` · `goalie` · `puck` · `cone` · `net` · `tire` · `stick` · `bumper` · `deker` · `passer` · `light`) |
+| `ITEM <key> hide` | Hide that row from the sheet — the piece **stays on the ice** |
+| `ITEM <key> count=<n> "Label"` | A **custom** off-ice gear row (any non-canonical `<key>`), e.g. whistles, pinnies, water |
+
+```drill
+ITEM puck count=8        # 8 pucks even though 1 is drawn
+ITEM net hide            # keep the net on the ice, off the sheet
+ITEM whistle count=1 "Whistle"
+```
+
 ---
 
 ## Worked example
@@ -268,11 +318,21 @@ step switches it fully to authored captions.
 RINK full
 TITLE Chip Off the Boards, Behind the D
 DESC F1 banks a chip off the boards past the standing-up D and picks it up behind him in the neutral zone.
+NOTES
+| ## Coaching points
+|
+| 1. F1 carries hard up the wall to draw the D up.
+| 2. **Chip** off the glass past the D (aim `~-60`).
+| 3. Slip inside and re-gather behind him — still onside.
+END NOTES
 PIECE N2 net 183 42.5 face=180 goalie
 PIECE D1 player 110 20 #1f4fa3 D1 defense
 PIECE F1 player 46 26 F1
 PATH F1 L 80,14 L 100,12 L 120,26
 PIECE PK1 puck 46 26 on=F1 chip=2:F1@3~-60
+STEP on=F1:2 "Chip off the glass past the D — `~-60`"
+ITEM puck count=8
+ITEM whistle count=1 "Whistle"
 ```
 ````
 
@@ -282,6 +342,9 @@ PIECE PK1 puck 46 26 on=F1 chip=2:F1@3~-60
 - The chip carries exactly as far as **point 3** `(120,26)`, where `F1` — having
   slipped past D1 — **collects it behind him**, still in the neutral zone.
 - `D1` is an auto-defenceman; `N2` has a goalie.
+- The **`NOTES`** block is the coach's writeup; **`ITEM`** rows tune the inventory
+  (8 pucks on the sheet though one is drawn, plus a `Whistle`). Both show on the
+  print sheet / preview page.
 
 ---
 

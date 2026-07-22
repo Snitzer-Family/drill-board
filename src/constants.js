@@ -6,12 +6,12 @@ export const COLORS = ["#d7263d", "#1f4fa3", "#1f8a4c", "#e0731d", "#22262b", "#
 export const SPEED = { carry: 1, pass: 7, shot: 10 };
 export const vb = m => VIEWS[m].join(" ");
 
-export const APP_VERSION = "4.33";
+export const APP_VERSION = "4.34";
 // DSL schema version, stamped into every serialized drill (`DSL <n>` header) so
 // production builds can eventually render a drill per the version that wrote it.
 // Bump ONLY on a breaking DSL change (new kinds/modifiers that older builds would
 // misread). Compatibility gating is not implemented yet — this just records intent.
-export const DSL_VERSION = 2;
+export const DSL_VERSION = 3;
 // visual size of players/pucks/cones relative to true rink-feet scale
 export const ICON_SCALE = 0.8;
 // build stamp injected by vite.config.js `define`; "dev" when run standalone
