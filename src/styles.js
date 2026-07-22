@@ -196,7 +196,6 @@ export const STYLES = `
           white-space:pre-wrap; overflow-wrap:anywhere; }
         /* read mode: the whole caption is a tap target that advances the hold */
         .hd-preso.tap { cursor:pointer; gap:5px; -webkit-user-select:none; user-select:none; }
-        .hd-preso-hint { font-size:11px; font-weight:600; color:#7d8b99; text-align:right; }
         .hd-preso-btn { flex:none; padding:8px 14px; font-size:13px; font-weight:700;
           background:#1f4fa3; border:1px solid #1f4fa3; color:#fff; border-radius:8px; cursor:pointer; }
         /* placement mode: the box is the SAME size the caption plays at (text-sized);
