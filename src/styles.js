@@ -35,6 +35,18 @@ export const STYLES = `
           box-shadow:0 4px 14px rgba(0,0,0,.45); backdrop-filter:blur(4px); touch-action:none; }
         .hd-playdock .hd-grip { cursor:grab; padding:6px 4px; font-size:15px; }
         .hd-playdock .hd-grip:active { cursor:grabbing; }
+        /* subtle "hide" button on the dock */
+        .hd-fab.small.hd-playhide { width:30px; height:30px; background:transparent;
+          border-color:transparent; box-shadow:none; color:#8b99a8; }
+        /* collapsed play-dock tab: tucked to an edge, tap to bring the dock back */
+        .hd-playtab { position:absolute; z-index:46; display:flex; align-items:center;
+          justify-content:center; width:54px; height:26px; padding:0; color:#cdd8e2;
+          background:rgba(23,29,37,.92); border:1px solid #33404f;
+          box-shadow:0 4px 14px rgba(0,0,0,.45); backdrop-filter:blur(4px); cursor:pointer; }
+        .hd-playtab.top { border-radius:0 0 13px 13px; border-top:none; }
+        .hd-playtab.bottom { border-radius:13px 13px 0 0; }
+        .hd-playtab.left { width:26px; height:54px; border-radius:0 13px 13px 0; border-left:none; }
+        .hd-playtab.right { width:26px; height:54px; border-radius:13px 0 0 13px; border-right:none; }
         /* bottom menu bar — owns the chrome so the ice stays clear */
         .hd-bar { position:absolute; z-index:44; left:env(safe-area-inset-left, 0px);
           right:env(safe-area-inset-right, 0px); bottom:0;
@@ -51,7 +63,7 @@ export const STYLES = `
         .hd-barplay { display:none; font-size:25px; line-height:1; }
         .hd-barplay.play { background:#d7263d; border-color:#d7263d; color:#fff; }
         @media (pointer: fine) and (min-width: 760px) {
-          .hd-playdock { display:none; }
+          .hd-playdock, .hd-playtab { display:none; }
           .hd-barplay { display:flex; }
           /* no floating top dock on desktop — pinned popups can ride the top edge */
           :root { --hd-pintop: 10px; }
@@ -59,7 +71,7 @@ export const STYLES = `
         /* landscape on a touch phone/tablet: vertical room is tight, so dock the
            play controls into the bottom bar instead of the floating top dock */
         @media (pointer: coarse) and (orientation: landscape) {
-          .hd-playdock { display:none; }
+          .hd-playdock, .hd-playtab { display:none; }
           .hd-barplay { display:flex; }
           :root { --hd-pintop: 10px; }
         }

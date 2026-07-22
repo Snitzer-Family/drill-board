@@ -644,6 +644,19 @@ export default function DrillAnimator() {
     });
   }
   function playDragEnd() { playDrag.current = null; }
+  // hide the floating play dock (portrait phone) to its nearest edge, leaving a
+  // small tab to bring it back. {edge, cross} in the dock container's px coords.
+  const [playHide, setPlayHide] = useState(null);
+  function hidePlayDock() {
+    const el = playRef.current, root = el && el.parentElement;
+    if (!el || !root) { setPlayHide({ edge: "top", cross: 0 }); return; }
+    const rr = root.getBoundingClientRect(), r = el.getBoundingClientRect();
+    const cx = r.left + r.width / 2 - rr.left, cy = r.top + r.height / 2 - rr.top;
+    const dl = cx, dr = rr.width - cx, dt = cy, db = rr.height - cy;
+    const m = Math.min(dl, dr, dt, db);
+    const edge = m === dt ? "top" : m === db ? "bottom" : m === dl ? "left" : "right";
+    setPlayHide({ edge, cross: (edge === "top" || edge === "bottom") ? cx : cy });
+  }
 
   // iOS 26 standalone bug: the viewport is sized as if the status bar were
   // opaque (screen − safeTop) but positioned as if translucent (at y=0),
@@ -4767,7 +4780,7 @@ export default function DrillAnimator() {
       {/* ---------- draggable play dock (mobile) ---------- */}
       <div className="hd-playdock" ref={playRef} style={{
         ...(playPos ? { left: playPos.x, top: playPos.y, transform: "none" } : {}),
-        ...(aiPlay ? { display: "none" } : {}),
+        ...(aiPlay || playHide ? { display: "none" } : {}),
       }}>
         <span className="hd-grip" onPointerDown={playDragStart} onPointerMove={playDragMove}
           onPointerUp={playDragEnd} onPointerCancel={playDragEnd}><Icon name="grip" size={16} /></span>
@@ -4775,7 +4788,25 @@ export default function DrillAnimator() {
           onClick={() => setLoopMode(v => !v)}><Icon name="loop" size={19} /></button>
         <button className="hd-fab small play" onClick={togglePlay}><Icon name={playing ? "pause" : "play"} size={22} /></button>
         <button className="hd-fab small" title={playing ? "Stop" : "Reset"} onClick={resetPlay}><Icon name={playing ? "stop" : "reset"} size={19} /></button>
+        <button className="hd-fab small hd-playhide" title="Hide controls" onClick={hidePlayDock}><Icon name="close" size={18} /></button>
       </div>
+      {/* collapsed tab: tucked to the nearest edge, tap to bring the dock back */}
+      {!aiPlay && playHide && (() => {
+        const { edge, cross } = playHide;
+        const horiz = edge === "top" || edge === "bottom";
+        const rot = { top: 0, bottom: 180, left: -90, right: 90 }[edge];
+        // keep the bottom tab clear of the menu bar
+        const anchor = edge === "bottom" ? { bottom: "calc(56px + var(--hd-b))" } : { [edge]: 0 };
+        const pos = horiz
+          ? { ...anchor, left: `clamp(30px, ${cross}px, calc(100% - 30px))`, transform: "translateX(-50%)" }
+          : { ...anchor, top: `clamp(30px, ${cross}px, calc(100% - 30px))`, transform: "translateY(-50%)" };
+        return (
+          <button className={`hd-playtab ${edge}`} style={pos} title="Show play controls"
+            onClick={() => setPlayHide(null)}>
+            <Icon name="chevronDown" size={18} style={{ transform: `rotate(${rot}deg)` }} />
+          </button>
+        );
+      })()}
 
       {/* ---------- bottom menu bar ---------- */}
       <div className="hd-bar">
