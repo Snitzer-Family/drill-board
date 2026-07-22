@@ -50,14 +50,14 @@ export function extractDrill(text) {
 // Shared by PATH (base routes) and FORK (light-reaction continuations).
 function parseSegments(tok, j, unq) {
   const segs = [];
-  let mode = "carry", dir = "fwd", stop = 0, rate = 1, name = null, waitOn = null, jump = false;
+  let mode = "carry", dir = "fwd", stop = 0, rate = 1, name = null, waitOn = null, jump = false, join = null;
   let dsc = null, dmode = null, dsize = null, dox = null, doy = null;
   const num = () => { const v = parseFloat(tok[j++]); if (isNaN(v)) throw new Error("bad number in PATH"); return v; };
   const push = seg => {
     segs.push({ ...seg, mode, dir, stop, rate, ...(name ? { name } : {}), ...(waitOn ? { waitOn } : {}), ...(jump ? { jump: true } : {}),
-      ...(dsc ? { desc: dsc } : {}), ...(dmode ? { dmode } : {}), ...(dsize != null ? { dsize } : {}),
+      ...(join ? { join } : {}), ...(dsc ? { desc: dsc } : {}), ...(dmode ? { dmode } : {}), ...(dsize != null ? { dsize } : {}),
       ...(dox != null ? { dox, doy } : {}) });
-    mode = "carry"; dir = "fwd"; stop = 0; rate = 1; name = null; waitOn = null; jump = false;
+    mode = "carry"; dir = "fwd"; stop = 0; rate = 1; name = null; waitOn = null; jump = false; join = null;
     dsc = null; dmode = null; dsize = null; dox = null; doy = null;
   };
   while (j < tok.length) {
@@ -66,6 +66,7 @@ function parseSegments(tok, j, unq) {
     if (t === "FWD" || t === "BWD") { dir = t.toLowerCase(); continue; }
     if (t === "STOP") { stop = num(); continue; }
     if (t === "JUMP") { jump = true; continue; }
+    if (t === "JOIN") { const v = (tok[j++] || "").toLowerCase(); join = (v === "smooth" || v === "sym") ? v : null; continue; }
     if (t === "WAIT") { const on = tok[j++]; const at = parseInt(tok[j++], 10); waitOn = { on, at: (isNaN(at) ? 1 : at) - 1, mode: "waypoint" }; continue; }
     // WACT <player> <pt> — pause until that player releases the puck at <pt> (0 = any action)
     if (t === "WACT") { const on = tok[j++]; const at = parseInt(tok[j++], 10); waitOn = { on, at: (isNaN(at) || at === 0) ? null : at - 1, mode: "action" }; continue; }
@@ -320,6 +321,7 @@ function segToStr(s) {
   }
   if (s.stop > 0) pre += `STOP ${f1(s.stop)} `;
   if (s.jump) pre += "JUMP ";
+  if (s.join === "smooth" || s.join === "sym") pre += `JOIN ${s.join} `;
   if (s.waitOn && s.waitOn.on) pre += s.waitOn.mode === "action"
     ? `WACT ${s.waitOn.on} ${s.waitOn.at != null ? s.waitOn.at + 1 : 0} `
     : `WAIT ${s.waitOn.on} ${(s.waitOn.at ?? 0) + 1} `;

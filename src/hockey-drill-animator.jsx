@@ -4,7 +4,7 @@ import { VIEWS, COLORS, vb, APP_VERSION, ICON_SCALE, BUILD_STAMP, DEFAULT_TEXT, 
 import { parseDrill, serializeDrill, extractDrill, deriveInventory } from "./drill-format.js";
 import { drillSvg } from "./drill-svg.js";
 import { mdEscape, mdInline, mdBlock } from "./md.js";
-import { clampX, clampY, segEnd, segD, nearestT, splitSeg, zigzagPoints, wigglePoints, convertSeg, fitRoute, evalSeg, rdp, catmullToBezier } from "./geometry.js";
+import { clampX, clampY, segEnd, segD, nearestT, splitSeg, zigzagPoints, wigglePoints, convertSeg, fitRoute, evalSeg, rdp, catmullToBezier, alignJoint, mirrorJoint, translateJointHandles } from "./geometry.js";
 import * as boards from "./boards.js";
 import { netShapes, bumperShapes, solidShapes, detourRoute, segCrossesNet } from "./net-collide.js";
 import { RinkMarkings } from "./rink.jsx";
@@ -203,6 +203,10 @@ function DelayTrigger({ value, onChange, sub, players, actorIds, nameOf }) {
      WAIT <player> <pt>    hold until that player REACHES <pt>
      WACT <player> <pt>    hold until that player RELEASES the puck at <pt> (0 = any action)
      RATE <mult>           speed multiplier for this leg
+     JOIN smooth|sym       link this waypoint's curve handles
+   JOIN links the two bézier handles meeting at a waypoint so
+   editing keeps them collinear (smooth) or collinear + equal
+   length (sym); omitted = a corner with independent handles.
    hand=L mirrors the player's stick. on=F1 puts a puck on that
    player's blade; it releases when the carrier reaches the
    puck's placed spot, then runs its own route.
@@ -2085,11 +2089,29 @@ export default function DrillAnimator() {
       const m = Math.hypot(dx, dy);
       if (m < 0.5) { dx = 22; dy = 0; } else { dx = (dx / m) * 22; dy = (dy / m) * 22; }
       const seg = convertSeg({ type, x: clampX(prev.x + dx), y: clampY(prev.y + dy) }, prev);
-      if (fork) return { ...p, forks: mapForkAt(p.forks, fork, f => ({ ...f, path: [...f.path, seg] })) };
-      return { ...p, path: [...p.path, seg] };
+      // extending curve → curve: make the shared waypoint a smooth join so the new
+      // leg continues the heading instead of kinking off with wild split handles
+      const build = arr => {
+        let path = [...arr, seg];
+        const j = n - 1;   // the waypoint the new leg grows from
+        if (j >= 0 && (type === "C" || type === "Q") && (path[j].type === "C" || path[j].type === "Q"))
+          path = alignJoint(path, j, "smooth", { x: rp.x, y: rp.y });
+        return path;
+      };
+      if (fork) return { ...p, forks: mapForkAt(p.forks, fork, f => ({ ...f, path: build(f.path) })) };
+      return { ...p, path: build(p.path) };
     });
     setSelectedId(id);
     setPopup({ type: "point", id, seg: newIdx, ...(fork ? { fork } : {}) });
+  }
+  // change a waypoint's point type (corner / smooth / sym), re-flowing its handles
+  function setJoint(id, i, join, fork = null) {
+    update(p => {
+      if (p.id !== id) return p;
+      const org = fork ? forkOriginPoint(p, fork) : { x: p.x, y: p.y };
+      if (fork) return { ...p, forks: mapForkAt(p.forks, fork, f => ({ ...f, path: alignJoint(f.path, i, join, org) })) };
+      return { ...p, path: alignJoint(p.path, i, join, org) };
+    });
   }
   function changeSegType(id, i, type, fork = null) {
     update(p => {
@@ -2855,6 +2877,21 @@ export default function DrillAnimator() {
     svgRef.current.setPointerCapture?.(e.pointerId);
   }
 
+  // a leg tap that lands within grabbing distance of one of its endpoint
+  // waypoints → that waypoint's index (nearest wins), else null. Lets a tap on a
+  // curve where a waypoint sits open the point popup without a second tap.
+  function waypointUnderTap(id, segIdx, pt, fork) {
+    const p = pieces.find(q => q.id === id);
+    if (!p) return null;
+    const route = routeSegs(p, fork);
+    let best = null, bd = 3.6;   // ~ the on-ice waypoint grab radius, in feet
+    for (const w of [segIdx, segIdx - 1]) {
+      if (w < 0 || w >= route.length) continue;
+      const dd = Math.hypot(route[w].x - pt.x, route[w].y - pt.y);
+      if (dd < bd) { bd = dd; best = w; }
+    }
+    return best;
+  }
   function lineDown(e, id, segIdx, fork = null) {
     if (playing || pinchRef.current) return;
     e.stopPropagation();
@@ -3012,13 +3049,22 @@ export default function DrillAnimator() {
     update(p => {
       if (p.id !== d.id) return p;
       const edit = arr => {
-        const path = arr.slice();
+        let path = arr.slice();
         const s = { ...path[d.seg] };
-        if (d.kind === "anchor") { s.x = cp.x; s.y = cp.y; }
+        if (d.kind === "anchor") {
+          const dx = cp.x - s.x, dy = cp.y - s.y;
+          s.x = cp.x; s.y = cp.y; path[d.seg] = s;
+          // a linked waypoint carries its tangent handles as it slides
+          if ((s.join === "smooth" || s.join === "sym") && d.wp != null)
+            path = translateJointHandles(path, d.wp, dx, dy);
+          return path;
+        }
         if (d.kind === "q") { s.cx = cp.x; s.cy = cp.y; }
         if (d.kind === "c1") { s.c1x = cp.x; s.c1y = cp.y; }
         if (d.kind === "c2") { s.c2x = cp.x; s.c2y = cp.y; }
         path[d.seg] = s;
+        // smooth/symmetric points drive their opposite handle to stay aligned
+        if (d.wp != null) path = mirrorJoint(path, d.wp, d.seg, d.kind, cp);
         return path;
       };
       if (d.fork) return { ...p, forks: mapForkAt(p.forks, d.fork, f => ({ ...f, path: edit(f.path) })) };
@@ -3070,6 +3116,10 @@ export default function DrillAnimator() {
           return;
         }
         lastLineTap.current = { t: now, id: d.id, pt: d.tapPt };
+        // a tap landing on a waypoint opens that point directly — don't make the
+        // coach hit the leg first, then the dot on a second tap
+        const wp = waypointUnderTap(d.id, d.line, d.tapPt, d.fork || null);
+        if (wp != null) { setSelectedId(d.id); setPopup({ type: "point", id: d.id, seg: wp, ...(d.fork ? { fork: d.fork } : {}) }); return; }
         setPopup({ type: "line", id: d.id, seg: d.line, pt: d.tapPt, ...(d.fork ? { fork: d.fork } : {}) });
         return;
       }
@@ -3352,9 +3402,13 @@ export default function DrillAnimator() {
     };
     route.forEach((s, i) => {
       if (i === activeWp) {
-        // full anchor grab (square kept square via yFix)
-        els.push(<rect key={`a${i}`} x={s.x - 1.4} y={s.y - 1.4 * yf} width={2.8} height={2.8 * yf}
-          fill={dotFill} stroke={dotStroke} strokeWidth={0.35} pointerEvents="none" />);
+        // full anchor grab: a circle for a linked (smooth/sym) point, a square for
+        // a corner — the vector-editor convention, so the point type reads on-ice
+        if (s.join === "smooth" || s.join === "sym")
+          els.push(hd(s.x, s.y, 1.6, { key: `a${i}`, fill: dotFill, stroke: dotStroke, strokeWidth: 0.35, pointerEvents: "none" }));
+        else
+          els.push(<rect key={`a${i}`} x={s.x - 1.4} y={s.y - 1.4 * yf} width={2.8} height={2.8 * yf}
+            fill={dotFill} stroke={dotStroke} strokeWidth={0.35} pointerEvents="none" />);
         els.push(hd(s.x, s.y, 4, { key: `ah${i}`, fill: "transparent", style: { cursor: "grab" },
           onPointerDown: e => handleDown(e, { kind: "anchor", id: p.id, seg: i, wp: i, ...(fork ? { fork } : {}) }) }));
         // incoming tangent: this leg's control nearest waypoint i
@@ -4448,6 +4502,20 @@ export default function DrillAnimator() {
                     onClick={() => changeSegType(p.id, i + 1, t, fork)}><Icon name={ic} /></button>
                 ))}
               </div>
+              {/* point type — only when both adjoining legs are curves (there's a
+                  handle on each side to link). Corner = independent handles;
+                  Smooth = handles kept collinear (auto-smooths); Sym = collinear + equal */}
+              {s.type !== "L" && next.type !== "L" && (
+                <div className="hd-poprow">
+                  <span>Point</span>
+                  {[["corner", "ptCorner", "Corner — independent handles"],
+                    ["smooth", "ptSmooth", "Smooth — linked handles, auto-smooths"],
+                    ["sym", "ptSym", "Symmetric — linked, equal-length handles"]].map(([j, ic, lbl]) => (
+                    <button key={j} className={`hd-mini${(s.join || "corner") === j ? " on" : ""}`} title={lbl}
+                      onClick={() => setJoint(p.id, i, j, fork)}><Icon name={ic} /></button>
+                  ))}
+                </div>
+              )}
               {p.kind === "player" && (
                 <div className="hd-poprow">
                   <span>Then skate</span>

@@ -182,6 +182,7 @@ is the piece's starting spot (so `shoot=0` / `chip=0` releases before skating).
 | `WAIT <player> <pt>` | Pause at the start of this leg until `<player>` **reaches** point `<pt>`. In the app: *Delay trigger → Waypoint* on the waypoint popup. |
 | `WACT <player> <pt>` | Pause at the start of this leg until `<player>` **releases the puck** (pass/chip/rim/shot) at point `<pt>` (`0` = at any of their actions). In the app: *Delay trigger → Action*. |
 | `JUMP` | The player jumps as they pass this waypoint — a hop (grow then shrink over a sticky ground shadow) in the animation. Toggle *Jump here* on the waypoint popup. |
+| `JOIN smooth\|sym` | Links this waypoint's two bézier handles so re-editing keeps them collinear (**smooth**) or collinear **and** equal length (**sym**). Omitted = a **corner** (independent handles). Purely an editing aid — the rendered curve is unchanged. Set via *Point* on the waypoint popup; on-ice a linked point shows a round node, a corner a square one. |
 | `RATE <n>` | Speed multiplier for this leg |
 | `NAME <word>` | Name this waypoint (underscores → spaces) for presentation text |
 | `DESC "<text>"` | A free-text description for this waypoint |
