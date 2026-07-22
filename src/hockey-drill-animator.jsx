@@ -1350,6 +1350,32 @@ export default function DrillAnimator() {
   function clearFork(id, color) {
     updateById(id, { forks: (pieces.find(p => p.id === id)?.forks || []).filter(f => !sameColor(f.color, color)) });
   }
+  // create-or-extend a reaction fork with a segment of the given type, continuing
+  // from its current end (or the branch), then open the new waypoint for editing.
+  // The icon-based counterpart to freehand beginForkDraw.
+  function addForkSegment(id, color, type) {
+    const piece = pieces.find(q => q.id === id); if (!piece) return;
+    const newIdx = (forkOf(piece, color)?.path.length) || 0;   // where the new point lands
+    update(p => {
+      if (p.id !== id) return p;
+      const forks = forkOf(p, color) ? (p.forks || []) : [...(p.forks || []), { color, action: "skate", forks: [], path: [] }];
+      const b = branchPoint(p);
+      return { ...p, forks: forks.map(f => {
+        if (!sameColor(f.color, color)) return f;
+        const rp = { ...p, x: b.x, y: b.y, path: f.path };
+        const n = rp.path.length;
+        const prev = n ? segEnd(rp, n - 1) : { x: rp.x, y: rp.y };
+        const before = n >= 2 ? segEnd(rp, n - 2) : { x: rp.x, y: rp.y };
+        let dx = prev.x - before.x, dy = prev.y - before.y;
+        const m = Math.hypot(dx, dy);
+        if (m < 0.5) { dx = 22; dy = 0; } else { dx = (dx / m) * 22; dy = (dy / m) * 22; }
+        const seg = convertSeg({ type, x: clampX(prev.x + dx), y: clampY(prev.y + dy) }, prev);
+        return { ...f, path: [...f.path, seg] };
+      }) };
+    });
+    setSelectedId(id); setEditingFork({ id, color });
+    setPopup({ type: "point", id, seg: newIdx, fork: color });
+  }
   // set the action a reaction performs (skate / pass / shoot / chip / rim); pass
   // defaults its target to the first other player
   function setForkAction(id, color, action) {
@@ -1361,9 +1387,25 @@ export default function DrillAnimator() {
       to: action === "pass" ? (f.to || (others[0] || {}).id || null) : undefined,
     }) });
   }
-  // the reaction-authoring controls (Draw / Edit / Clear per cue colour) — shown on
-  // the branch waypoint (the route's end, nearest the light), or the player popup
-  // when there's no route yet. Null if no governing cue-light.
+  // the shared "curve set" of route buttons: straight / curve / S-curve, plus a
+  // 4th freehand-draw button. onType(t) adds a segment of that type; onDraw()
+  // enters freehand mode. Used anywhere a route is built or extended.
+  const curveButtons = (onType, onDraw, activeType = null) => (
+    <>
+      {[["L", "segLine", "Straight"], ["Q", "segQuad", "Curve"], ["C", "segCubic", "S-curve"]].map(([t, ic, lbl]) => (
+        <button key={t} className={`hd-mini${activeType === t ? " on" : ""}`} title={lbl} onClick={() => onType(t)}><Icon name={ic} /></button>
+      ))}
+      <button className="hd-mini" title="Freehand draw" onClick={onDraw}><Icon name="pencil" /></button>
+    </>
+  );
+  // enter freehand draw mode for a route: a reaction fork, else the base route
+  function drawRouteMode(id, fork) {
+    if (fork) { beginForkDraw(id, fork); return; }
+    resetAnim(); setPlaying(false); setPopup(null); setSelectedId(id); setEditingFork(null); setTool("draw");
+  }
+  // the reaction-authoring controls (curve buttons + action + Edit/Clear per cue
+  // colour) — shown on the branch waypoint (the route's end, nearest the light), or
+  // the player popup when there's no route yet. Null if no governing cue-light.
   function renderLightReactions(p) {
     const light = governingLight(pieces, p);
     if (!light) return null;
@@ -1384,6 +1426,7 @@ export default function DrillAnimator() {
           return (
             <div className="hd-poprow" key={c}>
               <div className="hd-swatch on" style={{ background: c, cursor: "default" }} />
+              {curveButtons(t => addForkSegment(p.id, c, t), () => beginForkDraw(p.id, c))}
               {has ? (
                 <>
                   <select value={fk.action || "skate"} style={selStyle}
@@ -1396,14 +1439,10 @@ export default function DrillAnimator() {
                   </select>
                   <button className={`hd-mini${isEditing ? " on" : ""}`}
                     onClick={() => setEditingFork(isEditing ? null : { id: p.id, color: c })}>{isEditing ? "✓ Editing" : "Edit"}</button>
-                  <button className="hd-mini" onClick={() => beginForkDraw(p.id, c)}>Redraw</button>
                   <button className="hd-mini" onClick={() => { if (isEditing) setEditingFork(null); clearFork(p.id, c); }}>Clear</button>
                 </>
               ) : (
-                <>
-                  <button className="hd-mini" onClick={() => beginForkDraw(p.id, c)}>Draw</button>
-                  <span style={{ fontSize: 11, color: "#8b99a8" }}>no reaction</span>
-                </>
+                <span style={{ fontSize: 11, color: "#8b99a8" }}>add a reaction</span>
               )}
             </div>
           );
@@ -4031,10 +4070,8 @@ export default function DrillAnimator() {
           ) : (p.kind === "player" || p.kind === "puck") && !p.defense ? (
             <div className="hd-poprow">
               <span>Extend {fork ? "reaction" : "route"}</span>
-              <button className="hd-mini" title="Straight" onClick={() => addSegment(p.id, "L", fork)}><Icon name="segLine" /></button>
-              <button className="hd-mini" title="Curve" onClick={() => addSegment(p.id, "Q", fork)}><Icon name="segQuad" /></button>
-              <button className="hd-mini" title="S-curve" onClick={() => addSegment(p.id, "C", fork)}><Icon name="segCubic" /></button>
-              <span style={{ fontSize: 11, color: "#8b99a8" }}>adds a waypoint after the end</span>
+              {curveButtons(t => addSegment(p.id, t, fork), () => drawRouteMode(p.id, fork))}
+              <span style={{ fontSize: 11, color: "#8b99a8" }}>a waypoint, or draw freehand</span>
             </div>
           ) : (
             <div className="hd-poprow" style={{ color: "#8b99a8", fontSize: 12 }}>End of {fork ? "reaction" : "route"}</div>
