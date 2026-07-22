@@ -299,8 +299,24 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
         if (!pl) return;
         let tPick = 0;
         if (pl.path.length) {
-          const atIdx = Math.max(0, Math.min(pk.pickup.at, pl.path.length - 1));
-          tPick = routeTimeW(pl, warp, atIdx);
+          if (pk.pickup.nearest) {
+            // a "nearest" collect grabs the puck where the player passes CLOSEST to
+            // it — so a puck by the start is picked up early and carried, not
+            // dragged across to the route's end
+            const total = routeTimeW(pl, warp, pl.path.length - 1);
+            let bestD = Infinity;
+            for (let k = 0; k <= 48; k++) {
+              const tt = (total * k) / 48;
+              const pos = routePosAt(pl, tt, warp);
+              const d = Math.hypot(pos.x - pk.x, pos.y - pk.y);
+              if (d < bestD) { bestD = d; tPick = tt; }
+            }
+          } else if (pk.pickup.at < 0) {
+            tPick = 0;                                        // waypoint 0 (the start): collect before moving, then carry
+          } else {
+            const atIdx = Math.min(pk.pickup.at, pl.path.length - 1);
+            tPick = routeTimeW(pl, warp, atIdx);
+          }
         } else if (pk.path.length) {
           // stationary picker: gather the loose puck when its own route delivers it
           tPick = routeTimeW(pk, warp);

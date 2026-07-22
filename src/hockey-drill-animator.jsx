@@ -1742,7 +1742,11 @@ export default function DrillAnimator() {
         else if (pk.rimAt === i) steps.push({ ord: 900, text: `Hard rim ${pk.id}`, warn: wt, del: () => clearTerminal(pk.id), role: "terminal", kind: "rim", pk });
         else if (pk.chipAt === i) steps.push({ ord: 900, text: `Chip ${pk.id}`, warn: wt, del: () => clearTerminal(pk.id), role: "terminal", kind: "chip", pk });
       }
-      if (pk.pickup && pk.pickup.to === p.id && pk.pickup.at === (i < 0 ? 0 : i))
+      // waypoint 0 = the start (i=-1); a stationary collector shows there too. A
+      // routed collect at path index k shows only at that waypoint (i=k) — no
+      // more duplicating a waypoint-0 collect onto the standing spot.
+      const pickI = !p.path.length || pk.pickup.at < 0 ? -1 : pk.pickup.at;
+      if (pk.pickup && pk.pickup.to === p.id && pickI === i)
         steps.push({ ord: -1, text: pk.pickup.nearest ? "Collect nearest puck" : `Collect ${pk.id}`, warn: null, del: () => updateById(pk.id, { pickup: null }), role: "pickup", kind: null, pk });
     }
     // order by puck first (each puck's collect→…→shoot stays together and
@@ -3076,7 +3080,10 @@ export default function DrillAnimator() {
           return ch[ch.length - 1] === p.id && q.shotAt == null && q.rimAt == null && q.chipAt == null;
         });
         const here = holds.filter(q => {
-          if (q.pickup && q.pickup.to === p.id && (q.pickup.at === i || (i < 0 && q.pickup.at === 0))) return true;
+          if (q.pickup && q.pickup.to === p.id) {
+            const qi = !p.path.length || q.pickup.at < 0 ? -1 : q.pickup.at;   // waypoint 0 = start (i=-1)
+            if (qi === i) return true;
+          }
           const ts = q.transfers || [], t = ts[ts.length - 1];
           return t && t.to === p.id && (t.recvAt != null ? t.recvAt : -1) === i;
         });
