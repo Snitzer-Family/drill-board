@@ -1002,26 +1002,33 @@ export default function DrillAnimator() {
   const deleteStep = idx => setDrillSteps(s => s.filter((_, k) => k !== idx));
   // drag the placing caption around the app rect; its centre saves as pos (0..1),
   // clamped to stay over the ice (above the scrubber band / away from the edges).
-  const capDrag = useRef(null);
+  const capDrag = useRef(false);
   function capDragStart(e) {
-    if (placingStep == null || !rootRef.current) return;
-    capDrag.current = rootRef.current.getBoundingClientRect();
+    if (placingStep == null) return;
+    capDrag.current = true;
     e.currentTarget.setPointerCapture?.(e.pointerId);
     e.preventDefault(); e.stopPropagation();
   }
   function capDragMove(e) {
-    const rect = capDrag.current;
-    if (!rect) return;
-    // store the raw pointer fraction; captionStyle's CSS clamp() keeps the whole
-    // box on-screen (same style path on drag + playback, so they never disagree)
-    const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
-    setStepPos(placingStep, { x: +x.toFixed(3), y: +y.toFixed(3) });
+    if (!capDrag.current) return;
+    // store the caption anchor in RINK FEET (svgPt maps client px → feet through the
+    // scene CTM, so it's correct in either orientation and clamps to the ice)
+    const rk = svgPt(e);
+    setStepPos(placingStep, { x: +rk.x.toFixed(1), y: +rk.y.toFixed(1) });
   }
-  const capDragEnd = () => { capDrag.current = null; };
-  // place the caption's centre at its saved spot; clamp() keeps the box fully on
-  // screen (--cap-hw = its max half-width) and clear of the top dock / scrubber
-  // band. No pos → the CSS default (bottom-centre). 0..1 of the app rect.
+  const capDragEnd = () => { capDrag.current = false; };
+  // project a rink point (feet) to a fraction of the app rect, so the caption holds
+  // the same ice area across portrait/landscape (rinkToClient goes through the scene
+  // CTM). null until the SVG has laid out.
+  function rinkToRootFrac(rx, ry) {
+    const root = rootRef.current, c = rinkToClient(rx, ry);
+    if (!root || !c) return null;
+    const r = root.getBoundingClientRect();
+    return { x: (c.x - r.left) / r.width, y: (c.y - r.top) / r.height };
+  }
+  // place the caption's centre at its (projected) spot; clamp() keeps the box fully
+  // on screen (--cap-hw = its max half-width) and clear of the top dock / scrubber
+  // band. No pos → the CSS default (bottom-centre). Arg is a 0..1 app-rect fraction.
   const captionStyle = pos => pos ? {
     left: `clamp(calc(var(--cap-hw) + 6px), ${(pos.x * 100).toFixed(2)}%, calc(100% - var(--cap-hw) - 6px))`,
     top: `clamp(calc(env(safe-area-inset-top, 0px) + 58px), ${(pos.y * 100).toFixed(2)}%, calc(100% - 54px - var(--hd-b) - var(--hd-scrub) - 58px))`,
@@ -4929,8 +4936,9 @@ export default function DrillAnimator() {
         const placing = placingStep != null && placingStep < drillSteps.length;
         const cap = placing ? { ...drillSteps[placingStep], idx: placingStep } : (presentation && holdStep ? holdStep : null);
         if (!cap) return null;
+        const fpos = cap.pos ? rinkToRootFrac(cap.pos.x, cap.pos.y) : null;   // rink feet → app-rect fraction
         return (
-          <div className={`hd-preso${placing ? " placing" : " tap"}`} style={captionStyle(cap.pos)}
+          <div className={`hd-preso${placing ? " placing" : " tap"}`} style={captionStyle(fpos)}
             onClick={placing ? undefined : skipHold}>
             {placing && (
               <span className="hd-preso-grip" onPointerDown={capDragStart} onPointerMove={capDragMove}
