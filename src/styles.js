@@ -178,6 +178,9 @@ export const STYLES = `
           box-shadow:0 6px 22px rgba(0,0,0,.5); backdrop-filter:blur(5px); }
         .hd-preso-text { font-size:16px; font-weight:600; color:#eef4fa; line-height:1.35;
           white-space:pre-wrap; overflow-wrap:anywhere; }
+        /* read mode: the whole caption is a tap target that advances the hold */
+        .hd-preso.tap { cursor:pointer; gap:5px; -webkit-user-select:none; user-select:none; }
+        .hd-preso-hint { font-size:11px; font-weight:600; color:#7d8b99; text-align:right; }
         .hd-preso-row { display:flex; justify-content:flex-end; align-items:center; gap:9px; }
         .hd-preso-btn { flex:none; padding:8px 14px; font-size:13px; font-weight:700;
           background:#1f4fa3; border:1px solid #1f4fa3; color:#fff; border-radius:8px; cursor:pointer; }

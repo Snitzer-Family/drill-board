@@ -2540,6 +2540,7 @@ export default function DrillAnimator() {
   const TAP_DIST = 1.4;
 
   function onSvgDown(e) {
+    if (holdStep) { skipHold(); return; }      // presentation hold → a tap on the ice advances early
     setOpenMenu(null);                         // a tap on the ice always closes any open menu
     if (playing || pinchRef.current) return;
     if (wakeEdit()) return;                    // paused/finished → snap back to start first
@@ -4929,7 +4930,8 @@ export default function DrillAnimator() {
         const cap = placing ? { ...drillSteps[placingStep], idx: placingStep } : (presentation && holdStep ? holdStep : null);
         if (!cap) return null;
         return (
-          <div className={`hd-preso${placing ? " placing" : ""}`} style={captionStyle(cap.pos)}>
+          <div className={`hd-preso${placing ? " placing" : " tap"}`} style={captionStyle(cap.pos)}
+            onClick={placing ? undefined : skipHold}>
             {placing && (
               <span className="hd-preso-grip" onPointerDown={capDragStart} onPointerMove={capDragMove}
                 onPointerUp={capDragEnd} onPointerCancel={capDragEnd}>
@@ -4940,16 +4942,14 @@ export default function DrillAnimator() {
               ? <textarea className="hd-preso-input" autoFocus value={cap.text} placeholder="Describe this beat…"
                   spellCheck={false} onChange={e => setStepText(cap.idx, e.target.value)} />
               : <div className="hd-preso-text">{cap.text}</div>}
-            <div className="hd-preso-row">
-              {placing ? (
-                <>
-                  <button className="hd-preso-del" onClick={() => { deleteStep(cap.idx); setPlacingStep(null); }}>Delete</button>
-                  <button className="hd-preso-btn" onClick={() => setPlacingStep(null)}>Done ✓</button>
-                </>
-              ) : (
-                <button className="hd-preso-btn" onClick={skipHold}>Continue ▶</button>
-              )}
-            </div>
+            {placing ? (
+              <div className="hd-preso-row">
+                <button className="hd-preso-del" onClick={() => { deleteStep(cap.idx); setPlacingStep(null); }}>Delete</button>
+                <button className="hd-preso-btn" onClick={() => setPlacingStep(null)}>Done ✓</button>
+              </div>
+            ) : (
+              <div className="hd-preso-hint">tap anywhere to continue</div>
+            )}
           </div>
         );
       })()}
@@ -5347,7 +5347,7 @@ export default function DrillAnimator() {
             Scrub the timeline, pause, then “＋ Add here” drops a note — near a waypoint it
             anchors there (and tracks edits); otherwise it pins the time. Type it on the ice and
             drag it clear of the action; ⤢ re-places a caption, the chip switches its anchor.
-            In Presentation mode, play pauses {presoDelay}s at each step (Continue to skip).
+            In Presentation mode, play pauses {presoDelay}s at each step (tap the ice to skip ahead).
           </div>
         </div>
       )}
