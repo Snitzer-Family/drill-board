@@ -1,3 +1,4 @@
+<meta charset="utf-8">
 <title>DrillBoard · live drill card</title>
 <style>
   :root{--ice:#eef5f9;--panel:#fff;--ink:#14202b;--muted:#5c6b78;--line:#d6e2ea;--hair:#e4edf3;--red:#d7263d;--blue:#1f4fa3;--surface:#f6fafd;--mark:#cf3346;--mark-blue:#2f5fb0;--puck:#14171a;--code-bg:#0f1a23;--code-ink:#d9e6f0;--code-dim:#7e93a4;--shadow:0 1px 2px rgba(20,32,43,.06),0 12px 34px -14px rgba(20,32,43,.28);--font-display:800 1em/1 "Helvetica Neue",Helvetica,Arial,sans-serif;--font-body:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;--font-mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace}
@@ -37,57 +38,87 @@
   .err{margin-top:10px;min-height:1.3em;color:#e2475a;font:500 13px/1.5 var(--font-mono);white-space:pre-wrap}
   .foot{margin-top:36px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:14px}
   .foot code{font-family:var(--font-mono);color:var(--ink)}
-  .steps-list{margin:0;padding:16px 24px 22px 48px;display:flex;flex-direction:column;gap:10px;font-size:15.5px;line-height:1.5}
-  .steps-list li{padding-left:4px}
-  .steps-list li::marker{color:var(--red);font-weight:800;font-variant-numeric:tabular-nums}
-  .steps-list li.note{color:var(--muted);font-style:italic}
-  .steps-list:empty::after{content:"Add a puck chain (on=, pass=, shoot=…) to see the steps.";color:var(--muted);font-size:14px;font-style:italic;padding-left:-24px}
-  .playbtn{display:inline-flex;align-items:center;gap:6px;font:600 13px/1 var(--font-body);color:#fff;background:var(--red);border:none;border-radius:9px;padding:9px 15px;cursor:pointer;box-shadow:var(--shadow)}
-  .playbtn:active{transform:translateY(1px)}
-  #anim .mv text{pointer-events:none}</style>
+  .sec{margin-top:clamp(24px,4vw,38px)}
+  .sec-h{font:700 13px/1 var(--font-body);letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin:0 0 12px}
+  .notes h1{font-size:24px;text-transform:none;letter-spacing:0;margin:16px 0 8px;line-height:1.15}
+  .notes h2,.notes h3{text-transform:none;letter-spacing:0;font-size:18px;margin:14px 0 6px}
+  .notes p{margin:8px 0}.notes ul,.notes ol{margin:8px 0 8px 24px}.notes li{margin:4px 0}
+  .notes code,.steps code{background:var(--surface);border:1px solid var(--hair);padding:1px 6px;border-radius:6px;font:500 13px var(--font-mono)}
+  .notes a,.steps a{color:var(--red)}
+  table.inv{border-collapse:collapse;min-width:min(340px,100%)}
+  table.inv th,table.inv td{border:1px solid var(--line);padding:8px 16px;text-align:left}
+  table.inv th{background:var(--surface);font:700 12px/1 var(--font-body);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+  table.inv td:last-child,table.inv th:last-child{text-align:right;font-variant-numeric:tabular-nums;width:70px}
+  ol.steps{margin:0;padding-left:24px}ol.steps li{margin:7px 0;padding-left:4px}
+  @media print{
+    :root{--ice:#fff;--panel:#fff;--ink:#111;--muted:#555;--line:#bbb;--hair:#ddd;--surface:#f4f4f4;--shadow:none}
+    body{background:#fff}
+    .wrap{max-width:none;padding:0}
+    .topbar button,#print,.edit,.foot{display:none!important}
+    .card,.sec{page-break-inside:avoid;box-shadow:none}
+    .card{margin-top:14px}
+  }</style>
 <div class="wrap">
   <header>
     <div class="topbar">
       <span class="eyebrow"><span class="rule"></span>DrillBoard · Live drill card</span>
+      <span style="display:inline-flex;gap:8px">
+      <button id="print" class="copybtn" type="button" title="Print this drill sheet">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+        <span>Print</span>
+      </button>
       <button id="copy" class="copybtn" type="button" title="Copy a link that reopens this exact drill">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>
         <span class="lbl">Copy link</span>
       </button>
+      </span>
     </div>
     <h1 id="title">Drill</h1>
     <p class="lede" id="lede"></p>
   </header>
   <section class="card" aria-label="Rink diagram">
-    <div class="card-head"><span class="t" id="sheet">Full sheet</span><span class="meta" id="meta">rendered from the DSL</span></div>
+    <div class="card-head"><span class="t">Full sheet</span><span class="meta" id="meta">rendered from the DSL</span></div>
     <div class="rinkbox" id="diagram"></div>
     <div class="legend" id="legend"></div>
   </section>
-  <section class="card" aria-label="Animation">
-    <div class="card-head"><span class="t">Animation</span>
-      <button id="playbtn" class="playbtn" type="button">▶ Play</button></div>
-    <div class="rinkbox" id="anim"></div>
-  </section>
-  <section class="card" aria-label="Drill steps">
-    <div class="card-head"><span class="t">The drill, step by step</span><span class="meta" id="stepmeta"></span></div>
-    <ol class="steps-list" id="steps"></ol>
-  </section>
+  <section class="sec notes" id="notes-sec" hidden><div class="sec-h">Notes</div><div class="notes" id="notes"></div></section>
+  <section class="sec" id="inv-sec" hidden><div class="sec-h">What you need</div><div id="inventory"></div></section>
+  <section class="sec" id="steps-sec" hidden><div class="sec-h">Steps</div><div id="steps"></div></section>
   <section class="edit">
     <div class="edit-h"><h2>Edit the drill</h2><span class="hint">the rink redraws as you type</span></div>
     <textarea id="dsl" spellcheck="false" autocomplete="off" autocapitalize="off">RINK full
 TITLE Chip Off the Boards, Behind the D
 DESC F1 banks a chip off the boards past the standing-up D and picks it up behind him in the neutral zone.
+NOTES
+| ## Coaching points
+|
+| A **delayed** neutral-zone entry that beats a standing-up D with a chip.
+|
+| 1. F1 carries hard up the wall to draw the D up.
+| 2. **Chip** off the glass past the D (aim `~-60`).
+| 3. Slip inside and re-gather behind him — still onside.
+|
+| - Cue: *sell the carry* before the chip.
+| - Reps: 3 each side, then add a backchecker.
+END NOTES
 PIECE N2 net 183 42.5 face=180 goalie
 PIECE D1 player 110 20 #1f4fa3 D1 defense
 PIECE F1 player 46 26 F1
 PATH F1 L 80,14 DESC "Chip off glass" SHOW label OFF -22,16 L 100,12 DESC "Pickup behind D" SHOW label OFF 8,13 L 120,26
 PIECE L1 label 100 73 "Neutral-zone regroup"
-PIECE PK1 puck 46 26 on=F1 chip=2:F1@3~-60</textarea>
+PIECE PK1 puck 46 26 on=F1 chip=2:F1@3~-60
+STEP at=0 "**F1** carries hard up the wall"
+STEP on=F1:2 "Chip off the glass past the D — `~-60`"
+ITEM puck count=8
+ITEM whistle count=1 "Whistle"</textarea>
     <div class="err" id="err"></div>
   </section>
   <p class="foot">Drawn live by the DSL-to-SVG renderer (<code>src/drill-svg.js</code>). Paste any <code>drill</code> block above. See <code>docs/drill-dsl.md</code> for the format.</p>
 </div>
 <script>
 const VIEWS = { full:[0,0,200,85], half:[100,0,100,85], quarter:[100,0,100,42.5] };
+const RINK = { W:200, H:85 };
+const DSL_VERSION = 3;
 
 // Rink boards: a rounded-rectangle boundary the puck can rim along or bounce
 // off. Coordinates are rink feet (x 0..200, y 0..85). The puck-center boundary
@@ -308,8 +339,548 @@ function slideTo(x, y, ux, uy, target, maxDist = 130) {
 
 const boards = { isInside, clampInside, contain, tangentToward, edgeDist, pointAt, project, rimPath, rimAround, rimTo, slide, slideTo, PERIM };
 
+// Bezier & route geometry: evaluation, subdivision, zigzags, sketch fitting.
+
+
+/* ---------------- geometry ---------------- */
+
+const clampX = v => Math.max(0, Math.min(RINK.W, v));
+const clampY = v => Math.max(0, Math.min(RINK.H, v));
+const segEnd = (p, i) => (i < 0 ? { x: p.x, y: p.y } : { x: p.path[i].x, y: p.path[i].y });
+
+function segD(prev, s) {
+  if (s.type === "L") return `M ${prev.x} ${prev.y} L ${s.x} ${s.y}`;
+  if (s.type === "Q") return `M ${prev.x} ${prev.y} Q ${s.cx} ${s.cy} ${s.x} ${s.y}`;
+  return `M ${prev.x} ${prev.y} C ${s.c1x} ${s.c1y} ${s.c2x} ${s.c2y} ${s.x} ${s.y}`;
+}
+
+function evalSeg(prev, s, t) {
+  const u = 1 - t;
+  if (s.type === "L") return { x: prev.x + t * (s.x - prev.x), y: prev.y + t * (s.y - prev.y) };
+  if (s.type === "Q") return {
+    x: u * u * prev.x + 2 * u * t * s.cx + t * t * s.x,
+    y: u * u * prev.y + 2 * u * t * s.cy + t * t * s.y,
+  };
+  return {
+    x: u * u * u * prev.x + 3 * u * u * t * s.c1x + 3 * u * t * t * s.c2x + t * t * t * s.x,
+    y: u * u * u * prev.y + 3 * u * u * t * s.c1y + 3 * u * t * t * s.c2y + t * t * t * s.y,
+  };
+}
+
+function segTangentAngle(prev, s, t) {
+  const a = evalSeg(prev, s, Math.max(0, t - 0.02));
+  const b = evalSeg(prev, s, Math.min(1, t + 0.02));
+  return (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI || 0;
+}
+
+function nearestT(prev, s, pt) {
+  let best = 0.5, bd = Infinity;
+  for (let i = 0; i <= 60; i++) {
+    const t = i / 60;
+    const q = evalSeg(prev, s, t);
+    const d = (q.x - pt.x) ** 2 + (q.y - pt.y) ** 2;
+    if (d < bd) { bd = d; best = t; }
+  }
+  return Math.min(0.92, Math.max(0.08, best));
+}
+
+// de Casteljau subdivision: split one segment into two at t without
+// changing the curve's shape
+function splitSeg(prev, s, t) {
+  const lerp = (a, b) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+  const meta = { mode: s.mode || "carry", dir: s.dir || "fwd", rate: s.rate || 1 };
+  if (s.type === "L") {
+    const B = evalSeg(prev, s, t);
+    return [
+      { type: "L", ...meta, stop: s.stop || 0, x: B.x, y: B.y },
+      { type: "L", ...meta, stop: 0, x: s.x, y: s.y },
+    ];
+  }
+  if (s.type === "Q") {
+    const C = { x: s.cx, y: s.cy }, P1 = { x: s.x, y: s.y };
+    const q0 = lerp(prev, C), q1 = lerp(C, P1), B = lerp(q0, q1);
+    return [
+      { type: "Q", ...meta, stop: s.stop || 0, cx: q0.x, cy: q0.y, x: B.x, y: B.y },
+      { type: "Q", ...meta, stop: 0, cx: q1.x, cy: q1.y, x: s.x, y: s.y },
+    ];
+  }
+  const c1 = { x: s.c1x, y: s.c1y }, c2 = { x: s.c2x, y: s.c2y }, P1 = { x: s.x, y: s.y };
+  const p01 = lerp(prev, c1), p12 = lerp(c1, c2), p23 = lerp(c2, P1);
+  const p012 = lerp(p01, p12), p123 = lerp(p12, p23), B = lerp(p012, p123);
+  return [
+    { type: "C", ...meta, stop: s.stop || 0, c1x: p01.x, c1y: p01.y, c2x: p012.x, c2y: p012.y, x: B.x, y: B.y },
+    { type: "C", ...meta, stop: 0, c1x: p123.x, c1y: p123.y, c2x: p23.x, c2y: p23.y, x: s.x, y: s.y },
+  ];
+}
+
+// `ar` is the rink→screen aspect ratio (Sx/Sy). The zigzag's bump direction and
+// spacing are computed in stretched "screen" space so the pattern still reads as
+// even, upright squiggles after the fill-mode stretch (ar=1 → no correction).
+// a smooth sine "wiggle" along a segment — the hockey convention for skating
+// WITH the puck. Whole cycles so it starts/ends on the line (connects cleanly).
+// taperEnd flattens the wiggle over the final stretch so the line runs straight
+// into the end arrowhead (no bump poking through it) — pass it only on the
+// segment that carries the route's arrowhead.
+function wigglePoints(prev, s, ar = 1, taperEnd = false) {
+  const wlen = (ax, ay, bx, by) => Math.hypot((bx - ax) * ar, by - ay);
+  const approx =
+    s.type === "L" ? wlen(prev.x, prev.y, s.x, s.y)
+    : s.type === "Q" ? wlen(prev.x, prev.y, s.cx, s.cy) + wlen(s.cx, s.cy, s.x, s.y)
+    : wlen(prev.x, prev.y, s.c1x, s.c1y) + wlen(s.c1x, s.c1y, s.c2x, s.c2y) + wlen(s.c2x, s.c2y, s.x, s.y);
+  const cycles = Math.max(1, Math.round(approx / 3.4));   // ~3.4 screen units per wave
+  const n = Math.max(14, cycles * 10), A = 0.85;          // amplitude in screen units
+  const TAPER = 5;                                         // screen units of straight line under the arrowhead
+  const pts = [];
+  let cum = 0, prevPt = evalSeg(prev, s, 0);
+  for (let i = 0; i <= n; i++) {
+    const t = i / n, pt = evalSeg(prev, s, t);
+    if (i > 0) cum += wlen(prevPt.x, prevPt.y, pt.x, pt.y);
+    prevPt = pt;
+    if (i === 0 || i === n) { pts.push(pt); continue; }
+    const ahead = evalSeg(prev, s, Math.min(1, t + 0.005));
+    const tx = (ahead.x - pt.x) * ar, ty = ahead.y - pt.y;   // screen-space tangent
+    const px = -ty, py = tx, l = Math.hypot(px, py) || 1;    // screen-space normal
+    const taper = taperEnd ? Math.min(1, (approx - cum) / TAPER) : 1;
+    const a = Math.sin((cum / (approx || 1)) * cycles * 2 * Math.PI) * A * taper;
+    pts.push({ x: pt.x + (px / l) * a / ar, y: pt.y + (py / l) * a });
+  }
+  return pts.map(q => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" ");
+}
+
+function zigzagPoints(prev, s, ar = 1) {
+  // arc length measured in aspect-weighted space (x scaled by ar) so bump
+  // spacing stays uniform on screen regardless of the segment's direction
+  const wlen = (ax, ay, bx, by) => Math.hypot((bx - ax) * ar, by - ay);
+  const approx =
+    s.type === "L" ? wlen(prev.x, prev.y, s.x, s.y)
+    : s.type === "Q" ? wlen(prev.x, prev.y, s.cx, s.cy) + wlen(s.cx, s.cy, s.x, s.y)
+    : wlen(prev.x, prev.y, s.c1x, s.c1y) + wlen(s.c1x, s.c1y, s.c2x, s.c2y) + wlen(s.c2x, s.c2y, s.x, s.y);
+  const n = Math.max(6, Math.round(approx / 2.4));
+  const A = 0.9;                                   // bump amplitude, in screen units
+  const pts = [];
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const pt = evalSeg(prev, s, t);
+    if (i === 0 || i === n) { pts.push(pt); continue; }
+    const ahead = evalSeg(prev, s, Math.min(1, t + 0.01));
+    // perpendicular to the on-SCREEN tangent, then mapped back to rink coords
+    const tx = (ahead.x - pt.x) * ar, ty = ahead.y - pt.y;   // screen-space tangent
+    const px = -ty, py = tx;                                 // screen-space normal
+    const l = Math.hypot(px, py) || 1;
+    const a = (i % 2 ? 1 : -1) * A;
+    pts.push({ x: pt.x + (px / l) * a / ar, y: pt.y + (py / l) * a });
+  }
+  return pts.map(q => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" ");
+}
+
+function convertSeg(seg, prev) {
+  const { x, y, mode = "carry", dir = "fwd", stop = 0, rate = 1 } = seg;
+  const nx = -(y - prev.y), ny = x - prev.x;
+  const len = Math.hypot(nx, ny) || 1;
+  const off = 12;
+  if (seg.type === "L") return { type: "L", mode, dir, stop, rate, x, y };
+  if (seg.type === "Q")
+    return {
+      type: "Q", mode, dir, stop, rate,
+      cx: clampX((prev.x + x) / 2 + (nx / len) * off),
+      cy: clampY((prev.y + y) / 2 + (ny / len) * off), x, y,
+    };
+  return {
+    type: "C", mode, dir, stop, rate,
+    c1x: clampX(prev.x + (x - prev.x) / 3 + (nx / len) * off),
+    c1y: clampY(prev.y + (y - prev.y) / 3 + (ny / len) * off),
+    c2x: clampX(prev.x + (2 * (x - prev.x)) / 3 - (nx / len) * off),
+    c2y: clampY(prev.y + (2 * (y - prev.y)) / 3 - (ny / len) * off),
+    x, y,
+  };
+}
+
+/* ---- finger drawing ---- */
+
+function rdp(pts, eps) {
+  if (pts.length < 3) return pts.slice();
+  const [a, b] = [pts[0], pts[pts.length - 1]];
+  let maxD = 0, idx = 0;
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const len = Math.hypot(dx, dy) || 1e-9;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const d = Math.abs(dy * pts[i].x - dx * pts[i].y + b.x * a.y - b.y * a.x) / len;
+    if (d > maxD) { maxD = d; idx = i; }
+  }
+  if (maxD <= eps) return [a, b];
+  return [...rdp(pts.slice(0, idx + 1), eps).slice(0, -1), ...rdp(pts.slice(idx), eps)];
+}
+
+function catmullToBezier(pts) {
+  const segs = [];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[Math.max(0, i - 1)], p1 = pts[i], p2 = pts[i + 1], p3 = pts[Math.min(pts.length - 1, i + 2)];
+    segs.push({
+      type: "C", mode: "carry", dir: "fwd", stop: 0, rate: 1,
+      c1x: clampX(p1.x + (p2.x - p0.x) / 6), c1y: clampY(p1.y + (p2.y - p0.y) / 6),
+      c2x: clampX(p2.x - (p3.x - p1.x) / 6), c2y: clampY(p2.y - (p3.y - p1.y) / 6),
+      x: p2.x, y: p2.y,
+    });
+  }
+  return segs;
+}
+
+function fitRoute(start, raw) {
+  const pts = [start];
+  raw.forEach(q => {
+    const last = pts[pts.length - 1];
+    if (Math.hypot(q.x - last.x, q.y - last.y) > 2.2) pts.push(q);
+  });
+  if (pts.length < 2) return [];
+  const simp = pts.length > 3 ? [pts[0], ...rdp(pts.slice(1), 1.6)] : pts;
+  const chain = simp.filter((q, i) => i === 0 || Math.hypot(q.x - simp[i - 1].x, q.y - simp[i - 1].y) > 1.5);
+  if (chain.length < 2) return [];
+  if (chain.length === 2)
+    return [{ type: "L", mode: "carry", dir: "fwd", stop: 0, rate: 1, x: chain[1].x, y: chain[1].y }];
+  return catmullToBezier(chain);
+}
+
+
+
+// Nets as solid obstacles. A net's footprint (rink feet) is the cage polygon;
+// the MOUTH (front) is open so pucks enter from the front, while the sides and
+// back are solid — pucks bounce off them and players route around the whole net.
+// Icon units → rink feet uses ICON_SCALE (0.8); coords match icons.jsx.
+
+const ICON = 0.8;
+// cage outline in icon units, mouth-top → around the back → mouth-bottom
+const LOCAL = [
+  [0, -3.75], [-1.7, -3.75], [-3.45, -3.1], [-4.15, -1.5],
+  [-4.15, 1.5], [-3.45, 3.1], [-1.7, 3.75], [0, 3.75],
+];
+
+// world-space shape for one net piece (+ world↔local transforms)
+function netShape(n) {
+  const s = (n.size || 1) * ICON;
+  const a = ((n.facing || 0) * Math.PI) / 180, c = Math.cos(a), si = Math.sin(a);
+  const toWorld = (lx, ly) => ({ x: n.x + lx * s * c - ly * s * si, y: n.y + lx * s * si + ly * s * c });
+  const toLocal = (x, y) => { const dx = x - n.x, dy = y - n.y; return { lx: (dx * c + dy * si) / s, ly: (-dx * si + dy * c) / s }; };
+  const pts = LOCAL.map(([lx, ly]) => toWorld(lx, ly));
+  // solid edges = consecutive pts[0..7]; the mouth edge pts[7]→pts[0] is open
+  const solid = [];
+  for (let i = 0; i < pts.length - 1; i++) solid.push([pts[i], pts[i + 1]]);
+  // a keep-out disc (centroid + radius) that players arc smoothly around
+  let cx = 0, cy = 0; for (const p of pts) { cx += p.x; cy += p.y; } cx /= pts.length; cy /= pts.length;
+  let r = 0; for (const p of pts) r = Math.max(r, Math.hypot(p.x - cx, p.y - cy));
+  return { pts, solid, mouth: [pts[pts.length - 1], pts[0]], toWorld, toLocal, s, cx, cy, r };
+}
+
+function netShapes(pieces) {
+  return (pieces || []).filter(p => p.kind === "net").map(netShape);
+}
+
+// A bumper is a solid rectangular barrier: all four edges are solid (no open
+// mouth), so pucks carom off any side and players route around the whole bar.
+// It's long along its local x; its faces' normal is perpendicular to `facing`.
+const BUMP_HALF_L = 7.7 * ICON;   // half-length, along the bar
+const BUMP_HALF_T = 1.55 * ICON;  // half-thickness (a touch proud for the puck radius)
+function bumperShape(b) {
+  const a = ((b.facing || 0) * Math.PI) / 180, c = Math.cos(a), si = Math.sin(a);
+  const toWorld = (lx, ly) => ({ x: b.x + lx * c - ly * si, y: b.y + lx * si + ly * c });
+  const corners = [[-BUMP_HALF_L, -BUMP_HALF_T], [BUMP_HALF_L, -BUMP_HALF_T], [BUMP_HALF_L, BUMP_HALF_T], [-BUMP_HALF_L, BUMP_HALF_T]];
+  const pts = corners.map(([lx, ly]) => toWorld(lx, ly));
+  const solid = [];
+  for (let i = 0; i < pts.length; i++) solid.push([pts[i], pts[(i + 1) % pts.length]]); // closed loop — every edge solid
+  const r = Math.hypot(BUMP_HALF_L, BUMP_HALF_T);
+  // capsule spine (the two ends along the long axis) for player route avoidance
+  const spine = [toWorld(-BUMP_HALF_L, 0), toWorld(BUMP_HALF_L, 0)];
+  return { pts, solid, mouth: null, cx: b.x, cy: b.y, r, spine, capR: BUMP_HALF_T, bumper: true };
+}
+
+function bumperShapes(pieces) {
+  return (pieces || []).filter(p => p.kind === "bumper").map(bumperShape);
+}
+
+// every solid puck obstacle (nets + bumpers) — pucks carom off these
+function solidShapes(pieces) {
+  return [...netShapes(pieces), ...bumperShapes(pieces)];
+}
+
+// point-in-polygon (cage closed by the mouth)
+function inNet(sh, x, y) {
+  const p = sh.pts; let inside = false;
+  for (let i = 0, j = p.length - 1; i < p.length; j = i++) {
+    const xi = p[i].x, yi = p[i].y, xj = p[j].x, yj = p[j].y;
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+// nearest point on a segment to (x,y)
+function nearestOnSeg(a, b, x, y) {
+  const dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy || 1;
+  let t = ((x - a.x) * dx + (y - a.y) * dy) / l2;
+  t = Math.max(0, Math.min(1, t));
+  return { x: a.x + dx * t, y: a.y + dy * t, dx, dy };
+}
+
+// Slide a point out the nearer SIDE of a net (in the net's local frame), with
+// the clearance ramped smoothly over a buffer in front of and behind the cage so
+// the detour rounds into an ARC (no sharp V) — and only the net footprint itself
+// pushes hard, so a player placed behind the net isn't disturbed. margin (feet).
+function avoidNets(shapes, x, y, margin = 1.1) {
+  for (const sh of shapes) {
+    const { lx, ly } = sh.toLocal(x, y);       // lx: 0 mouth → -4.15 back
+    const front = 0, back = -4.15, buf = 2.6;
+    if (lx > front + buf || lx < back - buf) continue;
+    // depth factor: 1 across the cage, easing to 0 over the front/back buffers
+    let f = lx <= front && lx >= back ? 1 : lx > front ? 1 - (lx - front) / buf : 1 - (back - lx) / buf;
+    f = Math.max(0, Math.min(1, f));
+    f = f * f * (3 - 2 * f);                    // smoothstep → rounded shoulders
+    const bound = (3.75 + margin / sh.s) * f;   // lateral clearance at this depth
+    if (Math.abs(ly) >= bound) continue;
+    const w = sh.toWorld(lx, (ly >= 0 ? 1 : -1) * bound);
+    x = w.x; y = w.y;
+  }
+  return { x, y };
+}
+
+// Reroute a sampled polyline so it arcs smoothly AROUND each net's keep-out disc
+// instead of cutting through it — a single tangent-in → boundary-arc → tangent-out
+// per net, so there's no per-point jitter. Endpoints (incl. a start/end placed
+// inside the disc, e.g. behind the net) are preserved.
+function detourRoute(points, shapes) {
+  let pts = points, changed = false;
+  for (const sh of shapes) { const np = aroundDisc(pts, sh.cx, sh.cy, sh.r + 1); if (np !== pts) { pts = np; changed = true; } }
+  return changed ? chaikin(chaikin(pts)) : points;   // round the tangent/radial joins
+}
+// Chaikin corner-cutting (endpoints fixed) — rounds any residual joins
+function chaikin(pts) {
+  if (pts.length < 3) return pts;
+  const out = [pts[0]];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1];
+    if (Math.hypot(b.x - a.x, b.y - a.y) < 1e-6) continue;
+    out.push({ x: a.x * 0.75 + b.x * 0.25, y: a.y * 0.75 + b.y * 0.25 });
+    out.push({ x: a.x * 0.25 + b.x * 0.75, y: a.y * 0.25 + b.y * 0.75 });
+  }
+  out.push(pts[pts.length - 1]);
+  return out;
+}
+
+function segCircleHit(a, b, cx, cy, R) {
+  const dx = b.x - a.x, dy = b.y - a.y, fx = a.x - cx, fy = a.y - cy;
+  const A = dx * dx + dy * dy, B = 2 * (fx * dx + fy * dy), C = fx * fx + fy * fy - R * R;
+  let dis = B * B - 4 * A * C;
+  if (dis < 0) return { x: b.x, y: b.y };
+  dis = Math.sqrt(dis);
+  const t = Math.max(0, Math.min(1, (-B - dis) / (2 * A)));
+  return { x: a.x + dx * t, y: a.y + dy * t };
+}
+// the two tangent points from an external point P to a circle
+function tangents(P, cx, cy, R) {
+  const dx = P.x - cx, dy = P.y - cy, d = Math.hypot(dx, dy);
+  if (d <= R + 1e-6) return [];
+  const base = Math.atan2(dy, dx), off = Math.acos(Math.max(-1, Math.min(1, R / d)));
+  return [base + off, base - off].map(a => ({ x: cx + Math.cos(a) * R, y: cy + Math.sin(a) * R, ang: a }));
+}
+function arcPts(cx, cy, R, a0, ccw, span) {
+  const n = Math.max(4, Math.round(span / 0.12)), out = [];
+  for (let k = 0; k <= n; k++) { const a = a0 + (ccw ? 1 : -1) * span * k / n; out.push({ x: cx + Math.cos(a) * R, y: cy + Math.sin(a) * R }); }
+  return out;
+}
+
+function aroundDisc(pts, cx, cy, R) {
+  const D = p => Math.hypot(p.x - cx, p.y - cy);
+  let i0 = -1, i1 = -1;
+  for (let i = 0; i < pts.length; i++) if (D(pts[i]) < R) { if (i0 < 0) i0 = i; i1 = i; }
+  if (i0 < 0) return pts;                                    // never enters the disc
+  // anchor the tangents well outside the disc (~2.4R) so the route eases in
+  // gradually instead of turning hard right at the edge
+  const AR = 2.4 * R;
+  let ai = i0; while (ai > 0 && D(pts[ai - 1]) < AR) ai--;
+  let bi = i1; while (bi < pts.length - 1 && D(pts[bi + 1]) < AR) bi++;
+  ai = Math.max(0, ai - 1); bi = Math.min(pts.length - 1, bi + 1);
+  const A = pts[ai], B = pts[bi];
+  const startInside = D(A) < R, endInside = D(B) < R;
+  const ang = p => Math.atan2(p.y - cy, p.x - cx);
+
+  // Prefer a tangent-in → arc → tangent-out path (smooth, no kink at the joins).
+  // If an endpoint is inside the disc, that side starts/ends radially instead.
+  const TA = startInside ? null : tangents(A, cx, cy, R);
+  const TB = endInside ? null : tangents(B, cx, cy, R);
+  const startAngs = TA ? TA : [{ ...segCircleHitProj(pts[0], cx, cy, R), fromInside: true }];
+  const endAngs = TB ? TB : [{ ...segCircleHitProj(pts[pts.length - 1], cx, cy, R), fromInside: true }];
+
+  let best = null;
+  for (const t1 of startAngs) for (const t2 of endAngs) {
+    // arc direction follows the A→t1 tangent (radial-out if the start is inside)
+    const inx = t1.x - A.x, iny = t1.y - A.y;
+    const ccwTan1 = { x: -Math.sin(t1.ang), y: Math.cos(t1.ang) };
+    const ccw = t1.fromInside
+      ? (-Math.sin(t1.ang) * (B.x - A.x) + Math.cos(t1.ang) * (B.y - A.y)) >= 0
+      : (inx * ccwTan1.x + iny * ccwTan1.y) >= 0;
+    // require the arc to LEAVE at t2 heading toward B (tangency) unless B is inside
+    const exitTan = ccw ? { x: -Math.sin(t2.ang), y: Math.cos(t2.ang) } : { x: Math.sin(t2.ang), y: -Math.cos(t2.ang) };
+    const outx = B.x - t2.x, outy = B.y - t2.y;
+    if (!t2.fromInside && exitTan.x * outx + exitTan.y * outy < 0) continue;
+    let span = ccw ? t2.ang - t1.ang : t1.ang - t2.ang;
+    while (span < 0) span += 2 * Math.PI;
+    if (span > Math.PI * 1.7) continue;                     // reject wrong-way near-full loops
+    const len = Math.hypot(inx, iny) + span * R + Math.hypot(outx, outy);
+    if (!best || len < best.len) best = { t1, t2, ccw, span, len };
+  }
+  if (!best) return pts;
+  const arc = arcPts(cx, cy, R, best.t1.ang, best.ccw, best.span);   // includes t1 & t2 as endpoints
+  const pre = startInside ? [pts[0]] : pts.slice(0, ai + 1);
+  const post = endInside ? [pts[pts.length - 1]] : pts.slice(bi);
+  return [...pre, ...arc, ...post];
+}
+// project a point radially onto the circle (for an endpoint inside the disc)
+function segCircleHitProj(p, cx, cy, R) {
+  const dx = p.x - cx, dy = p.y - cy, d = Math.hypot(dx, dy) || 1;
+  const ang = Math.atan2(dy, dx);
+  return { x: cx + Math.cos(ang) * R, y: cy + Math.sin(ang) * R, ang };
+}
+
+// does segment a→b cross any net's solid cage (sides/back)? Used to flag a
+// rebound whose collection spot sits behind/through a net — it can't get there.
+function segCrossesNet(a, b, shapes) {
+  for (const sh of shapes || []) for (const [c, d] of sh.solid) if (segInt(a, b, c, d)) return true;
+  return false;
+}
+
+// segment a→b vs segment c→d intersection; returns { t, x, y } (t along a→b) or null
+function segInt(a, b, c, d) {
+  const r = { x: b.x - a.x, y: b.y - a.y }, s = { x: d.x - c.x, y: d.y - c.y };
+  const den = r.x * s.y - r.y * s.x;
+  if (Math.abs(den) < 1e-9) return null;
+  const t = ((c.x - a.x) * s.y - (c.y - a.y) * s.x) / den;
+  const u = ((c.x - a.x) * r.y - (c.y - a.y) * r.x) / den;
+  if (t < 1e-4 || t > 1 || u < 0 || u > 1) return null;
+  return { t, x: a.x + r.x * t, y: a.y + r.y * t };
+}
+
+// Reflect a travelling polyline off the solid net edges so it bounces instead of
+// passing through the sides/back. After a bounce it continues straight for the
+// remaining arc length (approximate, but reads as a natural carom). Returns a new
+// polyline of the same total length; unchanged if it never hits a net.
+function reflectPath(poly, shapes) {
+  if (!shapes.length || poly.length < 2) return poly;
+  // drop consecutive duplicate points (boards.slide can emit a zero-length first
+  // segment when the release is right on the boards) — a zero-length leg would
+  // give a (0,0) heading and swallow the whole path
+  const dedup = [poly[0]];
+  for (let i = 1; i < poly.length; i++) {
+    const p = dedup[dedup.length - 1];
+    if (Math.hypot(poly[i].x - p.x, poly[i].y - p.y) > 1e-4) dedup.push(poly[i]);
+  }
+  if (dedup.length < 2) return poly;
+  poly = dedup;
+  const out = [poly[0]];
+  let cur = poly[0];
+  // remaining length still to travel along the original polyline
+  let remain = 0;
+  for (let k = 1; k < poly.length; k++) remain += Math.hypot(poly[k].x - poly[k - 1].x, poly[k].y - poly[k - 1].y);
+  // direction of travel at the current point (from the source polyline)
+  let idx = 1, next = poly[1];
+  let dir = norm(next.x - cur.x, next.y - cur.y);
+  let guard = 0;
+  while (remain > 0.01 && guard++ < 200) {
+    // step target: either the next source vertex (if we're still tracing it) or
+    // a straight continuation after a bounce
+    const step = Math.min(remain, Math.hypot(next.x - cur.x, next.y - cur.y) || remain);
+    const tip = { x: cur.x + dir.x * step, y: cur.y + dir.y * step };
+    // nearest solid-edge hit along cur→tip
+    let hit = null;
+    for (const sh of shapes) for (const [a, b] of sh.solid) {
+      const h = segInt(cur, tip, a, b);
+      if (h && (!hit || h.t < hit.t)) hit = { ...h, a, b };
+    }
+    if (hit) {
+      out.push({ x: hit.x, y: hit.y });
+      const trav = Math.hypot(hit.x - cur.x, hit.y - cur.y);
+      remain -= trav;
+      // reflect dir about the edge normal
+      const ex = hit.b.x - hit.a.x, ey = hit.b.y - hit.a.y, el = Math.hypot(ex, ey) || 1;
+      let nx = -ey / el, ny = ex / el;
+      const dot = dir.x * nx + dir.y * ny;
+      dir = norm(dir.x - 2 * dot * nx, dir.y - 2 * dot * ny);
+      // nudge off the wall so we don't immediately re-hit it
+      cur = { x: hit.x + dir.x * 0.05, y: hit.y + dir.y * 0.05 };
+      next = { x: cur.x + dir.x * remain, y: cur.y + dir.y * remain };  // straight from here on
+    } else {
+      out.push(tip);
+      remain -= step;
+      cur = tip;
+      if (Math.hypot(next.x - cur.x, next.y - cur.y) < 0.02) {
+        // reached this source vertex — advance to the next one
+        idx++;
+        if (idx < poly.length) { next = poly[idx]; dir = norm(next.x - cur.x, next.y - cur.y); }
+      }
+    }
+  }
+  return out;
+}
+
+function norm(x, y) { const m = Math.hypot(x, y) || 1; return { x: x / m, y: y / m }; }
+
+// Real-time puck vs nets: if a step from (x,y) to (nx,ny) crosses a net's solid
+// edge (its sides/back — the mouth is open), reflect the velocity off that edge
+// and stop just short. Returns { x, y, vx, vy, hit }. `rest` = bounce energy kept.
+function bounceOffNets(x, y, nx, ny, vx, vy, shapes, rest = 0.72) {
+  for (const sh of shapes) {
+    for (const [a, b] of sh.solid) {
+      const h = segInt({ x, y }, { x: nx, y: ny }, a, b);
+      if (!h) continue;
+      const ex = b.x - a.x, ey = b.y - a.y, el = Math.hypot(ex, ey) || 1;
+      const nlx = -ey / el, nly = ex / el;                 // edge normal
+      const dot = vx * nlx + vy * nly;
+      // settle just outside the edge, along the normal facing the incoming puck
+      const s = dot > 0 ? -1 : 1;
+      return {
+        x: h.x + nlx * s * 0.4, y: h.y + nly * s * 0.4,
+        vx: (vx - 2 * dot * nlx) * rest, vy: (vy - 2 * dot * nly) * rest, hit: true,
+      };
+    }
+  }
+  return { x: nx, y: ny, vx, vy, hit: false };
+}
+
+
 // Drill text format: parser and serializer. See the DSL spec in App header.
 
+
+/* ---------------- inventory ---------------- */
+
+// Canonical inventory rows (a "recipe" of what a drill needs), in display order.
+// A goalie is a person, so goalie-flagged nets/tires are counted under `goalie`
+// (NOT under net/tire) — the one non-obvious rule. `label`/`mark` are excluded.
+const INV_KINDS = ["player", "goalie", "puck", "cone", "net", "tire", "stick", "bumper", "deker", "passer", "light"];
+const INV_LABELS = {
+  player: "Players", goalie: "Goalies", puck: "Pucks", cone: "Cones", net: "Nets",
+  tire: "Tires", stick: "Sticks", bumper: "Bumpers", deker: "Deker gates", passer: "Rebounders", light: "Lights",
+};
+
+// Merge auto-counted pieces with stored ITEM overrides into display rows:
+//   { key, label, custom, autoCount, count, hide }
+// autoCount is the count on the ice; count is what's shown (an override or the
+// auto count); hide drops the row from the printed table only.
+function deriveInventory(pieces, items = []) {
+  const isGoalie = p => (p.kind === "net" || p.kind === "tire") && p.goalie;
+  const auto = {};
+  (pieces || []).forEach(p => {
+    if (p.kind === "label" || p.kind === "mark") return;
+    const k = isGoalie(p) ? "goalie" : p.kind;
+    if (!INV_KINDS.includes(k)) return;
+    auto[k] = (auto[k] || 0) + 1;
+  });
+  const ov = k => (items || []).find(it => !it.custom && it.key === k);
+  const rows = INV_KINDS.filter(k => auto[k] || ov(k)).map(k => {
+    const o = ov(k) || {};
+    return { key: k, label: o.label || INV_LABELS[k], custom: false,
+      autoCount: auto[k] || 0, count: o.count != null ? o.count : (auto[k] || 0), hide: !!o.hide };
+  });
+  const custom = (items || []).filter(it => it.custom).map(it => ({
+    key: it.key, label: it.label || it.key, custom: true,
+    autoCount: null, count: it.count != null ? it.count : 0, hide: !!it.hide }));
+  return [...rows, ...custom];
+}
 
 /* ---------------- text format ---------------- */
 
@@ -320,13 +891,71 @@ function extractDrill(text) {
   return m ? m[1].replace(/\s+$/, "") : text;
 }
 
+// parse a run of PATH/FORK route tokens (starting at tok[j]) into a segment array.
+// Shared by PATH (base routes) and FORK (light-reaction continuations).
+function parseSegments(tok, j, unq) {
+  const segs = [];
+  let mode = "carry", dir = "fwd", stop = 0, rate = 1, name = null, waitOn = null, jump = false;
+  let dsc = null, dmode = null, dsize = null, dox = null, doy = null;
+  const num = () => { const v = parseFloat(tok[j++]); if (isNaN(v)) throw new Error("bad number in PATH"); return v; };
+  const push = seg => {
+    segs.push({ ...seg, mode, dir, stop, rate, ...(name ? { name } : {}), ...(waitOn ? { waitOn } : {}), ...(jump ? { jump: true } : {}),
+      ...(dsc ? { desc: dsc } : {}), ...(dmode ? { dmode } : {}), ...(dsize != null ? { dsize } : {}),
+      ...(dox != null ? { dox, doy } : {}) });
+    mode = "carry"; dir = "fwd"; stop = 0; rate = 1; name = null; waitOn = null; jump = false;
+    dsc = null; dmode = null; dsize = null; dox = null; doy = null;
+  };
+  while (j < tok.length) {
+    const t = tok[j++].toUpperCase();
+    if (t === "CARRY" || t === "PASS" || t === "SHOT") { mode = t.toLowerCase(); continue; }
+    if (t === "FWD" || t === "BWD") { dir = t.toLowerCase(); continue; }
+    if (t === "STOP") { stop = num(); continue; }
+    if (t === "JUMP") { jump = true; continue; }
+    if (t === "WAIT") { const on = tok[j++]; const at = parseInt(tok[j++], 10); waitOn = { on, at: (isNaN(at) ? 1 : at) - 1, mode: "waypoint" }; continue; }
+    // WACT <player> <pt> — pause until that player releases the puck at <pt> (0 = any action)
+    if (t === "WACT") { const on = tok[j++]; const at = parseInt(tok[j++], 10); waitOn = { on, at: (isNaN(at) || at === 0) ? null : at - 1, mode: "action" }; continue; }
+    if (t === "RATE") { rate = Math.max(0.1, num()); continue; }
+    if (t === "NAME") { name = (tok[j++] || "").replace(/_/g, " ").trim() || null; continue; }
+    if (t === "DESC") { dsc = unq(tok[j++]) || null; continue; }        // "free text" description
+    if (t === "SHOW") { const m = (tok[j++] || "").toLowerCase(); dmode = ["auto", "preso", "label"].includes(m) ? m : null; continue; }
+    if (t === "SIZE") { dsize = Math.max(0.2, num()); continue; }
+    if (t === "OFF") { dox = num(); doy = num(); continue; }            // label offset from the waypoint
+    if (t === "L") push({ type: "L", x: num(), y: num() });
+    else if (t === "Q") push({ type: "Q", cx: num(), cy: num(), x: num(), y: num() });
+    else if (t === "C") push({ type: "C", c1x: num(), c1y: num(), c2x: num(), c2y: num(), x: num(), y: num() });
+    else throw new Error(`unknown token "${t}" (use L Q C, PASS SHOT CARRY, FWD BWD, STOP n, RATE n)`);
+  }
+  return segs;
+}
+
 function parseDrill(text) {
   const pieces = [];
   const byId = {};
   let rink = "full";
   let title = "", desc = "";
+  // presentation steps: authored narration beats, each anchored to an absolute
+  // time (at=) or a player's waypoint activation (on=<id>:<pt>). See serializeDrill.
+  const steps = [];
+  // the DSL schema version the drill declares (a `DSL <n>` header). Absent → treat
+  // as the current version (no back-compat gating yet); a reader may branch on it.
+  let dslVersion = DSL_VERSION;
+  // coaching writeup: a multi-line markdown NOTES … END NOTES block, captured
+  // verbatim (see serializeDrill). `items` holds inventory overrides / custom
+  // gear rows; auto counts derive from the pieces at render time.
+  let notes = null, capturingNotes = false;
+  const noteBuf = [];
+  const items = [];
   const errors = [];
   text.split(/\r?\n/).forEach((raw, i) => {
+    // NOTES block capture mode: pipe-prefixed body lines are taken verbatim
+    // (no comment-strip / tokenize) until a bare `END NOTES`. The `| ` prefix on
+    // every body line means a coach's own `END NOTES` line can never terminate it.
+    if (capturingNotes) {
+      if (raw.trim() === "END NOTES") { notes = noteBuf.join("\n"); capturingNotes = false; }
+      else { const m = /^\|( (.*))?$/.exec(raw); noteBuf.push(m ? (m[2] || "") : raw); }
+      return;
+    }
+    if (/^\s*NOTES\s*$/.test(raw)) { capturingNotes = true; noteBuf.length = 0; return; }
     // TITLE/DESC take the whole rest of the line (may contain spaces or #)
     const meta = /^\s*(title|desc)\b\s*(.*)$/i.exec(raw);
     if (meta) { if (meta[1].toLowerCase() === "title") title = meta[2].trim(); else desc = meta[2].trim(); return; }
@@ -341,22 +970,27 @@ function parseDrill(text) {
     const quoted = t => /^\d+$/.test(t || "");
     const cmd = tok[0].toUpperCase();
     try {
-      if (cmd === "RINK") {
+      if (cmd === "DSL") {
+        const n = parseInt(tok[1], 10);
+        if (isNaN(n) || n < 1) throw new Error(`DSL needs a version number, got "${tok[1] || ""}"`);
+        dslVersion = n;
+      } else if (cmd === "RINK") {
         const m = (tok[1] || "").toLowerCase();
         if (!VIEWS[m]) throw new Error(`unknown rink "${tok[1]}"`);
         rink = m;
       } else if (cmd === "PIECE") {
         const [, id, kind, xs, ys, ...rest] = tok;
         const x = parseFloat(xs), y = parseFloat(ys);
-        if (!id || !["player", "puck", "cone", "net", "bumper", "deker", "passer", "label", "tire", "stick"].includes(kind) || isNaN(x) || isNaN(y))
+        if (!id || !["player", "puck", "cone", "net", "bumper", "deker", "passer", "label", "tire", "stick", "light"].includes(kind) || isNaN(x) || isNaN(y))
           throw new Error("PIECE needs: id kind x y");
         let color = kind === "cone" ? "#e0731d" : kind === "puck" ? "#14171a" : kind === "net" ? "#c81e33"
           : kind === "bumper" ? "#1b1e22" : kind === "deker" ? "#c79a4e" : kind === "passer" ? "#57636f"
-          : kind === "label" ? "#14202b" : kind === "tire" ? "#1c1c1e" : kind === "stick" ? "#20242a" : "#d7263d";
+          : kind === "label" ? "#14202b" : kind === "tire" ? "#1c1c1e" : kind === "stick" ? "#20242a" : kind === "light" ? "#2ea043" : "#d7263d";
         let label = kind === "player" ? id : "";
         let text = "", size = 1;                          // label piece: text + font scale
         let speed = 1, hand = "R", carrier = null, facing = 0, shotAt = null, pickup = null, rimAt = null, chipAt = null, chipAim = null, rimAim = null, chipDist = null, rimDist = null;
-        let net = null, holdLine = false, goalie = false, defense = false;
+        let net = null, holdLine = false, goalie = false, defense = false, wait = null, group = null, crease = false;
+        let cues = [], rand = true;                       // light: cue timeline + reactive (shuffle/loop) default on
         const transfers = [];
         rest.forEach(r => {
           if (quoted(r)) { text = unq(r); }              // a "quoted string" → label text
@@ -373,6 +1007,9 @@ function parseDrill(text) {
             } else if (key === "hand") hand = v.toUpperCase() === "L" ? "L" : "R";
             else if (key === "on") carrier = v;
             else if (key === "pass") {
+              // pass=<pt>:<to>[@<recvPt>][^<passer>][!] — a ^passer makes it a
+              // give-and-go bounced off that passer; a trailing ! is a sauce
+              // (raised) pass that arcs over ice obstacles
               const m2 = /^(\d+):([^@\s^!]+)(?:@(\d+))?(?:\^([^!\s]+))?(!)?$/.exec(v);
               if (m2) transfers.push({ at: parseInt(m2[1], 10) - 1, to: m2[2],
                 recvAt: m2[3] ? parseInt(m2[3], 10) - 1 : null, kind: "pass",
@@ -380,6 +1017,7 @@ function parseDrill(text) {
             } else if (key === "rebound") {
               // shot whose carom is collected by a player: shoot at <pt>, they
               // gather at their @<pt> (else route end / where they stand)
+              // rebound=<pt>:<to>[@<recvPt>][>net] — >net gives this rebound shot its own target
               const m4 = /^(\d+):([^@\s>]+)(?:@(\d+))?(?:>(\S+))?$/.exec(v);
               if (m4) transfers.push({ at: parseInt(m4[1], 10) - 1, to: m4[2],
                 recvAt: m4[3] ? parseInt(m4[3], 10) - 1 : null, kind: "shot",
@@ -401,62 +1039,112 @@ function parseDrill(text) {
                 else { chipAt = parseInt(m5[1], 10) - 1; chipAim = aim; chipDist = dist; }
               }
             } else if (key === "pickup") {
-              const m3 = /^([^@\s]+)@(\d+)$/.exec(v);
-              if (m3) pickup = { to: m3[1], at: parseInt(m3[2], 10) - 1 };
+              // pickup=<player>@<pt>[*] — trailing * = a live "nearest loose puck"
+              // collect that re-resolves at play time instead of a fixed puck
+              const m3 = /^([^@\s]+)@(\d+)(\*)?$/.exec(v);
+              if (m3) pickup = { to: m3[1], at: parseInt(m3[2], 10) - 1, ...(m3[3] ? { nearest: true } : {}) };
             } else if (key === "net") {
               net = v;                                   // a net piece id (or left/right for legacy)
             } else if (key === "hold") {
               if (v.toLowerCase() === "line") holdLine = true;
+            } else if (key === "wait" || key === "act") {
+              // wait=<player>[@<pt>] — hold until that player REACHES point <pt>.
+              // act=<player>[@<pt>] — hold until that player RELEASES the puck
+              // (pass/chip/rim/shot) at <pt>; no @<pt> = at any of their actions.
+              const mw = /^([^@\s]+)(?:@(\d+))?$/.exec(v);
+              if (mw) wait = { on: mw[1], mode: key === "act" ? "action" : "waypoint",
+                at: mw[2] ? parseInt(mw[2], 10) - 1 : (key === "act" ? null : 0) };
             } else if (key === "face") {
               const n = parseFloat(v);
               if (!isNaN(n)) facing = n;
-            }
+            } else if (key === "cues") {
+              // cues=<hex>:<dur>;<hex>:<dur>… — a light's colour timeline. Hex has
+              // no leading # (commas/# are stripped by tokenizing), so ; separates.
+              v.split(";").forEach(seg => {
+                const m6 = /^([0-9a-fA-F]{3,6}):(\d+(?:\.\d+)?)$/.exec(seg);
+                if (m6) cues.push({ color: "#" + m6[1], dur: parseFloat(m6[2]) });
+              });
+            } else if (key === "rand") { rand = !/^(off|0|false|no)$/i.test(v); }   // light: reactive mode (default on)
+            else if (key === "group") group = v.replace(/_/g, " ").trim() || null;   // named group membership
           } else if (r === "goalie") goalie = true;
+          else if (r === "crease") crease = true;
           else if (r === "defense") defense = true;
           else label = r;
         });
-        const p = { id, kind, x, y, color, label, text, size, speed, hand, carrier, facing, transfers, shotAt, pickup, rimAt, chipAt, chipAim, rimAim, chipDist, rimDist, net, holdLine, goalie, defense, path: [] };
+        const p = { id, kind, x, y, color, label, text, size, speed, hand, carrier, facing, transfers, shotAt, pickup, rimAt, chipAt, chipAim, rimAim, chipDist, rimDist, net, holdLine, goalie, defense, wait, group, crease, cues, rand, forks: [], path: [] };
         pieces.push(p); byId[id] = p;
       } else if (cmd === "PATH") {
         const id = tok[1];
         const p = byId[id];
         if (!p) throw new Error(`PATH for unknown piece "${id}"`);
-        let j = 2, mode = "carry", dir = "fwd", stop = 0, rate = 1, name = null;
-        let dsc = null, dmode = null, dsize = null, dox = null, doy = null;   // waypoint description/label
-        const num = () => { const v = parseFloat(tok[j++]); if (isNaN(v)) throw new Error("bad number in PATH"); return v; };
-        const push = seg => {
-          p.path.push({ ...seg, mode, dir, stop, rate, ...(name ? { name } : {}),
-            ...(dsc ? { desc: dsc } : {}), ...(dmode ? { dmode } : {}), ...(dsize != null ? { dsize } : {}),
-            ...(dox != null ? { dox, doy } : {}) });
-          mode = "carry"; dir = "fwd"; stop = 0; rate = 1; name = null;
-          dsc = null; dmode = null; dsize = null; dox = null; doy = null;
-        };
-        while (j < tok.length) {
-          const t = tok[j++].toUpperCase();
-          if (t === "CARRY" || t === "PASS" || t === "SHOT") { mode = t.toLowerCase(); continue; }
-          if (t === "FWD" || t === "BWD") { dir = t.toLowerCase(); continue; }
-          if (t === "STOP") { stop = num(); continue; }
-          if (t === "RATE") { rate = Math.max(0.1, num()); continue; }
-          if (t === "NAME") { name = (tok[j++] || "").replace(/_/g, " ").trim() || null; continue; }
-          if (t === "DESC") { dsc = unq(tok[j++]) || null; continue; }        // "free text" description
-          if (t === "SHOW") { const m = (tok[j++] || "").toLowerCase(); dmode = ["auto", "preso", "label"].includes(m) ? m : null; continue; }
-          if (t === "SIZE") { dsize = Math.max(0.2, num()); continue; }
-          if (t === "OFF") { dox = num(); doy = num(); continue; }            // label offset from the waypoint
-          if (t === "L") push({ type: "L", x: num(), y: num() });
-          else if (t === "Q") push({ type: "Q", cx: num(), cy: num(), x: num(), y: num() });
-          else if (t === "C") push({ type: "C", c1x: num(), c1y: num(), c2x: num(), c2y: num(), x: num(), y: num() });
-          else throw new Error(`unknown token "${t}" (use L Q C, PASS SHOT CARRY, FWD BWD, STOP n, RATE n)`);
+        p.path = parseSegments(tok, 2, unq);
+      } else if (cmd === "FORK") {
+        // FORK <player> <ref> [<action>[:target]] <segments…> — a light-reaction
+        // continuation. `ref` is a slash-path of cue colours (hex, no leading #):
+        // "green" is a top-level reaction, "green/red" the red reaction chained off
+        // the green (skate) one. An optional action says what the player does on it:
+        // skate (default) / shoot[:net] / chip / rim / pass:to.
+        const id = tok[1], col = tok[2];
+        const p = byId[id];
+        if (!p) throw new Error(`FORK for unknown piece "${id}"`);
+        const refParts = String(col || "").split("/");
+        if (!refParts.every(h => /^[0-9a-fA-F]{3,6}$/.test(h))) throw new Error("FORK needs: id colour[/colour…] segments");
+        let j = 3, action = "skate", net = null, to = null;
+        const am = /^(skate|shoot|chip|rim|pass)(?::(\S+))?$/i.exec(tok[3] || "");
+        if (am) { action = am[1].toLowerCase(); if (action === "shoot") net = am[2] || null; else if (action === "pass") to = am[2] || null; j = 4; }
+        // navigate/create the parent chain (parents are emitted before children), add leaf
+        let list = (p.forks = p.forks || []);
+        for (let k = 0; k < refParts.length - 1; k++) {
+          const c = "#" + refParts[k];
+          let node = list.find(f => f.color.toLowerCase() === c.toLowerCase());
+          if (!node) { node = { color: c, action: "skate", forks: [], path: [] }; list.push(node); }
+          list = (node.forks = node.forks || []);
         }
+        list.push({ color: "#" + refParts[refParts.length - 1], action,
+          ...(net ? { net } : {}), ...(to ? { to } : {}), forks: [], path: parseSegments(tok, j, unq) });
       } else if (cmd === "MARK") {
+        // MARK <id> <color> <width> <style> x1,y1 x2,y2 ...  (a freehand ink annotation)
         const mid = tok[1], mcol = tok[2] || "#ffd447", mw = parseFloat(tok[3]) || 1.1, mst = (tok[4] || "solid").toLowerCase();
         const nums = tok.slice(5).map(Number).filter(n => !isNaN(n));
         const pts = [];
         for (let k = 0; k + 1 < nums.length; k += 2) pts.push({ x: nums[k], y: nums[k + 1] });
-        if (mid && pts.length >= 2) { const m = { id: mid, kind: "mark", color: mcol, width: mw, style: ["dashed", "dotted", "wavy"].includes(mst) ? mst : "solid", x: pts[0].x, y: pts[0].y, pts, path: [] }; pieces.push(m); byId[mid] = m; }
+        if (mid && pts.length >= 2) {
+          const m = { id: mid, kind: "mark", color: mcol, width: mw, style: ["dashed", "dotted", "wavy"].includes(mst) ? mst : "solid", x: pts[0].x, y: pts[0].y, pts, path: [] };
+          pieces.push(m); byId[mid] = m;
+        }
+      } else if (cmd === "STEP") {
+        // STEP at=<seconds> "text"   OR   STEP on=<pieceId>:<pt> "text"
+        // waypoint number is 1-based on the wire, stored 0-based as wp. Optional
+        // pos=<x>:<y> is the caption's saved spot in RINK FEET (x 0..200, y 0..85),
+        // so it holds the same ice area across portrait/landscape.
+        let at = null, on = null, txt = "", pos = null;
+        const clampX = n => Math.max(0, Math.min(200, n)), clampY = n => Math.max(0, Math.min(85, n));
+        tok.slice(1).forEach(r => {
+          if (quoted(r)) txt = unq(r);
+          else if (/^at=/i.test(r)) { const n = parseFloat(r.slice(3)); if (!isNaN(n)) at = Math.max(0, n); }
+          else if (/^on=/i.test(r)) { const m = /^([^:]+):(\d+)$/.exec(r.slice(3)); if (m) on = { piece: m[1], wp: parseInt(m[2], 10) - 1 }; }
+          else if (/^pos=/i.test(r)) { const m = /^(-?\d*\.?\d+):(-?\d*\.?\d+)$/.exec(r.slice(4)); if (m) pos = { x: clampX(parseFloat(m[1])), y: clampY(parseFloat(m[2])) }; }
+        });
+        const anchor = on ? { on } : at != null ? { at } : null;
+        if (anchor) steps.push({ text: txt, ...anchor, ...(pos ? { pos } : {}) });
+      } else if (cmd === "ITEM") {
+        // ITEM <key> [count=<n>] [hide] ["Label"] — an inventory row. A canonical
+        // <key> overrides/hides its auto-derived row; any other key is a custom
+        // off-ice gear row (whistles, pinnies, water) carrying its own label.
+        const key = tok[1];
+        let count = null, hide = false, label = "";
+        tok.slice(2).forEach(r => {
+          if (quoted(r)) label = unq(r);
+          else if (/^count=/i.test(r)) { const n = parseInt(r.slice(6), 10); if (!isNaN(n) && n >= 0) count = n; }
+          else if (r.toLowerCase() === "hide") hide = true;
+        });
+        if (key) items.push({ key, ...(count != null ? { count } : {}), ...(hide ? { hide: true } : {}),
+          ...(label ? { label } : {}), ...(INV_KINDS.includes(key) ? {} : { custom: true }) });
       } else throw new Error(`unknown command "${tok[0]}"`);
     } catch (e) { errors.push(`line ${i + 1}: ${e.message}`); }
   });
-  return { rink, pieces, errors, title, desc };
+  if (capturingNotes) notes = noteBuf.join("\n");   // unterminated NOTES: flush what we have
+  return { rink, pieces, errors, title, desc, dslVersion, steps, notes: notes || "", items };
 }
 
 const f1 = n => (Math.round(n * 10) / 10).toString();
@@ -476,6 +1164,10 @@ function segToStr(s) {
     }
   }
   if (s.stop > 0) pre += `STOP ${f1(s.stop)} `;
+  if (s.jump) pre += "JUMP ";
+  if (s.waitOn && s.waitOn.on) pre += s.waitOn.mode === "action"
+    ? `WACT ${s.waitOn.on} ${s.waitOn.at != null ? s.waitOn.at + 1 : 0} `
+    : `WAIT ${s.waitOn.on} ${(s.waitOn.at ?? 0) + 1} `;
   if (s.rate && s.rate !== 1) pre += `RATE ${f2(s.rate)} `;
   if (s.dir === "bwd") pre += "BWD ";
   if (s.mode && s.mode !== "carry") pre += s.mode.toUpperCase() + " ";
@@ -484,10 +1176,19 @@ function segToStr(s) {
   return `${pre}C ${f1(s.c1x)},${f1(s.c1y)} ${f1(s.c2x)},${f1(s.c2y)} ${f1(s.x)},${f1(s.y)}`;
 }
 
-function serializeDrill(rink, pieces, title = "", desc = "") {
-  const out = [`RINK ${rink}`];
+function serializeDrill(rink, pieces, title = "", desc = "", steps = [], notes = "", items = []) {
+  // stamp the schema version that wrote this text (first line, so a reader can
+  // branch before parsing the body). Always the current DSL_VERSION on save.
+  const out = [`DSL ${DSL_VERSION}`, `RINK ${rink}`];
   if (title && title.trim()) out.push(`TITLE ${title.trim()}`);
   if (desc && desc.trim()) out.push(`DESC ${desc.trim()}`);
+  // coaching writeup: pipe-prefix every body line so nothing in the markdown
+  // (blank lines, a literal `END NOTES`) can collide with the terminator.
+  if (notes && notes.trim()) {
+    out.push("NOTES");
+    notes.replace(/\r\n?/g, "\n").split("\n").forEach(l => out.push(l === "" ? "|" : "| " + l));
+    out.push("END NOTES");
+  }
   out.push("");
   pieces.forEach(p => {
     if (p.kind === "label") {
@@ -495,34 +1196,165 @@ function serializeDrill(rink, pieces, title = "", desc = "") {
       out.push(`PIECE ${p.id} label ${f1(p.x)} ${f1(p.y)} ${p.color}${sz} ${qesc(p.text || "")}`);
       return;
     }
-    const lbl = p.kind === "player" && p.label ? " " + p.label : "";
+    if (p.kind === "mark") {
+      out.push(`MARK ${p.id} ${p.color} ${f2(p.width || 1.1)} ${p.style || "solid"} ${(p.pts || []).map(q => `${f1(q.x)},${f1(q.y)}`).join(" ")}`);
+      return;
+    }
+    const lbl = p.label ? " " + String(p.label).replace(/[\s,]+/g, "_") : "";
     const spd = p.speed && p.speed !== 1 ? ` speed=${f2(p.speed)}` : "";
     const hnd = p.kind === "player" && p.hand === "L" ? " hand=L" : "";
     const car = p.kind === "puck" && p.carrier ? ` on=${p.carrier}` : "";
-    const gp = p.kind === "puck" && !p.carrier && p.pickup ? ` pickup=${p.pickup.to}@${p.pickup.at + 1}` : "";
-    // chain transfers in order: pass= passes, rebound= shot handoffs, rim=/chip= board plays
+    const gp = p.kind === "puck" && !p.carrier && p.pickup ? ` pickup=${p.pickup.to}@${p.pickup.at + 1}${p.pickup.nearest ? "*" : ""}` : "";
+    // chain transfers in order: pass= passes, rebound= shot handoffs, rim=/chip= board plays.
+    // Only the VALID prefix is saved: an impossible step (an actor that never has
+    // the puck) and everything after it is dropped, and the intended-actor tags
+    // (`by` / `termBy`) are editor-only, not part of the DSL.
     const kw = t => t.kind === "shot" ? "rebound" : t.kind === "rim" ? "rim" : t.kind === "chip" ? "chip" : "pass";
-    const pas = p.kind === "puck" && (p.carrier || p.pickup) && p.transfers && p.transfers.length
-      ? p.transfers.map(t => ` ${kw(t)}=${t.at + 1}:${t.to}${t.recvAt != null ? "@" + (t.recvAt + 1) : ""}${(t.kind === "chip" || t.kind === "rim") && t.aim != null ? "~" + f1(t.aim) : ""}`).join("")
-      : "";
+    let vts = [], lastCarrier = (p.carrier || (p.pickup && p.pickup.to)) || null;
+    if (p.kind === "puck") for (const t of (p.transfers || [])) { if (t.by && t.by !== lastCarrier) break; vts.push(t); lastCarrier = t.to; }
     const head = p.kind === "puck" && (p.carrier || p.pickup);
-    const sht = head && p.shotAt != null ? ` shoot=${p.shotAt + 1}` : "";
-    const rmT = head && p.rimAt != null ? ` rim=${p.rimAt + 1}${p.rimAim != null ? "~" + f1(p.rimAim) : ""}${p.rimDist != null ? "*" + f1(p.rimDist) : ""}` : "";
-    const chT = head && p.chipAt != null ? ` chip=${p.chipAt + 1}${p.chipAim != null ? "~" + f1(p.chipAim) : ""}${p.chipDist != null ? "*" + f1(p.chipDist) : ""}` : "";
-    const hasShot = p.kind === "puck" && (p.shotAt != null || (p.transfers || []).some(t => t.kind === "shot"));
+    const pas = head && vts.length
+      ? vts.map(t => ` ${kw(t)}=${t.at + 1}:${t.to}${t.recvAt != null ? "@" + (t.recvAt + 1) : ""}${t.via ? "^" + t.via : ""}${t.sauce ? "!" : ""}${t.kind === "shot" && t.net ? ">" + t.net : ""}${(t.kind === "chip" || t.kind === "rim") && t.aim != null ? "~" + f1(t.aim) : ""}`).join("")
+      : "";
+    const termOk = !p.termBy || p.termBy === lastCarrier;
+    const sht = head && termOk && p.shotAt != null ? ` shoot=${p.shotAt + 1}` : "";
+    const rmT = head && termOk && p.rimAt != null ? ` rim=${p.rimAt + 1}${p.rimAim != null ? "~" + f1(p.rimAim) : ""}${p.rimDist != null ? "*" + f1(p.rimDist) : ""}` : "";
+    const chT = head && termOk && p.chipAt != null ? ` chip=${p.chipAt + 1}${p.chipAim != null ? "~" + f1(p.chipAim) : ""}${p.chipDist != null ? "*" + f1(p.chipDist) : ""}` : "";
+    const hasShot = p.kind === "puck" && ((termOk && p.shotAt != null) || vts.some(t => t.kind === "shot"));
     const nt = hasShot && p.net ? ` net=${p.net}` : "";
-    const rotatable = p.kind === "net" || p.kind === "bumper" || p.kind === "deker" || p.kind === "passer" || p.kind === "stick" || (p.kind === "player" && !p.path.length);
+    const rotatable = p.kind === "net" || p.kind === "bumper" || p.kind === "deker" || p.kind === "passer" || p.kind === "stick" || p.kind === "light" || (p.kind === "player" && !p.path.length);
     const fac = rotatable && p.facing ? ` face=${f1(p.facing)}` : "";
     const hld = p.kind === "player" && p.holdLine ? " hold=line" : "";
-    const gl = p.kind === "net" && p.goalie ? " goalie" : "";
+    const wt = p.kind === "player" && p.wait && p.wait.on
+      ? (p.wait.mode === "action"
+          ? ` act=${p.wait.on}${p.wait.at != null ? "@" + (p.wait.at + 1) : ""}`
+          : ` wait=${p.wait.on}@${(p.wait.at ?? 0) + 1}`)
+      : "";
+    const gl = (p.kind === "net" || p.kind === "tire") && p.goalie ? " goalie" : "";
+    const crs = p.kind === "net" && p.crease ? " crease" : "";
     const df = p.kind === "player" && p.defense ? " defense" : "";
     const siz = (p.kind === "net" || p.kind === "tire") && p.size && p.size !== 1 ? ` size=${f2(p.size)}` : "";
-    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${car}${gp}${pas}${sht}${rmT}${chT}${nt}${hld}${fac}${gl}${df}${siz}${spd}`);
+    const grp = p.group ? ` group=${String(p.group).trim().replace(/\s+/g, "_")}` : "";
+    const cue = p.kind === "light" && (p.cues || []).length
+      ? ` cues=${p.cues.map(c => `${String(c.color || "").replace("#", "")}:${f1(c.dur || 0)}`).join(";")}` : "";
+    // lights are reactive (shuffle + loop) by default; note the exception
+    const rnd = p.kind === "light" && p.rand === false ? " rand=off" : "";
+    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${car}${gp}${pas}${sht}${rmT}${chT}${nt}${hld}${wt}${fac}${gl}${crs}${df}${siz}${grp}${cue}${rnd}${spd}`);
     if (p.path.length) out.push(`PATH ${p.id} ${p.path.map(segToStr).join(" ")}`);
+    // light-reaction forks (players): one continuation per cue colour, with the
+    // action the player performs on it (skate default → omitted). Reactions nest —
+    // a skate reaction can chain another — so the colour ref is a slash-path
+    // (parent/child) and the whole tree is emitted, parents before children.
+    const emitForks = (forks, prefix) => (forks || []).forEach(f => {
+      if (!f.path || !f.path.length) return;
+      const ref = (prefix ? prefix + "/" : "") + String(f.color || "").replace("#", "");
+      const act = f.action && f.action !== "skate"
+        ? " " + f.action + (f.action === "shoot" && f.net ? ":" + f.net : f.action === "pass" && f.to ? ":" + f.to : "")
+        : "";
+      out.push(`FORK ${p.id} ${ref}${act} ${f.path.map(segToStr).join(" ")}`);
+      emitForks(f.forks, ref);
+    });
+    emitForks(p.forks, "");
+  });
+  // presentation steps (authored narration), each anchored to a time or a waypoint
+  (steps || []).forEach(s => {
+    const anchor = s.on ? `on=${s.on.piece}:${s.on.wp + 1}` : `at=${f2(s.at || 0)}`;
+    const pos = s.pos ? ` pos=${f1(s.pos.x)}:${f1(s.pos.y)}` : "";
+    out.push(`STEP ${anchor}${pos} ${qesc(s.text || "")}`);
+  });
+  // inventory: only rows the coach touched (overrides / hides / custom gear) are
+  // written; a pristine drill emits none and the table stays fully auto-derived.
+  (items || []).forEach(it => {
+    const parts = [`ITEM ${it.key}`];
+    if (it.count != null) parts.push(`count=${it.count}`);
+    if (it.hide) parts.push("hide");
+    if (it.label) parts.push(qesc(it.label));
+    out.push(parts.join(" "));
   });
   return out.join("\n") + "\n";
 }
 
+
+
+// A tiny, dependency-free markdown → HTML renderer for a SAFE subset. Used by
+// the app (coaching NOTES + presentation captions) and inlined verbatim into
+// the standalone preview page (scripts/build-drill-preview.mjs). The golden
+// rule: HTML-escape the source FIRST, then apply markdown to the escaped text,
+// so raw tags (`<script>`, `<img onerror>`) can never survive.
+
+function mdEscape(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// Only these link schemes are allowed; anything else (javascript:, data:, …)
+// renders as inert text so a pasted link can't run code.
+function safeHref(href) {
+  const h = String(href || "").trim();
+  if (/^(https?:|mailto:)/i.test(h)) return h;
+  if (/^[#/]/.test(h)) return h;                 // in-page anchor or relative path
+  if (/^[\w.+-]+@[\w.-]+\.\w+$/.test(h)) return "mailto:" + h;
+  return null;                                   // unsafe / unknown scheme
+}
+
+// Inline markdown on ALREADY-ESCAPED text: `code`, [text](href), **/__ bold,
+// */_ italic. Order matters — code spans are pulled out first so their contents
+// aren't re-processed. Safe for single-line captions and for each block line.
+function mdInline(escaped) {
+  let s = String(escaped == null ? "" : escaped);
+  const code = [];
+  s = s.replace(/`([^`]+)`/g, (_, c) => ` ${code.push(c) - 1} `);
+  // links: [label](href) — label may itself contain bold/italic (applied below)
+  s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, label, href) => {
+    const h = safeHref(href);
+    return h ? `<a href="${h}" target="_blank" rel="noopener noreferrer">${label}</a>` : m;
+  });
+  s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+       .replace(/__([^_]+)__/g, "<strong>$1</strong>")
+       .replace(/(^|[^*])\*(?!\s)([^*]+?)\*/g, "$1<em>$2</em>")
+       .replace(/(^|[^\w_])_(?!\s)([^_]+?)_/g, "$1<em>$2</em>");
+  s = s.replace(/ (\d+) /g, (_, i) => `<code>${code[+i]}</code>`);
+  return s;
+}
+
+// Block markdown for a multi-line NOTES writeup: #..###### headings, ordered
+// (`1.`) and unordered (`-`/`*`) lists, blank-line-separated paragraphs, single
+// newlines → <br>. No raw-HTML passthrough, no images. Returns an HTML string.
+function mdBlock(md) {
+  const lines = String(md == null ? "" : md).replace(/\r\n?/g, "\n").split("\n");
+  const out = [];
+  let para = [];       // buffered paragraph lines
+  let list = null;     // { tag: "ul"|"ol", items: [] }
+  const flushPara = () => {
+    if (!para.length) return;
+    out.push("<p>" + para.map(l => mdInline(mdEscape(l))).join("<br>") + "</p>");
+    para = [];
+  };
+  const flushList = () => {
+    if (!list) return;
+    out.push(`<${list.tag}>` + list.items.map(it => `<li>${mdInline(mdEscape(it))}</li>`).join("") + `</${list.tag}>`);
+    list = null;
+  };
+  for (const raw of lines) {
+    const line = raw.replace(/\s+$/, "");
+    if (!line.trim()) { flushPara(); flushList(); continue; }
+    const h = /^(#{1,6})\s+(.*)$/.exec(line);
+    if (h) { flushPara(); flushList(); const n = h[1].length; out.push(`<h${n}>${mdInline(mdEscape(h[2]))}</h${n}>`); continue; }
+    const ol = /^\s*\d+[.)]\s+(.*)$/.exec(line);
+    const ul = /^\s*[-*+]\s+(.*)$/.exec(line);
+    if (ol || ul) {
+      flushPara();
+      const tag = ol ? "ol" : "ul";
+      if (!list || list.tag !== tag) { flushList(); list = { tag, items: [] }; }
+      list.items.push((ol ? ol[1] : ul[1]));
+      continue;
+    }
+    flushList();
+    para.push(line);
+  }
+  flushPara(); flushList();
+  return out.join("\n");
+}
 
 
 // Render a drill (DSL text) to a standalone SVG string: the rink markings,
@@ -532,6 +1364,130 @@ function serializeDrill(rink, pieces, title = "", desc = "") {
 // it; pieces use their own DSL colours.
 
 
+
+
+
+// which of player p's route segments are skated WITH the puck (→ wiggle line):
+// held from where they get it (reception waypoint, or the start if head) to
+// where they release it (pass/shot waypoint).
+function carrySegsOf(p, pieces) {
+  const set = new Set();
+  if (!p.path || !p.path.length) return set;
+  const chainOf = pk => [pk.carrier || (pk.pickup && pk.pickup.to) || null, ...(pk.transfers || []).map(t => t.to)].filter(Boolean);
+  for (const pk of pieces) {
+    if (pk.kind !== "puck") continue;
+    const chain = chainOf(pk);
+    if (!chain.includes(p.id)) continue;
+    const ts = pk.transfers || [];
+    const termAt = pk.shotAt != null ? pk.shotAt : pk.rimAt != null ? pk.rimAt : pk.chipAt != null ? pk.chipAt : null;
+    let prevRelease = -1;
+    for (let s = 0; s < chain.length; s++) {
+      if (chain[s] !== p.id) continue;
+      const inc = s > 0 ? ts[s - 1] : null;
+      // give-and-go: reception is the waypoint AFTER the pass, so the leg right
+      // after passing draws straight and the wiggle resumes once it's back
+      // a pickup head only carries once it reaches the loose puck at pickup.at
+      const R = s === 0 ? (pk.pickup && pk.pickup.to === p.id ? pk.pickup.at : -1)
+        : (inc && inc.recvAt != null ? inc.recvAt : prevRelease + 1);
+      const L = s < ts.length ? ts[s].at : (termAt != null ? termAt : p.path.length - 1);
+      for (let i = Math.max(0, R + 1); i <= Math.min(L, p.path.length - 1); i++) set.add(i);
+      prevRelease = s < ts.length ? ts[s].at : L;
+    }
+  }
+  return set;
+}
+const segCmd = s => s.type === "L" ? `L ${f(s.x)} ${f(s.y)}` : s.type === "Q" ? `Q ${f(s.cx)} ${f(s.cy)} ${f(s.x)} ${f(s.y)}` : `C ${f(s.c1x)} ${f(s.c1y)} ${f(s.c2x)} ${f(s.c2y)} ${f(s.x)} ${f(s.y)}`;
+// path indices where an event happens on player p's route (a pass/shot/rim/chip,
+// a received pass, a collect) → renumbered 1..N. Shaping-only waypoints get no dot.
+function eventWps(p, pieces) {
+  const idx = new Set();
+  const chainOf = pk => [pk.carrier || (pk.pickup && pk.pickup.to) || null, ...(pk.transfers || []).map(t => t.to)].filter(Boolean);
+  for (const pk of pieces) {
+    if (pk.kind !== "puck") continue;
+    const chain = chainOf(pk), ts = pk.transfers || [];
+    const termAt = pk.shotAt != null ? pk.shotAt : pk.rimAt != null ? pk.rimAt : pk.chipAt != null ? pk.chipAt : null;
+    ts.forEach((t, s) => {
+      if (chain[s] === p.id && t.at >= 0) idx.add(t.at);
+      if (t.to === p.id && t.recvAt != null && t.recvAt >= 0) idx.add(t.recvAt);
+    });
+    if (chain[chain.length - 1] === p.id && termAt != null && termAt >= 0) idx.add(termAt);
+    if (pk.pickup && pk.pickup.to === p.id && pk.pickup.at >= 0) idx.add(pk.pickup.at);
+  }
+  const map = new Map();
+  [...idx].forEach(wi => map.set(wi, wi + 2));   // start = waypoint 1, path[i] = i+2
+  return map;
+}
+
+// pull a polyline's end back by `d` ft along its final heading so an arrowhead
+// points AT the target instead of landing on top of it
+function trimEnd(pts, d) {
+  if (!pts || pts.length < 2 || d <= 0) return pts;
+  const out = pts.map(p => ({ x: p.x, y: p.y }));
+  let rem = d;
+  while (out.length >= 2) {
+    const b = out[out.length - 1], a = out[out.length - 2];
+    const seg = Math.hypot(b.x - a.x, b.y - a.y);
+    if (seg > rem) { const g = (seg - rem) / seg; out[out.length - 1] = { x: a.x + (b.x - a.x) * g, y: a.y + (b.y - a.y) * g }; break; }
+    rem -= seg; out.pop();
+  }
+  return out;
+}
+// pull a polyline's start forward by `d` ft so it lifts off its source icon
+function trimStart(pts, d) {
+  if (!pts || pts.length < 2 || d <= 0) return pts;
+  return trimEnd([...pts].reverse(), d).reverse();
+}
+const polyLen = a => { let L = 0; for (let i = 1; i < a.length; i++) L += Math.hypot(a[i].x - a[i - 1].x, a[i].y - a[i - 1].y); return L; };
+// trim both ends of a puck-flow line off its source/target, scaling the trims
+// down on short lines so at least ~2 ft of line always remains visible
+function trimLine(pts, startD, endD) {
+  const total = polyLen(pts);
+  let s = startD, e = endD;
+  if (s + e > total - 2) { const k = Math.max(0, total - 2) / (s + e || 1); s *= k; e *= k; }
+  return trimStart(trimEnd(pts, e), s);
+}
+
+// de Casteljau: the sub-segment of `s` (starting at prev) covering [0, t]
+function subSeg(prev, s, t) {
+  const L = (a, b) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+  if (s.type === "L") { const e = L(prev, { x: s.x, y: s.y }); return { type: "L", x: e.x, y: e.y }; }
+  if (s.type === "Q") {
+    const a = L(prev, { x: s.cx, y: s.cy }), b = L({ x: s.cx, y: s.cy }, { x: s.x, y: s.y }), e = L(a, b);
+    return { type: "Q", cx: a.x, cy: a.y, x: e.x, y: e.y };
+  }
+  const c1 = { x: s.c1x, y: s.c1y }, c2 = { x: s.c2x, y: s.c2y }, p1 = { x: s.x, y: s.y };
+  const a = L(prev, c1), b = L(c1, c2), c = L(c2, p1), d = L(a, b), e = L(b, c), f = L(d, e);
+  return { type: "C", c1x: a.x, c1y: a.y, c2x: d.x, c2y: d.y, x: f.x, y: f.y };
+}
+
+// shorten the final route segment so its arrowhead points at the last waypoint
+function trimSeg(prev, s, d) {
+  const N = 40; let len = 0, last = evalSeg(prev, s, 0); const arc = [{ t: 0, l: 0 }];
+  for (let k = 1; k <= N; k++) { const t = k / N, q = evalSeg(prev, s, t); len += Math.hypot(q.x - last.x, q.y - last.y); arc.push({ t, l: len }); last = q; }
+  const target = len - d;
+  if (target <= 0.5) return s;                       // too short to trim — leave it
+  let t = 1;
+  for (let k = 1; k < arc.length; k++) if (arc[k].l >= target) { const a = arc[k - 1], b = arc[k]; t = a.t + (b.t - a.t) * (target - a.l) / ((b.l - a.l) || 1); break; }
+  return subSeg(prev, s, t);
+}
+// de Casteljau: the sub-segment of `s` covering [t, 1] (its new start point + seg)
+function subSegFrom(prev, s, t) {
+  const L = (a, b) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+  if (s.type === "L") { const st = L(prev, { x: s.x, y: s.y }); return { start: st, seg: { type: "L", x: s.x, y: s.y } }; }
+  if (s.type === "Q") { const a = L(prev, { x: s.cx, y: s.cy }), b = L({ x: s.cx, y: s.cy }, { x: s.x, y: s.y }), st = L(a, b); return { start: st, seg: { type: "Q", cx: b.x, cy: b.y, x: s.x, y: s.y } }; }
+  const c1 = { x: s.c1x, y: s.c1y }, c2 = { x: s.c2x, y: s.c2y }, p1 = { x: s.x, y: s.y };
+  const a = L(prev, c1), b = L(c1, c2), c = L(c2, p1), d = L(a, b), e = L(b, c), ff = L(d, e);
+  return { start: ff, seg: { type: "C", c1x: e.x, c1y: e.y, c2x: c.x, c2y: c.y, x: p1.x, y: p1.y } };
+}
+// shorten the first segment's START by `d` ft so the line lifts off the player
+function trimSegStart(prev, s, d) {
+  const N = 40; let len = 0, last = evalSeg(prev, s, 0); const arc = [{ t: 0, l: 0 }];
+  for (let k = 1; k <= N; k++) { const t = k / N, q = evalSeg(prev, s, t); len += Math.hypot(q.x - last.x, q.y - last.y); arc.push({ t, l: len }); last = q; }
+  if (d >= len - 0.5) return null;                   // too short to trim
+  let t = 0;
+  for (let k = 1; k < arc.length; k++) if (arc[k].l >= d) { const a = arc[k - 1], b = arc[k]; t = a.t + (b.t - a.t) * (d - a.l) / ((b.l - a.l) || 1); break; }
+  return subSegFrom(prev, s, t);
+}
 
 const NET_L = { x: 17, y: 42.5 }, NET_R = { x: 183, y: 42.5 };
 const f = n => Math.round(n * 100) / 100;
@@ -596,19 +1552,24 @@ function rink() {
 }
 
 /* ------------------------------------------------------------------ */
-/* piece icons                                                         */
+// freehand marker annotation → a coloured polyline in its style
 function markMarkup(m) {
   if (!m.pts || m.pts.length < 2) return "";
   const w = m.width || 1.1;
+  // smooth the control points into a Catmull-Rom curve (matches the app)
   const smooth = cp => {
     if (cp.length < 3) return cp;
     const out = [{ x: cp[0].x, y: cp[0].y }];
     for (let i = 0; i < cp.length - 1; i++) {
       const p0 = cp[Math.max(0, i - 1)], p1 = cp[i], p2 = cp[i + 1], p3 = cp[Math.min(cp.length - 1, i + 2)];
       const n = Math.max(2, Math.round(Math.hypot(p2.x - p1.x, p2.y - p1.y) / 0.6));
-      for (let k = 1; k <= n; k++) { const t = k / n, t2 = t * t, t3 = t2 * t;
-        out.push({ x: 0.5 * ((2 * p1.x) + (-p0.x + p2.x) * t + (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 + (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3),
-          y: 0.5 * ((2 * p1.y) + (-p0.y + p2.y) * t + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 + (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3) }); }
+      for (let k = 1; k <= n; k++) {
+        const t = k / n, t2 = t * t, t3 = t2 * t;
+        out.push({
+          x: 0.5 * ((2 * p1.x) + (-p0.x + p2.x) * t + (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 + (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3),
+          y: 0.5 * ((2 * p1.y) + (-p0.y + p2.y) * t + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 + (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3),
+        });
+      }
     }
     return out;
   };
@@ -620,6 +1581,7 @@ function markMarkup(m) {
   const dash = m.style === "dashed" ? ` stroke-dasharray="${f(w * 2.6)} ${f(w * 1.9)}"` : m.style === "dotted" ? ` stroke-dasharray="0.02 ${f(w * 2)}"` : "";
   return `<polyline points="${pts.map(q => `${f(q.x)},${f(q.y)}`).join(" ")}" fill="none" stroke="${m.color}" stroke-width="${f(w)}"${dash} stroke-linecap="round" stroke-linejoin="round" opacity="0.94"/>`;
 }
+/* piece icons                                                         */
 function piece(p) {
   if (p.kind === "mark") return markMarkup(p);
   const rot = (a = p.facing || 0) => `translate(${f(p.x)} ${f(p.y)}) rotate(${f(a)})`;
@@ -634,12 +1596,13 @@ function piece(p) {
   if (p.kind === "net") {
     const CAGE = "M 0 -3.75 L -1.7 -3.75 Q -4.15 -3.75 -4.15 -1.5 L -4.15 1.5 Q -4.15 3.75 -1.7 3.75 L 0 3.75";
     return `<g transform="${rot()} scale(${p.size || 1})">`
+      + (p.crease ? `<path d="M 0 -7.5 A 7.5 7.5 0 0 1 0 7.5" fill="none" stroke="#d7263d" stroke-width="0.42" opacity="0.85" stroke-linecap="round"/>` : "")
       + `<path d="${CAGE} Z" fill="rgba(230,238,246,0.3)" stroke="none"/>`
       + `<g stroke="#9fb0c0" stroke-width="0.13" opacity="0.85" fill="none"><path d="M -0.4 -2.9 L -3.7 -1.7 M -0.4 -1.45 L -3.95 -0.85 M -0.4 1.45 L -3.95 0.85 M -0.4 2.9 L -3.7 1.7"/><path d="M -1.2 -3.3 L -1.2 3.3 M -2.4 -3.1 L -2.4 3.1 M -3.4 -2 L -3.4 2"/><path d="M -0.2 0 L -4.0 0"/></g>`
       + `<path d="${CAGE}" fill="none" stroke="${p.color}" stroke-width="0.55" stroke-linejoin="round" stroke-linecap="round"/>`
       + `<line x1="0" y1="-4.05" x2="0" y2="4.05" stroke="${p.color}" stroke-width="0.8" stroke-linecap="round"/>`
       + `<circle cx="0" cy="-3.75" r="0.82" fill="${p.color}"/><circle cx="0" cy="3.75" r="0.82" fill="${p.color}"/>`
-      + (p.goalie ? `<rect x="-1.6" y="-2.4" width="2.4" height="4.8" rx="1.1" fill="#2f9e57" stroke="#fff" stroke-width="0.3"/>` : "") + `</g>`;
+      + (p.goalie ? `<g transform="rotate(${f(-(p.facing || 0))} -0.5 0)"><circle cx="-0.5" cy="0" r="1.55" fill="#2f9e57" stroke="#fff" stroke-width="0.3"/><text x="-0.5" y="0.72" text-anchor="middle" font-size="2.1" font-weight="800" fill="#fff" font-family="system-ui,sans-serif" paint-order="stroke" stroke="rgba(0,0,0,0.35)" stroke-width="0.18">G</text></g>` : "") + `</g>`;
   }
   if (p.kind === "tire") {
     let ticks = "";
@@ -649,7 +1612,7 @@ function piece(p) {
       + `<circle cx="0" cy="0" r="2.0" fill="none" stroke="${p.color}" stroke-width="1.55"/>`
       + `<circle cx="0" cy="0" r="2.78" fill="none" stroke="#000" stroke-width="0.2" opacity="0.55"/>`
       + `<circle cx="0" cy="0" r="1.22" fill="none" stroke="#000" stroke-width="0.2" opacity="0.55"/>${ticks}`
-      + (p.goalie ? `<circle cx="0" cy="-3.5" r="1.15" fill="#2f9e57" stroke="#fff" stroke-width="0.3"/>` : "") + `</g>`;
+      + (p.goalie ? `<circle cx="0" cy="-3.5" r="1.4" fill="#2f9e57" stroke="#fff" stroke-width="0.3"/><text x="0" y="-2.85" text-anchor="middle" font-size="1.9" font-weight="800" fill="#fff" font-family="system-ui,sans-serif" paint-order="stroke" stroke="rgba(0,0,0,0.35)" stroke-width="0.16">G</text>` : "") + `</g>`;
   }
   if (p.kind === "bumper") {
     const foam = p.color && p.color !== "#4d6fa6" ? p.color : "#1b1e22";
@@ -673,143 +1636,11 @@ function piece(p) {
 
 /* ------------------------------------------------------------------ */
 /* routes + chain                                                      */
-// smooth sine "wiggle" — skating WITH the puck (hockey convention)
-function wigglePoints(prev, s, ar = 1) {
-  const wlen = (ax, ay, bx, by) => Math.hypot((bx - ax) * ar, by - ay);
-  const approx = s.type === "L" ? wlen(prev.x, prev.y, s.x, s.y)
-    : s.type === "Q" ? wlen(prev.x, prev.y, s.cx, s.cy) + wlen(s.cx, s.cy, s.x, s.y)
-    : wlen(prev.x, prev.y, s.c1x, s.c1y) + wlen(s.c1x, s.c1y, s.c2x, s.c2y) + wlen(s.c2x, s.c2y, s.x, s.y);
-  const cycles = Math.max(1, Math.round(approx / 3.4)), n = Math.max(14, cycles * 10), A = 0.85;
-  const pts = []; let cum = 0, prevPt = evalSeg(prev, s, 0);
-  for (let i = 0; i <= n; i++) {
-    const t = i / n, pt = evalSeg(prev, s, t);
-    if (i > 0) cum += wlen(prevPt.x, prevPt.y, pt.x, pt.y); prevPt = pt;
-    if (i === 0 || i === n) { pts.push(pt); continue; }
-    const ahead = evalSeg(prev, s, Math.min(1, t + 0.005));
-    const tx = (ahead.x - pt.x) * ar, ty = ahead.y - pt.y, px = -ty, py = tx, l = Math.hypot(px, py) || 1;
-    const a = Math.sin((cum / (approx || 1)) * cycles * 2 * Math.PI) * A;
-    pts.push({ x: pt.x + (px / l) * a / ar, y: pt.y + (py / l) * a });
-  }
-  return pts.map(q => `${f(q.x)},${f(q.y)}`).join(" ");
-}
-// which of player p's route segments are skated WITH the puck (→ wiggle line)
-function carrySegsOf(p, pieces) {
-  const set = new Set();
-  if (!p.path || !p.path.length) return set;
-  const chainOf = pk => [pk.carrier || (pk.pickup && pk.pickup.to) || null, ...(pk.transfers || []).map(t => t.to)].filter(Boolean);
-  for (const pk of pieces) {
-    if (pk.kind !== "puck") continue;
-    const chain = chainOf(pk);
-    if (!chain.includes(p.id)) continue;
-    const ts = pk.transfers || [];
-    const termAt = pk.shotAt != null ? pk.shotAt : pk.rimAt != null ? pk.rimAt : pk.chipAt != null ? pk.chipAt : null;
-    let prevRelease = -1;
-    for (let s = 0; s < chain.length; s++) {
-      if (chain[s] !== p.id) continue;
-      const inc = s > 0 ? ts[s - 1] : null;
-      // give-and-go: reception is the waypoint AFTER the pass, so the leg right
-      // after passing draws straight and the wiggle resumes once it's back
-      const R = s === 0 ? (pk.pickup && pk.pickup.to === p.id ? pk.pickup.at : -1)
-        : (inc && inc.recvAt != null ? inc.recvAt : prevRelease + 1);
-      const L = s < ts.length ? ts[s].at : (termAt != null ? termAt : p.path.length - 1);
-      for (let i = Math.max(0, R + 1); i <= Math.min(L, p.path.length - 1); i++) set.add(i);
-      prevRelease = s < ts.length ? ts[s].at : L;
-    }
-  }
-  return set;
-}
-const segCmd = s => s.type === "L" ? `L ${f(s.x)} ${f(s.y)}` : s.type === "Q" ? `Q ${f(s.cx)} ${f(s.cy)} ${f(s.x)} ${f(s.y)}` : `C ${f(s.c1x)} ${f(s.c1y)} ${f(s.c2x)} ${f(s.c2y)} ${f(s.x)} ${f(s.y)}`;
-// path indices where SOMETHING happens on player p's route (a pass/shot/rim/chip
-// they make, a pass they receive, a collect) → renumbered 1..N. Pure shaping
-// waypoints (used only to bend the skate line) aren't events and get no dot.
-function eventWps(p, pieces) {
-  const idx = new Set();
-  const chainOf = pk => [pk.carrier || (pk.pickup && pk.pickup.to) || null, ...(pk.transfers || []).map(t => t.to)].filter(Boolean);
-  for (const pk of pieces) {
-    if (pk.kind !== "puck") continue;
-    const chain = chainOf(pk), ts = pk.transfers || [];
-    const termAt = pk.shotAt != null ? pk.shotAt : pk.rimAt != null ? pk.rimAt : pk.chipAt != null ? pk.chipAt : null;
-    ts.forEach((t, s) => {
-      if (chain[s] === p.id && t.at >= 0) idx.add(t.at);
-      if (t.to === p.id && t.recvAt != null && t.recvAt >= 0) idx.add(t.recvAt);
-    });
-    if (chain[chain.length - 1] === p.id && termAt != null && termAt >= 0) idx.add(termAt);
-    if (pk.pickup && pk.pickup.to === p.id && pk.pickup.at >= 0) idx.add(pk.pickup.at);
-  }
-  const map = new Map();
-  [...idx].forEach(wi => map.set(wi, wi + 2));   // start = waypoint 1, path[i] = i+2
-  return map;
-}
-// evaluate a path segment at t (for arc-length arrow trimming)
-function evalSeg(prev, s, t) {
-  const u = 1 - t;
-  if (s.type === "L") return { x: prev.x + t * (s.x - prev.x), y: prev.y + t * (s.y - prev.y) };
-  if (s.type === "Q") return { x: u*u*prev.x + 2*u*t*s.cx + t*t*s.x, y: u*u*prev.y + 2*u*t*s.cy + t*t*s.y };
-  return { x: u*u*u*prev.x + 3*u*u*t*s.c1x + 3*u*t*t*s.c2x + t*t*t*s.x, y: u*u*u*prev.y + 3*u*u*t*s.c1y + 3*u*t*t*s.c2y + t*t*t*s.y };
-}
-// pull a polyline's end back by `d` ft so an arrowhead points AT the target
-function trimEnd(pts, d) {
-  if (!pts || pts.length < 2 || d <= 0) return pts;
-  const out = pts.map(p => ({ x: p.x, y: p.y }));
-  let rem = d;
-  while (out.length >= 2) {
-    const b = out[out.length - 1], a = out[out.length - 2];
-    const seg = Math.hypot(b.x - a.x, b.y - a.y);
-    if (seg > rem) { const g = (seg - rem) / seg; out[out.length - 1] = { x: a.x + (b.x - a.x) * g, y: a.y + (b.y - a.y) * g }; break; }
-    rem -= seg; out.pop();
-  }
-  return out;
-}
-// pull a polyline's start forward by `d` ft so it lifts off its source icon
-function trimStart(pts, d) {
-  if (!pts || pts.length < 2 || d <= 0) return pts;
-  return trimEnd([...pts].reverse(), d).reverse();
-}
-const polyLen = a => { let L = 0; for (let i = 1; i < a.length; i++) L += Math.hypot(a[i].x - a[i - 1].x, a[i].y - a[i - 1].y); return L; };
-function trimLine(pts, startD, endD) {
-  const total = polyLen(pts);
-  let s = startD, e = endD;
-  if (s + e > total - 2) { const k = Math.max(0, total - 2) / (s + e || 1); s *= k; e *= k; }
-  return trimStart(trimEnd(pts, e), s);
-}
-function subSeg(prev, s, t) {
-  const L = (a, b) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
-  if (s.type === "L") { const e = L(prev, { x: s.x, y: s.y }); return { type: "L", x: e.x, y: e.y }; }
-  if (s.type === "Q") { const a = L(prev, { x: s.cx, y: s.cy }), b = L({ x: s.cx, y: s.cy }, { x: s.x, y: s.y }), e = L(a, b); return { type: "Q", cx: a.x, cy: a.y, x: e.x, y: e.y }; }
-  const c1 = { x: s.c1x, y: s.c1y }, c2 = { x: s.c2x, y: s.c2y }, p1 = { x: s.x, y: s.y };
-  const a = L(prev, c1), b = L(c1, c2), c = L(c2, p1), d = L(a, b), e = L(b, c), ff = L(d, e);
-  return { type: "C", c1x: a.x, c1y: a.y, c2x: d.x, c2y: d.y, x: ff.x, y: ff.y };
-}
-function trimSeg(prev, s, d) {
-  const N = 40; let len = 0, last = evalSeg(prev, s, 0); const arc = [{ t: 0, l: 0 }];
-  for (let k = 1; k <= N; k++) { const t = k / N, q = evalSeg(prev, s, t); len += Math.hypot(q.x - last.x, q.y - last.y); arc.push({ t, l: len }); last = q; }
-  const target = len - d;
-  if (target <= 0.5) return s;
-  let t = 1;
-  for (let k = 1; k < arc.length; k++) if (arc[k].l >= target) { const a = arc[k - 1], b = arc[k]; t = a.t + (b.t - a.t) * (target - a.l) / ((b.l - a.l) || 1); break; }
-  return subSeg(prev, s, t);
-}
-function subSegFrom(prev, s, t) {
-  const L = (a, b) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
-  if (s.type === "L") { const st = L(prev, { x: s.x, y: s.y }); return { start: st, seg: { type: "L", x: s.x, y: s.y } }; }
-  if (s.type === "Q") { const a = L(prev, { x: s.cx, y: s.cy }), b = L({ x: s.cx, y: s.cy }, { x: s.x, y: s.y }), st = L(a, b); return { start: st, seg: { type: "Q", cx: b.x, cy: b.y, x: s.x, y: s.y } }; }
-  const c1 = { x: s.c1x, y: s.c1y }, c2 = { x: s.c2x, y: s.c2y }, p1 = { x: s.x, y: s.y };
-  const a = L(prev, c1), b = L(c1, c2), c = L(c2, p1), d = L(a, b), e = L(b, c), ff = L(d, e);
-  return { start: ff, seg: { type: "C", c1x: e.x, c1y: e.y, c2x: c.x, c2y: c.y, x: p1.x, y: p1.y } };
-}
-function trimSegStart(prev, s, d) {
-  const N = 40; let len = 0, last = evalSeg(prev, s, 0); const arc = [{ t: 0, l: 0 }];
-  for (let k = 1; k <= N; k++) { const t = k / N, q = evalSeg(prev, s, t); len += Math.hypot(q.x - last.x, q.y - last.y); arc.push({ t, l: len }); last = q; }
-  if (d >= len - 0.5) return null;
-  let t = 0;
-  for (let k = 1; k < arc.length; k++) if (arc[k].l >= d) { const a = arc[k - 1], b = arc[k]; t = a.t + (b.t - a.t) * (d - a.l) / ((b.l - a.l) || 1); break; }
-  return subSegFrom(prev, s, t);
-}
-
 function routePath(p, pieces) {
   if (!p.path.length) return "";
-  // START lifts off the player; end arrow sits AT the last waypoint. Each segment
-  // draws in the style for how it's skated: WITH the puck = wiggle, else a line.
+  // the START lifts off the player; the end arrow sits AT the last waypoint.
+  // Each segment draws in the hockey-diagram style for how it's skated: WITH the
+  // puck = wiggle, backward = zigzag, otherwise a straight/curved line.
   const last = p.path.length - 1;
   const carry = pieces ? carrySegsOf(p, pieces) : new Set();
   const startTrim = trimSegStart({ x: p.x, y: p.y }, p.path[0], 3.6);
@@ -820,11 +1651,12 @@ function routePath(p, pieces) {
     const segPrev = i === 0 ? startPt : { x: p.path[i - 1].x, y: p.path[i - 1].y };
     const s = i === 0 && startTrim ? startTrim.seg : s0;
     const arrow = i === last ? ' marker-end="url(#arrowR)"' : "";
-    if (carry.has(i)) lines += `<polyline points="${wigglePoints(segPrev, s)}" ${stroke}${arrow}/>`;
-    else lines += `<path d="M ${f(segPrev.x)} ${f(segPrev.y)} ${segCmd(s)}" ${stroke}${arrow}/>`;
+    if (carry.has(i))
+      lines += `<polyline points="${wigglePoints(segPrev, s, 1, i === last)}" ${stroke}${arrow}/>`;
+    else
+      lines += `<path d="M ${f(segPrev.x)} ${f(segPrev.y)} ${segCmd(s)}" ${stroke}${arrow}/>`;
   });
-  // only number the waypoints where something happens; pure shaping points get
-  // no dot (the curve just flows through them)
+  // number only the waypoints where something happens; shaping points get no dot
   const ev = pieces ? eventWps(p, pieces) : null;
   const dots = p.path.map((s, i) => {
     const n = ev ? ev.get(i) : i + 1;
@@ -835,19 +1667,21 @@ function routePath(p, pieces) {
   return `${lines}${dots}`;
 }
 
-// puck flow lines. mode: "shot" solid dark · "rebound" dotted + distinct colour ·
-// else dashed pass/rim/chip. The endpoint is trimmed so the arrow points AT its
-// target (net / player / point) instead of sitting on top of the icon.
+// puck flow lines. mode: "shot" solid dark · "rebound" dotted + distinct colour
+// (so it reads apart from the shot it overlaps) · else dashed pass/rim/chip
 const REBOUND_COLOR = "#e8892b";
-const CHAIN_TRIM = { shot: 4.6, rebound: 3, pass: 4 };
-const CHAIN_START = { shot: 4, rebound: 3, pass: 4 };
+const BLOCKED_COLOR = "#e01f2b";      // a rebound that can't reach its collector (thru a net)
+// how far to hold each END (arrowhead) and START off its icon (net/player/point)
+const CHAIN_TRIM = { shot: 4.6, rebound: 3, "rebound-x": 3, pass: 4 };
+const CHAIN_START = { shot: 4, rebound: 3, "rebound-x": 3, pass: 4 };
 const chainLine = (pts, mode) => {
-  const rebound = mode === "rebound", shot = mode === "shot";
-  const color = rebound ? REBOUND_COLOR : V("puck", "#14171a");
-  const dash = shot ? "" : rebound ? ' stroke-dasharray="0.1 1.9"' : ' stroke-dasharray="2.4 2"';
-  const marker = rebound ? "arrowRB" : "arrowP";
+  const rebound = mode === "rebound", blocked = mode === "rebound-x", shot = mode === "shot";
+  const dotted = rebound || blocked;
+  const color = blocked ? BLOCKED_COLOR : rebound ? REBOUND_COLOR : V("puck", "#14171a");
+  const dash = shot ? "" : dotted ? ' stroke-dasharray="0.1 1.9"' : ' stroke-dasharray="2.4 2"';
+  const marker = blocked ? "arrowRX" : rebound ? "arrowRB" : "arrowP";
   const line = trimLine(pts, CHAIN_START[mode] != null ? CHAIN_START[mode] : 3.5, CHAIN_TRIM[mode] != null ? CHAIN_TRIM[mode] : 3.5);
-  return `<polyline points="${polyPts(line)}" fill="none" stroke="${color}" stroke-width="${shot ? 0.72 : 0.6}"`
+  return `<polyline points="${polyPts(line)}" fill="none" stroke="${color}" stroke-width="${shot ? 0.72 : blocked ? 0.72 : 0.6}"`
     + `${dash} stroke-linecap="round" stroke-linejoin="round" opacity="0.9" marker-end="url(#${marker})"/>`;
 };
 
@@ -856,8 +1690,9 @@ function chain(pk, byId, pieces) {
   if (!cur) return "";
   const nets = pieces.filter(q => q.kind === "net" || q.kind === "passer");
   const targets = pieces.filter(q => q.kind === "net" || q.kind === "passer" || q.kind === "bumper" || q.kind === "tire");
+  const netSh = solidShapes(pieces);
   const shotNet = (launch, netId = pk.net) => {
-    if (netId) { const n = targets.find(x => x.id === netId); if (n) return { x: n.x, y: n.y }; }
+    if (netId) { const n = targets.find(x => x.id === netId); if (n) return { x: n.x, y: n.y }; }  // this shot's own target
     if (nets.length) return nets.reduce((a, b) => (Math.hypot(b.x - launch.x, b.y - launch.y) < Math.hypot(a.x - launch.x, a.y - launch.y) ? b : a));
     return launch.x < 100 ? NET_L : NET_R;
   };
@@ -866,8 +1701,9 @@ function chain(pk, byId, pieces) {
   const transfers = pk.transfers || [];
   const termAt = pk.shotAt != null ? pk.shotAt : pk.rimAt != null ? pk.rimAt : pk.chipAt != null ? pk.chipAt : null;
   const lastAt = {};                                  // player id → route index where they last released
-  // give-and-go return: the receiver already carried the puck, so they catch it a
-  // bit up their route from where they gave it (not at their final waypoint)
+  // a give-and-go return: the receiver already carried the puck, so they catch
+  // it a bit up their route from where they gave it (not at their final waypoint,
+  // which is a later action) — this tracks what the animation actually does
   const returnPoint = (rec, giveAt, nextAt) => {
     const seg = Math.max(0, Math.min(giveAt + 1, nextAt, rec.path.length - 1));
     const prevPt = seg > 0 ? { x: rec.path[seg - 1].x, y: rec.path[seg - 1].y } : { x: rec.x, y: rec.y };
@@ -882,8 +1718,18 @@ function chain(pk, byId, pieces) {
       ? returnPoint(rec, giveAt, nextAt)
       : routePoint(rec, tr.recvAt == null ? rec.path.length - 1 : tr.recvAt);
     lastAt[cur.id] = tr.at;                            // the passer just released here
-    if (tr.via) { const ps = byId(tr.via); const pPt = ps ? { x: ps.x, y: ps.y } : launch; out.push(chainLine([launch, pPt], "pass"), chainLine([pPt, anchor], "pass")); }
-    else if (tr.kind === "shot") { const sn = shotNet(launch, tr.net != null ? tr.net : null); out.push(chainLine([launch, sn], "shot"), chainLine([sn, anchor], "rebound")); }
+    if (tr.via) {                                      // give-and-go off a passer: in to it, back out
+      const ps = byId(tr.via);
+      const pPt = ps ? { x: ps.x, y: ps.y } : launch;
+      out.push(chainLine([launch, pPt], "pass"), chainLine([pPt, anchor], "pass"));
+    }
+    else if (tr.kind === "shot") {
+      const net = shotNet(launch, tr.net != null ? tr.net : null);
+      // if the carom to the collector would pass through a net, it can't get
+      // there — flag that rebound red instead of drawing it as a clean carom
+      const rbMode = segCrossesNet(net, anchor, netSh) ? "rebound-x" : "rebound";
+      out.push(chainLine([launch, net], "shot"), chainLine([net, anchor], rbMode));
+    }
     else if (tr.kind === "rim") out.push(chainLine(rimPoly(launch, tr.aim, anchor), "pass"));
     else if (tr.kind === "chip") { const h = tr.aim != null ? aimVec(tr.aim) : heading(cur, tr.at); out.push(chainLine(boards.slideTo(launch.x, launch.y, h.x, h.y, anchor), "pass")); }
     else out.push(chainLine([launch, anchor], "pass"));   // pass
@@ -895,234 +1741,11 @@ function chain(pk, byId, pieces) {
   return out.join("");
 }
 
-// A compact play-time engine for the preview animation. Players skate their
-// routes at a speed-scaled pace; the puck rides its carrier (with a stickhandle
-// wiggle), then flies to wherever the next receiver is when it lands, then the
-// terminal shot flies to the net. Not the full app engine — a faithful preview.
-function buildAnim(pieces) {
-  const PACE = 22, PASS = 60, SHOT = 95, CHIP = 48;      // ft/s (CHIP = rim/chip glide)
-  const polyLen = poly => { let L = 0; for (let i = 1; i < poly.length; i++) L += Math.hypot(poly[i].x - poly[i - 1].x, poly[i].y - poly[i - 1].y); return L; };
-  const alongPoly = (poly, f) => {
-    if (!poly || !poly.length) return { x: 0, y: 0 };
-    const total = polyLen(poly); if (total <= 0) return poly[0];
-    let d = Math.max(0, Math.min(1, f)) * total, acc = 0;
-    for (let i = 1; i < poly.length; i++) { const seg = Math.hypot(poly[i].x - poly[i - 1].x, poly[i].y - poly[i - 1].y); if (acc + seg >= d) { const u = (d - acc) / (seg || 1); return { x: poly[i - 1].x + u * (poly[i].x - poly[i - 1].x), y: poly[i - 1].y + u * (poly[i].y - poly[i - 1].y) }; } acc += seg; } return poly[poly.length - 1];
-  };
-  const players = pieces.filter(p => p.kind === "player");
-  const nets = pieces.filter(q => q.kind === "net" || q.kind === "passer");
-  const targets = pieces.filter(q => q.kind === "net" || q.kind === "passer" || q.kind === "bumper" || q.kind === "tire");
-  const R = {};
-  players.forEach(p => {
-    if (!p.path.length) { R[p.id] = { pts: null, total: 0, dur: 0, wpL: [], speed: p.speed || 1, x: p.x, y: p.y }; return; }
-    const pts = [{ x: p.x, y: p.y, l: 0 }]; let prev = { x: p.x, y: p.y }, L = 0; const wpL = [];
-    p.path.forEach(s => {
-      const N = 24;
-      for (let k = 1; k <= N; k++) { const q = evalSeg(prev, s, k / N), last = pts[pts.length - 1]; L += Math.hypot(q.x - last.x, q.y - last.y); pts.push({ x: q.x, y: q.y, l: L }); }
-      wpL.push(L); prev = { x: s.x, y: s.y };
-    });
-    R[p.id] = { pts, total: L, dur: L / (PACE * (p.speed || 1)), wpL, speed: p.speed || 1, x: p.x, y: p.y };
-  });
-  const playerAt = (id, t) => {
-    const r = R[id]; if (!r) { const p = players.find(q => q.id === id); return p ? { x: p.x, y: p.y } : { x: 0, y: 0 }; }
-    if (!r.pts || !r.total) return { x: r.x, y: r.y };
-    const target = Math.min(1, Math.max(0, t / r.dur)) * r.total;
-    for (let k = 1; k < r.pts.length; k++) if (r.pts[k].l >= target) { const a = r.pts[k - 1], b = r.pts[k], f = (target - a.l) / ((b.l - a.l) || 1); return { x: a.x + f * (b.x - a.x), y: a.y + f * (b.y - a.y) }; }
-    const e = r.pts[r.pts.length - 1]; return { x: e.x, y: e.y };
-  };
-  const timeAtWp = (id, wi) => { const r = R[id]; if (!r || !r.wpL.length || wi < 0) return 0; return (r.wpL[Math.min(wi, r.wpL.length - 1)] || 0) / (PACE * r.speed); };
-  // carried puck: forward of the player, stickhandling side-to-side. Slow skating
-  // shows more stickhandle; fast skating or a sharp turn pushes it further ahead.
-  const bladeOf = (id, t) => {
-    const dt = 0.06, a = playerAt(id, t), b = playerAt(id, t + dt), c = playerAt(id, t - dt);
-    let hx = b.x - a.x, hy = b.y - a.y, hd = Math.hypot(hx, hy); const speed = hd / dt;
-    if (hd < 1e-4) { hx = 1; hy = 0; hd = 1; } hx /= hd; hy /= hd;
-    let ix = a.x - c.x, iy = a.y - c.y, il = Math.hypot(ix, iy) || 1; ix /= il; iy /= il;
-    const turn = Math.acos(Math.max(-1, Math.min(1, ix * hx + iy * hy)));   // 0..pi
-    const fast = Math.min(1, speed / 26), bend = Math.min(1, turn / 0.45);
-    // big, obvious stickhandle when slow/straight; pushed forward + calmer lateral
-    // when skating fast or cutting a turn
-    const stickAmp = 3 * (1 - 0.55 * fast) * (1 - 0.7 * bend);
-    const fwd = 3.2 + 2.6 * fast + 2.8 * bend;
-    const lat = Math.sin(t * 7.5) * stickAmp, px = -hy, py = hx;
-    return { x: a.x + hx * fwd + px * lat, y: a.y + hy * fwd + py * lat };
-  };
-  const shotNet = (pk, launch, netId) => {
-    const nid = netId !== undefined ? netId : pk.net;
-    if (nid) { const n = targets.find(x => x.id === nid); if (n) return { x: n.x, y: n.y }; }
-    if (nets.length) return nets.reduce((a, b) => Math.hypot(b.x - launch.x, b.y - launch.y) < Math.hypot(a.x - launch.x, a.y - launch.y) ? b : a);
-    return launch.x < 100 ? { x: 17, y: 42.5 } : { x: 183, y: 42.5 };
-  };
-  const P = {};
-  let maxT = Math.max(0, ...players.map(p => R[p.id] ? R[p.id].dur : 0));
-  pieces.filter(p => p.kind === "puck").forEach(pk => {
-    const chain = [pk.carrier || (pk.pickup && pk.pickup.to) || null, ...(pk.transfers || []).map(t => t.to)].filter(Boolean);
-    if (!chain.length) { P[pk.id] = { ph: [{ type: "still", x: pk.x, y: pk.y }] }; return; }
-    const ts = pk.transfers || [], ph = []; let cur = chain[0], carryStart = 0;
-    // a loose puck a player collects sits still at its spot until they reach it
-    if (pk.pickup && !pk.carrier) {
-      const picker = pieces.find(q => q.id === pk.pickup.to);
-      const T = picker && picker.path.length ? timeAtWp(picker.id, Math.max(0, Math.min(pk.pickup.at, picker.path.length - 1))) : 0;
-      if (T > 0) ph.push({ type: "hold", x: pk.x, y: pk.y, t0: 0, t1: T });
-      carryStart = T;
-    }
-    for (let s = 0; s < ts.length; s++) {
-      const t = ts[s]; if (t.by && t.by !== cur) break;
-      const rel = Math.max(carryStart, timeAtWp(cur, t.at)), relPos = bladeOf(cur, rel);
-      if (t.via) {                                          // give-and-go off a passer: in to it, back out
-        const ps = pieces.find(q => q.id === t.via); const pPt = ps ? { x: ps.x, y: ps.y } : relPos;
-        const hit = rel + Math.hypot(pPt.x - relPos.x, pPt.y - relPos.y) / PASS;
-        let tgt = playerAt(t.to, hit), fl = Math.hypot(tgt.x - pPt.x, tgt.y - pPt.y) / PASS, land = hit + fl;
-        tgt = playerAt(t.to, land);
-        ph.push({ type: "carry", id: cur, t0: carryStart, t1: rel });
-        ph.push({ type: "fly", from: relPos, to: pPt, t0: rel, t1: hit });
-        ph.push({ type: "fly", from: pPt, to: tgt, t0: hit, t1: land });
-        cur = t.to; carryStart = land; continue;
-      }
-      if (t.kind === "rim" || t.kind === "chip") {          // banks off the boards to the collector
-        const recP = pieces.find(q => q.id === t.to);
-        const gj = t.recvAt != null ? t.recvAt : (recP && recP.path.length ? recP.path.length - 1 : -1);
-        const anchor = gj >= 0 && recP && recP.path.length ? routePoint(recP, gj) : playerAt(t.to, rel);
-        const poly = t.kind === "rim"
-          ? (t.aim != null ? boards.rimTo(relPos, t.aim, anchor) : boards.rimPath(relPos, anchor))
-          : (() => { const h = t.aim != null ? aimVec(t.aim) : heading(cur, t.at); return boards.slideTo(relPos.x, relPos.y, h.x, h.y, anchor); })();
-        const arrive = rel + Math.max(0.2, polyLen(poly) / CHIP);
-        const gather = Math.max(arrive, gj >= 0 && recP ? timeAtWp(recP, gj) : arrive);
-        ph.push({ type: "carry", id: cur, t0: carryStart, t1: rel });
-        ph.push({ type: "path", poly, t0: rel, t1: gather, travel: arrive - rel });
-        cur = t.to; carryStart = gather; continue;
-      }
-      let target = t.kind === "shot" ? shotNet(pk, relPos, t.net != null ? t.net : null) : playerAt(t.to, rel);
-      let flight = Math.hypot(target.x - relPos.x, target.y - relPos.y) / PASS, land = rel + flight;
-      if (t.kind !== "shot") { target = playerAt(t.to, land); flight = Math.hypot(target.x - relPos.x, target.y - relPos.y) / PASS; land = rel + flight; }
-      ph.push({ type: "carry", id: cur, t0: carryStart, t1: rel });
-      ph.push({ type: "fly", from: relPos, to: target, t0: rel, t1: land });
-      cur = t.to; carryStart = land;
-    }
-    const termAt = pk.shotAt != null ? pk.shotAt : pk.rimAt != null ? pk.rimAt : pk.chipAt != null ? pk.chipAt : null;
-    if ((!pk.termBy || pk.termBy === cur) && termAt != null) {
-      const rel = Math.max(carryStart, timeAtWp(cur, termAt)), relPos = bladeOf(cur, rel);
-      ph.push({ type: "carry", id: cur, t0: carryStart, t1: rel });
-      if (pk.shotAt != null) {                              // shot flies to the net
-        const np = shotNet(pk, relPos), land = rel + Math.hypot(np.x - relPos.x, np.y - relPos.y) / SHOT;
-        ph.push({ type: "fly", from: relPos, to: np, t0: rel, t1: land });
-        ph.push({ type: "rest", x: np.x, y: np.y, t0: land });
-        carryStart = land;
-      } else {                                              // rim/chip release: slide the banked path into space
-        const poly = pk.rimAt != null
-          ? boards.rimAround(relPos, pk.rimDist != null ? pk.rimDist : 65, pk.rimAim)
-          : (() => { const h = pk.chipAim != null ? aimVec(pk.chipAim) : heading(cur, pk.chipAt); return boards.slide(relPos.x, relPos.y, h.x, h.y, pk.chipDist != null ? pk.chipDist : 26); })();
-        const end = poly[poly.length - 1] || relPos, land = rel + Math.max(0.2, polyLen(poly) / CHIP);
-        ph.push({ type: "path", poly, t0: rel, t1: land, travel: land - rel });
-        ph.push({ type: "rest", x: end.x, y: end.y, t0: land });
-        carryStart = land;
-      }
-    } else ph.push({ type: "carry", id: cur, t0: carryStart, t1: 1e9 });
-    P[pk.id] = { ph }; maxT = Math.max(maxT, carryStart);
-  });
-  const puckAt = (pkId, t) => {
-    const rec = P[pkId]; if (!rec) return { x: 0, y: 0 };
-    let last = null;
-    for (const p of rec.ph) {
-      if (p.type === "still") return { x: p.x, y: p.y };
-      if (p.type === "rest") { if (t >= p.t0) return { x: p.x, y: p.y }; last = p; continue; }
-      if (t >= p.t0 && t <= p.t1) {
-        if (p.type === "hold") return { x: p.x, y: p.y };
-        if (p.type === "carry") return bladeOf(p.id, t);
-        // a rim/chip follows its banked polyline; the puck reaches the end in
-        // `travel` seconds then waits there (t1 may run longer for the pickup)
-        if (p.type === "path") return alongPoly(p.poly, (t - p.t0) / (p.travel || (p.t1 - p.t0) || 1));
-        const f = (t - p.t0) / ((p.t1 - p.t0) || 1); return { x: p.from.x + f * (p.to.x - p.from.x), y: p.from.y + f * (p.to.y - p.from.y) };
-      }
-      last = p;
-    }
-    if (last && last.type === "carry") return bladeOf(last.id, t);
-    if (last && last.type === "fly") return { x: last.to.x, y: last.to.y };
-    if (last && last.type === "path") return last.poly[last.poly.length - 1];
-    if (last && last.type === "rest") return { x: last.x, y: last.y };
-    return { x: 0, y: 0 };
-  };
-  return { duration: maxT, posAt: (id, t) => { const pk = pieces.find(q => q.id === id && q.kind === "puck"); return pk ? puckAt(id, t) : playerAt(id, t); } };
-}
-// the animated diagram: rink + faint routes + still pieces, with the routed
-// players and pucks as .mv groups the loop repositions each frame
-function animScene(pieces, rinkMode) {
-  const rank = k => (k === "net" || k === "bumper" || k === "deker" || k === "passer" || k === "tire" || k === "stick" || k === "mark" ? 0 : k === "player" ? 2 : 1);
-  const faint = pieces.filter(p => p.kind === "player" && p.path.length).map(p => {
-    let d = `M ${f(p.x)} ${f(p.y)}`; p.path.forEach(s => { d += " " + segCmd(s); });
-    return `<path d="${d}" fill="none" stroke="${p.color}" stroke-width="0.6" stroke-linecap="round" opacity="0.28"/>`;
-  }).join("");
-  const stills = [...pieces].filter(p => !(p.kind === "player" && p.path.length) && p.kind !== "puck" && p.kind !== "label").sort((a, b) => rank(a.kind) - rank(b.kind)).map(piece).join("");
-  const moving = pieces.filter(p => (p.kind === "player" && p.path.length) || p.kind === "puck").map(p => {
-    const icon = p.kind === "puck"
-      ? `<circle r="1.5" fill="${V("puck", "#14171a")}" stroke="#fff" stroke-width="0.4"/>`
-      : `<ellipse cx="0" cy="0.5" rx="3.7" ry="3.9" fill="#0a1016" opacity="0.15"/><circle r="3.4" fill="${p.color}" stroke="#fff" stroke-width="0.5"/><text y="1.05" font-size="3" font-weight="800" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif">${esc(p.label || p.id)}</text>`;
-    return `<g class="mv" data-id="${p.id}" transform="translate(${f(p.x)} ${f(p.y)})">${icon}</g>`;
-  }).join("");
-  const labels = pieces.filter(p => p.kind === "label").map(p => labelSvg(p.x, p.y, p.text, p.size, p.color)).join("");
-  const [vx, vy, vw, vh] = VIEWS[rinkMode] || VIEWS.full, PAD = 7;
-  return `<svg class="rink" viewBox="${vx - PAD} ${vy - PAD} ${vw + 2 * PAD} ${vh + 2 * PAD}" xmlns="http://www.w3.org/2000/svg" role="img">${rink()}${faint}${stills}${moving}${labels}</svg>`;
-}
-
-// a recipe-style, play-ordered list of what happens in the drill. Coach-written
-// waypoint descriptions are used verbatim; everything else is auto-described.
-function drillSteps(pieces) {
-  const nameOf = id => { const q = pieces.find(x => x.id === id); return (q && q.label) || id; };
-  const out = [];
-  const descsBetween = (pl, a, b) => {
-    const r = [];
-    (pl.path || []).forEach((s, wi) => { if (wi > a && wi <= b && s.desc && s.dmode !== "label") r.push(s.desc); });
-    return r;
-  };
-  // designate the numbered waypoint a step happens at, so the recipe's own
-  // numbering isn't mistaken for waypoint numbers
-  const wpMaps = {};
-  const wpRef = (pid, at) => {
-    if (at == null) return "";
-    if (at < 0) return " (at waypoint 1)";          // the player's start / standing spot
-    if (!wpMaps[pid]) { const pl = pieces.find(q => q.id === pid); wpMaps[pid] = pl ? eventWps(pl, pieces) : new Map(); }
-    const n = wpMaps[pid].get(at);
-    return n ? ` (at waypoint ${n})` : "";
-  };
-  const pucks = pieces.filter(p => p.kind === "puck");
-  const inChain = new Set();
-  pucks.forEach(pk => {
-    const chain = [pk.carrier || (pk.pickup && pk.pickup.to) || null, ...(pk.transfers || []).map(t => t.to)].filter(Boolean);
-    if (!chain.length) return;
-    chain.forEach(id => inChain.add(id));
-    const ts = pk.transfers || [];
-    const termAt = pk.shotAt != null ? pk.shotAt : pk.rimAt != null ? pk.rimAt : pk.chipAt != null ? pk.chipAt : null;
-    out.push({ text: `${nameOf(chain[0])} ${pk.carrier ? "starts with the puck" : "picks up the puck"}` });
-    const prevRel = {};
-    for (let s = 0; s < chain.length; s++) {
-      const carrier = pieces.find(q => q.id === chain[s]);
-      const relAt = s < ts.length ? ts[s].at : (termAt != null ? termAt : (carrier && carrier.path ? carrier.path.length - 1 : -1));
-      if (carrier && carrier.path) {
-        const startWp = s === 0 ? -1 : (prevRel[carrier.id] != null ? prevRel[carrier.id] : -1);
-        descsBetween(carrier, startWp, relAt).forEach(d => out.push({ text: d, custom: true }));
-      }
-      if (s < ts.length) {
-        const t = ts[s], actor = nameOf(chain[s]), to = nameOf(t.to), wp = wpRef(chain[s], t.at);
-        out.push({ text: (t.via ? `${actor} gives it to ${nameOf(t.via)} and takes the give-and-go return`
-          : t.kind === "pass" ? `${actor} passes to ${to}`
-          : t.kind === "shot" ? `${actor} shoots — ${to} is there for the rebound`
-          : t.kind === "rim" ? `${actor} rims it around to ${to}`
-          : t.kind === "chip" ? `${actor} chips it to ${to}` : `${actor} moves it to ${to}`) + wp });
-        if (carrier) prevRel[carrier.id] = t.at;
-      } else {
-        const last = nameOf(chain[s]), wp = wpRef(chain[s], termAt);
-        if (pk.shotAt != null) out.push({ text: `${last} shoots on ${pk.net || "net"}${wp}` });
-        else if (pk.rimAt != null) out.push({ text: `${last} rims the puck${wp}` });
-        else if (pk.chipAt != null) out.push({ text: `${last} chips the puck${wp}` });
-      }
-    }
-  });
-  pieces.filter(p => p.kind === "player" && !inChain.has(p.id)).forEach(p => {
-    (p.path || []).forEach(s => { if (s.desc && s.dmode !== "label") out.push({ text: `${nameOf(p.id)}: ${s.desc}`, custom: true }); });
-  });
-  return out;
-}
-
 /* ------------------------------------------------------------------ */
+// rink view boxes (rink feet): the DSL RINK mode crops the diagram to half /
+// quarter ice, matching the editor's views
+
+
 function drillSvg(dsl, opts = {}) {
   const { pieces, rink: rinkMode } = parseDrill(dsl);
   const byId = id => pieces.find(p => p.id === id);
@@ -1132,6 +1755,7 @@ function drillSvg(dsl, opts = {}) {
       <marker id="arrowR" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="${V("mark", "#cf3346")}"/></marker>
       <marker id="arrowP" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="${V("puck", "#14171a")}"/></marker>
       <marker id="arrowRB" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="${REBOUND_COLOR}"/></marker>
+      <marker id="arrowRX" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="${BLOCKED_COLOR}"/></marker>
     </defs>`;
   const routes = pieces.map(p => routePath(p, pieces)).join("");
   const chains = pieces.filter(p => p.kind === "puck").map(pk => chain(pk, byId, pieces)).join("");
@@ -1148,43 +1772,24 @@ function drillSvg(dsl, opts = {}) {
     + pieces.flatMap(p => (p.path || []).filter(s => s.dmode === "label" && s.desc)
         .map(s => labelSvg(s.x + (s.dox || 0), s.y + (s.doy != null ? s.doy : -5), s.desc, s.dsize, "#14202b"))).join("");
   const wattr = opts.width ? ` width="${opts.width}"` : "";
-  // crop to the drill's rink mode (full / half / quarter) with a 7 ft margin
-  const [vx, vy, vw, vh] = VIEWS[rinkMode] || VIEWS.full, PAD = 7;
-  const viewBox = `${vx - PAD} ${vy - PAD} ${vw + 2 * PAD} ${vh + 2 * PAD}`;
+  // crop to the drill's rink mode (full / half / quarter). Pad preserves the
+  // view's aspect ratio (full ice = 200:85) so the exported image keeps true ice
+  // proportions: a 7 ft vertical margin, horizontal margin scaled to match.
+  const [vx, vy, vw, vh] = VIEWS[rinkMode] || VIEWS.full;
+  const py = 7, px = (vw / vh) * py;
+  const viewBox = `${vx - px} ${vy - py} ${vw + 2 * px} ${vh + 2 * py}`;
+  // icons paint over the chain lines; arrowheads are trimmed back so they point
+  // at their target instead of vanishing under a circle. Labels stay on top.
   return `<svg class="rink" viewBox="${viewBox}"${wattr} xmlns="http://www.w3.org/2000/svg" role="img">${defs}${rink()}${routes}${chains}${icons}${labels}</svg>`;
 }
 
 (function(){
   var ta=document.getElementById('dsl'),dia=document.getElementById('diagram'),err=document.getElementById('err'),
       title=document.getElementById('title'),lede=document.getElementById('lede'),leg=document.getElementById('legend'),meta=document.getElementById('meta'),
-      sheet=document.getElementById('sheet'),steps=document.getElementById('steps'),stepmeta=document.getElementById('stepmeta'),
-      anim=document.getElementById('anim'),playbtn=document.getElementById('playbtn'),copy=document.getElementById('copy');
-  var SHEET_LABEL={full:'Full sheet',half:'Half ice',quarter:'Quarter ice'};
-  // ---- animation ----
-  var animData=null, playing=false, animT0=0, raf=0, TAIL=1.4;
-  function stopAnim(){ playing=false; if(raf)cancelAnimationFrame(raf); raf=0; playbtn.textContent='▶ Play'; }
-  function setFrame(t){
-    if(!animData) return;
-    var els=anim.querySelectorAll('.mv');
-    for(var i=0;i<els.length;i++){ var id=els[i].getAttribute('data-id'); var p=animData.posAt(id,t); els[i].setAttribute('transform','translate('+(Math.round(p.x*100)/100)+' '+(Math.round(p.y*100)/100)+')'); }
-  }
-  function loop(now){
-    if(!playing) return;
-    var total=animData.duration+TAIL;
-    var t=((now-animT0)/1000)%total;
-    setFrame(Math.min(t,animData.duration));
-    raf=requestAnimationFrame(loop);
-  }
-  function buildAnimScene(r){
-    stopAnim();
-    try{ anim.innerHTML=animScene(r.pieces, r.rink); animData=buildAnim(r.pieces); setFrame(0); }
-    catch(e){ anim.innerHTML=''; animData=null; }
-  }
-  playbtn.addEventListener('click',function(){
-    if(!animData||animData.duration<=0) return;
-    if(playing){ stopAnim(); }
-    else { playing=true; animT0=performance.now(); playbtn.textContent='⏸ Pause'; raf=requestAnimationFrame(loop); }
-  });
+      copy=document.getElementById('copy'),printBtn=document.getElementById('print'),
+      notesEl=document.getElementById('notes'),notesSec=document.getElementById('notes-sec'),
+      invEl=document.getElementById('inventory'),invSec=document.getElementById('inv-sec'),
+      stepsEl=document.getElementById('steps'),stepsSec=document.getElementById('steps-sec');
   function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
   // URL-safe base64 of UTF-8 text, for sharing the current drill in the link.
   function enc(s){try{return btoa(unescape(encodeURIComponent(s))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}catch(e){return '';}}
@@ -1195,20 +1800,26 @@ function drillSvg(dsl, opts = {}) {
     try{ r=parseDrill(dsl); dia.innerHTML=drillSvg(dsl); }
     catch(e){ err.textContent=String(e&&e.message||e); return; }
     err.textContent=r.errors.length?r.errors.join('  \u00b7  '):'';
-    sheet.textContent=SHEET_LABEL[r.rink]||'Full sheet';
     title.textContent=r.title||'Drill'; lede.textContent=r.desc||'';
-    document.title = r.title ? r.title+' · DrillBoard' : 'DrillBoard · live drill card';
     var players=r.pieces.filter(function(p){return p.kind==='player';});
     var L=players.map(function(p){return '<span><span class="dot" style="background:'+p.color+'"></span>'+esc(p.id)+(p.defense?' \u2014 auto-D':'')+'</span>';});
     r.pieces.filter(function(p){return p.kind==='net';}).forEach(function(p){L.push('<span><span class="dot" style="background:'+(p.goalie?'#2f9e57':p.color)+'"></span>'+esc(p.id)+(p.goalie?' \u2014 net + goalie':' \u2014 net')+'</span>');});
-    r.pieces.filter(function(p){return p.kind==='tire'&&p.goalie;}).forEach(function(p){L.push('<span><span class="dot" style="background:#2f9e57"></span>'+esc(p.id)+' \u2014 tire + keeper</span>');});
     L.push('<span><span class="solid"></span>skating route</span>','<span><span class="dash"></span>puck path</span>');
     leg.innerHTML=L.join('');
     meta.textContent=players.length+' skater'+(players.length===1?'':'s')+' \u00b7 live';
-    var st=drillSteps(r.pieces);
-    steps.innerHTML=st.map(function(s){return '<li'+(s.custom?' class="note"':'')+'>'+esc(s.text)+'</li>';}).join('');
-    stepmeta.textContent=st.length?st.length+' step'+(st.length===1?'':'s'):'';
-    buildAnimScene(r);
+    // coaching notes (markdown)
+    if(r.notes&&r.notes.trim()){ notesEl.innerHTML=mdBlock(r.notes); notesSec.hidden=false; } else { notesEl.innerHTML=''; notesSec.hidden=true; }
+    // inventory / recipe table
+    var rows=deriveInventory(r.pieces,r.items).filter(function(x){return !x.hide;});
+    if(rows.length){
+      invEl.innerHTML='<table class="inv"><thead><tr><th>Item</th><th>Qty</th></tr></thead><tbody>'+
+        rows.map(function(x){return '<tr><td>'+esc(x.label)+'</td><td>'+x.count+'</td></tr>';}).join('')+'</tbody></table>';
+      invSec.hidden=false;
+    } else { invEl.innerHTML=''; invSec.hidden=true; }
+    // authored presentation steps → numbered list (markdown inline)
+    var st=(r.steps||[]).filter(function(s){return (s.text||'').trim();});
+    if(st.length){ stepsEl.innerHTML='<ol class="steps">'+st.map(function(s){return '<li>'+mdInline(esc(s.text))+'</li>';}).join('')+'</ol>'; stepsSec.hidden=false; }
+    else { stepsEl.innerHTML=''; stepsSec.hidden=true; }
     syncHash();
   }
   // A shared link carries the drill in #d=… — prefer it over the built-in default.
@@ -1221,6 +1832,7 @@ function drillSvg(dsl, opts = {}) {
     if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(url).then(done,function(){ fallbackCopy(url); done(); }); }
     else { fallbackCopy(url); done(); }
   });
+  printBtn.addEventListener('click',function(){ window.print(); });
   ta.addEventListener('input',render); render();
 })();
 </script>

@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo } from "react";
 import { VIEWS, COLORS, vb, APP_VERSION, ICON_SCALE, BUILD_STAMP, DEFAULT_TEXT, SPEED,
   SAVE_PROB, MISS_POST, MISS_WIDE, MISS_OVER, SHOT_AIR_PROB, BOUNCE_REST } from "./constants.js";
-import { parseDrill, serializeDrill, extractDrill } from "./drill-format.js";
+import { parseDrill, serializeDrill, extractDrill, deriveInventory } from "./drill-format.js";
 import { drillSvg } from "./drill-svg.js";
+import { mdEscape, mdInline, mdBlock } from "./md.js";
 import { clampX, clampY, segEnd, segD, nearestT, splitSeg, zigzagPoints, wigglePoints, convertSeg, fitRoute, evalSeg, rdp, catmullToBezier } from "./geometry.js";
 import * as boards from "./boards.js";
 import { netShapes, bumperShapes, solidShapes, detourRoute, segCrossesNet } from "./net-collide.js";
@@ -293,6 +294,12 @@ export default function DrillAnimator() {
   // authored presentation steps: [{ text, at } | { text, on:{piece,wp} }] — the
   // narration the coach drops while scrubbing; persisted via the STEP DSL statement
   const [drillSteps, setDrillSteps] = useState(init.steps || []);
+  // a markdown coaching writeup (headings, numbered steps, bold) shown on the
+  // preview/print sheet; persisted via the NOTES DSL block
+  const [drillNotes, setDrillNotes] = useState(init.notes || "");
+  // inventory overrides / custom gear rows; auto counts derive from the pieces.
+  // Persisted via ITEM lines — see deriveInventory()
+  const [drillItems, setDrillItems] = useState(init.items || []);
   // the DSL schema version the loaded drill declared (for future version-aware
   // rendering; not gated yet). Re-stamped to the current DSL_VERSION on save.
   const [drillVersion, setDrillVersion] = useState(init.dslVersion);
@@ -1975,11 +1982,11 @@ export default function DrillAnimator() {
     if (aiPlay) return;
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      try { localStorage.setItem(SAVE_KEY, serializeDrill(rink, pieces, drillTitle, drillDesc, drillSteps)); }
+      try { localStorage.setItem(SAVE_KEY, serializeDrill(rink, pieces, drillTitle, drillDesc, drillSteps, drillNotes, drillItems)); }
       catch { /* storage full / disabled — nothing we can do, keep running */ }
     }, 400);
     return () => clearTimeout(saveTimer.current);
-  }, [rink, pieces, drillTitle, drillDesc, drillSteps, aiPlay]);
+  }, [rink, pieces, drillTitle, drillDesc, drillSteps, drillNotes, drillItems, aiPlay]);
 
   function undoLast() {
     if (!undoStack.current.length) return;
@@ -3044,24 +3051,32 @@ export default function DrillAnimator() {
 
   /* ----- text / files ----- */
   function openText() {
-    setTextDraft(serializeDrill(rink, pieces, drillTitle, drillDesc, drillSteps));
+    setTextDraft(serializeDrill(rink, pieces, drillTitle, drillDesc, drillSteps, drillNotes, drillItems));
     setTextError("");
     setOpenMenu("text");
   }
   function applyText() {
     const r = parseDrill(extractDrill(textDraft));   // accepts a pasted ```drill markdown block
     if (r.errors.length) { setTextError(r.errors.join("\n")); return; }
-    setRink(r.rink); setPieces(r.pieces); setDrillTitle(r.title); setDrillDesc(r.desc); setDrillSteps(r.steps || []); setDrillVersion(r.dslVersion); setSelectedId(null); setPopup(null);
+    setRink(r.rink); setPieces(r.pieces); setDrillTitle(r.title); setDrillDesc(r.desc); setDrillSteps(r.steps || []); setDrillNotes(r.notes || ""); setDrillItems(r.items || []); setDrillVersion(r.dslVersion); setSelectedId(null); setPopup(null);
     resetAnim(); setTextError(""); setOpenMenu(null);
   }
   const slug = () => (drillTitle || "drill").replace(/[^\w-]+/g, "_").toLowerCase();
   // a drill as a markdown doc: title heading + description + a ```drill fenced
   // block that round-trips (renders as a code block in Obsidian / on the web)
   function toMarkdown() {
-    const dsl = serializeDrill(rink, pieces, drillTitle, drillDesc, drillSteps).trimEnd();
+    const dsl = serializeDrill(rink, pieces, drillTitle, drillDesc, drillSteps, drillNotes, drillItems).trimEnd();
     const title = (drillTitle || "Drill").trim();
     const desc = drillDesc && drillDesc.trim() ? drillDesc.trim() + "\n\n" : "";
-    return `# ${title}\n\n${desc}\`\`\`drill\n${dsl}\n\`\`\`\n`;
+    const notes = drillNotes && drillNotes.trim() ? drillNotes.trim() + "\n\n" : "";
+    // a real markdown table (rendered outside the fence for humans; the fenced
+    // DSL below still round-trips everything on load)
+    const rows = deriveInventory(pieces, drillItems).filter(r => !r.hide);
+    const inv = rows.length
+      ? "## What you need\n\n| Item | Qty |\n|---|---|\n"
+        + rows.map(r => `| ${r.label} | ${r.count} |`).join("\n") + "\n\n"
+      : "";
+    return `# ${title}\n\n${desc}${notes}${inv}\`\`\`drill\n${dsl}\n\`\`\`\n`;
   }
   function download(name, text, type) {
     const a = document.createElement("a");
@@ -3069,11 +3084,11 @@ export default function DrillAnimator() {
     a.download = name; a.click();
     URL.revokeObjectURL(a.href);
   }
-  function exportTxt() { download(`${slug()}.txt`, serializeDrill(rink, pieces, drillTitle, drillDesc, drillSteps), "text/plain"); }
+  function exportTxt() { download(`${slug()}.txt`, serializeDrill(rink, pieces, drillTitle, drillDesc, drillSteps, drillNotes, drillItems), "text/plain"); }
   function exportMd() { download(`${slug()}.md`, toMarkdown(), "text/markdown"); }
   // render the drill (via the DSL→SVG renderer) and rasterise it to a PNG
   function exportImage() {
-    const dsl = serializeDrill(rink, pieces, drillTitle, drillDesc, drillSteps);
+    const dsl = serializeDrill(rink, pieces, drillTitle, drillDesc, drillSteps, drillNotes, drillItems);
     // size the raster to the drill's rink mode, matching the diagram's aspect-
     // preserving viewBox so full ice keeps true 200:85 ice proportions
     const [, , vw, vh] = VIEWS[rink] || VIEWS.full;
@@ -3122,12 +3137,93 @@ export default function DrillAnimator() {
   // build a link to the standalone preview page with the current drill encoded in
   // the URL hash (matches the preview page's #d= URL-safe base64 format)
   function previewLink() {
-    const dsl = serializeDrill(rink, pieces, drillTitle, drillDesc, drillSteps);
+    const dsl = serializeDrill(rink, pieces, drillTitle, drillDesc, drillSteps, drillNotes, drillItems);
     const enc = btoa(unescape(encodeURIComponent(dsl)))
       .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
     const url = new URL("drill-preview.html", window.location.href).href + "#d=" + enc;
     if (navigator.share) navigator.share({ title: (drillTitle || "Drill").trim(), url }).catch(() => {});
     else { navigator.clipboard?.writeText(url); flash("Preview link copied"); }
+  }
+  // open a clean, self-contained print sheet (diagram + notes + inventory +
+  // steps) in a new window and offer to print it. Reuses the same DSL→SVG
+  // renderer and markdown helpers as the standalone preview page.
+  function printSheet() {
+    const dsl = serializeDrill(rink, pieces, drillTitle, drillDesc, drillSteps, drillNotes, drillItems);
+    const svg = drillSvg(dsl);
+    const title = (drillTitle || "Drill").trim();
+    const rows = deriveInventory(pieces, drillItems).filter(r => !r.hide);
+    const stepRows = (drillSteps.length ? resolveSteps().filter(s => s.resolved).slice().sort((a, b) => a.t - b.t) : buildSteps())
+      .filter(s => (s.text || "").trim());
+    const invHtml = rows.length
+      ? `<table class="inv"><thead><tr><th>Item</th><th>Qty</th></tr></thead><tbody>`
+        + rows.map(r => `<tr><td>${mdEscape(r.label)}</td><td>${r.count}</td></tr>`).join("") + `</tbody></table>`
+      : "";
+    const stepsHtml = stepRows.length
+      ? `<ol class="steps">` + stepRows.map(s => `<li>${mdInline(mdEscape(s.text))}</li>`).join("") + `</ol>` : "";
+    const notesHtml = drillNotes && drillNotes.trim() ? `<div class="notes">${mdBlock(drillNotes)}</div>` : "";
+    const descHtml = drillDesc && drillDesc.trim() ? `<p class="lede">${mdInline(mdEscape(drillDesc.trim()))}</p>` : "";
+    const doc = `<!doctype html><html><head><meta charset="utf-8"><title>${mdEscape(title)}</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;padding:28px 34px 48px;color:#14202b;background:#fff;
+    font:16px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  h1{font:800 30px/1.05 "Helvetica Neue",Helvetica,Arial,sans-serif;text-transform:uppercase;letter-spacing:-.01em;margin:0 0 6px}
+  .lede{color:#5c6b78;max-width:62ch;margin:0 0 18px}
+  .diagram{border:1px solid #d6e2ea;border-radius:12px;padding:12px;margin:0 0 22px;page-break-inside:avoid;background:#eef5f9}
+  .diagram svg{display:block;width:100%;height:auto}
+  h2{font:700 13px/1 system-ui,sans-serif;letter-spacing:.12em;text-transform:uppercase;color:#5c6b78;margin:22px 0 10px}
+  .notes h1{font-size:20px;text-transform:none;letter-spacing:0;margin:14px 0 8px}
+  .notes h2,.notes h3{font-size:16px;text-transform:none;letter-spacing:0;color:#14202b;margin:12px 0 6px}
+  .notes p{margin:8px 0}.notes ul,.notes ol{margin:8px 0 8px 22px}.notes code,.steps code{background:#eef2f6;padding:1px 5px;border-radius:5px;font:500 13px ui-monospace,Menlo,monospace}
+  table.inv{border-collapse:collapse;min-width:280px;margin:0 0 8px}
+  table.inv th,table.inv td{border:1px solid #d6e2ea;padding:6px 14px;text-align:left}
+  table.inv th{background:#f6fafd;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:#5c6b78}
+  table.inv td:last-child,table.inv th:last-child{text-align:right;font-variant-numeric:tabular-nums;width:64px}
+  ol.steps{margin:0 0 8px 22px;padding:0}ol.steps li{margin:5px 0}
+  .bar{margin:18px 0 0}
+  button{font:600 14px system-ui,sans-serif;color:#fff;background:#d7263d;border:0;border-radius:9px;padding:10px 18px;cursor:pointer}
+  @media print{.bar{display:none}body{padding:0}}
+</style></head><body>
+  <h1>${mdEscape(title)}</h1>
+  ${descHtml}
+  <div class="diagram">${svg}</div>
+  ${notesHtml}
+  ${invHtml ? `<h2>What you need</h2>${invHtml}` : ""}
+  ${stepsHtml ? `<h2>Steps</h2>${stepsHtml}` : ""}
+  <div class="bar"><button onclick="window.print()">🖨 Print</button></div>
+</body></html>`;
+    const w = window.open("", "_blank");
+    if (!w) { flash("Allow pop-ups to print"); return; }
+    w.document.open(); w.document.write(doc); w.document.close();
+  }
+
+  /* ----- inventory editing ----- */
+  // Canonical rows persist an ITEM override only when they differ from the auto
+  // count or are hidden; back to pure-auto → the entry is dropped (nothing saved).
+  function setCanonItem(row, { count, hide } = {}) {
+    const c = count != null ? Math.max(0, Math.round(count)) : row.count;
+    const h = hide != null ? hide : row.hide;
+    setDrillItems(prev => {
+      const rest = prev.filter(it => it.custom || it.key !== row.key);
+      const differs = c !== row.autoCount;
+      if (!differs && !h) return rest;
+      return [...rest, { key: row.key, ...(differs ? { count: c } : {}), ...(h ? { hide: true } : {}) }];
+    });
+  }
+  // Custom gear rows always persist (they exist only in the DSL, not on the ice).
+  function setCustomItem(row, { count, label, remove } = {}) {
+    setDrillItems(prev => {
+      const rest = prev.filter(it => !(it.custom && it.key === row.key));
+      if (remove) return rest;
+      const c = count != null ? Math.max(0, Math.round(count)) : row.count;
+      const l = label != null ? label : row.label;
+      return [...rest, { key: row.key, custom: true, count: c, ...(l ? { label: l } : {}) }];
+    });
+  }
+  function addCustomItem() {
+    let k = "gear", n = 1;
+    while (drillItems.some(it => it.custom && it.key === k)) k = "gear" + (++n);
+    setDrillItems(prev => [...prev, { key: k, custom: true, count: 1, label: "New item" }]);
   }
   function importTxt(e) {
     const f = e.target.files?.[0];
@@ -3137,7 +3233,7 @@ export default function DrillAnimator() {
       const txt = String(reader.result);
       const r = parseDrill(extractDrill(txt));      // .txt or a .md with a ```drill block
       if (r.errors.length) { setTextDraft(txt); setTextError(r.errors.join("\n")); setOpenMenu("text"); return; }
-      setRink(r.rink); setPieces(r.pieces); setDrillTitle(r.title); setDrillDesc(r.desc); setDrillSteps(r.steps || []); setDrillVersion(r.dslVersion); setSelectedId(null); setPopup(null);
+      setRink(r.rink); setPieces(r.pieces); setDrillTitle(r.title); setDrillDesc(r.desc); setDrillSteps(r.steps || []); setDrillNotes(r.notes || ""); setDrillItems(r.items || []); setDrillVersion(r.dslVersion); setSelectedId(null); setPopup(null);
       resetAnim(); setTextError(""); setOpenMenu(null);
     };
     reader.readAsText(f);
@@ -4967,10 +5063,9 @@ export default function DrillAnimator() {
                   onClick={() => setPlacingStep(null)}>Done ✓</button>
               </div>
             )}
-            {placing
               ? <div className="hd-preso-text" contentEditable suppressContentEditableWarning ref={edRef}
                   data-ph="Describe this beat…" onInput={e => setStepText(cap.idx, e.currentTarget.textContent)} />
-              : <div className="hd-preso-text">{cap.text}</div>}
+              : <div className="hd-preso-text" dangerouslySetInnerHTML={{ __html: mdInline(mdEscape(cap.text || "")) }} />}
             <div className="hd-preso-hint">tap anywhere to continue</div>
           </div>
         );
@@ -5058,6 +5153,9 @@ export default function DrillAnimator() {
             onChange={e => setDrillTitle(e.target.value)} />
           <textarea className="hd-input" style={{ minHeight: 46, resize: "vertical", fontFamily: "inherit" }}
             placeholder="Description" value={drillDesc} onChange={e => setDrillDesc(e.target.value)} spellCheck={false} />
+          <button className="hd-item" onClick={() => setOpenMenu("notes")}><Icon name="keyboard" size={16} /> Notes / writeup…{drillNotes.trim() ? " ✓" : ""}</button>
+          <button className="hd-item" onClick={() => setOpenMenu("inventory")}><Icon name="grid" size={16} /> Inventory / gear…</button>
+          <button className="hd-item" onClick={() => { printSheet(); setOpenMenu(null); }}><Icon name="image" size={16} /> Print sheet…</button>
           <button className="hd-item" onClick={openText}><Icon name="keyboard" size={16} /> Text editor</button>
           <button className="hd-item" onClick={() => { exportTxt(); setOpenMenu(null); }}><Icon name="download" size={16} /> Export .txt</button>
           <button className="hd-item" onClick={() => { exportMd(); setOpenMenu(null); }}><Icon name="download" size={16} /> Export .md</button>
@@ -5259,6 +5357,64 @@ export default function DrillAnimator() {
           )}
         </div>
       )}
+
+      {openMenu === "notes" && (
+        <div className="hd-sheet">
+          <div className="hd-mh">Coaching notes <span style={{ fontWeight: 400, color: "#8b99a8", textTransform: "none", letterSpacing: 0 }}>· markdown</span></div>
+          <textarea className="hd-ta" value={drillNotes} placeholder={"# Setup\n\n1. F1 carries out of the corner\n2. **Chip** off the glass past the D\n\n- Coach cue: head up through the neutral zone"}
+            onChange={e => setDrillNotes(e.target.value)} spellCheck={false} />
+          {drillNotes.trim() && (
+            <div className="hd-mdprev" dangerouslySetInnerHTML={{ __html: mdBlock(drillNotes) }} />
+          )}
+          <div className="hd-row">
+            <button className="hd-btn primary" onClick={() => setOpenMenu(null)}>Done</button>
+            <button className="hd-btn" onClick={() => setDrillNotes("")}>Clear</button>
+          </div>
+          <div className="hd-note">
+            A written writeup shown on the print sheet and preview page. Supports markdown:
+            <code># heading</code>, <code>**bold**</code>, <code>*italic*</code>, <code>`code`</code>,
+            numbered (<code>1.</code>) and bulleted (<code>-</code>) lists, and <code>[links](https://…)</code>.
+            Presentation captions accept inline markdown too.
+          </div>
+        </div>
+      )}
+
+      {openMenu === "inventory" && (() => {
+        const rows = deriveInventory(pieces, drillItems);
+        return (
+          <div className="hd-sheet">
+            <div className="hd-mh">Inventory <span style={{ fontWeight: 400, color: "#8b99a8", textTransform: "none", letterSpacing: 0 }}>· what you need</span></div>
+            <div className="hd-steplist">
+              {rows.length === 0 ? (
+                <div className="hd-note">No pieces yet. Add players, pucks, cones… and they’re counted here — or add gear below.</div>
+              ) : rows.map(r => (
+                <div key={(r.custom ? "c:" : "k:") + r.key} className="hd-poprow" style={{ opacity: r.hide ? 0.5 : 1 }}>
+                  {r.custom
+                    ? <input className="hd-input" style={{ flex: 1, minWidth: 0 }} value={r.label}
+                        placeholder="Gear…" onChange={e => setCustomItem(r, { label: e.target.value })} />
+                    : <span style={{ flex: 1, minWidth: 0 }}>{r.label}
+                        {r.count !== r.autoCount && <span style={{ color: "#8b99a8", fontSize: 11 }}> · {r.autoCount} on ice</span>}</span>}
+                  <Stepper value={r.count} min={0} step={1} suffix=""
+                    onChange={n => (r.custom ? setCustomItem(r, { count: n }) : setCanonItem(r, { count: n }))} />
+                  {r.custom
+                    ? <button className="hd-mini" title="Remove gear row" onClick={() => setCustomItem(r, { remove: true })}>✕</button>
+                    : <button className={`hd-mini${r.hide ? " on" : ""}`} title={r.hide ? "Hidden from the sheet — show it" : "Hide from the sheet (piece stays on the ice)"}
+                        onClick={() => setCanonItem(r, { hide: !r.hide })}>{r.hide ? "hidden" : "hide"}</button>}
+                </div>
+              ))}
+            </div>
+            <div className="hd-row">
+              <button className="hd-btn" onClick={addCustomItem}>＋ Add gear</button>
+              <button className="hd-btn primary" onClick={() => setOpenMenu(null)}>Done</button>
+            </div>
+            <div className="hd-note">
+              Auto-counted from the pieces on the ice. Edit a count to override it, <b>hide</b> a row to
+              drop it from the sheet (the piece stays on the ice), or <b>add gear</b> for off-ice items
+              (whistles, pinnies, water). Saved with the drill.
+            </div>
+          </div>
+        );
+      })()}
 
       {openMenu === "text" && (
         <div className="hd-sheet">
