@@ -1273,8 +1273,16 @@ export default function DrillAnimator() {
     const d = q => Math.hypot(q.x - b.x, q.y - b.y);
     return lights.reduce((a, q) => (d(q) < d(a) ? q : a));
   }
-  // splice each branching player's chosen fork onto their base path: the fork whose
-  // colour matches the governing light's cue at their branch arrival time.
+  // the puck a player carries into a reaction: one they hold at the branch with no
+  // action of its own yet (so the reaction's action decides what happens to it).
+  // A function declaration (hoisted) since resolveForks runs during render, above.
+  function reactionPuck(ps, playerId) {
+    return ps.find(q => q.kind === "puck" && q.carrier === playerId
+      && q.shotAt == null && q.rimAt == null && q.chipAt == null && !(q.transfers || []).length) || null;
+  }
+  // splice each branching player's chosen fork onto their base path (the fork whose
+  // colour matches the governing light's cue at their branch arrival), and apply the
+  // fork's action (shoot/chip/rim/pass) to the puck they carry into it.
   function resolveForks(ps) {
     const branching = ps.filter(p => p.kind === "player" && (p.forks || []).length);
     if (!branching.length) return ps;
@@ -1287,7 +1295,23 @@ export default function DrillAnimator() {
       if (!fork || !fork.path || !fork.path.length) continue;
       if (out === ps) out = ps.slice();
       const i = out.findIndex(q => q.id === p.id);
+      const baseLen = out[i].path.length;
       out[i] = { ...out[i], path: [...out[i].path, ...fork.path] };
+      // apply the reaction's action to the puck the player carries into it
+      const act = fork.action || "skate";
+      if (act !== "skate") {
+        const pk = reactionPuck(out, p.id);
+        if (pk) {
+          const pj = out.findIndex(q => q.id === pk.id);
+          const at = baseLen + fork.path.length - 1;    // the reaction's end waypoint (effective index)
+          const patch = { shotAt: null, rimAt: null, chipAt: null };
+          if (act === "shoot") { patch.shotAt = at; patch.net = fork.net || null; }
+          else if (act === "chip") { patch.chipAt = at; patch.chipAim = fork.aim ?? null; patch.chipDist = fork.dist ?? null; }
+          else if (act === "rim") { patch.rimAt = at; patch.rimAim = fork.aim ?? null; patch.rimDist = fork.dist ?? null; }
+          else if (act === "pass" && fork.to) { patch.transfers = [...(pk.transfers || []), { at, to: fork.to, recvAt: null, kind: "pass" }]; }
+          out[pj] = { ...out[pj], ...patch };
+        }
+      }
     }
     return out;
   }
@@ -1298,6 +1322,17 @@ export default function DrillAnimator() {
   }
   function clearFork(id, color) {
     updateById(id, { forks: (pieces.find(p => p.id === id)?.forks || []).filter(f => !sameColor(f.color, color)) });
+  }
+  // set the action a reaction performs (skate / pass / shoot / chip / rim); pass
+  // defaults its target to the first other player
+  function setForkAction(id, color, action) {
+    const pl = pieces.find(p => p.id === id); if (!pl) return;
+    const others = pieces.filter(q => q.kind === "player" && q.id !== id);
+    updateById(id, { forks: (pl.forks || []).map(f => !sameColor(f.color, color) ? f : {
+      ...f, action,
+      net: action === "shoot" ? (f.net || null) : undefined,
+      to: action === "pass" ? (f.to || (others[0] || {}).id || null) : undefined,
+    }) });
   }
   // the reaction-authoring controls (Draw / Edit / Clear per cue colour) — shown on
   // the branch waypoint (the route's end, nearest the light), or the player popup
@@ -1314,16 +1349,35 @@ export default function DrillAnimator() {
           </span>
         </div>
         {colors.map(c => {
-          const has = !!forkOf(p, c);
+          const fk = forkOf(p, c);
+          const has = !!fk;
           const isEditing = editingFork && editingFork.id === p.id && sameColor(editingFork.color, c);
+          const selStyle = { background: "#1b2530", color: "#eaf0f6", border: "1px solid rgba(255,255,255,0.16)",
+            borderRadius: 6, padding: "3px 6px", fontSize: 13, cursor: "pointer" };
           return (
             <div className="hd-poprow" key={c}>
               <div className="hd-swatch on" style={{ background: c, cursor: "default" }} />
-              <button className="hd-mini" onClick={() => beginForkDraw(p.id, c)}>{has ? "Redraw" : "Draw"}</button>
-              {has && <button className={`hd-mini${isEditing ? " on" : ""}`}
-                onClick={() => setEditingFork(isEditing ? null : { id: p.id, color: c })}>{isEditing ? "✓ Editing" : "Edit"}</button>}
-              {has && <button className="hd-mini" onClick={() => { if (isEditing) setEditingFork(null); clearFork(p.id, c); }}>Clear</button>}
-              {!has && <span style={{ fontSize: 11, color: "#8b99a8" }}>no reaction</span>}
+              {has ? (
+                <>
+                  <select value={fk.action || "skate"} style={selStyle}
+                    onChange={e => setForkAction(p.id, c, e.target.value)}>
+                    <option value="skate">Skate</option>
+                    <option value="pass">Pass</option>
+                    <option value="shoot">Shoot</option>
+                    <option value="chip">Chip</option>
+                    <option value="rim">Rim</option>
+                  </select>
+                  <button className={`hd-mini${isEditing ? " on" : ""}`}
+                    onClick={() => setEditingFork(isEditing ? null : { id: p.id, color: c })}>{isEditing ? "✓ Editing" : "Edit"}</button>
+                  <button className="hd-mini" onClick={() => beginForkDraw(p.id, c)}>Redraw</button>
+                  <button className="hd-mini" onClick={() => { if (isEditing) setEditingFork(null); clearFork(p.id, c); }}>Clear</button>
+                </>
+              ) : (
+                <>
+                  <button className="hd-mini" onClick={() => beginForkDraw(p.id, c)}>Draw</button>
+                  <span style={{ fontSize: 11, color: "#8b99a8" }}>no reaction</span>
+                </>
+              )}
             </div>
           );
         })}
@@ -2127,7 +2181,10 @@ export default function DrillAnimator() {
         if (p.id !== id) return p;
         const route = fitRoute(branchPoint(p), raw);
         if (!route.length) return p;
-        const forks = (p.forks || []).filter(f => !sameColor(f.color, color)).concat([{ color, path: route }]);
+        const prev = (p.forks || []).find(f => sameColor(f.color, color));   // redraw keeps the action + nested reactions
+        const forks = (p.forks || []).filter(f => !sameColor(f.color, color))
+          .concat([{ color, path: route, action: prev?.action || "skate",
+            ...(prev?.net ? { net: prev.net } : {}), ...(prev?.to ? { to: prev.to } : {}), forks: prev?.forks || [] }]);
         return { ...p, forks };
       }));
       return;

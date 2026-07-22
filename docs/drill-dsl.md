@@ -173,10 +173,15 @@ A waypoint **description** (`DESC "…"`) can be surfaced three ways via `SHOW`:
 Standalone text notes use the `label` **piece** instead:
 `PIECE L1 label 100 40 size=1.2 "Regroup here"`.
 
-### `FORK <player> <hex> <segments…>`
+### `FORK <player> <hex> [<action>[:target]] <segments…>`
 A **light-reaction** branch for a player: a continuation route (same segment
 grammar as `PATH`) that begins at the player's **branch point** — the end of their
-base `PATH` (or their start if they have none). Give a player one `FORK` per cue
+base `PATH` (or their start if they have none). An optional **action** right after
+the colour says what the player does on that reaction (a dropdown per cue colour
+in the app): `skate` (default — just move) · `shoot[:<net>]` · `chip` · `rim` ·
+`pass:<player>`. A non-`skate` action is applied to the puck the player carries
+into the reaction, at the reaction's end. (A `skate` reaction is what a chained
+follow-up light reaction hangs off of.) Give a player one `FORK` per cue
 colour of the governing light (the nearest `light` with a `cues=` timeline). The
 hex has no leading `#`.
 

@@ -179,13 +179,19 @@ export function parseDrill(text) {
         if (!p) throw new Error(`PATH for unknown piece "${id}"`);
         p.path = parseSegments(tok, 2, unq);
       } else if (cmd === "FORK") {
-        // FORK <player> <hex> <segments…> — a light-reaction continuation from the
-        // player's route end. Hex has no leading # (tokenizing strips it).
+        // FORK <player> <hex> [<action>[:target]] <segments…> — a light-reaction
+        // continuation from the player's route end. Hex has no leading # (tokenizing
+        // strips it). An optional action right after the colour says what the player
+        // does on this reaction: skate (default) / shoot[:net] / chip / rim / pass:to.
         const id = tok[1], col = tok[2];
         const p = byId[id];
         if (!p) throw new Error(`FORK for unknown piece "${id}"`);
         if (!/^[0-9a-fA-F]{3,6}$/.test(col || "")) throw new Error("FORK needs: id colour segments");
-        (p.forks = p.forks || []).push({ color: "#" + col, path: parseSegments(tok, 3, unq) });
+        let j = 3, action = "skate", net = null, to = null;
+        const am = /^(skate|shoot|chip|rim|pass)(?::(\S+))?$/i.exec(tok[3] || "");
+        if (am) { action = am[1].toLowerCase(); if (action === "shoot") net = am[2] || null; else if (action === "pass") to = am[2] || null; j = 4; }
+        (p.forks = p.forks || []).push({ color: "#" + col, action,
+          ...(net ? { net } : {}), ...(to ? { to } : {}), forks: [], path: parseSegments(tok, j, unq) });
       } else if (cmd === "MARK") {
         // MARK <id> <color> <width> <style> x1,y1 x2,y2 ...  (a freehand ink annotation)
         const mid = tok[1], mcol = tok[2] || "#ffd447", mw = parseFloat(tok[3]) || 1.1, mst = (tok[4] || "solid").toLowerCase();
@@ -287,10 +293,14 @@ export function serializeDrill(rink, pieces, title = "", desc = "") {
       ? ` cues=${p.cues.map(c => `${String(c.color || "").replace("#", "")}:${f1(c.dur || 0)}`).join(";")}` : "";
     out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${car}${gp}${pas}${sht}${rmT}${chT}${nt}${hld}${wt}${fac}${gl}${crs}${df}${siz}${grp}${cue}${spd}`);
     if (p.path.length) out.push(`PATH ${p.id} ${p.path.map(segToStr).join(" ")}`);
-    // light-reaction forks (players): one continuation per cue colour
+    // light-reaction forks (players): one continuation per cue colour, with the
+    // action the player performs on it (skate default → omitted)
     (p.forks || []).forEach(f => {
-      if (f.path && f.path.length)
-        out.push(`FORK ${p.id} ${String(f.color || "").replace("#", "")} ${f.path.map(segToStr).join(" ")}`);
+      if (!f.path || !f.path.length) return;
+      const act = f.action && f.action !== "skate"
+        ? " " + f.action + (f.action === "shoot" && f.net ? ":" + f.net : f.action === "pass" && f.to ? ":" + f.to : "")
+        : "";
+      out.push(`FORK ${p.id} ${String(f.color || "").replace("#", "")}${act} ${f.path.map(segToStr).join(" ")}`);
     });
   });
   return out.join("\n") + "\n";
