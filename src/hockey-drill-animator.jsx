@@ -46,13 +46,34 @@ const LABEL_COLORS = ["#14202b", "#d7263d", "#1f4fa3", "#1f8a4c", "#e0731d", "#7
 // cue colours a cognitive-training light can show (its screen fills with one)
 const LIGHT_COLORS = ["#2ea043", "#e5342b", "#2f6df6", "#f5c518", "#8a3ffc", "#f2f5f8"];
 
-// the colour a cue timeline is showing at absolute time t (seconds). Steps run
-// back-to-back; after the last cue its colour is held. null if there are no cues.
-function cueColorAt(cues, t) {
+// small deterministic string hash → int (for per-run cue seeding)
+const hashInt = s => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return h; };
+// a deterministic shuffle of [0..n) from a seed (seeded Fisher-Yates)
+function shuffleOrder(n, seed) {
+  const a = Array.from({ length: n }, (_, i) => i);
+  let s = (seed | 0) || 1;
+  const rnd = () => { s = (s * 1664525 + 1013904223) | 0; return (s >>> 0) / 4294967296; };
+  for (let i = n - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
+// the colour a cue timeline is showing at absolute time t (seconds).
+//  seed === null → the authored sequence, played once, holding the last colour.
+//  seed a number → REACTIVE mode: the cue order is shuffled each cycle and looped
+//    forever (seeded per run), so a "read the light" reaction stays unpredictable.
+function cueColorAt(cues, t, seed = null) {
   if (!cues || !cues.length) return null;
+  const n = cues.length, dur = k => Math.max(0.1, cues[k].dur || 0);
+  if (seed === null) {
+    let acc = 0;
+    for (let k = 0; k < n; k++) { acc += dur(k); if (t < acc) return cues[k].color; }
+    return cues[n - 1].color;
+  }
+  const total = cues.reduce((a, _, k) => a + dur(k), 0);
+  const tt = Math.max(0, t), cyc = Math.floor(tt / total), local = tt - cyc * total;
+  const order = shuffleOrder(n, (seed | 0) + cyc * 2654435761);   // reshuffle each cycle
   let acc = 0;
-  for (const c of cues) { acc += Math.max(0.1, c.dur || 0); if (t < acc) return c.color; }
-  return cues[cues.length - 1].color;
+  for (let k = 0; k < n; k++) { acc += dur(order[k]); if (local < acc) return cues[order[k]].color; }
+  return cues[order[n - 1]].color;
 }
 const sameColor = (a, b) => String(a || "").toLowerCase() === String(b || "").toLowerCase();
 
@@ -1225,11 +1246,17 @@ export default function DrillAnimator() {
     while (diff < -Math.PI) diff += 2 * Math.PI;
     return (diff >= 0 ? 1 : -1) * w * 60;   // degrees, tunable
   }
+  // per-run cue seed for a light: reactive (shuffle + loop) unless turned off.
+  // Keyed by playSeed so each run reshuffles; null → the fixed authored sequence.
+  // A function declaration (hoisted) since resolveForks runs during render, above.
+  function cueSeed(light) {
+    return (light && light.rand !== false && (light.cues || []).length) ? hashInt(light.id + "|" + playSeed) : null;
+  }
   // the colour a cognitive-training light is showing right now: its cue timeline
   // resolved at the current animation time, else (no cues / before play) its idle
   // base colour.
   function lightColor(p) {
-    return cueColorAt(p.cues, animT <= 0 ? 0 : animT * totalTime) ?? p.color;
+    return cueColorAt(p.cues, animT <= 0 ? 0 : animT * totalTime, cueSeed(p)) ?? p.color;
   }
 
   /* ----- light reactions (branch forks) ----- */
@@ -1290,7 +1317,7 @@ export default function DrillAnimator() {
     for (const p of branching) {
       const light = governingLight(ps, p);
       if (!light) continue;
-      const color = cueColorAt(light.cues, baseRouteTime(p));
+      const color = cueColorAt(light.cues, baseRouteTime(p), cueSeed(light));
       const fork = (p.forks || []).find(f => sameColor(f.color, color));
       if (!fork || !fork.path || !fork.path.length) continue;
       if (out === ps) out = ps.slice();
@@ -1389,7 +1416,7 @@ export default function DrillAnimator() {
   function chosenForkColor(p) {
     if (!(p.forks || []).length) return null;
     const light = governingLight(pieces, p);
-    return light ? cueColorAt(light.cues, baseRouteTime(p)) : null;
+    return light ? cueColorAt(light.cues, baseRouteTime(p), cueSeed(light)) : null;
   }
 
   function displayPos(p) {
@@ -3622,7 +3649,16 @@ export default function DrillAnimator() {
                   ))}
                 </div>
                 <div className="hd-poprow">
-                  <span style={{ fontSize: 11, color: "#8b99a8" }}>Cue timeline — the screen steps through these as the drill plays</span>
+                  <button className={`hd-mini${p.rand !== false ? " on" : ""}`}
+                    onClick={() => updateById(p.id, { rand: p.rand === false ? true : false })}>
+                    {p.rand !== false ? "✓ Reactive (random + loop)" : "Fixed sequence"}
+                  </button>
+                  <span style={{ fontSize: 11, color: "#8b99a8" }}>
+                    {p.rand !== false ? "shuffles + loops the cues, different each run" : "plays the cues in order, once"}
+                  </span>
+                </div>
+                <div className="hd-poprow">
+                  <span style={{ fontSize: 11, color: "#8b99a8" }}>Cue timeline — the colours the screen shows{p.rand !== false ? " (order randomised per run)" : ""}</span>
                 </div>
                 {cues.map((c, i) => (
                   <div className="hd-poprow" key={i}>

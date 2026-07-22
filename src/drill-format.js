@@ -91,7 +91,7 @@ export function parseDrill(text) {
         let text = "", size = 1;                          // label piece: text + font scale
         let speed = 1, hand = "R", carrier = null, facing = 0, shotAt = null, pickup = null, rimAt = null, chipAt = null, chipAim = null, rimAim = null, chipDist = null, rimDist = null;
         let net = null, holdLine = false, goalie = false, defense = false, wait = null, group = null, crease = false;
-        let cues = [];                                    // light: cue timeline (colour:duration steps)
+        let cues = [], rand = true;                       // light: cue timeline + reactive (shuffle/loop) default on
         const transfers = [];
         rest.forEach(r => {
           if (quoted(r)) { text = unq(r); }              // a "quoted string" → label text
@@ -165,13 +165,14 @@ export function parseDrill(text) {
                 const m6 = /^([0-9a-fA-F]{3,6}):(\d+(?:\.\d+)?)$/.exec(seg);
                 if (m6) cues.push({ color: "#" + m6[1], dur: parseFloat(m6[2]) });
               });
-            } else if (key === "group") group = v.replace(/_/g, " ").trim() || null;   // named group membership
+            } else if (key === "rand") { rand = !/^(off|0|false|no)$/i.test(v); }   // light: reactive mode (default on)
+            else if (key === "group") group = v.replace(/_/g, " ").trim() || null;   // named group membership
           } else if (r === "goalie") goalie = true;
           else if (r === "crease") crease = true;
           else if (r === "defense") defense = true;
           else label = r;
         });
-        const p = { id, kind, x, y, color, label, text, size, speed, hand, carrier, facing, transfers, shotAt, pickup, rimAt, chipAt, chipAim, rimAim, chipDist, rimDist, net, holdLine, goalie, defense, wait, group, crease, cues, forks: [], path: [] };
+        const p = { id, kind, x, y, color, label, text, size, speed, hand, carrier, facing, transfers, shotAt, pickup, rimAt, chipAt, chipAim, rimAim, chipDist, rimDist, net, holdLine, goalie, defense, wait, group, crease, cues, rand, forks: [], path: [] };
         pieces.push(p); byId[id] = p;
       } else if (cmd === "PATH") {
         const id = tok[1];
@@ -291,7 +292,9 @@ export function serializeDrill(rink, pieces, title = "", desc = "") {
     const grp = p.group ? ` group=${String(p.group).trim().replace(/\s+/g, "_")}` : "";
     const cue = p.kind === "light" && (p.cues || []).length
       ? ` cues=${p.cues.map(c => `${String(c.color || "").replace("#", "")}:${f1(c.dur || 0)}`).join(";")}` : "";
-    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${car}${gp}${pas}${sht}${rmT}${chT}${nt}${hld}${wt}${fac}${gl}${crs}${df}${siz}${grp}${cue}${spd}`);
+    // lights are reactive (shuffle + loop) by default; note the exception
+    const rnd = p.kind === "light" && p.rand === false ? " rand=off" : "";
+    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${car}${gp}${pas}${sht}${rmT}${chT}${nt}${hld}${wt}${fac}${gl}${crs}${df}${siz}${grp}${cue}${rnd}${spd}`);
     if (p.path.length) out.push(`PATH ${p.id} ${p.path.map(segToStr).join(" ")}`);
     // light-reaction forks (players): one continuation per cue colour, with the
     // action the player performs on it (skate default → omitted)

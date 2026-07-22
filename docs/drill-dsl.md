@@ -91,7 +91,8 @@ Places a piece. `id` is any unique token (e.g. `F1`, `PK1`, `N2`).
 | Modifier | Applies to | Meaning |
 |---|---|---|
 | `#RRGGBB` / `#RGB` | any | Colour. On a `light` this is the idle screen colour (shown before/without a cue timeline). |
-| `cues=<hex>:<dur>;…` | light | Cue timeline: the screen steps through each colour for `<dur>` seconds as the drill plays (hex has no leading `#`; steps separated by `;`). The drill runs at least as long as the timeline. e.g. `cues=2ea043:3;e5342b:2`. |
+| `cues=<hex>:<dur>;…` | light | Cue timeline: the colours the screen shows, each for `<dur>` seconds (hex has no leading `#`; steps separated by `;`). The drill runs at least as long as one cycle. e.g. `cues=2ea043:3;e5342b:2`. |
+| `rand=off` | light | Turn off **reactive** mode. Lights default to reactive: the cue order is **shuffled each cycle and looped**, seeded per run so a "read the light" reaction is unpredictable and differs on every replay. `rand=off` plays the cues in the authored order, once, holding the last. |
 | *bare word* | player | Jersey label (e.g. `F1`) |
 | `"quoted text"` | label | The label's text (spaces and commas allowed) |
 | `size=<n>` | label, net, tire | label: font scale · **net**: `1` NHL / `0.62` mite · **tire**: `1` large / `0.55` small |
