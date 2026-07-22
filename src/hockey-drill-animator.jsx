@@ -4971,7 +4971,6 @@ export default function DrillAnimator() {
               ? <div className="hd-preso-text" contentEditable suppressContentEditableWarning ref={edRef}
                   data-ph="Describe this beat…" onInput={e => setStepText(cap.idx, e.currentTarget.textContent)} />
               : <div className="hd-preso-text">{cap.text}</div>}
-            <div className="hd-preso-hint">tap anywhere to continue</div>
           </div>
         );
       })()}
