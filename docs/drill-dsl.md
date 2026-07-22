@@ -65,6 +65,13 @@ One statement per line. Order is mostly free, but a `PATH` must come after the
 
 ## Statements
 
+### `DSL <n>`
+The DSL schema version this drill was written in, stamped as the first line on
+every save (e.g. `DSL 1`). Optional on input — if omitted, a reader assumes the
+current version. Lets a production build eventually render a drill according to
+the version that wrote it. Bumped only on a **breaking** DSL change; there is no
+compatibility gating yet, so today it is informational.
+
 ### `RINK full | half | quarter`
 The ice surface shown. Defaults to `full`.
 
@@ -165,6 +172,34 @@ A waypoint **description** (`DESC "…"`) can be surfaced three ways via `SHOW`:
 
 Standalone text notes use the `label` **piece** instead:
 `PIECE L1 label 100 40 size=1.2 "Regroup here"`.
+
+### `FORK <player> <hex> <segments…>`
+A **light-reaction** branch for a player: a continuation route (same segment
+grammar as `PATH`) that begins at the player's **branch point** — the end of their
+base `PATH` (or their start if they have none). Give a player one `FORK` per cue
+colour of the governing light (the nearest `light` with a `cues=` timeline). The
+hex has no leading `#`.
+
+At playback the player skates their base route, and **on arrival at the branch**
+takes the fork whose colour matches the light's cue **at that instant** — modelling
+a "skate in, read the light, react" drill. Branch arrival time depends only on the
+base route, so the choice is deterministic. In the app: a player's popup shows a
+**Light reactions** row (one *Draw* / *Redraw* / *Clear* per cue colour); drawing
+starts from the route's end. The chosen reaction renders solid, the others dashed.
+
+```drill
+PIECE LT1 light 100 30 #2ea043 cues=2ea043:2;e5342b:2;2f6df6:3
+PIECE F1 player 55 42 #d7263d F1
+PATH F1 L 95,42
+FORK F1 2ea043 L 150,20    # green → drive the far dot
+FORK F1 e5342b L 150,65    # red   → cut low
+FORK F1 2f6df6 L 175,42    # blue  → straight to the net
+```
+
+> Note: a fork's segments are stored in absolute coordinates from where the base
+> route ended when it was drawn; heavily reshaping the base route afterwards can
+> require redrawing the forks. Per-point handle editing of forks is not yet
+> supported — *Redraw* to change one.
 
 ---
 

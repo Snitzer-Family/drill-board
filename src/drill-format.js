@@ -1,5 +1,5 @@
 // Drill text format: parser and serializer. See the DSL spec in App header.
-import { VIEWS } from "./constants.js";
+import { VIEWS, DSL_VERSION } from "./constants.js";
 
 /* ---------------- text format ---------------- */
 
@@ -10,11 +10,51 @@ export function extractDrill(text) {
   return m ? m[1].replace(/\s+$/, "") : text;
 }
 
+// parse a run of PATH/FORK route tokens (starting at tok[j]) into a segment array.
+// Shared by PATH (base routes) and FORK (light-reaction continuations).
+function parseSegments(tok, j, unq) {
+  const segs = [];
+  let mode = "carry", dir = "fwd", stop = 0, rate = 1, name = null, waitOn = null, jump = false;
+  let dsc = null, dmode = null, dsize = null, dox = null, doy = null;
+  const num = () => { const v = parseFloat(tok[j++]); if (isNaN(v)) throw new Error("bad number in PATH"); return v; };
+  const push = seg => {
+    segs.push({ ...seg, mode, dir, stop, rate, ...(name ? { name } : {}), ...(waitOn ? { waitOn } : {}), ...(jump ? { jump: true } : {}),
+      ...(dsc ? { desc: dsc } : {}), ...(dmode ? { dmode } : {}), ...(dsize != null ? { dsize } : {}),
+      ...(dox != null ? { dox, doy } : {}) });
+    mode = "carry"; dir = "fwd"; stop = 0; rate = 1; name = null; waitOn = null; jump = false;
+    dsc = null; dmode = null; dsize = null; dox = null; doy = null;
+  };
+  while (j < tok.length) {
+    const t = tok[j++].toUpperCase();
+    if (t === "CARRY" || t === "PASS" || t === "SHOT") { mode = t.toLowerCase(); continue; }
+    if (t === "FWD" || t === "BWD") { dir = t.toLowerCase(); continue; }
+    if (t === "STOP") { stop = num(); continue; }
+    if (t === "JUMP") { jump = true; continue; }
+    if (t === "WAIT") { const on = tok[j++]; const at = parseInt(tok[j++], 10); waitOn = { on, at: (isNaN(at) ? 1 : at) - 1, mode: "waypoint" }; continue; }
+    // WACT <player> <pt> — pause until that player releases the puck at <pt> (0 = any action)
+    if (t === "WACT") { const on = tok[j++]; const at = parseInt(tok[j++], 10); waitOn = { on, at: (isNaN(at) || at === 0) ? null : at - 1, mode: "action" }; continue; }
+    if (t === "RATE") { rate = Math.max(0.1, num()); continue; }
+    if (t === "NAME") { name = (tok[j++] || "").replace(/_/g, " ").trim() || null; continue; }
+    if (t === "DESC") { dsc = unq(tok[j++]) || null; continue; }        // "free text" description
+    if (t === "SHOW") { const m = (tok[j++] || "").toLowerCase(); dmode = ["auto", "preso", "label"].includes(m) ? m : null; continue; }
+    if (t === "SIZE") { dsize = Math.max(0.2, num()); continue; }
+    if (t === "OFF") { dox = num(); doy = num(); continue; }            // label offset from the waypoint
+    if (t === "L") push({ type: "L", x: num(), y: num() });
+    else if (t === "Q") push({ type: "Q", cx: num(), cy: num(), x: num(), y: num() });
+    else if (t === "C") push({ type: "C", c1x: num(), c1y: num(), c2x: num(), c2y: num(), x: num(), y: num() });
+    else throw new Error(`unknown token "${t}" (use L Q C, PASS SHOT CARRY, FWD BWD, STOP n, RATE n)`);
+  }
+  return segs;
+}
+
 export function parseDrill(text) {
   const pieces = [];
   const byId = {};
   let rink = "full";
   let title = "", desc = "";
+  // the DSL schema version the drill declares (a `DSL <n>` header). Absent → treat
+  // as the current version (no back-compat gating yet); a reader may branch on it.
+  let dslVersion = DSL_VERSION;
   const errors = [];
   text.split(/\r?\n/).forEach((raw, i) => {
     // TITLE/DESC take the whole rest of the line (may contain spaces or #)
@@ -31,7 +71,11 @@ export function parseDrill(text) {
     const quoted = t => /^\d+$/.test(t || "");
     const cmd = tok[0].toUpperCase();
     try {
-      if (cmd === "RINK") {
+      if (cmd === "DSL") {
+        const n = parseInt(tok[1], 10);
+        if (isNaN(n) || n < 1) throw new Error(`DSL needs a version number, got "${tok[1] || ""}"`);
+        dslVersion = n;
+      } else if (cmd === "RINK") {
         const m = (tok[1] || "").toLowerCase();
         if (!VIEWS[m]) throw new Error(`unknown rink "${tok[1]}"`);
         rink = m;
@@ -127,42 +171,21 @@ export function parseDrill(text) {
           else if (r === "defense") defense = true;
           else label = r;
         });
-        const p = { id, kind, x, y, color, label, text, size, speed, hand, carrier, facing, transfers, shotAt, pickup, rimAt, chipAt, chipAim, rimAim, chipDist, rimDist, net, holdLine, goalie, defense, wait, group, crease, cues, path: [] };
+        const p = { id, kind, x, y, color, label, text, size, speed, hand, carrier, facing, transfers, shotAt, pickup, rimAt, chipAt, chipAim, rimAim, chipDist, rimDist, net, holdLine, goalie, defense, wait, group, crease, cues, forks: [], path: [] };
         pieces.push(p); byId[id] = p;
       } else if (cmd === "PATH") {
         const id = tok[1];
         const p = byId[id];
         if (!p) throw new Error(`PATH for unknown piece "${id}"`);
-        let j = 2, mode = "carry", dir = "fwd", stop = 0, rate = 1, name = null, waitOn = null, jump = false;
-        let dsc = null, dmode = null, dsize = null, dox = null, doy = null;   // waypoint description/label
-        const num = () => { const v = parseFloat(tok[j++]); if (isNaN(v)) throw new Error("bad number in PATH"); return v; };
-        const push = seg => {
-          p.path.push({ ...seg, mode, dir, stop, rate, ...(name ? { name } : {}), ...(waitOn ? { waitOn } : {}), ...(jump ? { jump: true } : {}),
-            ...(dsc ? { desc: dsc } : {}), ...(dmode ? { dmode } : {}), ...(dsize != null ? { dsize } : {}),
-            ...(dox != null ? { dox, doy } : {}) });
-          mode = "carry"; dir = "fwd"; stop = 0; rate = 1; name = null; waitOn = null; jump = false;
-          dsc = null; dmode = null; dsize = null; dox = null; doy = null;
-        };
-        while (j < tok.length) {
-          const t = tok[j++].toUpperCase();
-          if (t === "CARRY" || t === "PASS" || t === "SHOT") { mode = t.toLowerCase(); continue; }
-          if (t === "FWD" || t === "BWD") { dir = t.toLowerCase(); continue; }
-          if (t === "STOP") { stop = num(); continue; }
-          if (t === "JUMP") { jump = true; continue; }
-          if (t === "WAIT") { const on = tok[j++]; const at = parseInt(tok[j++], 10); waitOn = { on, at: (isNaN(at) ? 1 : at) - 1, mode: "waypoint" }; continue; }
-          // WACT <player> <pt> — pause until that player releases the puck at <pt> (0 = any action)
-          if (t === "WACT") { const on = tok[j++]; const at = parseInt(tok[j++], 10); waitOn = { on, at: (isNaN(at) || at === 0) ? null : at - 1, mode: "action" }; continue; }
-          if (t === "RATE") { rate = Math.max(0.1, num()); continue; }
-          if (t === "NAME") { name = (tok[j++] || "").replace(/_/g, " ").trim() || null; continue; }
-          if (t === "DESC") { dsc = unq(tok[j++]) || null; continue; }        // "free text" description
-          if (t === "SHOW") { const m = (tok[j++] || "").toLowerCase(); dmode = ["auto", "preso", "label"].includes(m) ? m : null; continue; }
-          if (t === "SIZE") { dsize = Math.max(0.2, num()); continue; }
-          if (t === "OFF") { dox = num(); doy = num(); continue; }            // label offset from the waypoint
-          if (t === "L") push({ type: "L", x: num(), y: num() });
-          else if (t === "Q") push({ type: "Q", cx: num(), cy: num(), x: num(), y: num() });
-          else if (t === "C") push({ type: "C", c1x: num(), c1y: num(), c2x: num(), c2y: num(), x: num(), y: num() });
-          else throw new Error(`unknown token "${t}" (use L Q C, PASS SHOT CARRY, FWD BWD, STOP n, RATE n)`);
-        }
+        p.path = parseSegments(tok, 2, unq);
+      } else if (cmd === "FORK") {
+        // FORK <player> <hex> <segments…> — a light-reaction continuation from the
+        // player's route end. Hex has no leading # (tokenizing strips it).
+        const id = tok[1], col = tok[2];
+        const p = byId[id];
+        if (!p) throw new Error(`FORK for unknown piece "${id}"`);
+        if (!/^[0-9a-fA-F]{3,6}$/.test(col || "")) throw new Error("FORK needs: id colour segments");
+        (p.forks = p.forks || []).push({ color: "#" + col, path: parseSegments(tok, 3, unq) });
       } else if (cmd === "MARK") {
         // MARK <id> <color> <width> <style> x1,y1 x2,y2 ...  (a freehand ink annotation)
         const mid = tok[1], mcol = tok[2] || "#ffd447", mw = parseFloat(tok[3]) || 1.1, mst = (tok[4] || "solid").toLowerCase();
@@ -176,7 +199,7 @@ export function parseDrill(text) {
       } else throw new Error(`unknown command "${tok[0]}"`);
     } catch (e) { errors.push(`line ${i + 1}: ${e.message}`); }
   });
-  return { rink, pieces, errors, title, desc };
+  return { rink, pieces, errors, title, desc, dslVersion };
 }
 
 const f1 = n => (Math.round(n * 10) / 10).toString();
@@ -209,7 +232,9 @@ function segToStr(s) {
 }
 
 export function serializeDrill(rink, pieces, title = "", desc = "") {
-  const out = [`RINK ${rink}`];
+  // stamp the schema version that wrote this text (first line, so a reader can
+  // branch before parsing the body). Always the current DSL_VERSION on save.
+  const out = [`DSL ${DSL_VERSION}`, `RINK ${rink}`];
   if (title && title.trim()) out.push(`TITLE ${title.trim()}`);
   if (desc && desc.trim()) out.push(`DESC ${desc.trim()}`);
   out.push("");
@@ -262,6 +287,11 @@ export function serializeDrill(rink, pieces, title = "", desc = "") {
       ? ` cues=${p.cues.map(c => `${String(c.color || "").replace("#", "")}:${f1(c.dur || 0)}`).join(";")}` : "";
     out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${car}${gp}${pas}${sht}${rmT}${chT}${nt}${hld}${wt}${fac}${gl}${crs}${df}${siz}${grp}${cue}${spd}`);
     if (p.path.length) out.push(`PATH ${p.id} ${p.path.map(segToStr).join(" ")}`);
+    // light-reaction forks (players): one continuation per cue colour
+    (p.forks || []).forEach(f => {
+      if (f.path && f.path.length)
+        out.push(`FORK ${p.id} ${String(f.color || "").replace("#", "")} ${f.path.map(segToStr).join(" ")}`);
+    });
   });
   return out.join("\n") + "\n";
 }

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo } from "react";
-import { VIEWS, COLORS, vb, APP_VERSION, ICON_SCALE, BUILD_STAMP, DEFAULT_TEXT,
+import { VIEWS, COLORS, vb, APP_VERSION, ICON_SCALE, BUILD_STAMP, DEFAULT_TEXT, SPEED,
   SAVE_PROB, MISS_POST, MISS_WIDE, MISS_OVER, SHOT_AIR_PROB, BOUNCE_REST } from "./constants.js";
 import { parseDrill, serializeDrill, extractDrill } from "./drill-format.js";
 import { drillSvg } from "./drill-svg.js";
@@ -45,6 +45,16 @@ const LABEL_COLORS = ["#14202b", "#d7263d", "#1f4fa3", "#1f8a4c", "#e0731d", "#7
 
 // cue colours a cognitive-training light can show (its screen fills with one)
 const LIGHT_COLORS = ["#2ea043", "#e5342b", "#2f6df6", "#f5c518", "#8a3ffc", "#f2f5f8"];
+
+// the colour a cue timeline is showing at absolute time t (seconds). Steps run
+// back-to-back; after the last cue its colour is held. null if there are no cues.
+function cueColorAt(cues, t) {
+  if (!cues || !cues.length) return null;
+  let acc = 0;
+  for (const c of cues) { acc += Math.max(0.1, c.dur || 0); if (t < acc) return c.color; }
+  return cues[cues.length - 1].color;
+}
+const sameColor = (a, b) => String(a || "").toLowerCase() === String(b || "").toLowerCase();
 
 // chip / hard-rim release handle sits this many times CLOSER than the puck's
 // actual travel, so a small drag near the player controls a long release
@@ -254,6 +264,9 @@ export default function DrillAnimator() {
   const [loopPause, setLoopPause] = useState(1);       // seconds held on the finished drill
   const [drillTitle, setDrillTitle] = useState(init.title || "");
   const [drillDesc, setDrillDesc] = useState(init.desc || "");
+  // the DSL schema version the loaded drill declared (for future version-aware
+  // rendering; not gated yet). Re-stamped to the current DSL_VERSION on save.
+  const [drillVersion, setDrillVersion] = useState(init.dslVersion);
   const [toast, setToast] = useState("");
   const [aiPlay, setAiPlay] = useState(false);         // "Let AI play" 5v5 mode
   const [aiMins, setAiMins] = useState(2);             // duration in minutes
@@ -294,6 +307,10 @@ export default function DrillAnimator() {
   const [redoCount, setRedoCount] = useState(0);
   const drawRaw = useRef([]);
   const drawTarget = useRef(null);
+  // when set to {id, color}, the draw tool authors a light-reaction FORK for that
+  // player+colour (continuing from its branch point) instead of a base route
+  const forkTarget = useRef(null);
+  const [forkDrawColor, setForkDrawColor] = useState(null);   // mirrors forkTarget for UI/status
   const fileRef = useRef(null);
   const animRef = useRef(0);
   const totalRef = useRef(1);
@@ -736,12 +753,22 @@ export default function DrillAnimator() {
   // re-binds to whichever loose puck is actually closest right now. Rendering &
   // editing stay on raw `pieces` (displayPosAt keys plans by id, so it lines up).
   const rpieces = useMemo(() => resolveNearest(pieces), [pieces]);
-  const { getPlan, pieceTime, displayPosAt, stickSwing, waypointTime, puckInGoal } = createTiming({ pieces: rpieces, pace, segRefs, planCache, seed: playSeed, realisticShots, detail: detailAnim, odds: shotOdds });
+  // Stage-2 light reactions: a branching player skates a base route to its end
+  // (the "branch"), then continues on the colour-tagged fork matching the light's
+  // cue at the instant they arrive. The branch arrival time depends only on the
+  // BASE route, so we can pick the fork and splice it onto the path here — before
+  // timing runs — leaving the timing engine unchanged (it just sees a longer path).
+  const effPieces = resolveForks(rpieces);
+  // branching players are animated along their spliced (base+fork) path — map id
+  // → effective piece so position sampling follows the reaction, not the base end
+  const effById = new Map(effPieces.map(p => [p.id, p]));
+  const effOf = p => p && p.kind === "player" && (p.forks || []).length ? (effById.get(p.id) || p) : p;
+  const { getPlan, pieceTime, displayPosAt, stickSwing, waypointTime, puckInGoal } = createTiming({ pieces: effPieces, pace, segRefs, planCache, seed: playSeed, realisticShots, detail: detailAnim, odds: shotOdds });
 
   // a light's cue timeline can outlast every route — keep the drill running long
   // enough to show every cue (so a "read the light" reaction has time to resolve)
   const cueSpan = p => p.kind === "light" && p.cues ? p.cues.reduce((a, c) => a + Math.max(0.1, c.dur || 0), 0) : 0;
-  const totalTime = Math.max(0.1, ...rpieces.map(pieceTime), ...rpieces.map(cueSpan));
+  const totalTime = Math.max(0.1, ...effPieces.map(pieceTime), ...effPieces.map(cueSpan));
   totalRef.current = totalTime;
 
   // natural phrase for an area name mid-sentence ("Dot lane" -> "the dot lane")
@@ -1195,17 +1222,77 @@ export default function DrillAnimator() {
   }
   // the colour a cognitive-training light is showing right now: its cue timeline
   // resolved at the current animation time, else (no cues / before play) its idle
-  // base colour. After the last cue the final colour is held.
+  // base colour.
   function lightColor(p) {
-    const cues = p.cues || [];
-    if (!cues.length) return p.color;
-    const e = animT <= 0 ? 0 : animT * totalTime;
-    let acc = 0;
-    for (const c of cues) { acc += Math.max(0.1, c.dur || 0); if (e < acc) return c.color; }
-    return cues[cues.length - 1].color;
+    return cueColorAt(p.cues, animT <= 0 ? 0 : animT * totalTime) ?? p.color;
+  }
+
+  /* ----- light reactions (branch forks) ----- */
+  // the branch point of a player's route: where the base route ends (the decision
+  // point), or the player's start if they have no base route.
+  function branchPoint(p) {
+    return p.path && p.path.length ? { x: p.path[p.path.length - 1].x, y: p.path[p.path.length - 1].y } : { x: p.x, y: p.y };
+  }
+  // seconds for a player to skate their BASE route to the branch — the same arc-
+  // length ÷ pace formula the timing engine uses (measured off the rendered path
+  // refs), so the fork choice lines up with where the light actually is on arrival.
+  function baseRouteTime(p) {
+    if (!p.path || !p.path.length) return 0;
+    let t = 0;
+    for (let i = 0; i < p.path.length; i++) {
+      const s = p.path[i];
+      const el = segRefs.current[`${p.id}/${i}`];
+      let L = 0; try { L = el ? el.getTotalLength() : 0; } catch { L = 0; }
+      const v = pace * SPEED[s.mode || "carry"] * (p.speed || 1) * (s.rate || 1);
+      t += (s.stop || 0) + (v > 0 ? L / v : 0);
+    }
+    return t;
+  }
+  // the light that governs a player's reaction: the nearest one that has a cue
+  // timeline (to its branch point). null if there are no cue lights.
+  function governingLight(ps, p) {
+    const lights = ps.filter(q => q.kind === "light" && (q.cues || []).length);
+    if (!lights.length) return null;
+    const b = branchPoint(p);
+    const d = q => Math.hypot(q.x - b.x, q.y - b.y);
+    return lights.reduce((a, q) => (d(q) < d(a) ? q : a));
+  }
+  // splice each branching player's chosen fork onto their base path: the fork whose
+  // colour matches the governing light's cue at their branch arrival time.
+  function resolveForks(ps) {
+    const branching = ps.filter(p => p.kind === "player" && (p.forks || []).length);
+    if (!branching.length) return ps;
+    let out = ps;
+    for (const p of branching) {
+      const light = governingLight(ps, p);
+      if (!light) continue;
+      const color = cueColorAt(light.cues, baseRouteTime(p));
+      const fork = (p.forks || []).find(f => sameColor(f.color, color));
+      if (!fork || !fork.path || !fork.path.length) continue;
+      if (out === ps) out = ps.slice();
+      const i = out.findIndex(q => q.id === p.id);
+      out[i] = { ...out[i], path: [...out[i].path, ...fork.path] };
+    }
+    return out;
+  }
+  // enter draw mode to author a reaction fork for player `id` under `color`
+  function beginForkDraw(id, color) {
+    resetAnim(); setPlaying(false); setPopup(null); setSelectedId(id);
+    forkTarget.current = { id, color }; setForkDrawColor(color); setTool("draw");
+  }
+  function clearFork(id, color) {
+    updateById(id, { forks: (pieces.find(p => p.id === id)?.forks || []).filter(f => !sameColor(f.color, color)) });
+  }
+  // which fork colour a player will take (the governing light's cue at their branch
+  // arrival) — for highlighting the active reaction path. null if none applies.
+  function chosenForkColor(p) {
+    if (!(p.forks || []).length) return null;
+    const light = governingLight(pieces, p);
+    return light ? cueColorAt(light.cues, baseRouteTime(p)) : null;
   }
 
   function displayPos(p) {
+    p = effOf(p);
     const res = displayPosRaw(p);
     if (animT <= 0) return res;
     // players arc around nets/parked players (via the route detour) and deviate
@@ -1273,6 +1360,7 @@ export default function DrillAnimator() {
     return res;
   }
   function displayPosRaw(p) {
+    p = effOf(p);
     if (p.kind === "player" && p.defense) return animT > 0 ? dmanPos(p) : { x: p.x, y: p.y, a: p.facing || 0 };
     const dp = displayPosAt(p, animT <= 0 ? 0 : animT * totalTime);
     if (!detailAnim || p.kind !== "player" || !(dp.smul > 0.02)) return dp;  // no stride sway/lean when detail off
@@ -1927,6 +2015,15 @@ export default function DrillAnimator() {
   /* ----- drawing ----- */
   function beginDraw(e, existingId) {
     const pt = svgPt(e);
+    // drawing a light-reaction fork: target the chosen player, no new piece
+    if (forkTarget.current) {
+      drawTarget.current = forkTarget.current.id;
+      drawRaw.current = [pt];
+      setDrawPreview([pt]);
+      drag.current = { kind: "drawing", touch: e.pointerType !== "mouse" };
+      svgRef.current.setPointerCapture?.(e.pointerId);
+      return;
+    }
     let id = existingId || selectedId;
     const t = id && pieces.find(q => q.id === id);
     if (t && t.kind !== "player" && t.kind !== "puck") {
@@ -1960,6 +2057,21 @@ export default function DrillAnimator() {
     const raw = drawRaw.current;
     drawRaw.current = [];
     setDrawPreview(null);
+    // a light-reaction fork: fit a route from the player's branch point through the
+    // drawn trail, and store it (replacing any existing fork of the same colour)
+    if (forkTarget.current) {
+      const { id, color } = forkTarget.current;
+      forkTarget.current = null; setForkDrawColor(null); setTool("select");
+      if (raw.length < 3) return;
+      setPieces(ps => ps.map(p => {
+        if (p.id !== id) return p;
+        const route = fitRoute(branchPoint(p), raw);
+        if (!route.length) return p;
+        const forks = (p.forks || []).filter(f => !sameColor(f.color, color)).concat([{ color, path: route }]);
+        return { ...p, forks };
+      }));
+      return;
+    }
     if (markerDraw.current) {                       // freehand ink annotation
       markerDraw.current = false;
       setTool("select");
@@ -2476,7 +2588,7 @@ export default function DrillAnimator() {
   function applyText() {
     const r = parseDrill(extractDrill(textDraft));   // accepts a pasted ```drill markdown block
     if (r.errors.length) { setTextError(r.errors.join("\n")); return; }
-    setRink(r.rink); setPieces(r.pieces); setDrillTitle(r.title); setDrillDesc(r.desc); setSelectedId(null); setPopup(null);
+    setRink(r.rink); setPieces(r.pieces); setDrillTitle(r.title); setDrillDesc(r.desc); setDrillVersion(r.dslVersion); setSelectedId(null); setPopup(null);
     resetAnim(); setTextError(""); setOpenMenu(null);
   }
   const slug = () => (drillTitle || "drill").replace(/[^\w-]+/g, "_").toLowerCase();
@@ -2562,7 +2674,7 @@ export default function DrillAnimator() {
       const txt = String(reader.result);
       const r = parseDrill(extractDrill(txt));      // .txt or a .md with a ```drill block
       if (r.errors.length) { setTextDraft(txt); setTextError(r.errors.join("\n")); setOpenMenu("text"); return; }
-      setRink(r.rink); setPieces(r.pieces); setDrillTitle(r.title); setDrillDesc(r.desc); setSelectedId(null); setPopup(null);
+      setRink(r.rink); setPieces(r.pieces); setDrillTitle(r.title); setDrillDesc(r.desc); setDrillVersion(r.dslVersion); setSelectedId(null); setPopup(null);
       resetAnim(); setTextError(""); setOpenMenu(null);
     };
     reader.readAsText(f);
@@ -3493,6 +3605,33 @@ export default function DrillAnimator() {
                   <span style={{ fontSize: 11, color: "#8b99a8" }}>waits for the puck to enter the zone</span>
                 </div>
               )}
+              {/* light reactions: one fork per cue colour, forking from the route's
+                  end. The player takes the fork matching the light on arrival. */}
+              {(() => {
+                const light = governingLight(pieces, p);
+                if (!light) return null;
+                const colors = [...new Set((light.cues || []).map(c => c.color))];
+                return (
+                  <>
+                    <div className="hd-poprow">
+                      <span style={{ fontSize: 11, color: "#8b99a8" }}>
+                        Light reactions ({light.id}) — draw where {p.label || p.id} goes for each cue, from the route's end
+                      </span>
+                    </div>
+                    {colors.map(c => {
+                      const has = (p.forks || []).some(f => sameColor(f.color, c));
+                      return (
+                        <div className="hd-poprow" key={c}>
+                          <div className="hd-swatch on" style={{ background: c, cursor: "default" }} />
+                          <button className="hd-mini" onClick={() => beginForkDraw(p.id, c)}>{has ? "Redraw" : "Draw"}</button>
+                          {has && <button className="hd-mini" onClick={() => clearFork(p.id, c)}>Clear</button>}
+                          {!has && <span style={{ fontSize: 11, color: "#8b99a8" }}>no reaction yet</span>}
+                        </div>
+                      );
+                    })}
+                  </>
+                );
+              })()}
               {/* unified delay trigger: hold the whole route at the start until a
                   timer, another player's arrival, or another player's puck action */}
               {p.path.length > 0 && !p.defense && (
@@ -3940,7 +4079,9 @@ export default function DrillAnimator() {
   }
 
   const toolHint =
-    tool === "draw"
+    tool === "draw" && forkDrawColor
+      ? `Drawing the reaction — drag from the route's end`
+      : tool === "draw"
       ? (selected ? `Drawing ${selected.id}'s route — drag across the ice` : "Drag on the ice — creates a player")
       : tool === "marker" ? "Marker — drag on the ice to draw"
       : tool !== "select" ? "Tap the ice to place" : null;
@@ -4085,6 +4226,52 @@ export default function DrillAnimator() {
                   )}
                   {/* arrow last so it sits ON TOP of the line (raw or bent) */}
                   {showRoutes && p.path.length > 0 && renderArrow(p, bent)}
+                </g>
+              );
+            })}
+
+            {/* light-reaction forks: invisible ref paths so timing can measure the
+                spliced fork segments, plus visible tinted guide lines (the chosen
+                reaction solid, the others dashed/faint) */}
+            {!aiPlay && effPieces.map(p => {
+              const rawP = pieces.find(q => q.id === p.id);
+              const baseLen = rawP && rawP.path ? rawP.path.length : 0;
+              if (!p.path || p.path.length <= baseLen) return null;
+              let prev = baseLen ? { x: p.path[baseLen - 1].x, y: p.path[baseLen - 1].y } : { x: p.x, y: p.y };
+              return (
+                <g key={`fkm-${p.id}`}>
+                  {p.path.slice(baseLen).map((s, k) => {
+                    const i = baseLen + k, d = segD(prev, s);
+                    prev = { x: s.x, y: s.y };
+                    return <path key={i} d={d} fill="none" stroke="none"
+                      ref={el => { if (el) segRefs.current[`${p.id}/${i}`] = el; }} />;
+                  })}
+                </g>
+              );
+            })}
+            {showRoutes && !aiPlay && pieces.map(p => {
+              if (p.kind !== "player" || !(p.forks || []).length) return null;
+              const chosen = chosenForkColor(p);
+              return (
+                <g key={`fkv-${p.id}`}>
+                  {p.forks.map((f, fi) => {
+                    if (!f.path || !f.path.length) return null;
+                    let prev = branchPoint(p);
+                    const active = sameColor(f.color, chosen);
+                    return (
+                      <g key={fi}>
+                        {f.path.map((s, i) => {
+                          const d = segD(prev, s);
+                          prev = { x: s.x, y: s.y };
+                          return <path key={i} d={d} fill="none" stroke={f.color}
+                            strokeWidth={sw(active ? 0.55 : 0.42)} vectorEffect="non-scaling-stroke"
+                            strokeDasharray={active ? undefined : sdash("1.6 1.1")}
+                            strokeLinecap="round" strokeLinejoin="round"
+                            opacity={active ? 0.95 : 0.5} pointerEvents="none" />;
+                        })}
+                      </g>
+                    );
+                  })}
                 </g>
               );
             })}
@@ -4637,7 +4824,7 @@ export default function DrillAnimator() {
           transform: "translateX(-50%)", background: "rgba(20,26,32,0.92)", color: "#eaf2f8",
           padding: "6px 14px", borderRadius: 8, fontSize: 13, zIndex: 9999, pointerEvents: "none" }}>{toast}</div>
       )}
-      {showDiag && <DiagPanel />}
+      {showDiag && <DiagPanel drillVersion={drillVersion} />}
     </div>
   );
 }
