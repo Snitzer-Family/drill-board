@@ -52,6 +52,9 @@ export function parseDrill(text) {
   const byId = {};
   let rink = "full";
   let title = "", desc = "";
+  // presentation steps: authored narration beats, each anchored to an absolute
+  // time (at=) or a player's waypoint activation (on=<id>:<pt>). See serializeDrill.
+  const steps = [];
   // the DSL schema version the drill declares (a `DSL <n>` header). Absent → treat
   // as the current version (no back-compat gating yet); a reader may branch on it.
   let dslVersion = DSL_VERSION;
@@ -213,10 +216,21 @@ export function parseDrill(text) {
           const m = { id: mid, kind: "mark", color: mcol, width: mw, style: ["dashed", "dotted", "wavy"].includes(mst) ? mst : "solid", x: pts[0].x, y: pts[0].y, pts, path: [] };
           pieces.push(m); byId[mid] = m;
         }
+      } else if (cmd === "STEP") {
+        // STEP at=<seconds> "text"   OR   STEP on=<pieceId>:<pt> "text"
+        // waypoint number is 1-based on the wire, stored 0-based as wp.
+        let at = null, on = null, txt = "";
+        tok.slice(1).forEach(r => {
+          if (quoted(r)) txt = unq(r);
+          else if (/^at=/i.test(r)) { const n = parseFloat(r.slice(3)); if (!isNaN(n)) at = Math.max(0, n); }
+          else if (/^on=/i.test(r)) { const m = /^([^:]+):(\d+)$/.exec(r.slice(3)); if (m) on = { piece: m[1], wp: parseInt(m[2], 10) - 1 }; }
+        });
+        if (on) steps.push({ text: txt, on });
+        else if (at != null) steps.push({ text: txt, at });
       } else throw new Error(`unknown command "${tok[0]}"`);
     } catch (e) { errors.push(`line ${i + 1}: ${e.message}`); }
   });
-  return { rink, pieces, errors, title, desc, dslVersion };
+  return { rink, pieces, errors, title, desc, dslVersion, steps };
 }
 
 const f1 = n => (Math.round(n * 10) / 10).toString();
@@ -248,7 +262,7 @@ function segToStr(s) {
   return `${pre}C ${f1(s.c1x)},${f1(s.c1y)} ${f1(s.c2x)},${f1(s.c2y)} ${f1(s.x)},${f1(s.y)}`;
 }
 
-export function serializeDrill(rink, pieces, title = "", desc = "") {
+export function serializeDrill(rink, pieces, title = "", desc = "", steps = []) {
   // stamp the schema version that wrote this text (first line, so a reader can
   // branch before parsing the body). Always the current DSL_VERSION on save.
   const out = [`DSL ${DSL_VERSION}`, `RINK ${rink}`];
@@ -320,6 +334,11 @@ export function serializeDrill(rink, pieces, title = "", desc = "") {
       emitForks(f.forks, ref);
     });
     emitForks(p.forks, "");
+  });
+  // presentation steps (authored narration), each anchored to a time or a waypoint
+  (steps || []).forEach(s => {
+    const anchor = s.on ? `on=${s.on.piece}:${s.on.wp + 1}` : `at=${f2(s.at || 0)}`;
+    out.push(`STEP ${anchor} ${qesc(s.text || "")}`);
   });
   return out.join("\n") + "\n";
 }

@@ -221,6 +221,10 @@ function DelayTrigger({ value, onChange, sub, players, actorIds, nameOf }) {
    its own route) until that player reaches the waypoint, then
    hops onto their blade. A player with no route picks up when the
    loose puck's own path reaches them (or at once).
+   STEP at=<sec> "text"  or  STEP on=<id>:<pt> "text" — a
+   presentation caption anchored to an absolute time or a
+   player's waypoint activation; play pauses on each in
+   Presentation mode. Authored via scrub → pause → ＋ note.
 
    UI: the rink fills the screen. Corner controls: ☰ settings
    (text/export/load/pace), rink size, tools (+pieces / draw),
@@ -266,7 +270,6 @@ export default function DrillAnimator() {
   // presentation mode: pause at each described step so viewers can read along
   const [presentation, setPresentation] = useState(false);
   const [presoDelay, setPresoDelay] = useState(2.5);   // seconds held at each step
-  const [stepNotes, setStepNotes] = useState({});      // key -> hand-edited text
   const [holdStep, setHoldStep] = useState(null);      // step currently being read
   const [minorDesc, setMinorDesc] = useState(false);   // describe zones skated through
   const [showResult, setShowResult] = useState(true);  // Save!/Goal! splash on shots
@@ -285,6 +288,9 @@ export default function DrillAnimator() {
   const [loopPause, setLoopPause] = useState(1);       // seconds held on the finished drill
   const [drillTitle, setDrillTitle] = useState(init.title || "");
   const [drillDesc, setDrillDesc] = useState(init.desc || "");
+  // authored presentation steps: [{ text, at } | { text, on:{piece,wp} }] — the
+  // narration the coach drops while scrubbing; persisted via the STEP DSL statement
+  const [drillSteps, setDrillSteps] = useState(init.steps || []);
   // the DSL schema version the loaded drill declared (for future version-aware
   // rendering; not gated yet). Re-stamped to the current DSL_VERSION on save.
   const [drillVersion, setDrillVersion] = useState(init.dslVersion);
@@ -838,8 +844,9 @@ export default function DrillAnimator() {
     return out;
   }
 
-  // Auto-describe the play's major beats (puck events) as timed steps; the
-  // text is editable and stored per-step in stepNotes.
+  // Auto-describe the play's major beats (puck events) as timed steps. Used as the
+  // presentation fallback when no steps are authored, and as the seed for the
+  // "Generate from play" button (which converts these into editable authored steps).
   function buildSteps() {
     const { plans } = getPlan();
     const nameOf = id => { const q = pieces.find(x => x.id === id); return (q && q.label) || id; };
@@ -898,14 +905,118 @@ export default function DrillAnimator() {
     });
     evs.sort((a, b) => a.t - b.t);
     const steps = [{ t: 0, key: "start", auto: "The play begins" }, ...evs];
-    return steps.map(s => ({ ...s, text: stepNotes[s.key] != null ? stepNotes[s.key] : s.auto }));
+    return steps.map(s => ({ ...s, text: s.auto }));
   }
-  const presoSteps = (presentation || openMenu === "steps") ? buildSteps() : [];
-  stepsRef.current = presoSteps;
+
+  // Resolve the authored `drillSteps` into playable/displayable rows. A waypoint
+  // anchor (on=) resolves its time live via waypointTime — so it tracks edits and
+  // retiming; an absolute (at=) anchor is clamped into the drill's length. An
+  // anchor whose piece/waypoint no longer exists is kept (resolved:false) so the
+  // editor can flag it and undo can restore it, but it's dropped from the timeline.
+  function resolveSteps() {
+    const T = Math.max(0.1, totalTime);
+    return (drillSteps || []).map((s, idx) => {
+      if (s.on) {
+        const pc = effById.get(s.on.piece) || pieces.find(p => p.id === s.on.piece);
+        if (pc && pc.kind === "player" && (pc.path || []).length > s.on.wp && s.on.wp >= 0) {
+          return { ...s, idx, key: `step:${idx}`, resolved: true,
+            t: waypointTime(effOf(pc), s.on.wp), label: `${pc.label || pc.id} · pt ${s.on.wp + 1}` };
+        }
+        return { ...s, idx, key: `step:${idx}`, resolved: false, t: 0, label: "waypoint missing" };
+      }
+      const t = Math.min(s.at || 0, T);
+      return { ...s, idx, key: `step:${idx}`, resolved: true, t, label: `${(s.at || 0).toFixed(1)}s` };
+    });
+  }
+  // every authored row (incl. unresolved), for the editor; the resolved subset for
+  // the scrubber ticks; and the non-empty subset that actually pauses playback.
+  const allSteps = (presentation || openMenu === "steps") ? resolveSteps() : [];
+  const timelineSteps = allSteps.filter(s => s.resolved).slice().sort((a, b) => a.t - b.t);
+  const playSteps = timelineSteps.filter(s => (s.text || "").trim());
+  // editor rows: resolved first (by time), unresolved (waypoint gone) last
+  const editRows = allSteps.slice().sort((a, b) => a.resolved === b.resolved ? a.t - b.t : (a.resolved ? -1 : 1));
+  // feed the RAF loop: authored steps win once any exist; otherwise fall back to
+  // the legacy auto-derivation so pre-existing drills still narrate in presentation.
+  stepsRef.current = presentation
+    ? (drillSteps.length ? playSteps : buildSteps())
+    : playSteps;
   presoDelayRef.current = presoDelay;
   presoRef.current = presentation;
   loopRef.current = loopMode;
   loopPauseRef.current = loopPause;
+
+  // ----- presentation-step authoring (scrub → pause → describe) -----
+  // seek the paused animation to a normalized position (keeps ref + state in step)
+  function scrubTo(v) { const t = Math.max(0, Math.min(1, v)); animRef.current = t; setAnimT(t); }
+  // nearest player BASE-route waypoint activation to a time (seconds), within a
+  // small window. Base waypoints are stable under edits (we reindex them) and
+  // independent of which light-reaction fork resolves; fork points aren't anchored.
+  function nearestWaypoint(nowSec) {
+    const eps = Math.max(0.12, totalTime * 0.01);
+    let best = null;
+    pieces.forEach(p => {
+      if (p.kind !== "player" || !(p.path || []).length) return;
+      const ep = effOf(p);
+      p.path.forEach((_, i) => {
+        const dt = Math.abs(waypointTime(ep, i) - nowSec);
+        if (dt <= eps && (!best || dt < best.dt)) best = { piece: p.id, wp: i, dt };
+      });
+    });
+    return best;
+  }
+  // keep step waypoint-anchors valid when a player's route gains/loses a point
+  // (mirrors shiftActionWaypoints for puck actions). Insert at segIdx bumps later
+  // anchors up; delete of point i pulls later ones down and pins an anchor ON i to
+  // its (pre-delete) absolute time so the note survives.
+  const stepsOnInsert = (playerId, segIdx) => setDrillSteps(prev => prev.map(s =>
+    s.on && s.on.piece === playerId && s.on.wp >= segIdx ? { ...s, on: { ...s.on, wp: s.on.wp + 1 } } : s));
+  const stepsOnDelete = (playerId, i) => setDrillSteps(prev => prev.map(s => {
+    if (!s.on || s.on.piece !== playerId) return s;
+    if (s.on.wp === i) { const ep = effById.get(playerId); return { text: s.text, at: ep ? waypointTime(ep, i) : 0 }; }
+    return s.on.wp > i ? { ...s, on: { ...s.on, wp: s.on.wp - 1 } } : s;
+  }));
+  // drop a new step at the current paused position: prefer a nearby waypoint anchor
+  // (robust to edits), else pin the absolute time. Opens the editor to type text.
+  function addStepHere() {
+    const nowSec = animT * totalTime;
+    const wp = nowSec > Math.max(0.12, totalTime * 0.01) ? nearestWaypoint(nowSec) : null;
+    setDrillSteps(s => [...s, wp ? { text: "", on: { piece: wp.piece, wp: wp.wp } } : { text: "", at: nowSec }]);
+    setPlaying(false); setHoldStep(null); holdRef.current = 0;
+    setOpenMenu("steps");
+  }
+  const setStepText = (idx, text) => setDrillSteps(s => s.map((x, k) => k === idx ? { ...x, text } : x));
+  const deleteStep = idx => setDrillSteps(s => s.filter((_, k) => k !== idx));
+  // flip a step between its waypoint anchor and an absolute-time anchor. Time→
+  // waypoint snaps to the nearest activation to the step's current time (if any).
+  function toggleStepAnchor(idx) {
+    setDrillSteps(s => s.map((x, k) => {
+      if (k !== idx) return x;
+      if (x.on) { const r = resolveSteps()[idx]; return { text: x.text, at: r ? r.t : 0 }; }
+      const wp = nearestWaypoint(x.at || 0);
+      return wp ? { text: x.text, on: { piece: wp.piece, wp: wp.wp } } : x;
+    }));
+  }
+  // materialize the legacy auto-derivation into editable authored steps: movement
+  // beats become waypoint anchors (wp = i-1, where buildSteps fires them), puck
+  // events (pass/shot/pickup/collect) stay time-anchored.
+  function generateSteps() {
+    if (drillSteps.length && !window.confirm("Replace the current presentation steps with ones generated from the play?")) return;
+    const raw = buildSteps().filter(s => s.key !== "start");
+    setDrillSteps(raw.map(s => {
+      const m = /^([^:]+):(?:move|say):(\d+)$/.exec(s.key);
+      if (m) {
+        const pid = m[1], wp = parseInt(m[2], 10) - 1;
+        if (wp >= 0 && pieces.some(p => p.id === pid && p.kind === "player")) return { text: s.text, on: { piece: pid, wp } };
+      }
+      return { text: s.text, at: s.t };
+    }));
+  }
+  // scrubber tick positions (fractions 0..1): player waypoint activations + steps
+  const scrubDur = Math.max(0.1, totalTime);
+  const wpTicks = [];
+  if (!aiPlay) effPieces.forEach(p => { if (p.kind === "player") (p.path || []).forEach((_, i) => wpTicks.push(Math.min(1, waypointTime(p, i) / scrubDur))); });
+  const stepTicks = (!aiPlay && drillSteps.length)
+    ? resolveSteps().filter(s => s.resolved).map(s => Math.min(1, s.t / scrubDur)) : [];
 
   useEffect(() => {
     if (!playing) return;
@@ -1804,11 +1915,11 @@ export default function DrillAnimator() {
     if (aiPlay) return;
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      try { localStorage.setItem(SAVE_KEY, serializeDrill(rink, pieces, drillTitle, drillDesc)); }
+      try { localStorage.setItem(SAVE_KEY, serializeDrill(rink, pieces, drillTitle, drillDesc, drillSteps)); }
       catch { /* storage full / disabled — nothing we can do, keep running */ }
     }, 400);
     return () => clearTimeout(saveTimer.current);
-  }, [rink, pieces, drillTitle, drillDesc, aiPlay]);
+  }, [rink, pieces, drillTitle, drillDesc, drillSteps, aiPlay]);
 
   function undoLast() {
     if (!undoStack.current.length) return;
@@ -1900,6 +2011,7 @@ export default function DrillAnimator() {
       setPopup(null);
       return;
     }
+    stepsOnDelete(id, i);
     setPieces(ps => {
       // removing waypoint i pulls this player's later waypoints down by one
       const shifted = shiftActionWaypoints(ps, id, i + 1, -1);
@@ -2271,6 +2383,7 @@ export default function DrillAnimator() {
   }
 
   function addPointAt(id, segIdx, pt, fork = null) {
+    if (!fork) stepsOnInsert(id, segIdx);
     setPieces(ps => {
       // inserting a waypoint at segIdx pushes this player's later waypoints up by
       // one — shift their actions first so each stays on its own waypoint (base
@@ -2870,21 +2983,21 @@ export default function DrillAnimator() {
 
   /* ----- text / files ----- */
   function openText() {
-    setTextDraft(serializeDrill(rink, pieces, drillTitle, drillDesc));
+    setTextDraft(serializeDrill(rink, pieces, drillTitle, drillDesc, drillSteps));
     setTextError("");
     setOpenMenu("text");
   }
   function applyText() {
     const r = parseDrill(extractDrill(textDraft));   // accepts a pasted ```drill markdown block
     if (r.errors.length) { setTextError(r.errors.join("\n")); return; }
-    setRink(r.rink); setPieces(r.pieces); setDrillTitle(r.title); setDrillDesc(r.desc); setDrillVersion(r.dslVersion); setSelectedId(null); setPopup(null);
+    setRink(r.rink); setPieces(r.pieces); setDrillTitle(r.title); setDrillDesc(r.desc); setDrillSteps(r.steps || []); setDrillVersion(r.dslVersion); setSelectedId(null); setPopup(null);
     resetAnim(); setTextError(""); setOpenMenu(null);
   }
   const slug = () => (drillTitle || "drill").replace(/[^\w-]+/g, "_").toLowerCase();
   // a drill as a markdown doc: title heading + description + a ```drill fenced
   // block that round-trips (renders as a code block in Obsidian / on the web)
   function toMarkdown() {
-    const dsl = serializeDrill(rink, pieces, drillTitle, drillDesc).trimEnd();
+    const dsl = serializeDrill(rink, pieces, drillTitle, drillDesc, drillSteps).trimEnd();
     const title = (drillTitle || "Drill").trim();
     const desc = drillDesc && drillDesc.trim() ? drillDesc.trim() + "\n\n" : "";
     return `# ${title}\n\n${desc}\`\`\`drill\n${dsl}\n\`\`\`\n`;
@@ -2895,11 +3008,11 @@ export default function DrillAnimator() {
     a.download = name; a.click();
     URL.revokeObjectURL(a.href);
   }
-  function exportTxt() { download(`${slug()}.txt`, serializeDrill(rink, pieces, drillTitle, drillDesc), "text/plain"); }
+  function exportTxt() { download(`${slug()}.txt`, serializeDrill(rink, pieces, drillTitle, drillDesc, drillSteps), "text/plain"); }
   function exportMd() { download(`${slug()}.md`, toMarkdown(), "text/markdown"); }
   // render the drill (via the DSL→SVG renderer) and rasterise it to a PNG
   function exportImage() {
-    const dsl = serializeDrill(rink, pieces, drillTitle, drillDesc);
+    const dsl = serializeDrill(rink, pieces, drillTitle, drillDesc, drillSteps);
     // size the raster to the drill's rink mode, matching the diagram's aspect-
     // preserving viewBox so full ice keeps true 200:85 ice proportions
     const [, , vw, vh] = VIEWS[rink] || VIEWS.full;
@@ -2948,7 +3061,7 @@ export default function DrillAnimator() {
   // build a link to the standalone preview page with the current drill encoded in
   // the URL hash (matches the preview page's #d= URL-safe base64 format)
   function previewLink() {
-    const dsl = serializeDrill(rink, pieces, drillTitle, drillDesc);
+    const dsl = serializeDrill(rink, pieces, drillTitle, drillDesc, drillSteps);
     const enc = btoa(unescape(encodeURIComponent(dsl)))
       .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
     const url = new URL("drill-preview.html", window.location.href).href + "#d=" + enc;
@@ -2963,7 +3076,7 @@ export default function DrillAnimator() {
       const txt = String(reader.result);
       const r = parseDrill(extractDrill(txt));      // .txt or a .md with a ```drill block
       if (r.errors.length) { setTextDraft(txt); setTextError(r.errors.join("\n")); setOpenMenu("text"); return; }
-      setRink(r.rink); setPieces(r.pieces); setDrillTitle(r.title); setDrillDesc(r.desc); setDrillVersion(r.dslVersion); setSelectedId(null); setPopup(null);
+      setRink(r.rink); setPieces(r.pieces); setDrillTitle(r.title); setDrillDesc(r.desc); setDrillSteps(r.steps || []); setDrillVersion(r.dslVersion); setSelectedId(null); setPopup(null);
       resetAnim(); setTextError(""); setOpenMenu(null);
     };
     reader.readAsText(f);
@@ -4808,6 +4921,22 @@ export default function DrillAnimator() {
         );
       })()}
 
+      {/* ---------- timeline scrubber ---------- */}
+      {!aiPlay && !holdStep && (
+        <div className="hd-scrub">
+          <div className="hd-scrubtrack">
+            {wpTicks.map((f, k) => <span key={"w" + k} className="hd-tick wp" style={{ left: f * 100 + "%" }} />)}
+            {stepTicks.map((f, k) => <span key={"s" + k} className="hd-tick step" style={{ left: f * 100 + "%" }} />)}
+            <input className="hd-scrubrange" type="range" min={0} max={1} step={0.001} value={animT}
+              onPointerDown={() => { if (playing) setPlaying(false); setHoldStep(null); holdRef.current = 0; }}
+              onChange={e => scrubTo(+e.target.value)} />
+          </div>
+          <span className="hd-scrubtime">{(animT * totalTime).toFixed(1)}/{totalTime.toFixed(1)}s</span>
+          <button className="hd-scrubadd" disabled={playing} onClick={addStepHere}
+            title="Add a description at this point">＋ note</button>
+        </div>
+      )}
+
       {/* ---------- bottom menu bar ---------- */}
       <div className="hd-bar">
         <button className={`hd-barbtn${openMenu === "settings" ? " on" : ""}`} title="Menu"
@@ -4888,7 +5017,7 @@ export default function DrillAnimator() {
           </div>
           <div className="hd-poprow">
             <button className="hd-mini" onClick={() => setOpenMenu("steps")}>✎ Edit steps</button>
-            <span style={{ fontSize: 11, color: "#8b99a8" }}>play pauses at each described beat</span>
+            <span style={{ fontSize: 11, color: "#8b99a8" }}>{drillSteps.length ? `${drillSteps.length} step${drillSteps.length > 1 ? "s" : ""} — play pauses at each` : "scrub, pause, add your own"}</span>
           </div>
           <div className="hd-note">
             Tap a piece, route point, or line for its settings.
@@ -5111,6 +5240,10 @@ export default function DrillAnimator() {
             <b> Timer</b> (n seconds), a <b>Waypoint</b> (another player reaches a point — <code>wait=F2@3</code> /
             <code>WAIT F2 3</code>), or an <b>Action</b> (another player passes/chips/rims/shoots — <code>act=F2</code> /
             <code>WACT F2 0</code>) fires.
+            <b> Presentation steps</b> — <code>STEP at=8.4 "…"</code> pins a caption to a time,
+            <code>STEP on=F1:3 "…"</code> ties it to a player's waypoint activation (which tracks
+            edits/retiming). Author them by scrubbing the timeline, pausing, and tapping <b>＋ note</b>;
+            in Presentation mode play pauses on each.
           </div>
         </div>
       )}
@@ -5119,19 +5252,24 @@ export default function DrillAnimator() {
         <div className="hd-sheet">
           <div className="hd-mh">Presentation steps</div>
           <div className="hd-steplist">
-            {presoSteps.length === 0 ? (
-              <div className="hd-note">No described beats yet — add pucks, passes, or shots.</div>
-            ) : presoSteps.map(s => (
-              <div key={s.key} className="hd-steprow">
-                <span className="hd-steptime">{s.t.toFixed(1)}s</span>
+            {editRows.length === 0 ? (
+              <div className="hd-note">No steps yet. Scrub the timeline, pause, then “＋ Add here” — or Generate from the play.</div>
+            ) : editRows.map(s => (
+              <div key={s.idx} className="hd-steprow">
+                <button className={`hd-anchorbtn${s.on ? " wp" : ""}${s.resolved ? "" : " bad"}`}
+                  title={s.on ? "Anchored to a waypoint — tap to pin to this time instead"
+                    : "Anchored to a time — tap to snap to the nearest waypoint"}
+                  onClick={() => toggleStepAnchor(s.idx)}>{s.resolved ? s.label : "⚠ " + s.label}</button>
                 <input className="hd-input" style={{ flex: 1, minWidth: 0 }} value={s.text}
-                  onChange={e => setStepNotes(n => ({ ...n, [s.key]: e.target.value }))} />
-                {stepNotes[s.key] != null && (
-                  <button className="hd-mini" title="reset to auto"
-                    onClick={() => setStepNotes(n => { const m = { ...n }; delete m[s.key]; return m; })}>↺</button>
-                )}
+                  placeholder="Describe this beat…" autoFocus={!s.text}
+                  onChange={e => setStepText(s.idx, e.target.value)} />
+                <button className="hd-mini" title="delete step" onClick={() => deleteStep(s.idx)}>✕</button>
               </div>
             ))}
+          </div>
+          <div className="hd-row">
+            <button className="hd-btn" disabled={playing} onClick={addStepHere}>＋ Add here</button>
+            <button className="hd-btn" onClick={generateSteps}>⚙ Generate from play</button>
           </div>
           <div className="hd-row">
             <button className="hd-btn primary" onClick={() => setOpenMenu(null)}>Done</button>
@@ -5139,8 +5277,9 @@ export default function DrillAnimator() {
               onClick={() => setPresentation(v => !v)}>{presentation ? "Presentation on" : "Turn on"}</button>
           </div>
           <div className="hd-note">
-            Text is auto-generated from the play — edit any beat; ↺ resets it to auto.
-            In Presentation mode, play pauses {presoDelay}s at each step (Continue to skip ahead).
+            Scrub the timeline, pause, then “＋ Add here” drops a note — near a waypoint it
+            anchors there (and tracks edits); otherwise it pins the time. Tap a step's chip to
+            switch. In Presentation mode, play pauses {presoDelay}s at each step (Continue to skip).
           </div>
         </div>
       )}

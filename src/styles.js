@@ -47,6 +47,31 @@ export const STYLES = `
         .hd-playtab.bottom { border-radius:13px 13px 0 0; }
         .hd-playtab.left { width:26px; height:54px; border-radius:0 13px 13px 0; border-left:none; }
         .hd-playtab.right { width:26px; height:54px; border-radius:13px 0 0 13px; border-right:none; }
+        /* timeline scrubber — a thin strip above the menu bar; seek + drop notes */
+        .hd-scrub { position:absolute; z-index:44; left:8px; right:8px; bottom:calc(56px + var(--hd-b));
+          display:flex; align-items:center; gap:9px; padding:5px 10px;
+          background:rgba(23,29,37,.84); border:1px solid #2c3846; border-radius:11px;
+          box-shadow:0 3px 12px rgba(0,0,0,.4); backdrop-filter:blur(4px); }
+        .hd-scrubtrack { position:relative; flex:1; min-width:0; height:22px; display:flex; align-items:center; }
+        .hd-scrubtrack::before { content:""; position:absolute; left:0; right:0; top:50%;
+          height:4px; margin-top:-2px; border-radius:2px; background:#3a4756; }
+        .hd-tick { position:absolute; top:50%; width:2px; height:10px; margin-top:-5px;
+          border-radius:1px; transform:translateX(-1px); pointer-events:none; z-index:1; }
+        .hd-tick.wp { background:#6b7c8d; }
+        .hd-tick.step { background:#e0a92e; height:15px; margin-top:-7.5px; width:2.5px; }
+        .hd-scrubrange { position:relative; z-index:2; width:100%; margin:0; height:22px;
+          background:transparent; -webkit-appearance:none; appearance:none; cursor:pointer; }
+        .hd-scrubrange::-webkit-slider-runnable-track { height:4px; background:transparent; }
+        .hd-scrubrange::-moz-range-track { height:4px; background:transparent; }
+        .hd-scrubrange::-webkit-slider-thumb { -webkit-appearance:none; appearance:none;
+          width:16px; height:16px; margin-top:-6px; border-radius:50%; background:#e8eef4;
+          border:1px solid #1f4fa3; box-shadow:0 1px 3px rgba(0,0,0,.4); cursor:pointer; }
+        .hd-scrubrange::-moz-range-thumb { width:16px; height:16px; border-radius:50%;
+          background:#e8eef4; border:1px solid #1f4fa3; cursor:pointer; }
+        .hd-scrubtime { flex:none; font-size:11px; color:#93a4b2; font-variant-numeric:tabular-nums; }
+        .hd-scrubadd { flex:none; padding:5px 10px; font-size:12px; font-weight:700; color:#cdd8e2;
+          background:#26313d; border:1px solid #3a4756; border-radius:8px; cursor:pointer; white-space:nowrap; }
+        .hd-scrubadd:disabled { opacity:.4; cursor:default; }
         /* bottom menu bar — owns the chrome so the ice stays clear */
         .hd-bar { position:absolute; z-index:44; left:env(safe-area-inset-left, 0px);
           right:env(safe-area-inset-right, 0px); bottom:0;
@@ -130,6 +155,13 @@ export const STYLES = `
         .hd-steprow { display:flex; align-items:center; gap:8px; }
         .hd-steptime { flex:none; width:42px; font-size:11px; color:#7d8b99;
           font-variant-numeric:tabular-nums; text-align:right; }
+        /* per-step anchor chip: waypoint (blue) vs fixed-time (grey), warn if broken */
+        .hd-anchorbtn { flex:none; max-width:104px; overflow:hidden; text-overflow:ellipsis;
+          white-space:nowrap; padding:6px 8px; font-size:11px; font-weight:700; line-height:1;
+          color:#aeb9c6; background:#232c36; border:1px solid #333f4c; border-radius:7px;
+          cursor:pointer; font-variant-numeric:tabular-nums; }
+        .hd-anchorbtn.wp { color:#cddffb; background:#1c2b45; border-color:#2c477a; }
+        .hd-anchorbtn.bad { color:#ffb0ba; background:#3a2126; border-color:#6b2f38; }
         /* presentation caption — floats above the bottom bar during a hold */
         .hd-preso { position:absolute; z-index:47; left:50%; transform:translateX(-50%);
           bottom:calc(64px + var(--hd-b)); max-width:min(560px, 92vw);

@@ -225,6 +225,34 @@ FORK F1 2f6df6 L 175,42    # blue  → straight to the net
 > require redrawing the forks. Per-point handle editing of forks is not yet
 > supported — *Redraw* to change one.
 
+### `STEP at=<sec> "<text>"` · `STEP on=<pieceId>:<pt> "<text>"`
+A **presentation step** — an authored caption shown during **presentation mode**,
+where playback pauses on each so viewers can read along. Each step is anchored one
+of two ways (exactly one per step):
+
+- **`at=<seconds>`** — a fixed point on the animation clock (e.g. `at=8.4`). Simple,
+  but the caption can drift relative to the play if you later change pace/`RATE`/`STOP`.
+- **`on=<pieceId>:<pt>`** — a player's **waypoint activation** (1-based point number,
+  like `pass=`/`WAIT`). The time is resolved live, so the caption **tracks edits and
+  retiming**, and follows the point if you insert/delete route points before it. This
+  is the preferred anchor.
+
+```drill
+STEP at=0 "Play begins — F1 carries out of the corner"
+STEP on=F1:3 "F1 hits the far blue line and cuts to the net"
+STEP at=9.2 "Shot on goal — crash for the rebound"
+```
+
+Author steps in the app by **scrubbing the timeline, pausing, and tapping ＋ note**
+(☰ → *Presentation* → *Edit steps*, or the scrubber's ＋ note button). A note dropped
+near a waypoint anchors to it (`on=`) automatically; elsewhere it pins the time
+(`at=`). Tap a step's anchor chip to switch. *Generate from play* seeds editable
+steps from the auto-derived beats.
+
+When a drill has **no** `STEP` lines, presentation mode falls back to the
+auto-generated captions (including per-waypoint `SHOW preso`); the first authored
+step switches it fully to authored captions.
+
 ---
 
 ## Worked example
