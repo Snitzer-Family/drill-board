@@ -263,13 +263,14 @@ of two ways (exactly one per step):
   retiming**, and follows the point if you insert/delete route points before it. This
   is the preferred anchor.
 
-An optional **`pos=<x>:<y>`** (each `0`–`1`, fractions of the screen — the caption's
-centre) saves where the caption sits during playback, so it can be dragged clear of
-the action. Omit it and the caption defaults to bottom-centre.
+An optional **`pos=<x>:<y>`** saves where the caption sits during playback (its
+centre), in **rink feet** (`x` 0–200, `y` 0–85 — the same coordinates as pieces), so
+it holds the same area of the ice across portrait and landscape. Omit it and the
+caption defaults to bottom-centre.
 
 ```drill
 STEP at=0 "Play begins — F1 carries out of the corner"
-STEP on=F1:3 pos=0.2:0.8 "F1 hits the far blue line and cuts to the net"
+STEP on=F1:3 pos=150:20 "F1 hits the far blue line and cuts to the net"
 STEP at=9.2 "Shot on goal — crash for the rebound"
 ```
 

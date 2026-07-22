@@ -186,29 +186,33 @@ export const STYLES = `
           box-shadow:0 6px 22px rgba(0,0,0,.5); backdrop-filter:blur(5px); }
         .hd-preso-text { font-size:16px; font-weight:600; color:#eef4fa; line-height:1.35;
           white-space:pre-wrap; overflow-wrap:anywhere; }
-        .hd-preso-row { display:flex; justify-content:flex-end; align-items:center; gap:9px; }
+        /* read mode: the whole caption is a tap target that advances the hold */
+        .hd-preso.tap { cursor:pointer; gap:5px; -webkit-user-select:none; user-select:none; }
+        .hd-preso-hint { font-size:11px; font-weight:600; color:#7d8b99; text-align:right; }
         .hd-preso-btn { flex:none; padding:8px 14px; font-size:13px; font-weight:700;
           background:#1f4fa3; border:1px solid #1f4fa3; color:#fff; border-radius:8px; cursor:pointer; }
-        /* placement mode: a draggable grip + inline text field + Done/Delete */
-        .hd-preso.placing { width:min(340px, 70vw); border-color:#3f6bbf;
-          box-shadow:0 8px 26px rgba(0,0,0,.6); }
-        .hd-preso-grip { display:flex; align-items:center; gap:6px; align-self:flex-start;
-          margin:-2px 0 1px; padding:3px 8px; font-size:11px; font-weight:700; letter-spacing:.02em;
-          color:#9fb0c2; background:#212a34; border:1px solid #33404f; border-radius:999px;
-          cursor:grab; touch-action:none; -webkit-user-select:none; user-select:none; }
-        .hd-preso-grip:active { cursor:grabbing; }
-        .hd-preso-input { width:100%; min-height:52px; resize:none; font-family:inherit;
-          font-size:16px; font-weight:500; line-height:1.35; color:#eef4fa; padding:8px 10px;
-          background:#0f141a; border:1px solid #33404f; border-radius:8px; }
-        .hd-preso-input:focus { outline:none; border-color:#3f6bbf; }
-        .hd-preso-del { flex:none; padding:8px 12px; font-size:13px; font-weight:700; margin-right:auto;
-          color:#ffb0ba; background:#2a1a1e; border:1px solid #5a2a32; border-radius:8px; cursor:pointer; }
+        /* placement mode: the box is the SAME size the caption plays at (text-sized);
+           the text is edited inline and the controls hang above it as tabs. */
+        .hd-preso.placing { gap:5px; border-color:#3f6bbf; box-shadow:0 8px 26px rgba(0,0,0,.6); }
+        .hd-preso-text[contenteditable] { outline:none; cursor:text; min-width:4.5em; }
+        .hd-preso-text[contenteditable]:empty:before { content:attr(data-ph); color:#7d8b99; font-weight:500; }
+        /* control tabs: sit just above the box's top edge like folder tabs */
+        .hd-preso-tabs { position:absolute; left:8px; top:0; transform:translateY(-100%);
+          display:flex; align-items:flex-end; gap:5px; }
+        .hd-preso-tab { display:flex; align-items:center; gap:4px; height:26px; padding:0 10px;
+          font-size:12px; font-weight:700; line-height:1; white-space:nowrap; cursor:pointer;
+          color:#cdd8e2; background:rgba(26,33,41,.97); border:1px solid #3a4756; border-bottom:none;
+          border-radius:9px 9px 0 0; -webkit-user-select:none; user-select:none; }
+        .hd-preso-tab.move { cursor:grab; touch-action:none; color:#9fb0c2; }
+        .hd-preso-tab.move:active { cursor:grabbing; }
+        .hd-preso-tab.del { color:#ffb0ba; padding:0 9px; }
+        .hd-preso-tab.done { color:#fff; background:#1f4fa3; border-color:#1f4fa3; }
         @media (pointer: fine) and (min-width: 760px) {
           .hd-preso { --cap-hw:min(310px, 30vw); max-width:min(620px, 60vw); gap:12px; padding:16px 20px; bottom:calc(74px + var(--hd-b) + var(--hd-scrub)); }
           .hd-preso-text { font-size:22px; }
           .hd-preso-btn { font-size:15px; padding:9px 16px; }
-          .hd-preso.placing { width:min(560px, 56vw); }
-          .hd-preso-input { font-size:18px; min-height:60px; }
+          .hd-preso.placing { gap:8px; }
+          .hd-preso-tab { height:30px; font-size:13px; }
         }
         /* shared bits */
         .hd-swatch { width:24px; height:24px; border-radius:50%; border:2px solid transparent; cursor:pointer; }
