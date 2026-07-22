@@ -311,6 +311,11 @@ export default function DrillAnimator() {
   // player+colour (continuing from its branch point) instead of a base route
   const forkTarget = useRef(null);
   const [forkDrawColor, setForkDrawColor] = useState(null);   // mirrors forkTarget for UI/status
+  // {id, color} when a reaction fork's route is open for point-editing (its
+  // handles show, its line is tappable, its waypoints get the point popup)
+  const [editingFork, setEditingFork] = useState(null);
+  // leave fork-edit mode when another piece is selected
+  useEffect(() => { if (editingFork && selectedId !== editingFork.id) setEditingFork(null); }, [selectedId, editingFork]);
   const fileRef = useRef(null);
   const animRef = useRef(0);
   const totalRef = useRef(1);
@@ -1233,6 +1238,17 @@ export default function DrillAnimator() {
   function branchPoint(p) {
     return p.path && p.path.length ? { x: p.path[p.path.length - 1].x, y: p.path[p.path.length - 1].y } : { x: p.x, y: p.y };
   }
+  const forkEq = (a, b) => (!a && !b) || sameColor(a, b);
+  const forkOf = (p, color) => (p.forks || []).find(f => sameColor(f.color, color)) || null;
+  // a synthetic "route piece" whose path is a fork and whose origin is the branch,
+  // so all the base-route editing math (segEnd/convertSeg/splitSeg) works unchanged
+  function forkPiece(p, color) {
+    const f = forkOf(p, color), b = branchPoint(p);
+    return { ...p, x: b.x, y: b.y, path: f ? f.path : [] };
+  }
+  // read/write the active editing route (base path or a fork's path) of a piece
+  const routeSegs = (p, fork) => fork ? (forkOf(p, fork)?.path || []) : p.path;
+  const routePiece = (p, fork) => fork ? forkPiece(p, fork) : p;
   // seconds for a player to skate their BASE route to the branch — the same arc-
   // length ÷ pace formula the timing engine uses (measured off the rendered path
   // refs), so the fork choice lines up with where the light actually is on arrival.
@@ -1277,11 +1293,42 @@ export default function DrillAnimator() {
   }
   // enter draw mode to author a reaction fork for player `id` under `color`
   function beginForkDraw(id, color) {
-    resetAnim(); setPlaying(false); setPopup(null); setSelectedId(id);
+    resetAnim(); setPlaying(false); setPopup(null); setSelectedId(id); setEditingFork(null);
     forkTarget.current = { id, color }; setForkDrawColor(color); setTool("draw");
   }
   function clearFork(id, color) {
     updateById(id, { forks: (pieces.find(p => p.id === id)?.forks || []).filter(f => !sameColor(f.color, color)) });
+  }
+  // the reaction-authoring controls (Draw / Edit / Clear per cue colour) — shown on
+  // the branch waypoint (the route's end, nearest the light), or the player popup
+  // when there's no route yet. Null if no governing cue-light.
+  function renderLightReactions(p) {
+    const light = governingLight(pieces, p);
+    if (!light) return null;
+    const colors = [...new Set((light.cues || []).map(c => c.color))];
+    return (
+      <>
+        <div className="hd-poprow">
+          <span style={{ fontSize: 11, color: "#8b99a8" }}>
+            Light reactions ({light.id}) — a route per cue, forking from here
+          </span>
+        </div>
+        {colors.map(c => {
+          const has = !!forkOf(p, c);
+          const isEditing = editingFork && editingFork.id === p.id && sameColor(editingFork.color, c);
+          return (
+            <div className="hd-poprow" key={c}>
+              <div className="hd-swatch on" style={{ background: c, cursor: "default" }} />
+              <button className="hd-mini" onClick={() => beginForkDraw(p.id, c)}>{has ? "Redraw" : "Draw"}</button>
+              {has && <button className={`hd-mini${isEditing ? " on" : ""}`}
+                onClick={() => setEditingFork(isEditing ? null : { id: p.id, color: c })}>{isEditing ? "✓ Editing" : "Edit"}</button>}
+              {has && <button className="hd-mini" onClick={() => { if (isEditing) setEditingFork(null); clearFork(p.id, c); }}>Clear</button>}
+              {!has && <span style={{ fontSize: 11, color: "#8b99a8" }}>no reaction</span>}
+            </div>
+          );
+        })}
+      </>
+    );
   }
   // which fork colour a player will take (the governing light's cue at their branch
   // arrival) — for highlighting the active reaction path. null if none applies.
@@ -1565,12 +1612,12 @@ export default function DrillAnimator() {
     setSelectedId(null); setMultiSel(null); setPopup(null); setOpenMenu(null);
     setRedoCount(redoStack.current.length);
   }
-  const updateSeg = (id, i, patch) =>
+  const updateSeg = (id, i, patch, fork = null) =>
     update(p => {
       if (p.id !== id) return p;
-      const path = p.path.slice();
-      path[i] = { ...path[i], ...patch };
-      return { ...p, path };
+      const edit = arr => { const path = arr.slice(); path[i] = { ...path[i], ...patch }; return path; };
+      if (fork) return { ...p, forks: (p.forks || []).map(f => sameColor(f.color, fork) ? { ...f, path: edit(f.path) } : f) };
+      return { ...p, path: edit(p.path) };
     });
 
   function nextId(kind) {
@@ -1597,33 +1644,42 @@ export default function DrillAnimator() {
 
   // append a new waypoint after the route's end, continuing in its heading, and
   // open the new point so it can be dragged/edited right away
-  function addSegment(id, type) {
+  function addSegment(id, type, fork = null) {
     const piece = pieces.find(q => q.id === id);
     if (!piece) return;
-    const newIdx = piece.path.length;
+    const newIdx = routeSegs(piece, fork).length;
     update(p => {
       if (p.id !== id) return p;
-      const n = p.path.length;
-      const prev = n ? segEnd(p, n - 1) : { x: p.x, y: p.y };
-      const before = n >= 2 ? segEnd(p, n - 2) : { x: p.x, y: p.y };
+      const rp = routePiece(p, fork);
+      const n = rp.path.length;
+      const prev = n ? segEnd(rp, n - 1) : { x: rp.x, y: rp.y };
+      const before = n >= 2 ? segEnd(rp, n - 2) : { x: rp.x, y: rp.y };
       let dx = prev.x - before.x, dy = prev.y - before.y;
       const m = Math.hypot(dx, dy);
       if (m < 0.5) { dx = 22; dy = 0; } else { dx = (dx / m) * 22; dy = (dy / m) * 22; }
       const seg = convertSeg({ type, x: clampX(prev.x + dx), y: clampY(prev.y + dy) }, prev);
+      if (fork) return { ...p, forks: (p.forks || []).map(f => sameColor(f.color, fork) ? { ...f, path: [...f.path, seg] } : f) };
       return { ...p, path: [...p.path, seg] };
     });
     setSelectedId(id);
-    setPopup({ type: "point", id, seg: newIdx });
+    setPopup({ type: "point", id, seg: newIdx, ...(fork ? { fork } : {}) });
   }
-  function changeSegType(id, i, type) {
+  function changeSegType(id, i, type, fork = null) {
     update(p => {
       if (p.id !== id) return p;
-      const path = p.path.slice();
-      path[i] = convertSeg({ ...path[i], type }, segEnd(p, i - 1));
-      return { ...p, path };
+      const rp = routePiece(p, fork);
+      const conv = arr => { const path = arr.slice(); path[i] = convertSeg({ ...path[i], type }, segEnd(rp, i - 1)); return path; };
+      if (fork) return { ...p, forks: (p.forks || []).map(f => sameColor(f.color, fork) ? { ...f, path: conv(f.path) } : f) };
+      return { ...p, path: conv(p.path) };
     });
   }
-  function deleteSeg(id, i) {
+  function deleteSeg(id, i, fork = null) {
+    if (fork) {
+      setPieces(ps => ps.map(p => p.id === id
+        ? { ...p, forks: (p.forks || []).map(f => sameColor(f.color, fork) ? { ...f, path: f.path.filter((_, j) => j !== i) } : f) } : p));
+      setPopup(null);
+      return;
+    }
     setPieces(ps => {
       // removing waypoint i pulls this player's later waypoints down by one
       const shifted = shiftActionWaypoints(ps, id, i + 1, -1);
@@ -1994,22 +2050,26 @@ export default function DrillAnimator() {
     setSelectedId(receiverId);
   }
 
-  function addPointAt(id, segIdx, pt) {
+  function addPointAt(id, segIdx, pt, fork = null) {
     setPieces(ps => {
       // inserting a waypoint at segIdx pushes this player's later waypoints up by
-      // one — shift their actions first so each stays on its own waypoint
-      const shifted = shiftActionWaypoints(ps, id, segIdx, +1);
-      return shifted.map(p => {
+      // one — shift their actions first so each stays on its own waypoint (base
+      // routes only; forks carry no puck actions)
+      const list = fork ? ps : shiftActionWaypoints(ps, id, segIdx, +1);
+      return list.map(p => {
         if (p.id !== id) return p;
-        const s = p.path[segIdx];
+        const rp = routePiece(p, fork);
+        const s = rp.path[segIdx];
         if (!s) return p;
-        const prev = segEnd(p, segIdx - 1);
+        const prev = segEnd(rp, segIdx - 1);
         const parts = splitSeg(prev, s, nearestT(prev, s, pt));
-        return { ...p, path: [...p.path.slice(0, segIdx), ...parts, ...p.path.slice(segIdx + 1)] };
+        const next = [...rp.path.slice(0, segIdx), ...parts, ...rp.path.slice(segIdx + 1)];
+        if (fork) return { ...p, forks: (p.forks || []).map(f => sameColor(f.color, fork) ? { ...f, path: next } : f) };
+        return { ...p, path: next };
       });
     });
     setSelectedId(id);
-    setPopup({ type: "point", id, seg: segIdx });
+    setPopup({ type: "point", id, seg: segIdx, ...(fork ? { fork } : {}) });
   }
 
   /* ----- drawing ----- */
@@ -2361,15 +2421,15 @@ export default function DrillAnimator() {
     svgRef.current.setPointerCapture?.(e.pointerId);
   }
 
-  function lineDown(e, id, segIdx) {
+  function lineDown(e, id, segIdx, fork = null) {
     if (playing || pinchRef.current) return;
     e.stopPropagation();
     setOpenMenu(null);
-    if (tool === "draw") { setSelectedId(id); setPopup(null); beginDraw(e, id); return; }
+    if (tool === "draw" && !fork) { setSelectedId(id); setPopup(null); beginDraw(e, id); return; }
     if (wakeEdit()) return;
     setSelectedId(id);
     const pt = svgPt(e);
-    drag.current = { kind: "piece", id, line: segIdx, tapPt: pt, start: pt, last: pt, moved: false, touch: e.pointerType !== "mouse" };
+    drag.current = { kind: "piece", id, line: segIdx, ...(fork ? { fork } : {}), tapPt: pt, start: pt, last: pt, moved: false, touch: e.pointerType !== "mouse" };
     svgRef.current.setPointerCapture?.(e.pointerId);
   }
 
@@ -2516,14 +2576,18 @@ export default function DrillAnimator() {
     const cp = boards.clampInside(pt.x, pt.y);          // keep the handle inside the boards
     update(p => {
       if (p.id !== d.id) return p;
-      const path = p.path.slice();
-      const s = { ...path[d.seg] };
-      if (d.kind === "anchor") { s.x = cp.x; s.y = cp.y; }
-      if (d.kind === "q") { s.cx = cp.x; s.cy = cp.y; }
-      if (d.kind === "c1") { s.c1x = cp.x; s.c1y = cp.y; }
-      if (d.kind === "c2") { s.c2x = cp.x; s.c2y = cp.y; }
-      path[d.seg] = s;
-      return { ...p, path };
+      const edit = arr => {
+        const path = arr.slice();
+        const s = { ...path[d.seg] };
+        if (d.kind === "anchor") { s.x = cp.x; s.y = cp.y; }
+        if (d.kind === "q") { s.cx = cp.x; s.cy = cp.y; }
+        if (d.kind === "c1") { s.c1x = cp.x; s.c1y = cp.y; }
+        if (d.kind === "c2") { s.c2x = cp.x; s.c2y = cp.y; }
+        path[d.seg] = s;
+        return path;
+      };
+      if (d.fork) return { ...p, forks: (p.forks || []).map(f => sameColor(f.color, d.fork) ? { ...f, path: edit(f.path) } : f) };
+      return { ...p, path: edit(p.path) };
     });
   }
 
@@ -2567,16 +2631,16 @@ export default function DrillAnimator() {
         if (lt && now - lt.t < 350 && lt.id === d.id &&
             Math.hypot(lt.pt.x - d.tapPt.x, lt.pt.y - d.tapPt.y) < 3) {
           lastLineTap.current = null;
-          addPointAt(d.id, d.line, d.tapPt);
+          addPointAt(d.id, d.line, d.tapPt, d.fork || null);
           return;
         }
         lastLineTap.current = { t: now, id: d.id, pt: d.tapPt };
-        setPopup({ type: "line", id: d.id, seg: d.line, pt: d.tapPt });
+        setPopup({ type: "line", id: d.id, seg: d.line, pt: d.tapPt, ...(d.fork ? { fork: d.fork } : {}) });
         return;
       }
       setPopup({ type: "piece", id: d.id });
     }
-    if (d.kind === "anchor") { setSelectedId(d.id); setPopup({ type: "point", id: d.id, seg: d.seg }); }
+    if (d.kind === "anchor") { setSelectedId(d.id); setPopup({ type: "point", id: d.id, seg: d.seg, ...(d.fork ? { fork: d.fork } : {}) }); }
   }
 
   /* ----- text / files ----- */
@@ -2738,48 +2802,51 @@ export default function DrillAnimator() {
     );
   }
 
-  function renderHandles(p, yf = yFix) {
+  function renderHandles(p, yf = yFix, fork = null) {
     const hd = (cx, cy, r, props) => hdot(cx, cy, r, props, yf);
     if (!editing || p.id !== selectedId || tool === "draw") return null;
+    const rp = routePiece(p, fork);           // fork ? branch-origin route piece : p
+    const route = rp.path;
+    // colour the fork's handles by its cue colour so overlapping routes stay legible
+    const dotFill = fork || "#ffd447", dotStroke = fork ? "#0b1116" : "#7a5c00";
     // the selected waypoint = the leg/point popup that's open (tapping the anchor
     // opens a "point" popup, the line a "line" popup — both carry its seg). Its
     // handles show only for it, not every waypoint. A handle being dragged stays
     // active via its `wp` (owning waypoint) so it can't collapse to a dot mid-drag.
+    // Only this route's handles react (drag/popup `fork` must match).
     const d = drag.current;
-    const activeWp = d && d.id === p.id && (d.wp != null || d.seg != null || d.line != null)
+    const activeWp = d && d.id === p.id && forkEq(d.fork, fork) && (d.wp != null || d.seg != null || d.line != null)
       ? (d.wp != null ? d.wp : d.seg != null ? d.seg : d.line)
-      : popup && (popup.type === "line" || popup.type === "point") && popup.id === p.id ? popup.seg : null;
+      : popup && (popup.type === "line" || popup.type === "point") && popup.id === p.id && forkEq(popup.fork, fork) ? popup.seg : null;
     const els = [];
     // a draggable tangent control, with a dashed leash back to its waypoint anchor.
-    // `seg` is which path segment the control belongs to; `wp` the waypoint it sits
-    // at (so dragging keeps that waypoint selected).
     const ctrlPt = (key, cx, cy, kind, seg, wp, ax, ay) => {
       els.push(<line key={key + "l"} x1={ax} y1={ay} x2={cx} y2={cy} stroke="#8fa3b5" strokeWidth={0.25} strokeDasharray="1 1" />);
       els.push(hd(cx, cy, 1.5, { key, fill: "#fff", stroke: "#5b7d9e", strokeWidth: 0.4, pointerEvents: "none" }));
       els.push(hd(cx, cy, 4, { key: key + "h", fill: "transparent", style: { cursor: "grab" },
-        onPointerDown: e => handleDown(e, { kind, id: p.id, seg, wp }) }));
+        onPointerDown: e => handleDown(e, { kind, id: p.id, seg, wp, ...(fork ? { fork } : {}) }) }));
     };
-    p.path.forEach((s, i) => {
+    route.forEach((s, i) => {
       if (i === activeWp) {
         // full anchor grab (square kept square via yFix)
         els.push(<rect key={`a${i}`} x={s.x - 1.4} y={s.y - 1.4 * yf} width={2.8} height={2.8 * yf}
-          fill="#ffd447" stroke="#7a5c00" strokeWidth={0.35} pointerEvents="none" />);
+          fill={dotFill} stroke={dotStroke} strokeWidth={0.35} pointerEvents="none" />);
         els.push(hd(s.x, s.y, 4, { key: `ah${i}`, fill: "transparent", style: { cursor: "grab" },
-          onPointerDown: e => handleDown(e, { kind: "anchor", id: p.id, seg: i, wp: i }) }));
+          onPointerDown: e => handleDown(e, { kind: "anchor", id: p.id, seg: i, wp: i, ...(fork ? { fork } : {}) }) }));
         // incoming tangent: this leg's control nearest waypoint i
         if (s.type === "C") ctrlPt(`ic${i}`, s.c2x, s.c2y, "c2", i, i, s.x, s.y);
         else if (s.type === "Q") ctrlPt(`iq${i}`, s.cx, s.cy, "q", i, i, s.x, s.y);
-        // the first waypoint also exposes the departure tangent off the player start
-        if (i === 0 && s.type === "C") ctrlPt(`sc${i}`, s.c1x, s.c1y, "c1", i, i, p.x, p.y);
+        // the first waypoint also exposes the departure tangent off the route origin
+        if (i === 0 && s.type === "C") ctrlPt(`sc${i}`, s.c1x, s.c1y, "c1", i, i, rp.x, rp.y);
         // outgoing tangent: the next leg's control nearest waypoint i
-        const nx = p.path[i + 1];
+        const nx = route[i + 1];
         if (nx && nx.type === "C") ctrlPt(`oc${i}`, nx.c1x, nx.c1y, "c1", i + 1, i, s.x, s.y);
         else if (nx && nx.type === "Q") ctrlPt(`oq${i}`, nx.cx, nx.cy, "q", i + 1, i, s.x, s.y);
       } else {
         // every other waypoint is just a small (still grabbable) dot
-        els.push(hd(s.x, s.y, 0.9, { key: `am${i}`, fill: "#ffd447", stroke: "#7a5c00", strokeWidth: 0.3, pointerEvents: "none" }));
+        els.push(hd(s.x, s.y, 0.9, { key: `am${i}`, fill: dotFill, stroke: dotStroke, strokeWidth: 0.3, pointerEvents: "none" }));
         els.push(hd(s.x, s.y, 3.5, { key: `amh${i}`, fill: "transparent", style: { cursor: "grab" },
-          onPointerDown: e => handleDown(e, { kind: "anchor", id: p.id, seg: i, wp: i }) }));
+          onPointerDown: e => handleDown(e, { kind: "anchor", id: p.id, seg: i, wp: i, ...(fork ? { fork } : {}) }) }));
       }
     });
     return <g>{els}</g>;
@@ -3605,33 +3672,9 @@ export default function DrillAnimator() {
                   <span style={{ fontSize: 11, color: "#8b99a8" }}>waits for the puck to enter the zone</span>
                 </div>
               )}
-              {/* light reactions: one fork per cue colour, forking from the route's
-                  end. The player takes the fork matching the light on arrival. */}
-              {(() => {
-                const light = governingLight(pieces, p);
-                if (!light) return null;
-                const colors = [...new Set((light.cues || []).map(c => c.color))];
-                return (
-                  <>
-                    <div className="hd-poprow">
-                      <span style={{ fontSize: 11, color: "#8b99a8" }}>
-                        Light reactions ({light.id}) — draw where {p.label || p.id} goes for each cue, from the route's end
-                      </span>
-                    </div>
-                    {colors.map(c => {
-                      const has = (p.forks || []).some(f => sameColor(f.color, c));
-                      return (
-                        <div className="hd-poprow" key={c}>
-                          <div className="hd-swatch on" style={{ background: c, cursor: "default" }} />
-                          <button className="hd-mini" onClick={() => beginForkDraw(p.id, c)}>{has ? "Redraw" : "Draw"}</button>
-                          {has && <button className="hd-mini" onClick={() => clearFork(p.id, c)}>Clear</button>}
-                          {!has && <span style={{ fontSize: 11, color: "#8b99a8" }}>no reaction yet</span>}
-                        </div>
-                      );
-                    })}
-                  </>
-                );
-              })()}
+              {/* light reactions live on the branch waypoint (route end, nearest the
+                  light); a route-less player branches from its start, so show them here */}
+              {!p.path.length && renderLightReactions(p)}
               {/* unified delay trigger: hold the whole route at the start until a
                   timer, another player's arrival, or another player's puck action */}
               {p.path.length > 0 && !p.defense && (
@@ -3752,49 +3795,61 @@ export default function DrillAnimator() {
         </>
       );
     } else if (popup.type === "line") {
-      const s = p.path[popup.seg];
+      const fork = popup.fork || null;
+      const route = routeSegs(p, fork);
+      const s = route[popup.seg];
       if (!s || !popup.pt) return null;
       anchorPt = popup.pt;
-      title = `${p.id} · leg ${popup.seg + 1}`;
+      title = fork ? `Reaction · leg ${popup.seg + 1}` : `${p.id} · leg ${popup.seg + 1}`;
       body = (
         <div className="hd-poprow">
-          <button className="hd-mini" onClick={() => addPointAt(p.id, popup.seg, popup.pt)}>
+          <button className="hd-mini" onClick={() => addPointAt(p.id, popup.seg, popup.pt, fork)}>
             ＋ Add point here
           </button>
         </div>
       );
     } else {
+      const fork = popup.fork || null;
+      const rp = routePiece(p, fork);        // origin + path of the base route or the fork
+      const route = rp.path;
+      const uSeg = (k, patch) => updateSeg(p.id, k, patch, fork);   // writes to the active route
       const i = popup.seg;
-      const s = p.path[i];
+      const s = route[i];
       if (!s) return null;
       anchorPt = { x: s.x, y: s.y };
-      const next = p.path[i + 1];
-      title = `Waypoint ${i + 1} of ${p.path.length}`;   // waypoint 0 = the start (player popup)
-      // step back to waypoint 0 (the player/start popup) at j < 0
-      const goSeg = j => navPopup(j < 0 ? { type: "piece", id: p.id } : { type: "point", id: p.id, seg: j });
+      const next = route[i + 1];
+      title = fork ? `Reaction · waypoint ${i + 1} of ${route.length}` : `Waypoint ${i + 1} of ${route.length}`;
+      // Prev at waypoint 0: a fork steps back to its branch (the base route's end);
+      // a base route steps back to the player/start popup.
+      const branchNav = () => p.path.length ? { type: "point", id: p.id, seg: p.path.length - 1 } : { type: "piece", id: p.id };
+      const goSeg = j => navPopup(j < 0 ? (fork ? branchNav() : { type: "piece", id: p.id })
+        : { type: "point", id: p.id, seg: j, ...(fork ? { fork } : {}) });
       body = (
         <>
-          {p.path.length > 0 && (
+          {route.length > 0 && (
             <div className="hd-poprow">
-              <button className="hd-mini" onClick={() => goSeg(i - 1)}>‹ Prev</button>
-              <span style={{ fontSize: 11, color: "#8b99a8" }}>{i + 1} / {p.path.length}</span>
-              <button className="hd-mini" disabled={i >= p.path.length - 1} style={{ opacity: i >= p.path.length - 1 ? 0.4 : 1 }}
+              <button className="hd-mini" onClick={() => goSeg(i - 1)}>‹ {fork && i === 0 ? "Branch" : "Prev"}</button>
+              <span style={{ fontSize: 11, color: "#8b99a8" }}>{i + 1} / {route.length}</span>
+              <button className="hd-mini" disabled={i >= route.length - 1} style={{ opacity: i >= route.length - 1 ? 0.4 : 1 }}
                 onClick={() => goSeg(i + 1)}>Next ›</button>
             </div>
           )}
+          {/* the branch waypoint (route end, nearest the light) carries the reaction
+              controls — one route per cue colour forks from here */}
+          {p.kind === "player" && !fork && i === route.length - 1 && renderLightReactions(p)}
           <div className="hd-poprow">
             <span>Note</span>
             <input className="hd-input" style={{ flex: 1, minWidth: 90 }}
               value={s.desc != null ? s.desc : (s.name || "")}
               placeholder={zoneAt(s.x, s.y) || "describe this spot"}
-              onChange={e => updateSeg(p.id, i, { desc: e.target.value || undefined, name: undefined })} />
+              onChange={e => uSeg(i, { desc: e.target.value || undefined, name: undefined })} />
           </div>
           {(s.desc != null ? s.desc : s.name) && (
             <div className="hd-poprow">
               <span>Show as</span>
               {[["auto", "Auto"], ["preso", "Present"], ["label", "Label"]].map(([m, lab]) => (
                 <button key={m} className={`hd-mini${(s.dmode || "auto") === m ? " on" : ""}`}
-                  onClick={() => updateSeg(p.id, i, {
+                  onClick={() => uSeg(i, {
                     desc: s.desc != null ? s.desc : s.name, name: undefined,   // migrate legacy NAME
                     ...(m === "label"
                       ? { dmode: "label", dsize: s.dsize || 1, dox: s.dox || 0, doy: s.doy != null ? s.doy : -5 }
@@ -3806,7 +3861,7 @@ export default function DrillAnimator() {
           {s.dmode === "label" && (s.desc != null ? s.desc : s.name) && (
             <div className="hd-poprow">
               <span>Label size</span>
-              <Stepper value={+(s.dsize || 1).toFixed(2)} onChange={v => updateSeg(p.id, i, { dsize: Math.max(0.4, v) })} step={0.2} min={0.4} suffix="×" />
+              <Stepper value={+(s.dsize || 1).toFixed(2)} onChange={v => uSeg(i, { dsize: Math.max(0.4, v) })} step={0.2} min={0.4} suffix="×" />
               <span style={{ fontSize: 11, color: "#8b99a8" }}>drag it to move</span>
             </div>
           )}
@@ -3825,22 +3880,22 @@ export default function DrillAnimator() {
                     ? { mode: next.waitOn.mode || "waypoint", on: next.waitOn.on, at: next.waitOn.at, secs: 0 }
                     : { mode: "timer", secs: next.stop || 0 }}
                   onChange={v => {
-                    if (v.mode === "timer") updateSeg(p.id, i + 1, { waitOn: null, stop: v.secs || 0 });
-                    else if (v.on) updateSeg(p.id, i + 1, { waitOn: { on: v.on, at: v.at, mode: v.mode }, stop: 0 });
-                    else updateSeg(p.id, i + 1, { waitOn: null });
+                    if (v.mode === "timer") uSeg(i + 1, { waitOn: null, stop: v.secs || 0 });
+                    else if (v.on) uSeg(i + 1, { waitOn: { on: v.on, at: v.at, mode: v.mode }, stop: 0 });
+                    else uSeg(i + 1, { waitOn: null });
                   }}
                 />
               ) : (
                 <div className="hd-poprow">
                   <span>Pause here for</span>
-                  <Stepper value={next.stop || 0} onChange={v => updateSeg(p.id, i + 1, { stop: v })} />
+                  <Stepper value={next.stop || 0} onChange={v => uSeg(i + 1, { stop: v })} />
                   <span style={{ fontSize: 11, color: "#8b99a8" }}>seconds</span>
                 </div>
               )}
               {p.kind === "player" && (
                 <div className="hd-poprow">
                   <button className={`hd-mini${next.jump ? " on" : ""}`}
-                    onClick={() => updateSeg(p.id, i + 1, { jump: !next.jump })}>
+                    onClick={() => uSeg(i + 1, { jump: !next.jump })}>
                     <Icon name={next.jump ? "check" : "sauce"} size={15} /> Jump here
                   </button>
                   <span style={{ fontSize: 11, color: "#8b99a8" }}>hops as they pass this spot</span>
@@ -3849,22 +3904,22 @@ export default function DrillAnimator() {
               <div className="hd-poprow">
                 <span>Speed after ×{(next.rate || 1).toFixed(2)}</span>
                 <input type="range" min={0.5} max={2} step={0.05} value={next.rate || 1} style={{ flex: 1, minWidth: 70 }}
-                  onChange={e => updateSeg(p.id, i + 1, { rate: parseFloat(e.target.value) })} />
+                  onChange={e => uSeg(i + 1, { rate: parseFloat(e.target.value) })} />
               </div>
               <div className="hd-poprow">
                 <span>Next leg</span>
                 {[["L", "segLine", "Straight"], ["Q", "segQuad", "Curve"], ["C", "segCubic", "S-curve"]].map(([t, ic, lbl]) => (
                   <button key={t} className={`hd-mini${next.type === t ? " on" : ""}`} title={lbl}
-                    onClick={() => changeSegType(p.id, i + 1, t)}><Icon name={ic} /></button>
+                    onClick={() => changeSegType(p.id, i + 1, t, fork)}><Icon name={ic} /></button>
                 ))}
               </div>
               {p.kind === "player" && (
                 <div className="hd-poprow">
                   <span>Then skate</span>
                   <button className={`hd-mini${(next.dir || "fwd") === "fwd" ? " on" : ""}`}
-                    onClick={() => updateSeg(p.id, i + 1, { dir: "fwd" })}>Fwd</button>
+                    onClick={() => uSeg(i + 1, { dir: "fwd" })}>Fwd</button>
                   <button className={`hd-mini${next.dir === "bwd" ? " on" : ""}`}
-                    onClick={() => updateSeg(p.id, i + 1, { dir: "bwd" })}>Bwd</button>
+                    onClick={() => uSeg(i + 1, { dir: "bwd" })}>Bwd</button>
                 </div>
               )}
               {p.kind === "puck" && (
@@ -3872,7 +3927,7 @@ export default function DrillAnimator() {
                   <span>Then</span>
                   {["carry", "pass", "shot"].map(m => (
                     <button key={m} className={`hd-mini${(next.mode || "carry") === m ? " on" : ""}`}
-                      onClick={() => updateSeg(p.id, i + 1, { mode: m })}>
+                      onClick={() => uSeg(i + 1, { mode: m })}>
                       {m[0].toUpperCase() + m.slice(1)}
                     </button>
                   ))}
@@ -3881,18 +3936,18 @@ export default function DrillAnimator() {
             </>
           ) : (p.kind === "player" || p.kind === "puck") && !p.defense ? (
             <div className="hd-poprow">
-              <span>Extend route</span>
-              <button className="hd-mini" title="Straight" onClick={() => addSegment(p.id, "L")}><Icon name="segLine" /></button>
-              <button className="hd-mini" title="Curve" onClick={() => addSegment(p.id, "Q")}><Icon name="segQuad" /></button>
-              <button className="hd-mini" title="S-curve" onClick={() => addSegment(p.id, "C")}><Icon name="segCubic" /></button>
+              <span>Extend {fork ? "reaction" : "route"}</span>
+              <button className="hd-mini" title="Straight" onClick={() => addSegment(p.id, "L", fork)}><Icon name="segLine" /></button>
+              <button className="hd-mini" title="Curve" onClick={() => addSegment(p.id, "Q", fork)}><Icon name="segQuad" /></button>
+              <button className="hd-mini" title="S-curve" onClick={() => addSegment(p.id, "C", fork)}><Icon name="segCubic" /></button>
               <span style={{ fontSize: 11, color: "#8b99a8" }}>adds a waypoint after the end</span>
             </div>
           ) : (
-            <div className="hd-poprow" style={{ color: "#8b99a8", fontSize: 12 }}>End of route</div>
+            <div className="hd-poprow" style={{ color: "#8b99a8", fontSize: 12 }}>End of {fork ? "reaction" : "route"}</div>
           )}
-          {p.kind === "player" && ActionSteps(p, i)}
+          {p.kind === "player" && !fork && ActionSteps(p, i)}
           <div className="hd-poprow">
-            <button className="hd-mini danger" onClick={() => deleteSeg(p.id, i)}>Delete point</button>
+            <button className="hd-mini danger" onClick={() => deleteSeg(p.id, i, fork)}>Delete point</button>
           </div>
         </>
       );
@@ -4079,7 +4134,9 @@ export default function DrillAnimator() {
   }
 
   const toolHint =
-    tool === "draw" && forkDrawColor
+    editingFork && tool === "select"
+      ? `Editing the reaction — drag waypoints · tap the line to add · “✓ Editing” to finish`
+      : tool === "draw" && forkDrawColor
       ? `Drawing the reaction — drag from the route's end`
       : tool === "draw"
       ? (selected ? `Drawing ${selected.id}'s route — drag across the ice` : "Drag on the ice — creates a player")
@@ -4256,6 +4313,7 @@ export default function DrillAnimator() {
                 <g key={`fkv-${p.id}`}>
                   {p.forks.map((f, fi) => {
                     if (!f.path || !f.path.length) return null;
+                    const editThis = editingFork && editingFork.id === p.id && sameColor(editingFork.color, f.color);
                     let prev = branchPoint(p);
                     const active = sameColor(f.color, chosen);
                     return (
@@ -4263,11 +4321,19 @@ export default function DrillAnimator() {
                         {f.path.map((s, i) => {
                           const d = segD(prev, s);
                           prev = { x: s.x, y: s.y };
-                          return <path key={i} d={d} fill="none" stroke={f.color}
-                            strokeWidth={sw(active ? 0.55 : 0.42)} vectorEffect="non-scaling-stroke"
-                            strokeDasharray={active ? undefined : sdash("1.6 1.1")}
-                            strokeLinecap="round" strokeLinejoin="round"
-                            opacity={active ? 0.95 : 0.5} pointerEvents="none" />;
+                          return (
+                            <g key={i}>
+                              <path d={d} fill="none" stroke={f.color}
+                                strokeWidth={sw(editThis || active ? 0.55 : 0.42)} vectorEffect="non-scaling-stroke"
+                                strokeDasharray={editThis || active ? undefined : sdash("1.6 1.1")}
+                                strokeLinecap="round" strokeLinejoin="round"
+                                opacity={editThis ? 1 : active ? 0.95 : 0.5} pointerEvents="none" />
+                              {editThis && (
+                                <path d={d} fill="none" stroke="transparent" strokeWidth={4}
+                                  onPointerDown={e => lineDown(e, p.id, i, f.color)} style={{ cursor: "pointer" }} />
+                              )}
+                            </g>
+                          );
                         })}
                       </g>
                     );
@@ -4336,7 +4402,14 @@ export default function DrillAnimator() {
                 vectorEffect="non-scaling-stroke" pointerEvents="none" />
             )}
 
-            {pieces.map(p => <g key={`h-${p.id}`}>{renderHandles(p)}</g>)}
+            {pieces.map(p => (
+              <g key={`h-${p.id}`}>
+                {renderHandles(p)}
+                {/* a reaction fork open for editing gets its own handles */}
+                {editingFork && editingFork.id === p.id && forkOf(p, editingFork.color)
+                  ? renderHandles(p, yFix, editingFork.color) : null}
+              </g>
+            ))}
             {renderMarkHandles()}
 
             {/* nets sit on the ice (bottom); players paint above pucks so a

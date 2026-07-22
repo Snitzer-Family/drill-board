@@ -183,9 +183,13 @@ hex has no leading `#`.
 At playback the player skates their base route, and **on arrival at the branch**
 takes the fork whose colour matches the light's cue **at that instant** — modelling
 a "skate in, read the light, react" drill. Branch arrival time depends only on the
-base route, so the choice is deterministic. In the app: a player's popup shows a
-**Light reactions** row (one *Draw* / *Redraw* / *Clear* per cue colour); drawing
-starts from the route's end. The chosen reaction renders solid, the others dashed.
+base route, so the choice is deterministic. In the app the reaction controls live
+on the **branch waypoint** (the route's end, nearest the light — tap that waypoint;
+a route-less player shows them on its own popup): a **Light reactions** row with
+*Draw* / *Redraw* / *Edit* / *Clear* per cue colour. *Draw* sketches the reaction
+from the branch; *Edit* opens its waypoints in the full point editor (drag points,
+add/delete, curve, per-leg speed/pause). The chosen reaction renders solid, the
+others dashed.
 
 ```drill
 PIECE LT1 light 100 30 #2ea043 cues=2ea043:2;e5342b:2;2f6df6:3
