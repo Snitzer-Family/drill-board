@@ -2386,9 +2386,9 @@ export default function DrillAnimator() {
   const TAP_DIST = 1.4;
 
   function onSvgDown(e) {
+    setOpenMenu(null);                         // a tap on the ice always closes any open menu
     if (playing || pinchRef.current) return;
     if (wakeEdit()) return;                    // paused/finished → snap back to start first
-    setOpenMenu(null);
     const pt = svgPt(e);
     if (tool === "draw") { setPopup(null); beginDraw(e); return; }
     if (tool === "marker") { setPopup(null); beginMark(e); return; }
