@@ -23,6 +23,9 @@ function copyPreviewPage() {
 export default defineConfig({
   plugins: [react(), copyPreviewPage()],
   base: "/drill-board/",
+  // ship sourcemaps so the error-boundary overlay shows a readable stack (helps
+  // diagnose field crashes from a screenshot instead of minified frames)
+  build: { sourcemap: true },
   define: {
     // build stamp shown in the app's version watermark (UTC)
     __BUILD_STAMP__: JSON.stringify(
