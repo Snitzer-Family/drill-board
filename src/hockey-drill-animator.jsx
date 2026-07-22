@@ -1028,12 +1028,24 @@ export default function DrillAnimator() {
   }
   // place the caption's centre at its (projected) spot; clamp() keeps the box fully
   // on screen (--cap-hw = its max half-width) and clear of the top dock / scrubber
-  // band. No pos → the CSS default (bottom-centre). Arg is a 0..1 app-rect fraction.
-  const captionStyle = pos => pos ? {
+  // band. When placing, the top gets extra room for the control tabs above the box.
+  // No pos → the CSS default (bottom-centre). Arg is a 0..1 app-rect fraction.
+  const captionStyle = (pos, placing) => pos ? {
     left: `clamp(calc(var(--cap-hw) + 6px), ${(pos.x * 100).toFixed(2)}%, calc(100% - var(--cap-hw) - 6px))`,
-    top: `clamp(calc(env(safe-area-inset-top, 0px) + 58px), ${(pos.y * 100).toFixed(2)}%, calc(100% - 54px - var(--hd-b) - var(--hd-scrub) - 58px))`,
+    top: `clamp(calc(env(safe-area-inset-top, 0px) + ${placing ? 96 : 58}px), ${(pos.y * 100).toFixed(2)}%, calc(100% - 54px - var(--hd-b) - var(--hd-scrub) - 58px))`,
     right: "auto", bottom: "auto", transform: "translate(-50%, -50%)",
   } : undefined;
+  // seed the editable caption + focus it when a step's placement begins (kept out of
+  // React's control so typing doesn't reset the box or jump the cursor)
+  const edRef = useRef(null);
+  useEffect(() => {
+    const el = edRef.current;
+    if (placingStep == null || !el) return;
+    el.textContent = drillSteps[placingStep]?.text || "";
+    el.focus();
+    const sel = window.getSelection && window.getSelection();
+    if (sel) { const r = document.createRange(); r.selectNodeContents(el); r.collapse(false); sel.removeAllRanges(); sel.addRange(r); }
+  }, [placingStep]); // eslint-disable-line
   // flip a step between its waypoint anchor and an absolute-time anchor. Time→
   // waypoint snaps to the nearest activation to the step's current time (if any).
   function toggleStepAnchor(idx) {
@@ -4938,26 +4950,28 @@ export default function DrillAnimator() {
         if (!cap) return null;
         const fpos = cap.pos ? rinkToRootFrac(cap.pos.x, cap.pos.y) : null;   // rink feet → app-rect fraction
         return (
-          <div className={`hd-preso${placing ? " placing" : " tap"}`} style={captionStyle(fpos)}
+          // in placing mode the box is the SAME size the caption will play at; the
+          // move / delete / submit controls hang off the top as tabs so they don't
+          // change its footprint (WYSIWYG placement).
+          <div className={`hd-preso${placing ? " placing" : " tap"}`} style={captionStyle(fpos, placing)}
             onClick={placing ? undefined : skipHold}>
             {placing && (
-              <span className="hd-preso-grip" onPointerDown={capDragStart} onPointerMove={capDragMove}
-                onPointerUp={capDragEnd} onPointerCancel={capDragEnd}>
-                <Icon name="grip" size={14} /> drag to place
-              </span>
+              <div className="hd-preso-tabs">
+                <span className="hd-preso-tab move" onPointerDown={capDragStart} onPointerMove={capDragMove}
+                  onPointerUp={capDragEnd} onPointerCancel={capDragEnd} title="Drag to place">
+                  <Icon name="grip" size={13} /> move
+                </span>
+                <button className="hd-preso-tab del" title="Delete this step"
+                  onClick={() => { deleteStep(cap.idx); setPlacingStep(null); }}>✕</button>
+                <button className="hd-preso-tab done" title="Done"
+                  onClick={() => setPlacingStep(null)}>Done ✓</button>
+              </div>
             )}
             {placing
-              ? <textarea className="hd-preso-input" autoFocus value={cap.text} placeholder="Describe this beat…"
-                  spellCheck={false} onChange={e => setStepText(cap.idx, e.target.value)} />
+              ? <div className="hd-preso-text" contentEditable suppressContentEditableWarning ref={edRef}
+                  data-ph="Describe this beat…" onInput={e => setStepText(cap.idx, e.currentTarget.textContent)} />
               : <div className="hd-preso-text">{cap.text}</div>}
-            {placing ? (
-              <div className="hd-preso-row">
-                <button className="hd-preso-del" onClick={() => { deleteStep(cap.idx); setPlacingStep(null); }}>Delete</button>
-                <button className="hd-preso-btn" onClick={() => setPlacingStep(null)}>Done ✓</button>
-              </div>
-            ) : (
-              <div className="hd-preso-hint">tap anywhere to continue</div>
-            )}
+            <div className="hd-preso-hint">tap anywhere to continue</div>
           </div>
         );
       })()}
