@@ -3,13 +3,15 @@
 export const STYLES = `
         .hd-root { position:fixed; inset:0; background:#0c1014; color:#e8edf2; overflow:hidden;
           --hd-b: var(--hd-safe-b, min(env(safe-area-inset-bottom, 0px), 34px));
+          --hd-scrub: 0px;   /* reserved height for the timeline scrubber band (0 when hidden) */
           font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+        .hd-root.scrub-on { --hd-scrub: 44px; }
         /* the ice starts below the Dynamic Island / status bar and ends
            above the home-indicator band — iOS 26 standalone composites an
            opaque system bar there that web content cannot render under */
         .hd-stage { position:absolute; top:env(safe-area-inset-top, 0px);
           left:env(safe-area-inset-left, 0px); right:env(safe-area-inset-right, 0px);
-          bottom:calc(54px + var(--hd-b));
+          bottom:calc(54px + var(--hd-b) + var(--hd-scrub));
           display:flex; align-items:center; justify-content:center; }
         .hd-canvas { position:relative; }
         .hd-canvas svg.hd-ice { width:100%; height:100%; display:block; }
@@ -48,7 +50,10 @@ export const STYLES = `
         .hd-playtab.left { width:26px; height:54px; border-radius:0 13px 13px 0; border-left:none; }
         .hd-playtab.right { width:26px; height:54px; border-radius:13px 0 0 13px; border-right:none; }
         /* timeline scrubber — a thin strip above the menu bar; seek + drop notes */
-        .hd-scrub { position:absolute; z-index:44; left:8px; right:8px; bottom:calc(56px + var(--hd-b));
+        /* the scrubber sits in its own reserved band between the ice and the menu
+           bar (see --hd-scrub on .hd-root) — it never overlaps the ice sheet */
+        .hd-scrub { position:absolute; z-index:44; left:8px; right:8px;
+          bottom:calc(54px + var(--hd-b) + 4px); height:36px;
           display:flex; align-items:center; gap:9px; padding:5px 10px;
           background:rgba(23,29,37,.84); border:1px solid #2c3846; border-radius:11px;
           box-shadow:0 3px 12px rgba(0,0,0,.4); backdrop-filter:blur(4px); }

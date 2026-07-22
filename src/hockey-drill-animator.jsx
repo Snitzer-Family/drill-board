@@ -4503,7 +4503,7 @@ export default function DrillAnimator() {
   const showPuckPaths = !aiPlay && (editing || playRoutes === "all"); // planned pass / shot lines
 
   return (
-    <div className="hd-root" ref={rootRef}>
+    <div className={`hd-root${aiPlay ? "" : " scrub-on"}`} ref={rootRef}>
       <style>{STYLES}</style>
 
       {/* ---------- the ice, filling the screen ---------- */}
