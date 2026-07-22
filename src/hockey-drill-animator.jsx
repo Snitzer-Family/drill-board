@@ -3368,9 +3368,10 @@ export default function DrillAnimator() {
     return (
       <g key={`arw-${p.id}`} transform={fx.t} pointerEvents="none">
         <g transform={`scale(${z})`}>
-          {/* SOLID head so the line can't show through and the tip sits on the end */}
-          <path d="M 0 0 L -4.6 -2.7 L -4.6 2.7 Z" fill={p.color} stroke={p.color}
-            strokeWidth={0.6} strokeLinejoin="round" />
+          {/* open chevron head (skating-route convention): two barbs meeting at
+              the tip, which sits on the line's end */}
+          <path d="M -4.8 -2.9 L 0 0 L -4.8 2.9" fill="none" stroke={p.color}
+            strokeWidth={1.2} strokeLinecap="round" strokeLinejoin="round" />
         </g>
       </g>
     );
@@ -3392,6 +3393,10 @@ export default function DrillAnimator() {
     const activeWp = d && d.id === p.id && forkEq(d.fork, fork) && (d.wp != null || d.seg != null || d.line != null)
       ? (d.wp != null ? d.wp : d.seg != null ? d.seg : d.line)
       : popup && (popup.type === "line" || popup.type === "point") && popup.id === p.id && forkEq(popup.fork, fork) ? popup.seg : null;
+    // the player/route START is a curve point too — its departure tangent aims the
+    // launch. Expose it whenever the piece itself is selected, so you don't have to
+    // open the NEXT waypoint just to adjust the starting point's angle.
+    const originActive = popup && popup.type === "piece" && popup.id === p.id && forkEq(popup.fork, fork);
     const els = [];
     // a draggable tangent control, with a dashed leash back to its waypoint anchor.
     const ctrlPt = (key, cx, cy, kind, seg, wp, ax, ay) => {
@@ -3414,8 +3419,6 @@ export default function DrillAnimator() {
         // incoming tangent: this leg's control nearest waypoint i
         if (s.type === "C") ctrlPt(`ic${i}`, s.c2x, s.c2y, "c2", i, i, s.x, s.y);
         else if (s.type === "Q") ctrlPt(`iq${i}`, s.cx, s.cy, "q", i, i, s.x, s.y);
-        // the first waypoint also exposes the departure tangent off the route origin
-        if (i === 0 && s.type === "C") ctrlPt(`sc${i}`, s.c1x, s.c1y, "c1", i, i, rp.x, rp.y);
         // outgoing tangent: the next leg's control nearest waypoint i
         const nx = route[i + 1];
         if (nx && nx.type === "C") ctrlPt(`oc${i}`, nx.c1x, nx.c1y, "c1", i + 1, i, s.x, s.y);
@@ -3427,6 +3430,16 @@ export default function DrillAnimator() {
           onPointerDown: e => handleDown(e, { kind: "anchor", id: p.id, seg: i, wp: i, ...(fork ? { fork } : {}) }) }));
       }
     });
+    // departure-angle handle at the route origin, leashed back to the piece: shown
+    // when the piece is selected OR waypoint 0 is active. For a cubic it's the c1
+    // control (distinct from waypoint 0's incoming c2); a quad has one shared
+    // control, already drawn at waypoint 0 when it's active — so only add it here
+    // for the piece-selected case to avoid a duplicate dot.
+    const s0 = route[0];
+    if (s0 && s0.type === "C" && (originActive || activeWp === 0))
+      ctrlPt(`sc0`, s0.c1x, s0.c1y, "c1", 0, 0, rp.x, rp.y);
+    else if (s0 && s0.type === "Q" && originActive && activeWp !== 0)
+      ctrlPt(`sq0`, s0.cx, s0.cy, "q", 0, 0, rp.x, rp.y);
     return <g>{els}</g>;
   }
 
