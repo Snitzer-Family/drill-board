@@ -804,6 +804,11 @@ export default function DrillAnimator() {
 
   /* ----- timing & pass planning (see timing.js) ----- */
   const planCache = useRef({ key: null, pace: 0, sig: -1, warp: {}, plans: {}, rel: {} });
+  // a second plan used ONLY for the grey puck-route preview: it shows INTENT
+  // (every shot on net), so it's timed with realistic misses forced off. The
+  // animation still uses the main plan above, which may ring the post / sail
+  // wide / go over — but the planning view always draws the shot going to the net.
+  const intentPlanCache = useRef({ key: null, pace: 0, sig: -1, warp: {}, plans: {}, rel: {} });
   // timing runs on the nearest-resolved model: any "Collect nearest puck" intent
   // re-binds to whichever loose puck is actually closest right now. Rendering &
   // editing stay on raw `pieces` (displayPosAt keys plans by id, so it lines up).
@@ -819,6 +824,13 @@ export default function DrillAnimator() {
   const effById = new Map(effPieces.map(p => [p.id, p]));
   const effOf = p => p && p.kind === "player" && (p.forks || []).length ? (effById.get(p.id) || p) : p;
   const { getPlan, pieceTime, displayPosAt, stickSwing, waypointTime, puckInGoal } = createTiming({ pieces: effPieces, pace, segRefs, planCache, seed: playSeed, realisticShots, detail: detailAnim, odds: shotOdds });
+  // intent plan for the route preview (identical to the main plan but with misses
+  // off, so shots always route on net). Only built when realistic shots are on and
+  // the puck-path overlay is actually shown; otherwise the main plan already IS the
+  // intent, so reuse it.
+  const wantPuckPaths = !aiPlay && (editing || playRoutes === "all");
+  const getIntentPlan = (!realisticShots || !wantPuckPaths) ? getPlan
+    : createTiming({ pieces: effPieces, pace, segRefs, planCache: intentPlanCache, seed: playSeed, realisticShots: false, detail: detailAnim, odds: shotOdds }).getPlan;
 
   // a light's cue timeline can outlast every route — keep the drill running long
   // enough to show every cue (so a "read the light" reaction has time to resolve)
@@ -4561,7 +4573,7 @@ export default function DrillAnimator() {
     const W = w => (flat ? w : sw(w));
     const D = d => (flat ? d : sdash(d));
     const ve = flat ? undefined : "non-scaling-stroke";
-    const { plans } = getPlan();
+    const { plans } = getIntentPlan();   // draw the shot's intent (on net), not a realistic miss
     const z = 1 / (view.s || 1);
     return pieces
       .filter(q => q.kind === "puck" && plans[q.id])
