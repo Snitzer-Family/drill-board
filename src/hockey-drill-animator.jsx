@@ -1908,7 +1908,7 @@ export default function DrillAnimator() {
       // waypoint 0 = the start (i=-1); a stationary collector shows there too. A
       // routed collect at path index k shows only at that waypoint (i=k) — no
       // more duplicating a waypoint-0 collect onto the standing spot.
-      const pickI = !p.path.length || pk.pickup.at < 0 ? -1 : pk.pickup.at;
+      const pickI = !p.path.length || !pk.pickup || pk.pickup.at < 0 ? -1 : pk.pickup.at;
       if (pk.pickup && pk.pickup.to === p.id && pickI === i)
         steps.push({ ord: -1, text: pk.pickup.nearest ? "Collect nearest puck" : `Collect ${pk.id}`, warn: null, del: () => updateById(pk.id, { pickup: null }), role: "pickup", kind: null, pk });
     }
