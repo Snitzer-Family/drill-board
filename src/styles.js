@@ -165,7 +165,14 @@ export const STYLES = `
         .hd-btn.primary { background:#d7263d; border-color:#d7263d; }
         /* presentation steps editor */
         .hd-steplist { flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:7px; }
+        .hd-stepitem { display:flex; flex-direction:column; gap:6px; }
         .hd-steprow { display:flex; align-items:center; gap:8px; }
+        /* inline anchor editor revealed under a step when its chip is tapped */
+        .hd-anchoredit { display:flex; align-items:center; gap:7px; flex-wrap:wrap;
+          padding:8px 9px; margin-left:2px; background:#161d25; border:1px solid #263140;
+          border-radius:8px; }
+        .hd-seclabel { display:inline-flex; align-items:center; gap:4px; font-size:12.5px; color:#aeb9c6; }
+        .hd-secinput { width:74px; flex:none; padding:6px 8px; font-variant-numeric:tabular-nums; }
         .hd-steptime { flex:none; width:42px; font-size:11px; color:#7d8b99;
           font-variant-numeric:tabular-nums; text-align:right; }
         /* per-step anchor chip: waypoint (blue) vs fixed-time (grey), warn if broken */
@@ -175,6 +182,7 @@ export const STYLES = `
           cursor:pointer; font-variant-numeric:tabular-nums; }
         .hd-anchorbtn.wp { color:#cddffb; background:#1c2b45; border-color:#2c477a; }
         .hd-anchorbtn.bad { color:#ffb0ba; background:#3a2126; border-color:#6b2f38; }
+        .hd-anchorbtn.open { box-shadow:0 0 0 1px #1f4fa3 inset; border-color:#1f4fa3; }
         /* presentation caption — floats over the ice; text on top, actions below so
            it reads cleanly on a narrow phone instead of squishing beside the button.
            Default spot is bottom-centre; a saved pos (inline style) overrides it. */

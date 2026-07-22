@@ -274,6 +274,7 @@ export default function DrillAnimator() {
   const [presoDelay, setPresoDelay] = useState(2.5);   // seconds held at each step
   const [holdStep, setHoldStep] = useState(null);      // step currently being read
   const [placingStep, setPlacingStep] = useState(null); // idx of the step whose caption is being placed on the ice
+  const [editAnchor, setEditAnchor] = useState(null);  // idx of the step whose time/waypoint anchor is being edited inline
   const [minorDesc, setMinorDesc] = useState(false);   // describe zones skated through
   const [showResult, setShowResult] = useState(true);  // Save!/Goal! splash on shots
   const [collisions, setCollisions] = useState(true);  // route avoidance (nets/goalie/players)
@@ -993,7 +994,7 @@ export default function DrillAnimator() {
     const idx = drillSteps.length;
     setDrillSteps(s => [...s, wp ? { text: "", on: { piece: wp.piece, wp: wp.wp } } : { text: "", at: nowSec }]);
     setPlaying(false); setHoldStep(null); holdRef.current = 0;
-    setOpenMenu(null); setPopup(null);
+    setOpenMenu(null); setPopup(null); setEditAnchor(null);
     setPlacingStep(idx);
   }
   // re-open an existing step for on-ice placement: seek to its beat, pause, show it
@@ -1001,12 +1002,25 @@ export default function DrillAnimator() {
     const r = resolveSteps()[idx];
     if (r && r.resolved) scrubTo(Math.min(1, r.t / Math.max(0.1, totalTime)));
     setPlaying(false); setHoldStep(null); holdRef.current = 0;
-    setOpenMenu(null); setPopup(null);
+    setOpenMenu(null); setPopup(null); setEditAnchor(null);
     setPlacingStep(idx);
   }
   const setStepText = (idx, text) => setDrillSteps(s => s.map((x, k) => k === idx ? { ...x, text } : x));
   const setStepPos = (idx, pos) => setDrillSteps(s => s.map((x, k) => k === idx ? { ...x, pos } : x));
-  const deleteStep = idx => setDrillSteps(s => s.filter((_, k) => k !== idx));
+  const deleteStep = idx => { setDrillSteps(s => s.filter((_, k) => k !== idx)); setEditAnchor(null); };
+  // pin a step to an absolute time (seconds); drops any waypoint anchor, keeps text + pos
+  const setStepTime = (idx, sec) => setDrillSteps(s => s.map((x, k) => {
+    if (k !== idx) return x;
+    const { on, ...rest } = x; return { ...rest, at: Math.max(0, sec) };
+  }));
+  // anchor a step to a player's waypoint; drops any time anchor, keeps text + pos
+  const setStepWaypoint = (idx, piece, wp) => setDrillSteps(s => s.map((x, k) => {
+    if (k !== idx) return x;
+    const { at, ...rest } = x; return { ...rest, on: { piece, wp } };
+  }));
+  // players that carry a route, for the waypoint-anchor picker
+  const stepPlayers = pieces.filter(p => p.kind === "player" && (p.path || []).length);
+  const stepWpCount = pid => { const p = pieces.find(x => x.id === pid); return p ? (p.path || []).length : 0; };
   // drag the placing caption around the app rect; its centre saves as pos (0..1),
   // clamped to stay over the ice (above the scrubber band / away from the edges).
   const capDrag = useRef(false);
@@ -1053,15 +1067,18 @@ export default function DrillAnimator() {
     const sel = window.getSelection && window.getSelection();
     if (sel) { const r = document.createRange(); r.selectNodeContents(el); r.collapse(false); sel.removeAllRanges(); sel.addRange(r); }
   }, [placingStep]); // eslint-disable-line
-  // flip a step between its waypoint anchor and an absolute-time anchor. Time→
-  // waypoint snaps to the nearest activation to the step's current time (if any).
-  function toggleStepAnchor(idx) {
-    setDrillSteps(s => s.map((x, k) => {
-      if (k !== idx) return x;
-      if (x.on) { const r = resolveSteps()[idx]; return { text: x.text, at: r ? r.t : 0 }; }
-      const wp = nearestWaypoint(x.at || 0);
-      return wp ? { text: x.text, on: { piece: wp.piece, wp: wp.wp } } : x;
-    }));
+  // switch a step to an absolute-time anchor, seeding it with the step's current
+  // resolved time (so a waypoint→time flip lands where the note already fired).
+  function anchorToTime(idx) {
+    const r = resolveSteps()[idx];
+    setStepTime(idx, r ? +r.t.toFixed(1) : 0);
+  }
+  // switch a step to a waypoint anchor: snap to the nearest activation to its
+  // current time, else fall back to the first player's first waypoint.
+  function anchorToWaypoint(idx) {
+    const r = resolveSteps()[idx];
+    const wp = nearestWaypoint(r ? r.t : 0) || (stepPlayers[0] ? { piece: stepPlayers[0].id, wp: 0 } : null);
+    if (wp) setStepWaypoint(idx, wp.piece, wp.wp);
   }
   // materialize the legacy auto-derivation into editable authored steps: movement
   // beats become waypoint anchors (wp = i-1, where buildSteps fires them), puck
@@ -5498,17 +5515,50 @@ export default function DrillAnimator() {
             {editRows.length === 0 ? (
               <div className="hd-note">No steps yet. Scrub the timeline, pause, then “＋ Add here” — or Generate from the play.</div>
             ) : editRows.map(s => (
-              <div key={s.idx} className="hd-steprow">
-                <button className={`hd-anchorbtn${s.on ? " wp" : ""}${s.resolved ? "" : " bad"}`}
-                  title={s.on ? "Anchored to a waypoint — tap to pin to this time instead"
-                    : "Anchored to a time — tap to snap to the nearest waypoint"}
-                  onClick={() => toggleStepAnchor(s.idx)}>{s.resolved ? s.label : "⚠ " + s.label}</button>
-                <input className="hd-input" style={{ flex: 1, minWidth: 0 }} value={s.text}
-                  placeholder="Describe this beat…" autoFocus={!s.text}
-                  onChange={e => setStepText(s.idx, e.target.value)} />
-                <button className={`hd-mini${s.pos ? " on" : ""}`} title="Place the caption on the ice"
-                  disabled={!s.resolved} onClick={() => enterPlacing(s.idx)}>⤢</button>
-                <button className="hd-mini" title="delete step" onClick={() => deleteStep(s.idx)}>✕</button>
+              <div key={s.idx} className="hd-stepitem">
+                <div className="hd-steprow">
+                  <button className={`hd-anchorbtn${s.on ? " wp" : ""}${s.resolved ? "" : " bad"}${editAnchor === s.idx ? " open" : ""}`}
+                    title="Edit when this step pops — a fixed time or a player's waypoint"
+                    onClick={() => setEditAnchor(v => v === s.idx ? null : s.idx)}>{s.resolved ? s.label : "⚠ " + s.label}</button>
+                  <input className="hd-input" style={{ flex: 1, minWidth: 0 }} value={s.text}
+                    placeholder="Describe this beat…" autoFocus={!s.text}
+                    onChange={e => setStepText(s.idx, e.target.value)} />
+                  <button className={`hd-mini${s.pos ? " on" : ""}`} title="Place the caption on the ice"
+                    disabled={!s.resolved} onClick={() => enterPlacing(s.idx)}>⤢</button>
+                  <button className="hd-mini" title="delete step" onClick={() => deleteStep(s.idx)}>✕</button>
+                </div>
+                {editAnchor === s.idx && (
+                  <div className="hd-anchoredit">
+                    <button className={`hd-mini${s.on ? "" : " on"}`}
+                      onClick={() => anchorToTime(s.idx)}>⏱ Time</button>
+                    <button className={`hd-mini${s.on ? " on" : ""}`}
+                      disabled={!stepPlayers.length}
+                      onClick={() => anchorToWaypoint(s.idx)}>📍 Waypoint</button>
+                    {s.on ? (
+                      <>
+                        <select className="hd-select on" value={s.on.piece}
+                          onChange={e => setStepWaypoint(s.idx, e.target.value,
+                            Math.min(s.on.wp, Math.max(0, stepWpCount(e.target.value) - 1)))}>
+                          {!stepPlayers.some(p => p.id === s.on.piece) &&
+                            <option value={s.on.piece}>{s.on.piece} (missing)</option>}
+                          {stepPlayers.map(p => <option key={p.id} value={p.id}>{p.label || p.id}</option>)}
+                        </select>
+                        <select className="hd-select on" value={s.on.wp}
+                          onChange={e => setStepWaypoint(s.idx, s.on.piece, +e.target.value)}>
+                          {Array.from({ length: stepWpCount(s.on.piece) }, (_, i) =>
+                            <option key={i} value={i}>pt {i + 1}</option>)}
+                        </select>
+                      </>
+                    ) : (
+                      <label className="hd-seclabel">
+                        <input className="hd-input hd-secinput" type="number" min="0" step="0.1"
+                          inputMode="decimal" value={(s.at ?? 0).toFixed(1)}
+                          onChange={e => setStepTime(s.idx, parseFloat(e.target.value) || 0)} />
+                        s
+                      </label>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -5517,14 +5567,15 @@ export default function DrillAnimator() {
             <button className="hd-btn" onClick={generateSteps}>⚙ Generate from play</button>
           </div>
           <div className="hd-row">
-            <button className="hd-btn primary" onClick={() => setOpenMenu(null)}>Done</button>
+            <button className="hd-btn primary" onClick={() => { setOpenMenu(null); setEditAnchor(null); }}>Done</button>
             <button className={`hd-btn${presentation ? " primary" : ""}`}
               onClick={() => setPresentation(v => !v)}>{presentation ? "Presentation on" : "Turn on"}</button>
           </div>
           <div className="hd-note">
             Scrub the timeline, pause, then “＋ Add here” drops a note — near a waypoint it
             anchors there (and tracks edits); otherwise it pins the time. Type it on the ice and
-            drag it clear of the action; ⤢ re-places a caption, the chip switches its anchor.
+            drag it clear of the action; ⤢ re-places a caption. Tap the anchor chip to set an
+            exact time in seconds, or pin the step to a player's waypoint.
             In Presentation mode, play pauses {presoDelay}s at each step (tap the ice to skip ahead).
           </div>
         </div>
