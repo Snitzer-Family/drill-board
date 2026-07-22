@@ -173,6 +173,31 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
         <path d="M -1.5 -1.5 A 2.1 2.1 0 0 1 1.5 -1.5" fill="none" stroke="#5a5a5e" strokeWidth={0.28} opacity={0.6} strokeLinecap="round" />
       </g>
     );
+  } else if (p.kind === "light") {
+    // cognitive-training light, top-down: an iPad on a tripod. Three legs splay
+    // out beneath a portrait tablet whose screen shows the current cue colour;
+    // the ice around it takes a soft wash of that colour.
+    const lit = p.color || "#2ea043";
+    const legs = [];
+    for (let k = 0; k < 3; k++) {
+      const a = (-90 + k * 120) * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
+      legs.push(<line key={k} x1={c * 0.55} y1={s * 0.55} x2={c * 3.3} y2={s * 3.3}
+        stroke="#4a4f57" strokeWidth={0.4} strokeLinecap="round" />);
+    }
+    body = (
+      <g pointerEvents="none">
+        {selected && <rect x={-2.55} y={-3.35} width={5.1} height={6.7} rx={0.9} fill="none" stroke="#ffd447" strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
+        {/* the coloured light the screen casts on the ice */}
+        <circle cx={0} cy={0} r={3.5} fill={lit} opacity={0.16} />
+        {/* tripod legs + centre hub */}
+        {legs}
+        <circle cx={0} cy={0} r={0.62} fill="#3a3f47" />
+        {/* the tablet: dark bezel, a colour-filled screen, and a glass highlight */}
+        <rect x={-1.85} y={-2.7} width={3.7} height={5.4} rx={0.55} fill="#15181c" stroke="#0a0d10" strokeWidth={0.18} />
+        <rect x={-1.42} y={-2.25} width={2.84} height={4.5} rx={0.32} fill={lit} />
+        <rect x={-1.42} y={-2.25} width={2.84} height={1.5} rx={0.32} fill="#ffffff" opacity={0.16} />
+      </g>
+    );
   } else if (p.kind === "cone")
     body = (
       <path d="M 0 -2.4 L 2.2 1.8 L -2.2 1.8 Z"
@@ -279,6 +304,8 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
     ? <rect x={-2.5} y={-3.2} width={5} height={6.4} fill="transparent" onPointerDown={onDown} style={{ cursor: "grab" }} />
     : p.kind === "passer"
     ? <rect x={-1.9} y={-2.9} width={3.8} height={5.8} fill="transparent" onPointerDown={onDown} style={{ cursor: "grab" }} />
+    : p.kind === "light"
+    ? <rect x={-2.4} y={-3.1} width={4.8} height={6.2} fill="transparent" onPointerDown={onDown} style={{ cursor: "grab" }} />
     : <circle cx={0} cy={0} r={p.kind === "puck" ? 3.4 : 6.8} fill="transparent" onPointerDown={onDown} style={{ cursor: "grab" }} />;
   return (
     <g opacity={dim ? 0.92 : 1} transform={frame}>

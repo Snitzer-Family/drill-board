@@ -76,13 +76,15 @@ Places a piece. `id` is any unique token (e.g. `F1`, `PK1`, `N2`).
 
 **Kinds:** `player` · `puck` · `cone` · `net` · `bumper` (solid barrier — players route around it, pucks carom off it) ·
 `deker` (stickhandling gate) · `passer` (rebounder box) · `tire` (agility prop) ·
+`stick` (a stick laid on the ice) · `light` (cognitive-training light — an iPad on a tripod whose screen shows a cue colour) ·
 `label` (a movable, resizable on-ice text note).
 
 **Modifiers** (any order):
 
 | Modifier | Applies to | Meaning |
 |---|---|---|
-| `#RRGGBB` / `#RGB` | any | Colour |
+| `#RRGGBB` / `#RGB` | any | Colour. On a `light` this is the idle screen colour (shown before/without a cue timeline). |
+| `cues=<hex>:<dur>;…` | light | Cue timeline: the screen steps through each colour for `<dur>` seconds as the drill plays (hex has no leading `#`; steps separated by `;`). The drill runs at least as long as the timeline. e.g. `cues=2ea043:3;e5342b:2`. |
 | *bare word* | player | Jersey label (e.g. `F1`) |
 | `"quoted text"` | label | The label's text (spaces and commas allowed) |
 | `size=<n>` | label, net, tire | label: font scale · **net**: `1` NHL / `0.62` mite · **tire**: `1` large / `0.55` small |

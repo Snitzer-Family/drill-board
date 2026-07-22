@@ -26,6 +26,7 @@ const TOOL_GLYPH = {
   passer: { vb: "-2.3 -3.2 4.6 6.4", color: "#57636f" },
   tire: { vb: "-3.3 -3.3 6.6 6.6", color: "#1c1c1e" },
   stick: { vb: "-6.4 -2.4 13.4 4.8", color: "#8a929c" },
+  light: { vb: "-3.7 -3.7 7.4 7.4", color: "#2ea043" },
 };
 const toolImg = kind => {
   const k = kind === "playerpuck" ? "player" : kind;
@@ -41,6 +42,9 @@ const toolImg = kind => {
 
 // swatch palette for on-ice text labels (dark ink first — labels sit on light ice)
 const LABEL_COLORS = ["#14202b", "#d7263d", "#1f4fa3", "#1f8a4c", "#e0731d", "#7a3fa8"];
+
+// cue colours a cognitive-training light can show (its screen fills with one)
+const LIGHT_COLORS = ["#2ea043", "#e5342b", "#2f6df6", "#f5c518", "#8a3ffc", "#f2f5f8"];
 
 // chip / hard-rim release handle sits this many times CLOSER than the puck's
 // actual travel, so a small drag near the player controls a long release
@@ -734,7 +738,10 @@ export default function DrillAnimator() {
   const rpieces = useMemo(() => resolveNearest(pieces), [pieces]);
   const { getPlan, pieceTime, displayPosAt, stickSwing, waypointTime, puckInGoal } = createTiming({ pieces: rpieces, pace, segRefs, planCache, seed: playSeed, realisticShots, detail: detailAnim, odds: shotOdds });
 
-  const totalTime = Math.max(0.1, ...rpieces.map(pieceTime));
+  // a light's cue timeline can outlast every route — keep the drill running long
+  // enough to show every cue (so a "read the light" reaction has time to resolve)
+  const cueSpan = p => p.kind === "light" && p.cues ? p.cues.reduce((a, c) => a + Math.max(0.1, c.dur || 0), 0) : 0;
+  const totalTime = Math.max(0.1, ...rpieces.map(pieceTime), ...rpieces.map(cueSpan));
   totalRef.current = totalTime;
 
   // natural phrase for an area name mid-sentence ("Dot lane" -> "the dot lane")
@@ -1186,6 +1193,18 @@ export default function DrillAnimator() {
     while (diff < -Math.PI) diff += 2 * Math.PI;
     return (diff >= 0 ? 1 : -1) * w * 60;   // degrees, tunable
   }
+  // the colour a cognitive-training light is showing right now: its cue timeline
+  // resolved at the current animation time, else (no cues / before play) its idle
+  // base colour. After the last cue the final colour is held.
+  function lightColor(p) {
+    const cues = p.cues || [];
+    if (!cues.length) return p.color;
+    const e = animT <= 0 ? 0 : animT * totalTime;
+    let acc = 0;
+    for (const c of cues) { acc += Math.max(0.1, c.dur || 0); if (e < acc) return c.color; }
+    return cues[cues.length - 1].color;
+  }
+
   function displayPos(p) {
     const res = displayPosRaw(p);
     if (animT <= 0) return res;
@@ -1469,7 +1488,7 @@ export default function DrillAnimator() {
   function nextId(kind) {
     const prefix = kind === "player" ? "P" : kind === "puck" ? "PK" : kind === "net" ? "N"
       : kind === "bumper" ? "B" : kind === "deker" ? "DK" : kind === "passer" ? "PS"
-      : kind === "label" ? "L" : kind === "tire" ? "T" : kind === "stick" ? "ST" : kind === "mark" ? "MK" : "C";
+      : kind === "label" ? "L" : kind === "tire" ? "T" : kind === "stick" ? "ST" : kind === "light" ? "LT" : kind === "mark" ? "MK" : "C";
     let n = 1;
     while (pieces.some(p => p.id === prefix + n)) n++;
     return prefix + n;
@@ -1483,7 +1502,7 @@ export default function DrillAnimator() {
       facing: kind === "net" && pt.x >= 100 ? 180 : 0, transfers: [], shotAt: null, rimAt: null, chipAt: null, chipAim: null, rimAim: null, chipDist: null, rimDist: null, pickup: null, net: null, holdLine: false, goalie: false, defense: false,
       color: kind === "player" ? COLORS[colorIdx] : kind === "cone" ? "#e0731d" : kind === "net" ? "#c81e33"
         : kind === "bumper" ? "#1b1e22" : kind === "deker" ? "#c79a4e" : kind === "passer" ? "#57636f"
-        : kind === "label" ? "#14202b" : kind === "tire" ? "#1c1c1e" : "#14171a",
+        : kind === "label" ? "#14202b" : kind === "tire" ? "#1c1c1e" : kind === "light" ? "#2ea043" : "#14171a",
       label: kind === "player" ? id : "", text: kind === "label" ? "Label" : "", size: 1, path: [],
     };
   }
@@ -2052,7 +2071,7 @@ export default function DrillAnimator() {
   // ----- box-select group operations (multiSel) -----
   const idPrefix = kind => (kind === "player" ? "P" : kind === "puck" ? "PK" : kind === "net" ? "N"
     : kind === "bumper" ? "B" : kind === "deker" ? "DK" : kind === "passer" ? "PS"
-    : kind === "label" ? "L" : kind === "tire" ? "T" : kind === "stick" ? "ST" : kind === "mark" ? "MK" : "C");
+    : kind === "label" ? "L" : kind === "tire" ? "T" : kind === "stick" ? "ST" : kind === "light" ? "LT" : kind === "mark" ? "MK" : "C");
   const rotatesFacing = p => ["net", "bumper", "deker", "passer", "tire"].includes(p.kind) || (p.kind === "player" && !p.path.length);
   const groupCentroid = sel => sel.length
     ? { x: sel.reduce((a, p) => a + p.x, 0) / sel.length, y: sel.reduce((a, p) => a + p.y, 0) / sel.length } : null;
@@ -3274,6 +3293,7 @@ export default function DrillAnimator() {
           <button className="hd-tool" onClick={() => addPieceAt("passer", popup.pt)}>{toolImg("passer")}<span>Passer</span></button>
           <button className="hd-tool" onClick={() => addPieceAt("tire", popup.pt)}>{toolImg("tire")}<span>Tire</span></button>
           <button className="hd-tool" onClick={() => addPieceAt("stick", popup.pt)}>{toolImg("stick")}<span>Stick</span></button>
+          <button className="hd-tool" onClick={() => addPieceAt("light", popup.pt)}>{toolImg("light")}<span>Light</span></button>
           <button className="hd-tool" onClick={() => addPieceAt("label", popup.pt)}><span className="hd-toolglyph"><Icon name="label" size={22} /></span><span>Label</span></button>
         </div>
       );
@@ -3283,7 +3303,7 @@ export default function DrillAnimator() {
         : p.kind === "net" ? `Net ${p.id}` : p.kind === "bumper" ? `Bumper ${p.id}`
         : p.kind === "deker" ? `Deker ${p.id}` : p.kind === "passer" ? `Passer ${p.id}`
         : p.kind === "label" ? `Label ${p.id}` : p.kind === "tire" ? `Tire ${p.id}` : p.kind === "stick" ? `Stick ${p.id}`
-        : p.kind === "mark" ? `Mark ${p.id}` : `Cone ${p.id}`;
+        : p.kind === "light" ? `Light ${p.id}` : p.kind === "mark" ? `Mark ${p.id}` : `Cone ${p.id}`;
       body = (
         <>
           {p.kind === "label" && (
@@ -3351,6 +3371,40 @@ export default function DrillAnimator() {
               </div>
             </>
           )}
+          {p.kind === "light" && (() => {
+            const cues = p.cues || [];
+            const nextColor = c => LIGHT_COLORS[(LIGHT_COLORS.indexOf(c) + 1) % LIGHT_COLORS.length];
+            const setCues = next => updateById(p.id, { cues: next });
+            return (
+              <>
+                <div className="hd-poprow">
+                  <span>Idle</span>
+                  {LIGHT_COLORS.map(c => (
+                    <div key={c} className={`hd-swatch${p.color === c ? " on" : ""}`} style={{ background: c }}
+                      onClick={() => updateById(p.id, { color: c })} />
+                  ))}
+                </div>
+                <div className="hd-poprow">
+                  <span style={{ fontSize: 11, color: "#8b99a8" }}>Cue timeline — the screen steps through these as the drill plays</span>
+                </div>
+                {cues.map((c, i) => (
+                  <div className="hd-poprow" key={i}>
+                    <div className="hd-swatch on" title="tap to change colour" style={{ background: c.color, cursor: "pointer" }}
+                      onClick={() => setCues(cues.map((q, j) => j === i ? { ...q, color: nextColor(q.color) } : q))} />
+                    <Stepper value={+(c.dur || 0).toFixed(1)} step={0.5} min={0.5}
+                      onChange={v => setCues(cues.map((q, j) => j === i ? { ...q, dur: v } : q))} />
+                    <button className="hd-mini" onClick={() => setCues(cues.filter((_, j) => j !== i))}>×</button>
+                  </div>
+                ))}
+                <div className="hd-poprow">
+                  <button className="hd-mini" onClick={() => setCues([...cues, { color: LIGHT_COLORS[cues.length % LIGHT_COLORS.length], dur: 2 }])}>
+                    + Add cue
+                  </button>
+                  <span style={{ fontSize: 11, color: "#8b99a8" }}>cognitive-training light · drag to move</span>
+                </div>
+              </>
+            );
+          })()}
           {(p.kind === "bumper" || p.kind === "deker" || p.kind === "passer") && (
             <div className="hd-poprow">
               <span style={{ fontSize: 11, color: "#8b99a8" }}>
@@ -4110,12 +4164,14 @@ export default function DrillAnimator() {
                 const goalE = animT <= 0 ? 0 : animT * totalTime;
                 const rank = p => (p.goalieOf ? 0.5
                   : p.kind === "puck" && puckInGoal(p, goalE) ? -1
-                  : p.kind === "net" || p.kind === "bumper" || p.kind === "deker" || p.kind === "passer" || p.kind === "tire" || p.kind === "stick" ? 0 : p.kind === "player" ? 2 : 1);
+                  : p.kind === "net" || p.kind === "bumper" || p.kind === "deker" || p.kind === "passer" || p.kind === "tire" || p.kind === "stick" || p.kind === "light" ? 0 : p.kind === "player" ? 2 : 1);
                 return rank(a) - rank(b);
               })
               .map(p => {
               if (p.goalieOf) return renderGoalie(p.goalieOf);
               const dp = displayPos(p);
+              // a light's screen colour tracks its cue timeline as the drill plays
+              if (p.kind === "light") p = { ...p, color: lightColor(p) };
               const isJump = p.kind === "player";
               const lift = p.kind === "puck" ? sauceLift(p) : isJump ? jumpLift(p) : 0;
               if (lift > 0.002) {
@@ -4431,7 +4487,7 @@ export default function DrillAnimator() {
           <div className="hd-mh">Add to the ice</div>
           <div className="hd-toolgrid">
             {[["player", "Player"], ["playerpuck", "+ Puck"], ["puck", "Puck"], ["cone", "Cone"],
-              ["net", "Net"], ["bumper", "Bumper"], ["deker", "Deker"], ["passer", "Passer"], ["tire", "Tire"], ["stick", "Stick"]].map(([k, lbl]) => (
+              ["net", "Net"], ["bumper", "Bumper"], ["deker", "Deker"], ["passer", "Passer"], ["tire", "Tire"], ["stick", "Stick"], ["light", "Light"]].map(([k, lbl]) => (
               <button key={k} className={`hd-tool${tool === k ? " on" : ""}`} onClick={() => { setTool(k); setOpenMenu(null); }}>
                 {toolImg(k)}<span>{lbl}</span>
               </button>

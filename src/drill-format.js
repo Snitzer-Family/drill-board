@@ -38,15 +38,16 @@ export function parseDrill(text) {
       } else if (cmd === "PIECE") {
         const [, id, kind, xs, ys, ...rest] = tok;
         const x = parseFloat(xs), y = parseFloat(ys);
-        if (!id || !["player", "puck", "cone", "net", "bumper", "deker", "passer", "label", "tire", "stick"].includes(kind) || isNaN(x) || isNaN(y))
+        if (!id || !["player", "puck", "cone", "net", "bumper", "deker", "passer", "label", "tire", "stick", "light"].includes(kind) || isNaN(x) || isNaN(y))
           throw new Error("PIECE needs: id kind x y");
         let color = kind === "cone" ? "#e0731d" : kind === "puck" ? "#14171a" : kind === "net" ? "#c81e33"
           : kind === "bumper" ? "#1b1e22" : kind === "deker" ? "#c79a4e" : kind === "passer" ? "#57636f"
-          : kind === "label" ? "#14202b" : kind === "tire" ? "#1c1c1e" : kind === "stick" ? "#20242a" : "#d7263d";
+          : kind === "label" ? "#14202b" : kind === "tire" ? "#1c1c1e" : kind === "stick" ? "#20242a" : kind === "light" ? "#2ea043" : "#d7263d";
         let label = kind === "player" ? id : "";
         let text = "", size = 1;                          // label piece: text + font scale
         let speed = 1, hand = "R", carrier = null, facing = 0, shotAt = null, pickup = null, rimAt = null, chipAt = null, chipAim = null, rimAim = null, chipDist = null, rimDist = null;
         let net = null, holdLine = false, goalie = false, defense = false, wait = null, group = null, crease = false;
+        let cues = [];                                    // light: cue timeline (colour:duration steps)
         const transfers = [];
         rest.forEach(r => {
           if (quoted(r)) { text = unq(r); }              // a "quoted string" → label text
@@ -113,13 +114,20 @@ export function parseDrill(text) {
             } else if (key === "face") {
               const n = parseFloat(v);
               if (!isNaN(n)) facing = n;
+            } else if (key === "cues") {
+              // cues=<hex>:<dur>;<hex>:<dur>… — a light's colour timeline. Hex has
+              // no leading # (commas/# are stripped by tokenizing), so ; separates.
+              v.split(";").forEach(seg => {
+                const m6 = /^([0-9a-fA-F]{3,6}):(\d+(?:\.\d+)?)$/.exec(seg);
+                if (m6) cues.push({ color: "#" + m6[1], dur: parseFloat(m6[2]) });
+              });
             } else if (key === "group") group = v.replace(/_/g, " ").trim() || null;   // named group membership
           } else if (r === "goalie") goalie = true;
           else if (r === "crease") crease = true;
           else if (r === "defense") defense = true;
           else label = r;
         });
-        const p = { id, kind, x, y, color, label, text, size, speed, hand, carrier, facing, transfers, shotAt, pickup, rimAt, chipAt, chipAim, rimAim, chipDist, rimDist, net, holdLine, goalie, defense, wait, group, crease, path: [] };
+        const p = { id, kind, x, y, color, label, text, size, speed, hand, carrier, facing, transfers, shotAt, pickup, rimAt, chipAt, chipAim, rimAim, chipDist, rimDist, net, holdLine, goalie, defense, wait, group, crease, cues, path: [] };
         pieces.push(p); byId[id] = p;
       } else if (cmd === "PATH") {
         const id = tok[1];
@@ -250,7 +258,9 @@ export function serializeDrill(rink, pieces, title = "", desc = "") {
     const df = p.kind === "player" && p.defense ? " defense" : "";
     const siz = (p.kind === "net" || p.kind === "tire") && p.size && p.size !== 1 ? ` size=${f2(p.size)}` : "";
     const grp = p.group ? ` group=${String(p.group).trim().replace(/\s+/g, "_")}` : "";
-    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${car}${gp}${pas}${sht}${rmT}${chT}${nt}${hld}${wt}${fac}${gl}${crs}${df}${siz}${grp}${spd}`);
+    const cue = p.kind === "light" && (p.cues || []).length
+      ? ` cues=${p.cues.map(c => `${String(c.color || "").replace("#", "")}:${f1(c.dur || 0)}`).join(";")}` : "";
+    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${car}${gp}${pas}${sht}${rmT}${chT}${nt}${hld}${wt}${fac}${gl}${crs}${df}${siz}${grp}${cue}${spd}`);
     if (p.path.length) out.push(`PATH ${p.id} ${p.path.map(segToStr).join(" ")}`);
   });
   return out.join("\n") + "\n";
