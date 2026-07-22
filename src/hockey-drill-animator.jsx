@@ -2428,6 +2428,7 @@ export default function DrillAnimator() {
     if (tool === "draw" && !fork) { setSelectedId(id); setPopup(null); beginDraw(e, id); return; }
     if (wakeEdit()) return;
     setSelectedId(id);
+    if (fork) setEditingFork({ id, color: fork });   // tapping a reaction route opens it for editing
     const pt = svgPt(e);
     drag.current = { kind: "piece", id, line: segIdx, ...(fork ? { fork } : {}), tapPt: pt, start: pt, last: pt, moved: false, touch: e.pointerType !== "mouse" };
     svgRef.current.setPointerCapture?.(e.pointerId);
@@ -4328,7 +4329,8 @@ export default function DrillAnimator() {
                                 strokeDasharray={editThis || active ? undefined : sdash("1.6 1.1")}
                                 strokeLinecap="round" strokeLinejoin="round"
                                 opacity={editThis ? 1 : active ? 0.95 : 0.5} pointerEvents="none" />
-                              {editThis && (
+                              {/* tappable whenever editing — tapping a reaction route opens it for editing */}
+                              {editing && !playing && (
                                 <path d={d} fill="none" stroke="transparent" strokeWidth={4}
                                   onPointerDown={e => lineDown(e, p.id, i, f.color)} style={{ cursor: "pointer" }} />
                               )}
