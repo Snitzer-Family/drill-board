@@ -3272,46 +3272,62 @@ export default function DrillAnimator() {
     return { ...base, strokeWidth: W(0.75), strokeDasharray: D("0.2 1.5") };
   }
 
-  // Arrowhead at a route's end, drawn in the stretch-cancelling icon frame so it
-  // stays a clean triangle (SVG markers get sheared by the fill-mode stretch).
-  function renderArrow(p, bentPts) {
-    const n = p.path.length;
-    if (!n) return null;
-    // anchor the tip at the drawn line's END and point it along that line's end
-    // tangent — use the detoured (bent) polyline when there is one so the head
-    // lines up with the curve actually shown, not the raw path
-    let endPt, tx, ty;
-    if (bentPts && bentPts.length >= 2) {
-      endPt = bentPts[bentPts.length - 1];
-      const b = bentPts[Math.max(0, bentPts.length - 4)];
-      tx = endPt.x - b.x; ty = endPt.y - b.y;
-    } else {
-      const last = p.path[n - 1];
-      const prev = n >= 2 ? segEnd(p, n - 2) : { x: p.x, y: p.y };
-      endPt = { x: last.x, y: last.y };
-      const near = evalSeg(prev, last, 0.9);
-      tx = last.x - near.x; ty = last.y - near.y;
-      if (Math.hypot(tx, ty) < 1e-4) {               // degenerate (control on the endpoint)
-        if (last.type === "C") { tx = last.x - last.c2x; ty = last.y - last.c2y; }
-        else if (last.type === "Q") { tx = last.x - last.cx; ty = last.y - last.cy; }
-        else { tx = last.x - prev.x; ty = last.y - prev.y; }
-      }
-    }
-    if (!tx && !ty) return null;
-    const ang = (Math.atan2(ty, tx) * 180) / Math.PI;
+  // a carat (chevron ">") arrowhead, tip AT `endPt` pointing along heading `ang`
+  // (deg), drawn in the stretch-cancelling icon frame so it stays a clean, open
+  // chevron (SVG markers get sheared by the fill-mode stretch).
+  function caratHead(endPt, ang, color, key, opacity = 1) {
     const fx = iconXf({ x: endPt.x, y: endPt.y, a: ang });
     // hold a constant SCREEN size (counter the pinch-zoom) so the head stays
     // locked to the non-scaling line and is equally distinctive at any zoom
     const z = 1 / (view.s || 1);
     return (
-      <g key={`arw-${p.id}`} transform={fx.t} pointerEvents="none">
+      <g key={key} transform={fx.t} pointerEvents="none" opacity={opacity}>
         <g transform={`scale(${z})`}>
-          {/* SOLID head so the line can't show through and the tip sits on the end */}
-          <path d="M 0 0 L -4.6 -2.7 L -4.6 2.7 Z" fill={p.color} stroke={p.color}
-            strokeWidth={0.6} strokeLinejoin="round" />
+          {/* open chevron: two strokes meeting at the tip (0,0) */}
+          <path d="M -4.6 -2.7 L 0 0 L -4.6 2.7" fill="none" stroke={color}
+            strokeWidth={1.1} strokeLinecap="round" strokeLinejoin="round" />
         </g>
       </g>
     );
+  }
+
+  // end point + heading (deg) of a route path array that begins at `start`; null
+  // if empty or degenerate. Shared by base routes and reaction forks.
+  function pathEndArrow(pathArr, start) {
+    const n = pathArr.length;
+    if (!n) return null;
+    const last = pathArr[n - 1];
+    const prev = n >= 2 ? { x: pathArr[n - 2].x, y: pathArr[n - 2].y } : start;
+    const endPt = { x: last.x, y: last.y };
+    const near = evalSeg(prev, last, 0.9);
+    let tx = last.x - near.x, ty = last.y - near.y;
+    if (Math.hypot(tx, ty) < 1e-4) {               // degenerate (control on the endpoint)
+      if (last.type === "C") { tx = last.x - last.c2x; ty = last.y - last.c2y; }
+      else if (last.type === "Q") { tx = last.x - last.cx; ty = last.y - last.cy; }
+      else { tx = last.x - prev.x; ty = last.y - prev.y; }
+    }
+    if (!tx && !ty) return null;
+    return { endPt, ang: (Math.atan2(ty, tx) * 180) / Math.PI };
+  }
+
+  // Arrowhead at a route's end, as an open carat pointing along the line's end
+  // tangent — use the detoured (bent) polyline when there is one so the head
+  // lines up with the curve actually shown, not the raw path.
+  function renderArrow(p, bentPts) {
+    if (!p.path.length) return null;
+    let endPt, ang;
+    if (bentPts && bentPts.length >= 2) {
+      endPt = bentPts[bentPts.length - 1];
+      const b = bentPts[Math.max(0, bentPts.length - 4)];
+      const tx = endPt.x - b.x, ty = endPt.y - b.y;
+      if (!tx && !ty) return null;
+      ang = (Math.atan2(ty, tx) * 180) / Math.PI;
+    } else {
+      const ea = pathEndArrow(p.path, { x: p.x, y: p.y });
+      if (!ea) return null;
+      endPt = ea.endPt; ang = ea.ang;
+    }
+    return caratHead(endPt, ang, p.color, `arw-${p.id}`);
   }
 
   function renderHandles(p, yf = yFix, fork = null) {
@@ -4858,6 +4874,11 @@ export default function DrillAnimator() {
                         </g>
                       );
                     })}
+                    {(() => {                             // carat at this reaction's end
+                      const ea = pathEndArrow(f.path, origin);
+                      return ea ? caratHead(ea.endPt, ea.ang, f.color, ref + "/arw",
+                        editThis ? 1 : active ? 0.95 : 0.5) : null;
+                    })()}
                     {(f.action || "skate") === "skate" ? renderLevel(f.forks, { x: end.x, y: end.y }, ref) : null}
                   </g>
                 );
