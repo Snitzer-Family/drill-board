@@ -100,7 +100,7 @@ function DelayTrigger({ value, onChange, sub, players, actorIds, nameOf }) {
     <select className="hd-select on" value={value.at == null ? -1 : value.at}
       onChange={e => onChange({ ...value, at: parseInt(e.target.value, 10) })} disabled={!trig}>
       <option value={-1}>start</option>
-      {trig && trig.path.map((s, wi) => <option key={wi} value={wi}>{wi + 2}</option>)}
+      {trig && trig.path.map((s, wi) => <option key={wi} value={wi}>{wi + 1}</option>)}
     </select>
   );
 
@@ -141,7 +141,7 @@ function DelayTrigger({ value, onChange, sub, players, actorIds, nameOf }) {
           <select className="hd-select on" value={value.at == null ? "any" : value.at}
             onChange={e => onChange({ ...value, at: e.target.value === "any" ? null : parseInt(e.target.value, 10) })}>
             <option value="any">Any action</option>
-            {trig && trig.path.map((s, wi) => <option key={wi} value={wi}>{wi + 2}</option>)}
+            {trig && trig.path.map((s, wi) => <option key={wi} value={wi}>{wi + 1}</option>)}
           </select>
         </div>
       ) : hint("No player releases a puck yet (add a pass, shot, rim, or chip)."))}
@@ -1807,9 +1807,10 @@ export default function DrillAnimator() {
   function collectPuckAt(playerId, at, targetId) {
     const player = pieces.find(q => q.id === playerId);
     if (!player) return;
-    // a routed player collecting from their standing spot (at = -1) actually
-    // gathers it at the END of their route — where they skate to the puck
-    const cAt = at < 0 && player.path.length ? player.path.length - 1 : at;
+    // a standing collect (at = -1) pins to waypoint 0 — the player's start — so
+    // they gather the puck before moving and carry it (the timing engine grabs it
+    // at t0; a "nearest" collect placed at a route waypoint still auto-resolves)
+    const cAt = at;
     const spot = cAt < 0 || !player.path.length ? { x: player.x, y: player.y }
       : segEnd(player, Math.min(cAt, player.path.length - 1));
     const relPoint = pk => {
@@ -1852,7 +1853,7 @@ export default function DrillAnimator() {
     } else {
       // no explicit id → a live "nearest" collect: re-resolves to the closest
       // loose puck at play time (see resolveNearest). A chosen id stays fixed.
-      updateById(target.id, { pickup: { to: playerId, at: cAt < 0 ? 0 : cAt, ...(targetId ? {} : { nearest: true }) } });
+      updateById(target.id, { pickup: { to: playerId, at: cAt, ...(targetId ? {} : { nearest: true }) } });
     }
     // steps are ordered by puck array position, so move the just-collected puck
     // to the end — its collect (and any release) then sits at the END of the
@@ -2905,6 +2906,29 @@ export default function DrillAnimator() {
     return els;
   }
 
+  // the goalie sprite for a net/tire (tracks the puck in front of the net). Drawn
+  // ABOVE the net + its drawn crease, but still below the pucks/players (rank 0.5).
+  function renderGoalie(net) {
+    const gp = goaliePos(net);
+    const fx = iconXf(gp);
+    const col = net.color || "#c81e33";
+    const dark = "#1d2126";
+    return (
+      <g key={`goalie-${net.id}`} transform={fx.t} pointerEvents="none">
+        <ellipse cx={0.4} cy={0} rx={2.9} ry={2.6} fill="#0a1016" opacity={0.16} />
+        <path d="M 2.3 2.2 L 3.9 1 M 3.9 1.1 L 4.5 -1.1" stroke={dark} strokeWidth={1} strokeLinecap="round" />
+        <rect x={-1.7} y={-1.5} width={2.4} height={3} rx={1.05} fill={col} stroke="#fff" strokeWidth={0.3} />
+        <rect x={0.2} y={-1.85} width={2.6} height={1.5} rx={0.42} fill="#eef2f6" stroke="#2a2f36" strokeWidth={0.3} />
+        <rect x={0.2} y={0.35} width={2.6} height={1.5} rx={0.42} fill="#eef2f6" stroke="#2a2f36" strokeWidth={0.3} />
+        <circle cx={1.95} cy={-2.4} r={1.05} fill="#e8edf2" stroke="#2a2f36" strokeWidth={0.32} />
+        <circle cx={1.95} cy={-2.4} r={0.48} fill="none" stroke="#2a2f36" strokeWidth={0.18} opacity={0.55} />
+        <rect x={1.35} y={1.6} width={1.85} height={1.5} rx={0.28} fill="#e8edf2" stroke="#2a2f36" strokeWidth={0.32} />
+        <circle cx={-0.15} cy={0} r={0.92} fill={col} stroke="#fff" strokeWidth={0.3} />
+        <path d="M 0.35 -0.55 Q 0.85 0 0.35 0.55" fill="none" stroke="#fff" strokeWidth={0.16} opacity={0.55} />
+      </g>
+    );
+  }
+
   // Result splash for each net's latest shot (GOAL/SAVE/POST/WIDE/OVER). Parks in
   // an open area near the net (clear of players/routes) and flashes with an
   // outcome-specific motion (see the per-type block below); once the drill has
@@ -3052,7 +3076,7 @@ export default function DrillAnimator() {
             <div className="hd-poprow">
               <span style={{ fontSize: 11 }}>{tr.via ? "back at" : "caught at"}</span>
               <button className={`hd-mini${tr.recvAt == null ? " on" : ""}`} onClick={() => setRecvAt(pk.id, st.stage, null)}>auto</button>
-              {rec.path.map((s, wi) => <button key={wi} className={`hd-mini${tr.recvAt === wi ? " on" : ""}`} onClick={() => setRecvAt(pk.id, st.stage, tr.recvAt === wi ? null : wi)}>{wi + 2}</button>)}
+              {rec.path.map((s, wi) => <button key={wi} className={`hd-mini${tr.recvAt === wi ? " on" : ""}`} onClick={() => setRecvAt(pk.id, st.stage, tr.recvAt === wi ? null : wi)}>{wi + 1}</button>)}
             </div>
           )}
           <div className="hd-poprow">
@@ -3205,7 +3229,7 @@ export default function DrillAnimator() {
       );
       return (
         <div style={{ margin: "6px 0", padding: "7px 8px", background: "rgba(120,140,160,0.12)", borderRadius: 8 }}>
-          <div className="hd-mh" style={{ marginBottom: 5 }}>Action — {i < 0 ? "start" : `waypoint ${i + 2}`}</div>
+          <div className="hd-mh" style={{ marginBottom: 5 }}>Action — {i < 0 ? "waypoint 0 · start" : `waypoint ${i + 1}`}</div>
           {rows.length > 0 && addRow("addtop")}
           {rows.map(({ st, opts }, n) => {
             const t = typeOfStep(st);
@@ -3552,15 +3576,15 @@ export default function DrillAnimator() {
       if (!s) return null;
       anchorPt = { x: s.x, y: s.y };
       const next = p.path[i + 1];
-      title = `Waypoint ${i + 2} of ${p.path.length + 1}`;
-      // step back to waypoint 1 (the player/start popup) at j < 0
+      title = `Waypoint ${i + 1} of ${p.path.length}`;   // waypoint 0 = the start (player popup)
+      // step back to waypoint 0 (the player/start popup) at j < 0
       const goSeg = j => navPopup(j < 0 ? { type: "piece", id: p.id } : { type: "point", id: p.id, seg: j });
       body = (
         <>
           {p.path.length > 0 && (
             <div className="hd-poprow">
               <button className="hd-mini" onClick={() => goSeg(i - 1)}>‹ Prev</button>
-              <span style={{ fontSize: 11, color: "#8b99a8" }}>{i + 2} / {p.path.length + 1}</span>
+              <span style={{ fontSize: 11, color: "#8b99a8" }}>{i + 1} / {p.path.length}</span>
               <button className="hd-mini" disabled={i >= p.path.length - 1} style={{ opacity: i >= p.path.length - 1 ? 0.4 : 1 }}
                 onClick={() => goSeg(i + 1)}>Next ›</button>
             </div>
@@ -3965,30 +3989,6 @@ export default function DrillAnimator() {
               </g>
             )}
 
-            {/* goalies track the puck in front of their net (or all the way
-               around a tire), below the action */}
-            {!aiPlay && pieces.filter(q => (q.kind === "net" || q.kind === "tire") && q.goalie).map(net => {
-              const gp = goaliePos(net);
-              const fx = iconXf(gp);
-              const col = net.color || "#c81e33";
-              const dark = "#1d2126";
-              // local +x faces the shooter: chest, mask, two leg pads out front,
-              // catch glove (top), blocker + goalie stick (bottom)
-              return (
-                <g key={`goalie-${net.id}`} transform={fx.t} pointerEvents="none">
-                  <ellipse cx={0.4} cy={0} rx={2.9} ry={2.6} fill="#0a1016" opacity={0.16} />
-                  <path d="M 2.3 2.2 L 3.9 1 M 3.9 1.1 L 4.5 -1.1" stroke={dark} strokeWidth={1} strokeLinecap="round" />
-                  <rect x={-1.7} y={-1.5} width={2.4} height={3} rx={1.05} fill={col} stroke="#fff" strokeWidth={0.3} />
-                  <rect x={0.2} y={-1.85} width={2.6} height={1.5} rx={0.42} fill="#eef2f6" stroke="#2a2f36" strokeWidth={0.3} />
-                  <rect x={0.2} y={0.35} width={2.6} height={1.5} rx={0.42} fill="#eef2f6" stroke="#2a2f36" strokeWidth={0.3} />
-                  <circle cx={1.95} cy={-2.4} r={1.05} fill="#e8edf2" stroke="#2a2f36" strokeWidth={0.32} />
-                  <circle cx={1.95} cy={-2.4} r={0.48} fill="none" stroke="#2a2f36" strokeWidth={0.18} opacity={0.55} />
-                  <rect x={1.35} y={1.6} width={1.85} height={1.5} rx={0.28} fill="#e8edf2" stroke="#2a2f36" strokeWidth={0.32} />
-                  <circle cx={-0.15} cy={0} r={0.92} fill={col} stroke="#fff" strokeWidth={0.3} />
-                  <path d="M 0.35 -0.55 Q 0.85 0 0.35 0.55" fill="none" stroke="#fff" strokeWidth={0.16} opacity={0.55} />
-                </g>
-              );
-            })}
 
             {!aiPlay && pieces.map(p => {
               const rd = showRoutes ? routeDetour(p) : null;   // arc detour around a crossed net
@@ -4101,15 +4101,20 @@ export default function DrillAnimator() {
             {/* nets sit on the ice (bottom); players paint above pucks so a
                carried puck can't steal the grab; rotate ring is drawn last. A
                puck IN the net (a goal) sinks below the cage (rank −1). */}
-            {!aiPlay && [...pieces]
-              .filter(p => p.kind !== "label" && p.kind !== "mark")
+            {!aiPlay && [
+                ...pieces.filter(p => p.kind !== "label" && p.kind !== "mark"),
+                // goalies ride at rank 0.5 — above their net + drawn crease, below the action
+                ...pieces.filter(q => (q.kind === "net" || q.kind === "tire") && q.goalie).map(n => ({ goalieOf: n })),
+              ]
               .sort((a, b) => {
                 const goalE = animT <= 0 ? 0 : animT * totalTime;
-                const rank = p => (p.kind === "puck" && puckInGoal(p, goalE) ? -1
+                const rank = p => (p.goalieOf ? 0.5
+                  : p.kind === "puck" && puckInGoal(p, goalE) ? -1
                   : p.kind === "net" || p.kind === "bumper" || p.kind === "deker" || p.kind === "passer" || p.kind === "tire" || p.kind === "stick" ? 0 : p.kind === "player" ? 2 : 1);
                 return rank(a) - rank(b);
               })
               .map(p => {
+              if (p.goalieOf) return renderGoalie(p.goalieOf);
               const dp = displayPos(p);
               const isJump = p.kind === "player";
               const lift = p.kind === "puck" ? sauceLift(p) : isJump ? jumpLift(p) : 0;

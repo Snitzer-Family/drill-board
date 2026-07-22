@@ -299,7 +299,9 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
         if (!pl) return;
         let tPick = 0;
         if (pl.path.length) {
-          if (pk.pickup.nearest) {
+          if (pk.pickup.at < 0) {
+            tPick = 0;                                        // waypoint 0 (the start): pinned — collect before moving, then carry
+          } else if (pk.pickup.nearest) {
             // a "nearest" collect grabs the puck where the player passes CLOSEST to
             // it — so a puck by the start is picked up early and carried, not
             // dragged across to the route's end
@@ -311,8 +313,6 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
               const d = Math.hypot(pos.x - pk.x, pos.y - pk.y);
               if (d < bestD) { bestD = d; tPick = tt; }
             }
-          } else if (pk.pickup.at < 0) {
-            tPick = 0;                                        // waypoint 0 (the start): collect before moving, then carry
           } else {
             const atIdx = Math.min(pk.pickup.at, pl.path.length - 1);
             tPick = routeTimeW(pl, warp, atIdx);
@@ -392,9 +392,9 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           else if (r < OD.post + OD.wide) miss = "wide";
           else if (r < OD.post + OD.wide + OD.over) miss = "over";
         }
-        // a rebound collector set up within reach of the net (≤15 ft) — the only
+        // a rebound collector set up within reach of the net (≤30 ft) — the only
         // thing that forces a save when realistic shots are off
-        const nearCollect = !!aimPt && Math.hypot(aimPt.x - net.x, aimPt.y - net.y) <= 15;
+        const nearCollect = !!aimPt && Math.hypot(aimPt.x - net.x, aimPt.y - net.y) <= 30;
         // realistic OFF ("simple"): every shot on a net scores — even past a goalie
         // — unless a near-net rebound collect is set up, which forces a save out.
         const isGoal = !realisticShots ? (onNet && !nearCollect)
