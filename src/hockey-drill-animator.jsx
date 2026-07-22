@@ -3315,6 +3315,10 @@ export default function DrillAnimator() {
   // lines up with the curve actually shown, not the raw path.
   function renderArrow(p, bentPts) {
     if (!p.path.length) return null;
+    // a route that branches into reaction-light forks doesn't END here — its
+    // arrowhead sits at the branch point, so drop it and let the forks' carats
+    // mark the real endpoints
+    if ((p.forks || []).some(f => f.path && f.path.length)) return null;
     let endPt, ang;
     if (bentPts && bentPts.length >= 2) {
       endPt = bentPts[bentPts.length - 1];
@@ -4875,6 +4879,11 @@ export default function DrillAnimator() {
                       );
                     })}
                     {(() => {                             // carat at this reaction's end
+                      // …unless it chains into further reactions (then it's a
+                      // branch point, not an endpoint)
+                      const branches = (f.action || "skate") === "skate"
+                        && (f.forks || []).some(g => g.path && g.path.length);
+                      if (branches) return null;
                       const ea = pathEndArrow(f.path, origin);
                       return ea ? caratHead(ea.endPt, ea.ang, f.color, ref + "/arw",
                         editThis ? 1 : active ? 0.95 : 0.5) : null;
