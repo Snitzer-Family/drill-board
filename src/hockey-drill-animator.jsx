@@ -3024,9 +3024,17 @@ export default function DrillAnimator() {
           return { ...p, pts, x: pts[0].x, y: pts[0].y };
         }
         if (d.line == null) {
-          // dragging the piece itself moves only the route's start point —
-          // the piece is waypoint zero; the rest of the route stays anchored
+          // dragging the piece itself moves the route's START point; carry the
+          // first leg's departure handle along so the start-point angle handle
+          // stays glued to the piece (waypoint 0 and the rest stay anchored, just
+          // like moving an anchor in a curve editor carries only its own tangent)
           const np = ci(p.x + dx, p.y + dy);
+          const s0 = p.path[0];
+          if (s0 && (s0.type === "C" || s0.type === "Q")) {
+            const kx = s0.type === "C" ? "c1x" : "cx", ky = s0.type === "C" ? "c1y" : "cy";
+            const c = ci(s0[kx] + (np.x - p.x), s0[ky] + (np.y - p.y));
+            return { ...p, x: np.x, y: np.y, path: p.path.map((s, i) => i === 0 ? { ...s, [kx]: c.x, [ky]: c.y } : s) };
+          }
           return { ...p, x: np.x, y: np.y };
         }
         // dragging a route line slides the whole piece + route together
@@ -3098,6 +3106,10 @@ export default function DrillAnimator() {
         const near = spots.find(s => Math.hypot(s.x - pc.x, s.y - pc.y) < 12);
         if (near) updateById(pc.id, near);
       }
+      // a routed piece carries a start-point angle handle — reopen its editor so
+      // that handle reshows after the move instead of needing a second click
+      if (pc && pc.path && pc.path.length) { setSelectedId(d.id); setPopup({ type: "piece", id: d.id }); }
+      return;
     }
     if (d.moved) return;
     if (d.kind === "wlabel") { setSelectedId(d.id); setPopup({ type: "point", id: d.id, seg: d.seg }); return; }
@@ -4361,10 +4373,9 @@ export default function DrillAnimator() {
           )}
           {(p.kind === "player" || p.kind === "puck") && !p.defense && (
             <div className="hd-poprow">
-              <span>Add leg</span>
-              <button className="hd-mini" title="Straight" onClick={() => addSegment(p.id, "L")}><Icon name="segLine" /></button>
-              <button className="hd-mini" title="Curve" onClick={() => addSegment(p.id, "Q")}><Icon name="segQuad" /></button>
-              <button className="hd-mini" title="S-curve" onClick={() => addSegment(p.id, "C")}><Icon name="segCubic" /></button>
+              <span>{p.path.length ? "Extend route" : "Add route"}</span>
+              {curveButtons(t => addSegment(p.id, t), () => drawRouteMode(p.id))}
+              <span style={{ fontSize: 11, color: "#8b99a8" }}>a waypoint, or draw freehand</span>
             </div>
           )}
           {p.kind !== "player" && p.kind !== "label" && (
