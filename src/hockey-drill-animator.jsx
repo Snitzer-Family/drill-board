@@ -224,7 +224,8 @@ function DelayTrigger({ value, onChange, sub, players, actorIds, nameOf }) {
    STEP at=<sec> "text"  or  STEP on=<id>:<pt> "text" — a
    presentation caption anchored to an absolute time or a
    player's waypoint activation; play pauses on each in
-   Presentation mode. Authored via scrub → pause → ＋ note.
+   Presentation mode. Authored via scrub → pause → ＋ note,
+   then dragged clear of the action (optional pos=x:y).
 
    UI: the rink fills the screen. Corner controls: ☰ settings
    (text/export/load/pace), rink size, tools (+pieces / draw),
@@ -271,6 +272,7 @@ export default function DrillAnimator() {
   const [presentation, setPresentation] = useState(false);
   const [presoDelay, setPresoDelay] = useState(2.5);   // seconds held at each step
   const [holdStep, setHoldStep] = useState(null);      // step currently being read
+  const [placingStep, setPlacingStep] = useState(null); // idx of the step whose caption is being placed on the ice
   const [minorDesc, setMinorDesc] = useState(false);   // describe zones skated through
   const [showResult, setShowResult] = useState(true);  // Save!/Goal! splash on shots
   const [collisions, setCollisions] = useState(true);  // route avoidance (nets/goalie/players)
@@ -976,16 +978,55 @@ export default function DrillAnimator() {
     return s.on.wp > i ? { ...s, on: { ...s.on, wp: s.on.wp - 1 } } : s;
   }));
   // drop a new step at the current paused position: prefer a nearby waypoint anchor
-  // (robust to edits), else pin the absolute time. Opens the editor to type text.
+  // (robust to edits), else pin the absolute time. The caption then appears ON the
+  // ice for the coach to type + drag into place (its spot saves with the step).
   function addStepHere() {
     const nowSec = animT * totalTime;
     const wp = nowSec > Math.max(0.12, totalTime * 0.01) ? nearestWaypoint(nowSec) : null;
+    const idx = drillSteps.length;
     setDrillSteps(s => [...s, wp ? { text: "", on: { piece: wp.piece, wp: wp.wp } } : { text: "", at: nowSec }]);
     setPlaying(false); setHoldStep(null); holdRef.current = 0;
-    setOpenMenu("steps");
+    setOpenMenu(null); setPopup(null);
+    setPlacingStep(idx);
+  }
+  // re-open an existing step for on-ice placement: seek to its beat, pause, show it
+  function enterPlacing(idx) {
+    const r = resolveSteps()[idx];
+    if (r && r.resolved) scrubTo(Math.min(1, r.t / Math.max(0.1, totalTime)));
+    setPlaying(false); setHoldStep(null); holdRef.current = 0;
+    setOpenMenu(null); setPopup(null);
+    setPlacingStep(idx);
   }
   const setStepText = (idx, text) => setDrillSteps(s => s.map((x, k) => k === idx ? { ...x, text } : x));
+  const setStepPos = (idx, pos) => setDrillSteps(s => s.map((x, k) => k === idx ? { ...x, pos } : x));
   const deleteStep = idx => setDrillSteps(s => s.filter((_, k) => k !== idx));
+  // drag the placing caption around the app rect; its centre saves as pos (0..1),
+  // clamped to stay over the ice (above the scrubber band / away from the edges).
+  const capDrag = useRef(null);
+  function capDragStart(e) {
+    if (placingStep == null || !rootRef.current) return;
+    capDrag.current = rootRef.current.getBoundingClientRect();
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    e.preventDefault(); e.stopPropagation();
+  }
+  function capDragMove(e) {
+    const rect = capDrag.current;
+    if (!rect) return;
+    // store the raw pointer fraction; captionStyle's CSS clamp() keeps the whole
+    // box on-screen (same style path on drag + playback, so they never disagree)
+    const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+    setStepPos(placingStep, { x: +x.toFixed(3), y: +y.toFixed(3) });
+  }
+  const capDragEnd = () => { capDrag.current = null; };
+  // place the caption's centre at its saved spot; clamp() keeps the box fully on
+  // screen (--cap-hw = its max half-width) and clear of the top dock / scrubber
+  // band. No pos → the CSS default (bottom-centre). 0..1 of the app rect.
+  const captionStyle = pos => pos ? {
+    left: `clamp(calc(var(--cap-hw) + 6px), ${(pos.x * 100).toFixed(2)}%, calc(100% - var(--cap-hw) - 6px))`,
+    top: `clamp(calc(env(safe-area-inset-top, 0px) + 58px), ${(pos.y * 100).toFixed(2)}%, calc(100% - 54px - var(--hd-b) - var(--hd-scrub) - 58px))`,
+    right: "auto", bottom: "auto", transform: "translate(-50%, -50%)",
+  } : undefined;
   // flip a step between its waypoint anchor and an absolute-time anchor. Time→
   // waypoint snaps to the nearest activation to the step's current time (if any).
   function toggleStepAnchor(idx) {
@@ -4494,7 +4535,7 @@ export default function DrillAnimator() {
     padding: "0 8px", borderRadius: 999, border: "1px solid rgba(255,255,255,0.14)", background: "rgba(255,255,255,0.06)",
     color: "#eaf0f6", fontSize: 14, fontWeight: 700, cursor: "pointer" };
 
-  const togglePlay = () => { if (animT >= 1) resetAnim(); if (!playing && animT === 0) setPlaySeed(s => s + 1); setPopup(null); setOpenMenu(null); setHoldStep(null); holdRef.current = 0; setPlaying(p => !p); };
+  const togglePlay = () => { if (animT >= 1) resetAnim(); if (!playing && animT === 0) setPlaySeed(s => s + 1); setPopup(null); setOpenMenu(null); setHoldStep(null); setPlacingStep(null); holdRef.current = 0; setPlaying(p => !p); };
   const resetPlay = () => { setPlaying(false); resetAnim(); };
 
   // during playback the "Routes on play" setting controls what stays visible;
@@ -4869,7 +4910,7 @@ export default function DrillAnimator() {
 
       {/* ---------- AI game scoreboard ---------- */}
       {aiPlay && aiRef.current && (
-        <div className="hd-preso" style={{ bottom: "auto", top: "calc(10px + env(safe-area-inset-top))" }}>
+        <div className="hd-preso" style={{ flexDirection: "row", alignItems: "center", bottom: "auto", top: "calc(10px + env(safe-area-inset-top))" }}>
           <div className="hd-preso-text">
             <span style={{ color: "#ff6b7a" }}>{aiRef.current.score[0]}</span>
             <span style={{ opacity: 0.6, margin: "0 6px" }}>–</span>
@@ -4882,13 +4923,36 @@ export default function DrillAnimator() {
         </div>
       )}
 
-      {/* ---------- presentation caption ---------- */}
-      {presentation && holdStep && (
-        <div className="hd-preso">
-          <div className="hd-preso-text">{holdStep.text}</div>
-          <button className="hd-preso-btn" onClick={skipHold}>Continue ▶</button>
-        </div>
-      )}
+      {/* ---------- presentation caption (read during a hold, or placeable while authoring) ---------- */}
+      {(() => {
+        const placing = placingStep != null && placingStep < drillSteps.length;
+        const cap = placing ? { ...drillSteps[placingStep], idx: placingStep } : (presentation && holdStep ? holdStep : null);
+        if (!cap) return null;
+        return (
+          <div className={`hd-preso${placing ? " placing" : ""}`} style={captionStyle(cap.pos)}>
+            {placing && (
+              <span className="hd-preso-grip" onPointerDown={capDragStart} onPointerMove={capDragMove}
+                onPointerUp={capDragEnd} onPointerCancel={capDragEnd}>
+                <Icon name="grip" size={14} /> drag to place
+              </span>
+            )}
+            {placing
+              ? <textarea className="hd-preso-input" autoFocus value={cap.text} placeholder="Describe this beat…"
+                  spellCheck={false} onChange={e => setStepText(cap.idx, e.target.value)} />
+              : <div className="hd-preso-text">{cap.text}</div>}
+            <div className="hd-preso-row">
+              {placing ? (
+                <>
+                  <button className="hd-preso-del" onClick={() => { deleteStep(cap.idx); setPlacingStep(null); }}>Delete</button>
+                  <button className="hd-preso-btn" onClick={() => setPlacingStep(null)}>Done ✓</button>
+                </>
+              ) : (
+                <button className="hd-preso-btn" onClick={skipHold}>Continue ▶</button>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ---------- draggable play dock (mobile) ---------- */}
       <div className="hd-playdock" ref={playRef} style={{
@@ -5243,7 +5307,8 @@ export default function DrillAnimator() {
             <b> Presentation steps</b> — <code>STEP at=8.4 "…"</code> pins a caption to a time,
             <code>STEP on=F1:3 "…"</code> ties it to a player's waypoint activation (which tracks
             edits/retiming). Author them by scrubbing the timeline, pausing, and tapping <b>＋ note</b>;
-            in Presentation mode play pauses on each.
+            the caption appears on the ice to type + drag clear of the action (its spot saves as
+            <code>pos=x:y</code>). In Presentation mode play pauses on each.
           </div>
         </div>
       )}
@@ -5263,6 +5328,8 @@ export default function DrillAnimator() {
                 <input className="hd-input" style={{ flex: 1, minWidth: 0 }} value={s.text}
                   placeholder="Describe this beat…" autoFocus={!s.text}
                   onChange={e => setStepText(s.idx, e.target.value)} />
+                <button className={`hd-mini${s.pos ? " on" : ""}`} title="Place the caption on the ice"
+                  disabled={!s.resolved} onClick={() => enterPlacing(s.idx)}>⤢</button>
                 <button className="hd-mini" title="delete step" onClick={() => deleteStep(s.idx)}>✕</button>
               </div>
             ))}
@@ -5278,8 +5345,9 @@ export default function DrillAnimator() {
           </div>
           <div className="hd-note">
             Scrub the timeline, pause, then “＋ Add here” drops a note — near a waypoint it
-            anchors there (and tracks edits); otherwise it pins the time. Tap a step's chip to
-            switch. In Presentation mode, play pauses {presoDelay}s at each step (Continue to skip).
+            anchors there (and tracks edits); otherwise it pins the time. Type it on the ice and
+            drag it clear of the action; ⤢ re-places a caption, the chip switches its anchor.
+            In Presentation mode, play pauses {presoDelay}s at each step (Continue to skip).
           </div>
         </div>
       )}

@@ -167,19 +167,40 @@ export const STYLES = `
           cursor:pointer; font-variant-numeric:tabular-nums; }
         .hd-anchorbtn.wp { color:#cddffb; background:#1c2b45; border-color:#2c477a; }
         .hd-anchorbtn.bad { color:#ffb0ba; background:#3a2126; border-color:#6b2f38; }
-        /* presentation caption — floats above the bottom bar during a hold */
-        .hd-preso { position:absolute; z-index:47; left:50%; transform:translateX(-50%);
-          bottom:calc(64px + var(--hd-b)); max-width:min(560px, 92vw);
-          display:flex; align-items:center; gap:12px; padding:11px 14px;
-          background:rgba(17,22,28,.94); border:1px solid #3a4756; border-radius:12px;
+        /* presentation caption — floats over the ice; text on top, actions below so
+           it reads cleanly on a narrow phone instead of squishing beside the button.
+           Default spot is bottom-centre; a saved pos (inline style) overrides it. */
+        .hd-preso { position:absolute; z-index:47; box-sizing:border-box; left:50%; transform:translateX(-50%);
+          --cap-hw: min(170px, 35vw);   /* max half-width, for the on-screen clamp */
+          bottom:calc(64px + var(--hd-b) + var(--hd-scrub)); width:max-content; max-width:min(340px, 70vw);
+          display:flex; flex-direction:column; align-items:stretch; gap:9px; padding:12px 15px;
+          background:rgba(17,22,28,.95); border:1px solid #3a4756; border-radius:13px;
           box-shadow:0 6px 22px rgba(0,0,0,.5); backdrop-filter:blur(5px); }
-        .hd-preso-text { font-size:15px; font-weight:600; color:#eef4fa; line-height:1.3; }
-        .hd-preso-btn { flex:none; padding:7px 12px; font-size:12.5px; font-weight:700;
+        .hd-preso-text { font-size:16px; font-weight:600; color:#eef4fa; line-height:1.35;
+          white-space:pre-wrap; overflow-wrap:anywhere; }
+        .hd-preso-row { display:flex; justify-content:flex-end; align-items:center; gap:9px; }
+        .hd-preso-btn { flex:none; padding:8px 14px; font-size:13px; font-weight:700;
           background:#1f4fa3; border:1px solid #1f4fa3; color:#fff; border-radius:8px; cursor:pointer; }
+        /* placement mode: a draggable grip + inline text field + Done/Delete */
+        .hd-preso.placing { width:min(340px, 70vw); border-color:#3f6bbf;
+          box-shadow:0 8px 26px rgba(0,0,0,.6); }
+        .hd-preso-grip { display:flex; align-items:center; gap:6px; align-self:flex-start;
+          margin:-2px 0 1px; padding:3px 8px; font-size:11px; font-weight:700; letter-spacing:.02em;
+          color:#9fb0c2; background:#212a34; border:1px solid #33404f; border-radius:999px;
+          cursor:grab; touch-action:none; -webkit-user-select:none; user-select:none; }
+        .hd-preso-grip:active { cursor:grabbing; }
+        .hd-preso-input { width:100%; min-height:52px; resize:none; font-family:inherit;
+          font-size:16px; font-weight:500; line-height:1.35; color:#eef4fa; padding:8px 10px;
+          background:#0f141a; border:1px solid #33404f; border-radius:8px; }
+        .hd-preso-input:focus { outline:none; border-color:#3f6bbf; }
+        .hd-preso-del { flex:none; padding:8px 12px; font-size:13px; font-weight:700; margin-right:auto;
+          color:#ffb0ba; background:#2a1a1e; border:1px solid #5a2a32; border-radius:8px; cursor:pointer; }
         @media (pointer: fine) and (min-width: 760px) {
-          .hd-preso { max-width:min(760px, 80vw); gap:18px; padding:16px 22px; bottom:calc(74px + var(--hd-b)); }
-          .hd-preso-text { font-size:24px; }
+          .hd-preso { --cap-hw:min(310px, 30vw); max-width:min(620px, 60vw); gap:12px; padding:16px 20px; bottom:calc(74px + var(--hd-b) + var(--hd-scrub)); }
+          .hd-preso-text { font-size:22px; }
           .hd-preso-btn { font-size:15px; padding:9px 16px; }
+          .hd-preso.placing { width:min(560px, 56vw); }
+          .hd-preso-input { font-size:18px; min-height:60px; }
         }
         /* shared bits */
         .hd-swatch { width:24px; height:24px; border-radius:50%; border:2px solid transparent; cursor:pointer; }

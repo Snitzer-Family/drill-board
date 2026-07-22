@@ -237,17 +237,23 @@ of two ways (exactly one per step):
   retiming**, and follows the point if you insert/delete route points before it. This
   is the preferred anchor.
 
+An optional **`pos=<x>:<y>`** (each `0`–`1`, fractions of the screen — the caption's
+centre) saves where the caption sits during playback, so it can be dragged clear of
+the action. Omit it and the caption defaults to bottom-centre.
+
 ```drill
 STEP at=0 "Play begins — F1 carries out of the corner"
-STEP on=F1:3 "F1 hits the far blue line and cuts to the net"
+STEP on=F1:3 pos=0.2:0.8 "F1 hits the far blue line and cuts to the net"
 STEP at=9.2 "Shot on goal — crash for the rebound"
 ```
 
 Author steps in the app by **scrubbing the timeline, pausing, and tapping ＋ note**
-(☰ → *Presentation* → *Edit steps*, or the scrubber's ＋ note button). A note dropped
-near a waypoint anchors to it (`on=`) automatically; elsewhere it pins the time
-(`at=`). Tap a step's anchor chip to switch. *Generate from play* seeds editable
-steps from the auto-derived beats.
+(☰ → *Presentation* → *Edit steps*, or the scrubber's ＋ note button). The caption
+then appears on the ice: **type it and drag it** (by the *drag to place* grip) clear
+of the action, then **Done** — its spot saves as `pos`. A note dropped near a waypoint
+anchors to it (`on=`) automatically; elsewhere it pins the time (`at=`). Tap a step's
+anchor chip to switch, or the ⤢ button in the steps list to re-place its caption.
+*Generate from play* seeds editable steps from the auto-derived beats.
 
 When a drill has **no** `STEP` lines, presentation mode falls back to the
 auto-generated captions (including per-waypoint `SHOW preso`); the first authored

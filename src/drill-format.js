@@ -218,15 +218,18 @@ export function parseDrill(text) {
         }
       } else if (cmd === "STEP") {
         // STEP at=<seconds> "text"   OR   STEP on=<pieceId>:<pt> "text"
-        // waypoint number is 1-based on the wire, stored 0-based as wp.
-        let at = null, on = null, txt = "";
+        // waypoint number is 1-based on the wire, stored 0-based as wp. Optional
+        // pos=<x>,<y> is the caption's saved on-screen spot (0..1 of the app rect).
+        let at = null, on = null, txt = "", pos = null;
+        const clamp01 = n => Math.max(0, Math.min(1, n));
         tok.slice(1).forEach(r => {
           if (quoted(r)) txt = unq(r);
           else if (/^at=/i.test(r)) { const n = parseFloat(r.slice(3)); if (!isNaN(n)) at = Math.max(0, n); }
           else if (/^on=/i.test(r)) { const m = /^([^:]+):(\d+)$/.exec(r.slice(3)); if (m) on = { piece: m[1], wp: parseInt(m[2], 10) - 1 }; }
+          else if (/^pos=/i.test(r)) { const m = /^(-?\d*\.?\d+):(-?\d*\.?\d+)$/.exec(r.slice(4)); if (m) pos = { x: clamp01(parseFloat(m[1])), y: clamp01(parseFloat(m[2])) }; }
         });
-        if (on) steps.push({ text: txt, on });
-        else if (at != null) steps.push({ text: txt, at });
+        const anchor = on ? { on } : at != null ? { at } : null;
+        if (anchor) steps.push({ text: txt, ...anchor, ...(pos ? { pos } : {}) });
       } else throw new Error(`unknown command "${tok[0]}"`);
     } catch (e) { errors.push(`line ${i + 1}: ${e.message}`); }
   });
@@ -338,7 +341,8 @@ export function serializeDrill(rink, pieces, title = "", desc = "", steps = []) 
   // presentation steps (authored narration), each anchored to a time or a waypoint
   (steps || []).forEach(s => {
     const anchor = s.on ? `on=${s.on.piece}:${s.on.wp + 1}` : `at=${f2(s.at || 0)}`;
-    out.push(`STEP ${anchor} ${qesc(s.text || "")}`);
+    const pos = s.pos ? ` pos=${f2(s.pos.x)}:${f2(s.pos.y)}` : "";
+    out.push(`STEP ${anchor}${pos} ${qesc(s.text || "")}`);
   });
   return out.join("\n") + "\n";
 }
