@@ -2455,7 +2455,7 @@ export default function DrillAnimator() {
   const idPrefix = kind => (kind === "player" ? "P" : kind === "puck" ? "PK" : kind === "net" ? "N"
     : kind === "bumper" ? "B" : kind === "deker" ? "DK" : kind === "passer" ? "PS"
     : kind === "label" ? "L" : kind === "tire" ? "T" : kind === "stick" ? "ST" : kind === "light" ? "LT" : kind === "mark" ? "MK" : "C");
-  const rotatesFacing = p => ["net", "bumper", "deker", "passer", "tire"].includes(p.kind) || (p.kind === "player" && !p.path.length);
+  const rotatesFacing = p => ["net", "bumper", "deker", "passer", "tire", "light"].includes(p.kind) || (p.kind === "player" && !p.path.length);
   const groupCentroid = sel => sel.length
     ? { x: sel.reduce((a, p) => a + p.x, 0) / sel.length, y: sel.reduce((a, p) => a + p.y, 0) / sel.length } : null;
   // slide a set of pieces (and their routes) by dx,dy
@@ -3068,7 +3068,7 @@ export default function DrillAnimator() {
   // the knob sits at the current facing angle, radius 7 ft
   function renderRotateHandle(p, yf = yFix) {
     const hd = (cx, cy, r, props) => hdot(cx, cy, r, props, yf);
-    const rotatable = p.kind === "net" || p.kind === "bumper" || p.kind === "deker" || p.kind === "passer" || p.kind === "stick" || (p.kind === "player" && !p.path.length);
+    const rotatable = p.kind === "net" || p.kind === "bumper" || p.kind === "deker" || p.kind === "passer" || p.kind === "stick" || p.kind === "light" || (p.kind === "player" && !p.path.length);
     if (!editing || tool === "draw" || !rotatable) return null;
     const a = ((p.facing || 0) * Math.PI) / 180;
     const R = 7;
@@ -3800,7 +3800,7 @@ export default function DrillAnimator() {
                   <button className="hd-mini" onClick={() => setCues([...cues, { color: LIGHT_COLORS[cues.length % LIGHT_COLORS.length], dur: 2 }])}>
                     + Add cue
                   </button>
-                  <span style={{ fontSize: 11, color: "#8b99a8" }}>cognitive-training light · drag to move</span>
+                  <span style={{ fontSize: 11, color: "#8b99a8" }}>cognitive-training light · drag to move · ring to rotate</span>
                 </div>
               </>
             );

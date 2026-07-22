@@ -287,7 +287,7 @@ export function serializeDrill(rink, pieces, title = "", desc = "") {
     const chT = head && termOk && p.chipAt != null ? ` chip=${p.chipAt + 1}${p.chipAim != null ? "~" + f1(p.chipAim) : ""}${p.chipDist != null ? "*" + f1(p.chipDist) : ""}` : "";
     const hasShot = p.kind === "puck" && ((termOk && p.shotAt != null) || vts.some(t => t.kind === "shot"));
     const nt = hasShot && p.net ? ` net=${p.net}` : "";
-    const rotatable = p.kind === "net" || p.kind === "bumper" || p.kind === "deker" || p.kind === "passer" || p.kind === "stick" || (p.kind === "player" && !p.path.length);
+    const rotatable = p.kind === "net" || p.kind === "bumper" || p.kind === "deker" || p.kind === "passer" || p.kind === "stick" || p.kind === "light" || (p.kind === "player" && !p.path.length);
     const fac = rotatable && p.facing ? ` face=${f1(p.facing)}` : "";
     const hld = p.kind === "player" && p.holdLine ? " hold=line" : "";
     const wt = p.kind === "player" && p.wait && p.wait.on
