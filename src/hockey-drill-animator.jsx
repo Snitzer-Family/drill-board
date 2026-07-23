@@ -1793,10 +1793,16 @@ export default function DrillAnimator() {
         const dx = x - gd.cx, dy = y - gd.cy, d = Math.hypot(dx, dy), MIN = PLAYER_R + gd.r;
         if (d < MIN && d > 1e-3) { const push = (MIN - d) * 0.3; x += (dx / d) * push; y += (dy / d) * push; }
       }
-      // open the body to shield a carried puck from a net, goalie, or another player
+      // open the body to shield a carried puck from a net, goalie, another
+      // player, or an obstacle tool (bumper/tire/passer/deker) it routes around
       const carries = collisions && pieces.some(q => q.kind === "puck"
         && Math.hypot(displayPosRaw(q).x - x, displayPosRaw(q).y - y) < 5.5);
-      if (carries) a += shieldDelta(x, y, a, side, [...netObstacles, ...others, ...gDiscs]);
+      if (carries) {
+        // skip props the carrier jumps over (hopped, not routed around)
+        const jps = jumpPointsOf(p);
+        const props = propDiscs().filter(d => !jps.some(j => Math.hypot(j.x - d.cx, j.y - d.cy) < d.r + 3));
+        a += shieldDelta(x, y, a, side, [...netObstacles, ...others, ...gDiscs, ...props]);
+      }
       return { ...res, x, y, a };
     }
     // a carried puck sits on its carrier's blade tip (so it stays on the stick
