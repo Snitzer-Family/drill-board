@@ -5001,7 +5001,7 @@ export default function DrillAnimator() {
                         {showRoutes && !bent && (bwd
                           ? <polyline points={zigzagPoints(vFrom, vSeg, strokeAR)} {...style} strokeLinejoin="round" pointerEvents="none" />
                           : wig
-                          ? <polyline points={wigglePoints(vFrom, vSeg, strokeAR, isLast)} {...style} strokeLinejoin="round" pointerEvents="none" />
+                          ? <polyline points={wigglePoints(vFrom, vSeg, strokeAR, isLast || acts.has(i))} {...style} strokeLinejoin="round" pointerEvents="none" />
                           : <path d={vD} {...style} pointerEvents="none" />)}
                         {showRoutes && (
                           <path d={d} fill="none" stroke="transparent" strokeWidth={4}

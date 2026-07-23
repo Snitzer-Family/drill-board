@@ -89,7 +89,9 @@ export function wigglePoints(prev, s, ar = 1, taperEnd = false) {
     : wlen(prev.x, prev.y, s.c1x, s.c1y) + wlen(s.c1x, s.c1y, s.c2x, s.c2y) + wlen(s.c2x, s.c2y, s.x, s.y);
   const cycles = Math.max(1, Math.round(approx / 3.4));   // ~3.4 screen units per wave
   const n = Math.max(14, cycles * 10), A = 0.85;          // amplitude in screen units
-  const TAPER = 5;                                         // screen units of straight line under the arrowhead
+  // the wiggle settles into a straight run before an end mark (arrowhead / ‖):
+  // dead-straight for the final FLAT units, ramping up over the next (TAPER-FLAT)
+  const TAPER = 8, FLAT = 4;
   const pts = [];
   let cum = 0, prevPt = evalSeg(prev, s, 0);
   for (let i = 0; i <= n; i++) {
@@ -100,7 +102,7 @@ export function wigglePoints(prev, s, ar = 1, taperEnd = false) {
     const ahead = evalSeg(prev, s, Math.min(1, t + 0.005));
     const tx = (ahead.x - pt.x) * ar, ty = ahead.y - pt.y;   // screen-space tangent
     const px = -ty, py = tx, l = Math.hypot(px, py) || 1;    // screen-space normal
-    const taper = taperEnd ? Math.min(1, (approx - cum) / TAPER) : 1;
+    const taper = taperEnd ? Math.max(0, Math.min(1, (approx - cum - FLAT) / (TAPER - FLAT))) : 1;
     const a = Math.sin((cum / (approx || 1)) * cycles * 2 * Math.PI) * A * taper;
     pts.push({ x: pt.x + (px / l) * a / ar, y: pt.y + (py / l) * a });
   }
