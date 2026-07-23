@@ -5093,6 +5093,16 @@ export default function DrillAnimator() {
                           : wig
                           ? <polyline points={wigglePoints(vFrom, vSeg, strokeAR, isLast || acts.has(i))} {...style} strokeLinejoin="round" pointerEvents="none" />
                           : <path d={vD} {...style} pointerEvents="none" />)}
+                        {/* detour active → the authored route lingers as a faint,
+                            dashed ghost so the user can still see + grab it (add
+                            waypoints / edit); the transparent hit path below drives
+                            the interaction, so the ghost stays pointer-transparent */}
+                        {showRoutes && bent && (
+                          <path d={vD} fill="none" stroke={p.color}
+                            strokeWidth={sw(0.5)} strokeDasharray={sdash("1.4 1.6")}
+                            strokeLinecap="round" vectorEffect="non-scaling-stroke"
+                            opacity={0.22} pointerEvents="none" />
+                        )}
                         {showRoutes && (
                           <path d={d} fill="none" stroke="transparent" strokeWidth={4}
                             onPointerDown={e => lineDown(e, p.id, i)} style={{ cursor: "pointer" }} />
