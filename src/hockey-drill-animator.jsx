@@ -3406,22 +3406,26 @@ export default function DrillAnimator() {
             : <path d="M -3 -1.9 L 0 0 L -3 1.9" fill="none" stroke={p.color} strokeWidth={0.7} strokeLinecap="round" strokeLinejoin="round" />}
         </g>
       );
-      // upright badge circle + action icon (+ count)
+      // badge circle + action icon (+ count). The icon and number counter-rotate
+      // by the frame's screen angle (like player labels) so they read upright on
+      // screen even when the rink is shown rotated (portrait).
       const cfx = iconXf({ x: s.x, y: s.y, a: 0 });
       els.push(
         <g key={`ab${i}`} transform={cfx.t} pointerEvents="none">
           <circle cx={0} cy={0} r={ACT_R} fill="#fff" stroke={p.color} strokeWidth={0.5} />
-          <g style={{ color: p.color }} transform={`scale(0.178) translate(-12 -12)`}
-            fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round">
-            {ICONS[actionIconName(info.type)]}
-          </g>
-          {info.count > 1 && (
-            <g transform={`translate(${ACT_R * 0.74} ${-ACT_R * 0.74})`}>
-              <circle cx={0} cy={0} r={1.55} fill={p.color} />
-              <text x={0} y={0} textAnchor="middle" dominantBaseline="central" fontSize={2.2}
-                fontWeight={800} fill="#fff" style={{ fontFamily: "system-ui, sans-serif" }}>{info.count}</text>
+          <g transform={`rotate(${-cfx.th})`}>
+            <g style={{ color: p.color }} transform={`scale(0.178) translate(-12 -12)`}
+              fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round">
+              {ICONS[actionIconName(info.type)]}
             </g>
-          )}
+            {info.count > 1 && (
+              <g transform={`translate(${ACT_R * 0.74} ${-ACT_R * 0.74})`}>
+                <circle cx={0} cy={0} r={1.55} fill={p.color} />
+                <text x={0} y={0} textAnchor="middle" dominantBaseline="central" fontSize={2.2}
+                  fontWeight={800} fill="#fff" style={{ fontFamily: "system-ui, sans-serif" }}>{info.count}</text>
+              </g>
+            )}
+          </g>
         </g>
       );
     }
