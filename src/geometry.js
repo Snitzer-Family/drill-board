@@ -59,16 +59,17 @@ export function splitSeg(prev, s, t) {
     const C = { x: s.cx, y: s.cy }, P1 = { x: s.x, y: s.y };
     const q0 = lerp(prev, C), q1 = lerp(C, P1), B = lerp(q0, q1);
     return [
-      { type: "Q", ...meta, stop: s.stop || 0, cx: q0.x, cy: q0.y, x: B.x, y: B.y },
-      { type: "Q", ...meta, stop: 0, cx: q1.x, cy: q1.y, x: s.x, y: s.y },
+      // the inserted midpoint sits on a smooth tangent (de Casteljau guarantees it)
+      { type: "Q", ...meta, stop: s.stop || 0, join: "smooth", cx: q0.x, cy: q0.y, x: B.x, y: B.y },
+      { type: "Q", ...meta, stop: 0, ...(s.join ? { join: s.join } : {}), cx: q1.x, cy: q1.y, x: s.x, y: s.y },
     ];
   }
   const c1 = { x: s.c1x, y: s.c1y }, c2 = { x: s.c2x, y: s.c2y }, P1 = { x: s.x, y: s.y };
   const p01 = lerp(prev, c1), p12 = lerp(c1, c2), p23 = lerp(c2, P1);
   const p012 = lerp(p01, p12), p123 = lerp(p12, p23), B = lerp(p012, p123);
   return [
-    { type: "C", ...meta, stop: s.stop || 0, c1x: p01.x, c1y: p01.y, c2x: p012.x, c2y: p012.y, x: B.x, y: B.y },
-    { type: "C", ...meta, stop: 0, c1x: p123.x, c1y: p123.y, c2x: p23.x, c2y: p23.y, x: s.x, y: s.y },
+    { type: "C", ...meta, stop: s.stop || 0, join: "smooth", c1x: p01.x, c1y: p01.y, c2x: p012.x, c2y: p012.y, x: B.x, y: B.y },
+    { type: "C", ...meta, stop: 0, ...(s.join ? { join: s.join } : {}), c1x: p123.x, c1y: p123.y, c2x: p23.x, c2y: p23.y, x: s.x, y: s.y },
   ];
 }
 
@@ -82,25 +83,34 @@ export function splitSeg(prev, s, t) {
 // segment that carries the route's arrowhead.
 export function wigglePoints(prev, s, ar = 1, taperEnd = false) {
   const wlen = (ax, ay, bx, by) => Math.hypot((bx - ax) * ar, by - ay);
-  const approx =
+  const poly =                                             // control-polygon estimate → sample count
     s.type === "L" ? wlen(prev.x, prev.y, s.x, s.y)
     : s.type === "Q" ? wlen(prev.x, prev.y, s.cx, s.cy) + wlen(s.cx, s.cy, s.x, s.y)
     : wlen(prev.x, prev.y, s.c1x, s.c1y) + wlen(s.c1x, s.c1y, s.c2x, s.c2y) + wlen(s.c2x, s.c2y, s.x, s.y);
-  const cycles = Math.max(1, Math.round(approx / 3.4));   // ~3.4 screen units per wave
-  const n = Math.max(14, cycles * 10), A = 0.85;          // amplitude in screen units
-  const TAPER = 5;                                         // screen units of straight line under the arrowhead
+  const n = Math.max(14, Math.max(1, Math.round(poly / 3.4)) * 10);
+  // measure the TRUE arc length (screen-weighted) by sampling — the control-polygon
+  // estimate over-counts a curve, which would leave the end-taper never reaching
+  // zero on a curved leg (the wiggle would run wavy straight into the arrowhead)
+  const samp = [evalSeg(prev, s, 0)];
+  let total = 0;
+  for (let i = 1; i <= n; i++) { const q = evalSeg(prev, s, i / n); total += wlen(samp[i - 1].x, samp[i - 1].y, q.x, q.y); samp.push(q); }
+  const cycles = Math.max(1, Math.round(total / 3.4));   // ~3.4 screen units per wave
+  const A = 0.85;                                         // amplitude in screen units
+  // the wiggle ends in a SMALL FIXED straight run before an end mark (arrowhead /
+  // ‖): dead-straight for the final STRAIGHT feet, with a short EASE back into the
+  // wiggle. Keyed only on distance-from-the-end, so it never scales with line length.
+  const STRAIGHT = 4.5, EASE = 1.5;
   const pts = [];
-  let cum = 0, prevPt = evalSeg(prev, s, 0);
+  let cum = 0;
   for (let i = 0; i <= n; i++) {
-    const t = i / n, pt = evalSeg(prev, s, t);
-    if (i > 0) cum += wlen(prevPt.x, prevPt.y, pt.x, pt.y);
-    prevPt = pt;
+    const pt = samp[i];
+    if (i > 0) cum += wlen(samp[i - 1].x, samp[i - 1].y, pt.x, pt.y);
     if (i === 0 || i === n) { pts.push(pt); continue; }
-    const ahead = evalSeg(prev, s, Math.min(1, t + 0.005));
+    const ahead = samp[i + 1];                               // next sample → local direction
     const tx = (ahead.x - pt.x) * ar, ty = ahead.y - pt.y;   // screen-space tangent
     const px = -ty, py = tx, l = Math.hypot(px, py) || 1;    // screen-space normal
-    const taper = taperEnd ? Math.min(1, (approx - cum) / TAPER) : 1;
-    const a = Math.sin((cum / (approx || 1)) * cycles * 2 * Math.PI) * A * taper;
+    const taper = taperEnd ? Math.max(0, Math.min(1, (total - cum - STRAIGHT) / EASE)) : 1;
+    const a = Math.sin((cum / (total || 1)) * cycles * 2 * Math.PI) * A * taper;
     pts.push({ x: pt.x + (px / l) * a / ar, y: pt.y + (py / l) * a });
   }
   return pts.map(q => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" ");
@@ -152,6 +162,163 @@ export function convertSeg(seg, prev) {
     c2y: clampY(prev.y + (2 * (y - prev.y)) / 3 - (ny / len) * off),
     x, y,
   };
+}
+
+// Trim a small gap off the START of a segment for DRAWING only (the ref path and
+// timing still use the full segment). Returns { from, seg } — the sub-segment
+// beginning `gap` feet from the original start — or null if the segment ends
+// within the gap. Used so a route line starts just clear of the player icon.
+export function trimSegStart(from, s, gap, ar = 1) {
+  const sar = Math.sqrt(ar);                 // geometric-mean metric: gaps read the same
+  const gm = (ax, ay, bx, by) => Math.hypot((bx - ax) * sar, (by - ay) / sar);
+  const N = 64;
+  let pT = 0, pD = 0;
+  for (let i = 1; i <= N; i++) {
+    const t = i / N, pt = evalSeg(from, s, t);
+    const d = gm(from.x, from.y, pt.x, pt.y);
+    if (d >= gap) {                          // interpolate the crossing for a gap-accurate cut
+      const f = Math.max(0, Math.min(1, (gap - pD) / (d - pD || 1)));
+      const [first, second] = splitSeg(from, s, pT + (t - pT) * f);
+      return { from: { x: first.x, y: first.y }, seg: second };
+    }
+    pT = t; pD = d;
+  }
+  return null;                               // whole segment sits within the gap
+}
+
+// Trim a gap off the END of a segment for drawing (mirror of trimSegStart) —
+// leaves the leg stopping `gap` feet short of its endpoint. Returns { seg } or null.
+export function trimSegEnd(from, s, gap, ar = 1) {
+  const sar = Math.sqrt(ar);
+  const gm = (ax, ay, bx, by) => Math.hypot((bx - ax) * sar, (by - ay) / sar);
+  const end = { x: s.x, y: s.y };
+  const N = 64;
+  let pT = 1, pD = 0;
+  for (let i = N - 1; i >= 0; i--) {
+    const t = i / N, pt = evalSeg(from, s, t);
+    const d = gm(end.x, end.y, pt.x, pt.y);
+    if (d >= gap) {
+      const f = Math.max(0, Math.min(1, (gap - pD) / (d - pD || 1)));
+      const [first] = splitSeg(from, s, pT + (t - pT) * f);
+      return { seg: first };
+    }
+    pT = t; pD = d;
+  }
+  return null;                               // whole segment sits within the gap
+}
+
+// Drop a `gap`-foot lead off the start of a polyline (the net-detour case),
+// interpolating the exact cut point. Returns a new points array.
+export function trimPolyStart(pts, gap, ar = 1) {
+  if (!pts || pts.length < 2) return pts;
+  const sar = Math.sqrt(ar);
+  const gm = (ax, ay, bx, by) => Math.hypot((bx - ax) * sar, (by - ay) / sar);
+  const start = pts[0];
+  for (let i = 1; i < pts.length; i++) {
+    if (gm(start.x, start.y, pts[i].x, pts[i].y) >= gap) {
+      const a = pts[i - 1], b = pts[i];
+      const segLen = gm(a.x, a.y, b.x, b.y) || 1;
+      const f = Math.max(0, Math.min(1, (gap - gm(start.x, start.y, a.x, a.y)) / segLen));
+      return [{ x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f }, ...pts.slice(i)];
+    }
+  }
+  return pts;                                // whole polyline within the gap
+}
+
+/* ---- waypoint "join" (Illustrator-style point types) ----
+   A waypoint's two bézier handles are stored on two different segments: the
+   INCOMING handle is the control of the leg ENDING at the waypoint (c2 for a
+   cubic, cx for a quad), the OUTGOING handle is the control of the NEXT leg
+   nearest its start (c1 / cx). A `join` flag on the ending segment says how the
+   two are linked while editing: "corner" (default, independent), "smooth"
+   (kept collinear, each side keeps its own length) or "sym" (collinear + equal
+   length). It never affects the rendered/serialized curve — only re-editing. */
+
+// The two handle controls flanking waypoint w. Each side is {i, xk, yk} (the
+// segment index + the x/y field names) or null when that side is a straight leg.
+export function jointControls(path, w) {
+  const s = path[w];
+  if (!s) return null;
+  const inH = s.type === "C" ? { i: w, xk: "c2x", yk: "c2y" }
+            : s.type === "Q" ? { i: w, xk: "cx", yk: "cy" } : null;
+  const nx = path[w + 1];
+  const outH = !nx ? null
+    : nx.type === "C" ? { i: w + 1, xk: "c1x", yk: "c1y" }
+    : nx.type === "Q" ? { i: w + 1, xk: "cx", yk: "cy" } : null;
+  return { A: { x: s.x, y: s.y }, inH, outH };
+}
+
+// While dragging one handle of a linked waypoint, drive the OPPOSITE handle so
+// the join stays smooth/symmetric. `draggedSeg`/`draggedKind` identify the grabbed
+// control (kind ∈ c1|c2|q); `cp` is its new position. Returns a new path (or the
+// same one when there's nothing to mirror — corner points, endpoints, the route's
+// departure handle, or a straight neighbour).
+export function mirrorJoint(path, w, draggedSeg, draggedKind, cp) {
+  const s = path[w];
+  if (!s) return path;
+  const join = s.join || "corner";
+  if (join === "corner") return path;
+  const jc = jointControls(path, w);
+  if (!jc || !jc.inH || !jc.outH) return path;
+  const inKind = s.type === "C" ? "c2" : "q";
+  const outKind = path[w + 1].type === "C" ? "c1" : "q";
+  const draggedIn = draggedSeg === jc.inH.i && draggedKind === inKind;
+  const draggedOut = draggedSeg === jc.outH.i && draggedKind === outKind;
+  if (!draggedIn && !draggedOut) return path;    // e.g. the origin's departure handle
+  const opp = draggedIn ? jc.outH : jc.inH;
+  const A = jc.A;
+  const vx = cp.x - A.x, vy = cp.y - A.y, vl = Math.hypot(vx, vy);
+  if (vl < 1e-3) return path;
+  const oldOpp = { x: path[opp.i][opp.xk], y: path[opp.i][opp.yk] };
+  let nx, ny;
+  if (join === "sym") { nx = A.x - vx; ny = A.y - vy; }
+  else { const ol = Math.hypot(oldOpp.x - A.x, oldOpp.y - A.y) || vl; nx = A.x - (vx / vl) * ol; ny = A.y - (vy / vl) * ol; }
+  const out = path.slice();
+  out[opp.i] = { ...out[opp.i], [opp.xk]: clampX(nx), [opp.yk]: clampY(ny) };
+  return out;
+}
+
+// A linked waypoint carries its two handles as its anchor moves (rigid drag).
+export function translateJointHandles(path, w, dx, dy) {
+  const jc = jointControls(path, w);
+  if (!jc) return path;
+  const out = path.slice();
+  for (const h of [jc.inH, jc.outH]) {
+    if (!h) continue;
+    out[h.i] = { ...out[h.i], [h.xk]: clampX(out[h.i][h.xk] + dx), [h.yk]: clampY(out[h.i][h.yk] + dy) };
+  }
+  return out;
+}
+
+// Set waypoint w's join type, re-flowing its handles onto a shared tangent so the
+// change is visible immediately (smooth keeps each handle's length; sym averages
+// them). `origin` is the route start, used only for the w===0 fallback tangent.
+// A one-sided junction (a straight neighbour) just records the flag. Returns a
+// new path; "corner" clears the flag and leaves the handles untouched.
+export function alignJoint(path, w, join, origin) {
+  const out = path.slice();
+  if (!out[w]) return out;
+  if (join === "corner") { const s = { ...out[w] }; delete s.join; out[w] = s; return out; }
+  const jc = jointControls(out, w);
+  if (!jc || !jc.inH || !jc.outH) { out[w] = { ...out[w], join }; return out; }
+  const A = jc.A;
+  const inP = { x: out[jc.inH.i][jc.inH.xk], y: out[jc.inH.i][jc.inH.yk] };
+  const outP = { x: out[jc.outH.i][jc.outH.xk], y: out[jc.outH.i][jc.outH.yk] };
+  let tx = outP.x - inP.x, ty = outP.y - inP.y;
+  if (Math.hypot(tx, ty) < 1e-3) {          // handles coincide — fall back to the neighbour chord
+    const prev = w >= 1 ? { x: out[w - 1].x, y: out[w - 1].y } : origin;
+    tx = out[w + 1].x - prev.x; ty = out[w + 1].y - prev.y;
+  }
+  const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
+  let inLen = Math.hypot(inP.x - A.x, inP.y - A.y);
+  let outLen = Math.hypot(outP.x - A.x, outP.y - A.y);
+  if (join === "sym") { const m = (inLen + outLen) / 2 || 8; inLen = m; outLen = m; }
+  else { if (inLen < 1e-3) inLen = 8; if (outLen < 1e-3) outLen = 8; }
+  const setH = (h, px, py) => { out[h.i] = { ...out[h.i], [h.xk]: clampX(px), [h.yk]: clampY(py) }; };
+  setH(jc.inH, A.x - tx * inLen, A.y - ty * inLen);    // in-handle points back up the incoming leg
+  setH(jc.outH, A.x + tx * outLen, A.y + ty * outLen); // out-handle continues down the next leg
+  out[w] = { ...out[w], join };
+  return out;
 }
 
 /* ---- finger drawing ---- */

@@ -1,15 +1,15 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo } from "react";
-import { VIEWS, COLORS, vb, APP_VERSION, ICON_SCALE, BUILD_STAMP, DEFAULT_TEXT, SPEED,
+import { VIEWS, COLORS, vb, APP_VERSION, ICON_SCALE, ROUTE_START_GAP, BUILD_STAMP, DEFAULT_TEXT, SPEED,
   SAVE_PROB, MISS_POST, MISS_WIDE, MISS_OVER, SHOT_AIR_PROB, BOUNCE_REST } from "./constants.js";
 import { parseDrill, serializeDrill, extractDrill, deriveInventory } from "./drill-format.js";
 import { drillSvg } from "./drill-svg.js";
 import { mdEscape, mdInline, mdBlock } from "./md.js";
-import { clampX, clampY, segEnd, segD, nearestT, splitSeg, zigzagPoints, wigglePoints, convertSeg, fitRoute, evalSeg, rdp, catmullToBezier } from "./geometry.js";
+import { clampX, clampY, segEnd, segD, nearestT, splitSeg, zigzagPoints, wigglePoints, convertSeg, fitRoute, evalSeg, rdp, catmullToBezier, alignJoint, mirrorJoint, translateJointHandles, trimSegStart, trimSegEnd, trimPolyStart } from "./geometry.js";
 import * as boards from "./boards.js";
 import { netShapes, bumperShapes, solidShapes, detourRoute, segCrossesNet } from "./net-collide.js";
 import { RinkMarkings } from "./rink.jsx";
 import { ZONES, zoneAt } from "./zones.js";
-import { PieceIcon, Stepper, DiagPanel, Icon } from "./icons.jsx";
+import { PieceIcon, Stepper, DiagPanel, Icon, ICONS } from "./icons.jsx";
 import { createTiming, resolveNearest } from "./timing.js";
 import { newGame, stepGame } from "./ai-game.js";
 import { STYLES } from "./styles.js";
@@ -203,6 +203,11 @@ function DelayTrigger({ value, onChange, sub, players, actorIds, nameOf }) {
      WAIT <player> <pt>    hold until that player REACHES <pt>
      WACT <player> <pt>    hold until that player RELEASES the puck at <pt> (0 = any action)
      RATE <mult>           speed multiplier for this leg
+     JOIN smooth|sym       link this waypoint's curve handles
+     ENDSTOP               end the route in a ‖ stop mark (player)
+   JOIN links the two bézier handles meeting at a waypoint so
+   editing keeps them collinear (smooth) or collinear + equal
+   length (sym); omitted = a corner with independent handles.
    hand=L mirrors the player's stick. on=F1 puts a puck on that
    player's blade; it releases when the carrier reaches the
    puck's placed spot, then runs its own route.
@@ -797,6 +802,14 @@ export default function DrillAnimator() {
   // vector-effect:non-scaling-stroke keep their intended on-ice weight
   const strokeAR = iconGeom.Sx / iconGeom.Sy;
   const strokeK = Math.sqrt(iconGeom.Sx * iconGeom.Sy);
+  // move `g` geometric-mean feet from (cx,cy) along raw unit dir (ux,uy) — so a gap
+  // clears the round (stretch-compensated) badge/icon by the same amount in every
+  // direction, regardless of the fill-mode stretch (badges vs raw-rink offsets)
+  const gmSar = Math.sqrt(strokeAR);
+  const gmMove = (cx, cy, ux, uy, g) => {
+    const gl = Math.hypot(ux * gmSar, uy / gmSar) || 1;
+    return { x: cx + ux * (g / gl), y: cy + uy * (g / gl) };
+  };
   // scale a stroke width (rink feet) to non-scaling-stroke screen px
   const sw = w => +(w * strokeK).toFixed(2);
   // scale a dash pattern string ("2.4 1.8") the same way
@@ -2085,11 +2098,30 @@ export default function DrillAnimator() {
       const m = Math.hypot(dx, dy);
       if (m < 0.5) { dx = 22; dy = 0; } else { dx = (dx / m) * 22; dy = (dy / m) * 22; }
       const seg = convertSeg({ type, x: clampX(prev.x + dx), y: clampY(prev.y + dy) }, prev);
-      if (fork) return { ...p, forks: mapForkAt(p.forks, fork, f => ({ ...f, path: [...f.path, seg] })) };
-      return { ...p, path: [...p.path, seg] };
+      // extending curve → curve: make the shared waypoint a smooth join so the new
+      // leg continues the heading instead of kinking off with wild split handles
+      const build = arr => {
+        let path = [...arr, seg];
+        const j = n - 1;   // the waypoint the new leg grows from (the old route end)
+        if (j >= 0 && path[j].endStop) path[j] = { ...path[j], endStop: undefined };   // no longer the end
+        if (j >= 0 && (type === "C" || type === "Q") && (path[j].type === "C" || path[j].type === "Q"))
+          path = alignJoint(path, j, "smooth", { x: rp.x, y: rp.y });
+        return path;
+      };
+      if (fork) return { ...p, forks: mapForkAt(p.forks, fork, f => ({ ...f, path: build(f.path) })) };
+      return { ...p, path: build(p.path) };
     });
     setSelectedId(id);
     setPopup({ type: "point", id, seg: newIdx, ...(fork ? { fork } : {}) });
+  }
+  // change a waypoint's point type (corner / smooth / sym), re-flowing its handles
+  function setJoint(id, i, join, fork = null) {
+    update(p => {
+      if (p.id !== id) return p;
+      const org = fork ? forkOriginPoint(p, fork) : { x: p.x, y: p.y };
+      if (fork) return { ...p, forks: mapForkAt(p.forks, fork, f => ({ ...f, path: alignJoint(f.path, i, join, org) })) };
+      return { ...p, path: alignJoint(p.path, i, join, org) };
+    });
   }
   function changeSegType(id, i, type, fork = null) {
     update(p => {
@@ -2855,6 +2887,21 @@ export default function DrillAnimator() {
     svgRef.current.setPointerCapture?.(e.pointerId);
   }
 
+  // a leg tap that lands within grabbing distance of one of its endpoint
+  // waypoints → that waypoint's index (nearest wins), else null. Lets a tap on a
+  // curve where a waypoint sits open the point popup without a second tap.
+  function waypointUnderTap(id, segIdx, pt, fork) {
+    const p = pieces.find(q => q.id === id);
+    if (!p) return null;
+    const route = routeSegs(p, fork);
+    let best = null, bd = 3.6;   // ~ the on-ice waypoint grab radius, in feet
+    for (const w of [segIdx, segIdx - 1]) {
+      if (w < 0 || w >= route.length) continue;
+      const dd = Math.hypot(route[w].x - pt.x, route[w].y - pt.y);
+      if (dd < bd) { bd = dd; best = w; }
+    }
+    return best;
+  }
   function lineDown(e, id, segIdx, fork = null) {
     if (playing || pinchRef.current) return;
     e.stopPropagation();
@@ -2987,9 +3034,17 @@ export default function DrillAnimator() {
           return { ...p, pts, x: pts[0].x, y: pts[0].y };
         }
         if (d.line == null) {
-          // dragging the piece itself moves only the route's start point —
-          // the piece is waypoint zero; the rest of the route stays anchored
+          // dragging the piece itself moves the route's START point; carry the
+          // first leg's departure handle along so the start-point angle handle
+          // stays glued to the piece (waypoint 0 and the rest stay anchored, just
+          // like moving an anchor in a curve editor carries only its own tangent)
           const np = ci(p.x + dx, p.y + dy);
+          const s0 = p.path[0];
+          if (s0 && (s0.type === "C" || s0.type === "Q")) {
+            const kx = s0.type === "C" ? "c1x" : "cx", ky = s0.type === "C" ? "c1y" : "cy";
+            const c = ci(s0[kx] + (np.x - p.x), s0[ky] + (np.y - p.y));
+            return { ...p, x: np.x, y: np.y, path: p.path.map((s, i) => i === 0 ? { ...s, [kx]: c.x, [ky]: c.y } : s) };
+          }
           return { ...p, x: np.x, y: np.y };
         }
         // dragging a route line slides the whole piece + route together
@@ -3012,13 +3067,22 @@ export default function DrillAnimator() {
     update(p => {
       if (p.id !== d.id) return p;
       const edit = arr => {
-        const path = arr.slice();
+        let path = arr.slice();
         const s = { ...path[d.seg] };
-        if (d.kind === "anchor") { s.x = cp.x; s.y = cp.y; }
+        if (d.kind === "anchor") {
+          const dx = cp.x - s.x, dy = cp.y - s.y;
+          s.x = cp.x; s.y = cp.y; path[d.seg] = s;
+          // a linked waypoint carries its tangent handles as it slides
+          if ((s.join === "smooth" || s.join === "sym") && d.wp != null)
+            path = translateJointHandles(path, d.wp, dx, dy);
+          return path;
+        }
         if (d.kind === "q") { s.cx = cp.x; s.cy = cp.y; }
         if (d.kind === "c1") { s.c1x = cp.x; s.c1y = cp.y; }
         if (d.kind === "c2") { s.c2x = cp.x; s.c2y = cp.y; }
         path[d.seg] = s;
+        // smooth/symmetric points drive their opposite handle to stay aligned
+        if (d.wp != null) path = mirrorJoint(path, d.wp, d.seg, d.kind, cp);
         return path;
       };
       if (d.fork) return { ...p, forks: mapForkAt(p.forks, d.fork, f => ({ ...f, path: edit(f.path) })) };
@@ -3052,6 +3116,10 @@ export default function DrillAnimator() {
         const near = spots.find(s => Math.hypot(s.x - pc.x, s.y - pc.y) < 12);
         if (near) updateById(pc.id, near);
       }
+      // a routed piece carries a start-point angle handle — reopen its editor so
+      // that handle reshows after the move instead of needing a second click
+      if (pc && pc.path && pc.path.length) { setSelectedId(d.id); setPopup({ type: "piece", id: d.id }); }
+      return;
     }
     if (d.moved) return;
     if (d.kind === "wlabel") { setSelectedId(d.id); setPopup({ type: "point", id: d.id, seg: d.seg }); return; }
@@ -3070,6 +3138,10 @@ export default function DrillAnimator() {
           return;
         }
         lastLineTap.current = { t: now, id: d.id, pt: d.tapPt };
+        // a tap landing on a waypoint opens that point directly — don't make the
+        // coach hit the leg first, then the dot on a second tap
+        const wp = waypointUnderTap(d.id, d.line, d.tapPt, d.fork || null);
+        if (wp != null) { setSelectedId(d.id); setPopup({ type: "point", id: d.id, seg: wp, ...(d.fork ? { fork: d.fork } : {}) }); return; }
         setPopup({ type: "line", id: d.id, seg: d.line, pt: d.tapPt, ...(d.fork ? { fork: d.fork } : {}) });
         return;
       }
@@ -3284,9 +3356,128 @@ export default function DrillAnimator() {
     return { ...base, strokeWidth: W(0.75), strokeDasharray: D("0.2 1.5") };
   }
 
+  /* ---- action badges at waypoints ---- */
+  // gap (rink ft) the line leaves around an action badge; badge radius in icon-frame units
+  const ACT_GAP = 3.4, ACT_R = 3.0;
+  // priority for picking the "main" action shown in a badge with several actions
+  const ACT_PRI = { shot: 5, pass: 4, rim: 3, chip: 2, receive: 1, collect: 1, pickup: 1 };
+  const stepActionType = st => st.role === "pickup" ? "pickup" : st.role === "receive" ? "receive"
+    : st.role === "collect" ? "collect" : (st.kind || "pass");   // release/terminal → its kind
+  const actionIconName = t => t === "shot" ? "net" : t === "pass" ? "pass" : t === "chip" ? "chip"
+    : t === "rim" ? "rim" : "collect";   // receive / collect / pickup all = gaining the puck
+  // waypoints (index → {count, type}) where a player acts on the puck. Skips the
+  // standing spot (i=-1) — the player icon already sits there.
+  function actionWaypoints(p) {
+    const m = new Map();
+    if (p.kind !== "player" || !p.path.length) return m;
+    for (let i = 0; i < p.path.length; i++) {
+      const steps = stepsAt(p, i);
+      if (!steps.length) continue;
+      let best = null, bp = -1;
+      for (const st of steps) { const t = stepActionType(st), pr = ACT_PRI[t] || 0; if (pr > bp) { bp = pr; best = t; } }
+      m.set(i, { count: steps.length, type: best });
+    }
+    return m;
+  }
+  // draw, at each action waypoint: the incoming end-mark (chevron, or ‖ when the
+  // player stops there) plus a circular badge with the main action's icon and, if
+  // several actions land there, a count. The route's segment trims leave the gaps.
+  // the shared route end-mark: an open chevron, or a ‖ stop mark. Drawn rink-scaled
+  // in the stretch-cancelling frame so a route's END and an ACTION-CIRCLE entry look
+  // identical — same shape, weight, and scaling.
+  function routeMark(key, endPt, ang, stop, color) {
+    const fx = iconXf({ x: endPt.x, y: endPt.y, a: ang });
+    return (
+      <g key={key} transform={fx.t} pointerEvents="none">
+        {stop
+          // ‖ stop mark: the incoming line ends at the FIRST bar (the line's end);
+          // the second bar sits just PAST it, so the line doesn't run through both
+          ? <path d="M 0 -2.4 L 0 2.4 M 1.5 -2.4 L 1.5 2.4" fill="none" stroke={color} strokeWidth={1.1} strokeLinecap="round" />
+          : <path d="M -4.1 -2.5 L 0 0 L -4.1 2.5" fill="none" stroke={color} strokeWidth={1.1} strokeLinecap="round" strokeLinejoin="round" />}
+      </g>
+    );
+  }
+  function renderActionMarks(p, bentPts, acts) {
+    if (!acts || !acts.size) return null;
+    const n = p.path.length, els = [];
+    for (const [i, info] of acts) {
+      const s = p.path[i];
+      const prev = i >= 1 ? segEnd(p, i - 1) : { x: p.x, y: p.y };
+      let tx, ty;
+      if (i === n - 1 && bentPts && bentPts.length >= 2) {
+        const b = bentPts[Math.max(0, bentPts.length - 4)]; tx = s.x - b.x; ty = s.y - b.y;
+      } else {
+        const near = evalSeg(prev, s, 0.85); tx = s.x - near.x; ty = s.y - near.y;
+        if (Math.hypot(tx, ty) < 1e-4) { tx = s.x - prev.x; ty = s.y - prev.y; }
+      }
+      const tl = Math.hypot(tx, ty) || 1, ang = (Math.atan2(ty, tx) * 180) / Math.PI;
+      // incoming end-mark, just outside the round badge on the incoming side —
+      // the SAME glyph as a route end
+      const mp = gmMove(s.x, s.y, -tx / tl, -ty / tl, ACT_GAP);
+      els.push(routeMark(`am${i}`, mp, ang, s.endStop, p.color));
+      // badge circle + action icon (+ count). The icon and number counter-rotate
+      // by the frame's screen angle (like player labels) so they read upright on
+      // screen even when the rink is shown rotated (portrait).
+      const cfx = iconXf({ x: s.x, y: s.y, a: 0 });
+      els.push(
+        <g key={`ab${i}`} transform={cfx.t} pointerEvents="none">
+          <circle cx={0} cy={0} r={ACT_R} fill="#fff" stroke={p.color} strokeWidth={0.5} />
+          <g transform={`rotate(${-cfx.th})`}>
+            <g style={{ color: p.color }} transform={`scale(0.178) translate(-12 -12)`}
+              fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round">
+              {ICONS[actionIconName(info.type)]}
+            </g>
+            {info.count > 1 && (
+              <g transform={`translate(${ACT_R * 0.74} ${-ACT_R * 0.74})`}>
+                <circle cx={0} cy={0} r={1.55} fill={p.color} />
+                <text x={0} y={0} textAnchor="middle" dominantBaseline="central" fontSize={2.2}
+                  fontWeight={800} fill="#fff" style={{ fontFamily: "system-ui, sans-serif" }}>{info.count}</text>
+              </g>
+            )}
+          </g>
+        </g>
+      );
+    }
+    return <g>{els}</g>;
+  }
+
+  // Arrowhead at a route's end, drawn in the stretch-cancelling icon frame so it
+  // stays a clean triangle (SVG markers get sheared by the fill-mode stretch).
+  function renderArrow(p, bentPts, acts) {
+    const n = p.path.length;
+    if (!n) return null;
+    if (acts && acts.has(n - 1)) return null;   // an action badge marks this end instead
+    // a route that branches into reaction-light forks doesn't END here — its mark
+    // sits at the branch point, so drop it and let the forks' carats mark the ends
+    if ((p.forks || []).some(f => f.path && f.path.length)) return null;
+    // anchor the tip at the drawn line's END and point it along that line's end
+    // tangent — use the detoured (bent) polyline when there is one so the head
+    // lines up with the curve actually shown, not the raw path
+    let endPt, tx, ty;
+    if (bentPts && bentPts.length >= 2) {
+      endPt = bentPts[bentPts.length - 1];
+      const b = bentPts[Math.max(0, bentPts.length - 4)];
+      tx = endPt.x - b.x; ty = endPt.y - b.y;
+    } else {
+      const last = p.path[n - 1];
+      const prev = n >= 2 ? segEnd(p, n - 2) : { x: p.x, y: p.y };
+      endPt = { x: last.x, y: last.y };
+      const near = evalSeg(prev, last, 0.9);
+      tx = last.x - near.x; ty = last.y - near.y;
+      if (Math.hypot(tx, ty) < 1e-4) {               // degenerate (control on the endpoint)
+        if (last.type === "C") { tx = last.x - last.c2x; ty = last.y - last.c2y; }
+        else if (last.type === "Q") { tx = last.x - last.cx; ty = last.y - last.cy; }
+        else { tx = last.x - prev.x; ty = last.y - prev.y; }
+      }
+    }
+    if (!tx && !ty) return null;
+    const ang = (Math.atan2(ty, tx) * 180) / Math.PI;
+    // the same glyph as an action-circle entry: a chevron, or a ‖ stop mark
+    return routeMark(`arw-${p.id}`, endPt, ang, !!(p.path[n - 1] && p.path[n - 1].endStop), p.color);
+  }
   // a carat (chevron ">") arrowhead, tip AT `endPt` pointing along heading `ang`
   // (deg), drawn in the stretch-cancelling icon frame so it stays a clean, open
-  // chevron (SVG markers get sheared by the fill-mode stretch).
+  // chevron (SVG markers get sheared by the fill-mode stretch). Used by reaction forks.
   function caratHead(endPt, ang, color, key, opacity = 1) {
     const fx = iconXf({ x: endPt.x, y: endPt.y, a: ang });
     // hold a constant SCREEN size (counter the pinch-zoom) so the head stays
@@ -3322,30 +3513,6 @@ export default function DrillAnimator() {
     return { endPt, ang: (Math.atan2(ty, tx) * 180) / Math.PI };
   }
 
-  // Arrowhead at a route's end, as an open carat pointing along the line's end
-  // tangent — use the detoured (bent) polyline when there is one so the head
-  // lines up with the curve actually shown, not the raw path.
-  function renderArrow(p, bentPts) {
-    if (!p.path.length) return null;
-    // a route that branches into reaction-light forks doesn't END here — its
-    // arrowhead sits at the branch point, so drop it and let the forks' carats
-    // mark the real endpoints
-    if ((p.forks || []).some(f => f.path && f.path.length)) return null;
-    let endPt, ang;
-    if (bentPts && bentPts.length >= 2) {
-      endPt = bentPts[bentPts.length - 1];
-      const b = bentPts[Math.max(0, bentPts.length - 4)];
-      const tx = endPt.x - b.x, ty = endPt.y - b.y;
-      if (!tx && !ty) return null;
-      ang = (Math.atan2(ty, tx) * 180) / Math.PI;
-    } else {
-      const ea = pathEndArrow(p.path, { x: p.x, y: p.y });
-      if (!ea) return null;
-      endPt = ea.endPt; ang = ea.ang;
-    }
-    return caratHead(endPt, ang, p.color, `arw-${p.id}`);
-  }
-
   function renderHandles(p, yf = yFix, fork = null) {
     const hd = (cx, cy, r, props) => hdot(cx, cy, r, props, yf);
     if (!editing || p.id !== selectedId || tool === "draw") return null;
@@ -3362,6 +3529,10 @@ export default function DrillAnimator() {
     const activeWp = d && d.id === p.id && forkEq(d.fork, fork) && (d.wp != null || d.seg != null || d.line != null)
       ? (d.wp != null ? d.wp : d.seg != null ? d.seg : d.line)
       : popup && (popup.type === "line" || popup.type === "point") && popup.id === p.id && forkEq(popup.fork, fork) ? popup.seg : null;
+    // the player/route START is a curve point too — its departure tangent aims the
+    // launch. Expose it whenever the piece itself is selected, so you don't have to
+    // open the NEXT waypoint just to adjust the starting point's angle.
+    const originActive = popup && popup.type === "piece" && popup.id === p.id && forkEq(popup.fork, fork);
     const els = [];
     // a draggable tangent control, with a dashed leash back to its waypoint anchor.
     const ctrlPt = (key, cx, cy, kind, seg, wp, ax, ay) => {
@@ -3372,16 +3543,18 @@ export default function DrillAnimator() {
     };
     route.forEach((s, i) => {
       if (i === activeWp) {
-        // full anchor grab (square kept square via yFix)
-        els.push(<rect key={`a${i}`} x={s.x - 1.4} y={s.y - 1.4 * yf} width={2.8} height={2.8 * yf}
-          fill={dotFill} stroke={dotStroke} strokeWidth={0.35} pointerEvents="none" />);
+        // full anchor grab: a circle for a linked (smooth/sym) point, a square for
+        // a corner — the vector-editor convention, so the point type reads on-ice
+        if (s.join === "smooth" || s.join === "sym")
+          els.push(hd(s.x, s.y, 1.6, { key: `a${i}`, fill: dotFill, stroke: dotStroke, strokeWidth: 0.35, pointerEvents: "none" }));
+        else
+          els.push(<rect key={`a${i}`} x={s.x - 1.4} y={s.y - 1.4 * yf} width={2.8} height={2.8 * yf}
+            fill={dotFill} stroke={dotStroke} strokeWidth={0.35} pointerEvents="none" />);
         els.push(hd(s.x, s.y, 4, { key: `ah${i}`, fill: "transparent", style: { cursor: "grab" },
           onPointerDown: e => handleDown(e, { kind: "anchor", id: p.id, seg: i, wp: i, ...(fork ? { fork } : {}) }) }));
         // incoming tangent: this leg's control nearest waypoint i
         if (s.type === "C") ctrlPt(`ic${i}`, s.c2x, s.c2y, "c2", i, i, s.x, s.y);
         else if (s.type === "Q") ctrlPt(`iq${i}`, s.cx, s.cy, "q", i, i, s.x, s.y);
-        // the first waypoint also exposes the departure tangent off the route origin
-        if (i === 0 && s.type === "C") ctrlPt(`sc${i}`, s.c1x, s.c1y, "c1", i, i, rp.x, rp.y);
         // outgoing tangent: the next leg's control nearest waypoint i
         const nx = route[i + 1];
         if (nx && nx.type === "C") ctrlPt(`oc${i}`, nx.c1x, nx.c1y, "c1", i + 1, i, s.x, s.y);
@@ -3393,6 +3566,16 @@ export default function DrillAnimator() {
           onPointerDown: e => handleDown(e, { kind: "anchor", id: p.id, seg: i, wp: i, ...(fork ? { fork } : {}) }) }));
       }
     });
+    // departure-angle handle at the route origin, leashed back to the piece: shown
+    // when the piece is selected OR waypoint 0 is active. For a cubic it's the c1
+    // control (distinct from waypoint 0's incoming c2); a quad has one shared
+    // control, already drawn at waypoint 0 when it's active — so only add it here
+    // for the piece-selected case to avoid a duplicate dot.
+    const s0 = route[0];
+    if (s0 && s0.type === "C" && (originActive || activeWp === 0))
+      ctrlPt(`sc0`, s0.c1x, s0.c1y, "c1", 0, 0, rp.x, rp.y);
+    else if (s0 && s0.type === "Q" && originActive && activeWp !== 0)
+      ctrlPt(`sq0`, s0.cx, s0.cy, "q", 0, 0, rp.x, rp.y);
     return <g>{els}</g>;
   }
 
@@ -4314,10 +4497,9 @@ export default function DrillAnimator() {
           )}
           {(p.kind === "player" || p.kind === "puck") && !p.defense && (
             <div className="hd-poprow">
-              <span>Add leg</span>
-              <button className="hd-mini" title="Straight" onClick={() => addSegment(p.id, "L")}><Icon name="segLine" /></button>
-              <button className="hd-mini" title="Curve" onClick={() => addSegment(p.id, "Q")}><Icon name="segQuad" /></button>
-              <button className="hd-mini" title="S-curve" onClick={() => addSegment(p.id, "C")}><Icon name="segCubic" /></button>
+              <span>{p.path.length ? "Extend route" : "Add route"}</span>
+              {curveButtons(t => addSegment(p.id, t), () => drawRouteMode(p.id))}
+              <span style={{ fontSize: 11, color: "#8b99a8" }}>a waypoint, or draw freehand</span>
             </div>
           )}
           {p.kind !== "player" && p.kind !== "label" && (
@@ -4468,6 +4650,20 @@ export default function DrillAnimator() {
                     onClick={() => changeSegType(p.id, i + 1, t, fork)}><Icon name={ic} /></button>
                 ))}
               </div>
+              {/* point type — only when both adjoining legs are curves (there's a
+                  handle on each side to link). Corner = independent handles;
+                  Smooth = handles kept collinear (auto-smooths); Sym = collinear + equal */}
+              {s.type !== "L" && next.type !== "L" && (
+                <div className="hd-poprow">
+                  <span>Point</span>
+                  {[["corner", "ptCorner", "Corner — independent handles"],
+                    ["smooth", "ptSmooth", "Smooth — linked handles, auto-smooths"],
+                    ["sym", "ptSym", "Symmetric — linked, equal-length handles"]].map(([j, ic, lbl]) => (
+                    <button key={j} className={`hd-mini${(s.join || "corner") === j ? " on" : ""}`} title={lbl}
+                      onClick={() => setJoint(p.id, i, j, fork)}><Icon name={ic} /></button>
+                  ))}
+                </div>
+              )}
               {p.kind === "player" && (
                 <div className="hd-poprow">
                   <span>Then skate</span>
@@ -4497,6 +4693,17 @@ export default function DrillAnimator() {
             </div>
           ) : (
             <div className="hd-poprow" style={{ color: "#8b99a8", fontSize: 12 }}>End of {fork ? "reaction" : "route"}</div>
+          )}
+          {/* route end: mark that the player stops here → a ‖ stop mark replaces
+              the direction arrowhead (skating-diagram convention) */}
+          {!next && p.kind === "player" && !fork && (
+            <div className="hd-poprow">
+              <button className={`hd-mini${s.endStop ? " on" : ""}`}
+                onClick={() => uSeg(i, { endStop: s.endStop ? undefined : true })}>
+                {s.endStop ? "✓ Stops here" : "Stops here"}
+              </button>
+              <span style={{ fontSize: 11, color: "#8b99a8" }}>ends with a ‖ stop mark, not an arrow</span>
+            </div>
           )}
           {p.kind === "player" && !fork && ActionSteps(p, i)}
           <div className="hd-poprow">
@@ -4595,23 +4802,66 @@ export default function DrillAnimator() {
     const ve = flat ? undefined : "non-scaling-stroke";
     const { plans } = getIntentPlan();   // draw the shot's intent (on net), not a realistic miss
     const z = 1 / (view.s || 1);
+    // action-badge centres: a pass/shot released AT a waypoint (not off a player's
+    // stick at their standing spot) begins just outside that badge's edge
+    const badges = [];
+    pieces.forEach(p => { if (p.kind === "player" && p.path.length) { const m = actionWaypoints(p); for (const i of m.keys()) badges.push({ x: p.path[i].x, y: p.path[i].y }); } });
+    const START_OFF = ACT_R * ICON_SCALE + 0.9;   // badge radius (rink ft) + a slight gap
+    // a fly leg launches/lands at the player's STICK, ~a stick-length off the
+    // waypoint centre where the badge sits — so match within that reach
+    const nearBadge = (x, y) => { let best = null, bd = 6; for (const b of badges) { const d = Math.hypot(b.x - x, b.y - y); if (d < bd) { bd = d; best = b; } } return best; };
+    // multiple shots landing on the same net stop at staggered distances so their
+    // arrowheads queue up in front of it instead of piling into one busy clump
+    // group shots by the NET they land on (landings scatter a few feet, so bucket
+    // by nearest net, not exact point), then stagger by LENGTH: the closest
+    // (shortest) shots keep their room right at the net, and the farther (longer)
+    // shots step back — so nothing overlaps and short shots still read accurately
+    const shotTargets = pieces.filter(q => q.kind === "net" || q.kind === "passer" || q.kind === "bumper" || q.kind === "tire");
+    const nearNet = (x, y) => { let best = "?", bd = 24; for (const nt of shotTargets) { const d = Math.hypot(nt.x - x, nt.y - y); if (d < bd) { bd = d; best = nt.id; } } return best; };
+    const byNet = {}, shotStagger = {};   // `${pk}/${k}` → extra feet in front of the net
+    pieces.filter(q => q.kind === "puck" && plans[q.id]).forEach(q => plans[q.id].legs.forEach((L, k, legs) => {
+      if (L.type === "fly" && L.shot && (!legs[k + 1] || legs[k + 1].type !== "fly")) {
+        const net = nearNet(L.x1, L.y1);
+        (byNet[net] = byNet[net] || []).push({ id: `${q.id}/${k}`, len: Math.hypot(L.x1 - L.x0, L.y1 - L.y0) });
+      }
+    }));
+    Object.values(byNet).forEach(list => list.sort((a, b) => a.len - b.len).forEach((s, i) => { shotStagger[s.id] = i * 9; }));
     return pieces
       .filter(q => q.kind === "puck" && plans[q.id])
       .map(q => plans[q.id].legs.map((L, k, legs) => {
         if (L.type !== "fly") return null;
         const nxt = legs[k + 1];
         const runEnd = !nxt || nxt.type !== "fly";   // last fly leg of a pass/shot/rim/chip run
+        const runStart = k === 0 || legs[k - 1].type !== "fly";   // first fly leg of the run
         const dx = L.x1 - L.x0, dy = L.y1 - L.y0;
+        const len = Math.hypot(dx, dy) || 1, ux = dx / len, uy = dy / len;
+        // start: released AT an action badge → begin just outside its round edge,
+        // measured from the badge CENTRE (not the stick); off a standing stick → start there
+        const sb = runStart ? nearBadge(L.x0, L.y0) : null;
+        const sp = sb ? gmMove(sb.x, sb.y, ux, uy, START_OFF) : { x: L.x0, y: L.y0 };
+        const sx = sp.x, sy = sp.y;
+        // end: a shot stops just short of the net (+ stagger for several on one net);
+        // a pass/rim/chip into a receiver's badge stops just off its edge. Clamp the
+        // offset so a SHORT leg's arrow never overshoots its own start and reverses.
+        const eb = runEnd && !L.shot ? nearBadge(L.x1, L.y1) : null;
+        let eGap = L.shot && runEnd ? 4.5 + (shotStagger[`${q.id}/${k}`] || 0) : eb ? START_OFF : 0;
+        if (eGap > 0) eGap = Math.min(eGap, Math.max(0, Math.hypot((L.x1 - sx) * gmSar, (L.y1 - sy) / gmSar) - 2));
+        const ep = eGap > 0 ? gmMove(L.x1, L.y1, -ux, -uy, eGap) : { x: L.x1, y: L.y1 };
+        const ex = ep.x, ey = ep.y;
         return (
           <g key={`pf-${q.id}-${k}`} pointerEvents="none" opacity={0.62}>
-            <line x1={L.x0} y1={L.y0} x2={L.x1} y2={L.y1} vectorEffect={ve}
+            <line x1={sx} y1={sy} x2={ex} y2={ey} vectorEffect={ve}
               stroke="#14171a" strokeWidth={W(L.shot ? 1.1 : 0.55)}
               strokeDasharray={L.shot ? undefined : D("2.4 1.8")} />
             {runEnd && (dx || dy) && (flat
-              ? <circle cx={L.x1} cy={L.y1} r={1.1} fill="none" vectorEffect={ve} stroke="#14171a" strokeWidth={W(0.3)} />
-              : (() => { const fx = iconXf({ x: L.x1, y: L.y1, a: (Math.atan2(dy, dx) * 180) / Math.PI });
+              ? <circle cx={ex} cy={ey} r={1.1} fill="none" vectorEffect={ve} stroke="#14171a" strokeWidth={W(0.3)} />
+              : (() => { const fx = iconXf({ x: ex, y: ey, a: (Math.atan2(dy, dx) * 180) / Math.PI });
                   return <g transform={fx.t}><g transform={`scale(${z})`}>
-                    <path d="M 0 0 L -3.6 -2.1 L -3.6 2.1 Z" fill="#14171a" stroke="#14171a" strokeWidth={0.5} strokeLinejoin="round" /></g></g>; })())}
+                    {L.shot
+                      // double chevron ">>" for a shot
+                      ? <path d="M -3.4 -2.2 L 0 0 L -3.4 2.2 M -6.8 -2.2 L -3.4 0 L -6.8 2.2" fill="none" stroke="#14171a" strokeWidth={1} strokeLinecap="round" strokeLinejoin="round" />
+                      : <path d="M 0 0 L -3.6 -2.1 L -3.6 2.1 Z" fill="#14171a" stroke="#14171a" strokeWidth={0.5} strokeLinejoin="round" />}
+                  </g></g>; })())}
           </g>
         );
       }));
@@ -4799,6 +5049,7 @@ export default function DrillAnimator() {
               const rd = showRoutes ? routeDetour(p) : null;   // arc detour around a crossed net
               const bent = rd && rd.pts;
               const carry = p.kind === "player" ? carrySegs(p) : null;   // segments skated with the puck
+              const acts = showRoutes && p.kind === "player" ? actionWaypoints(p) : new Map();
               let prev = { x: p.x, y: p.y };
               return (
                 <g key={`rt-${p.id}`}>
@@ -4812,16 +5063,25 @@ export default function DrillAnimator() {
                     // straight otherwise (hockey diagram convention)
                     const bwd = p.kind === "player" && s.dir === "bwd";
                     const wig = !bwd && carry && carry.has(i);
+                    // the VISIBLE line leaves a gap at the player start and around any
+                    // action badge (before this waypoint / after the previous one);
+                    // the ref path + hit area below still use the full segment
+                    const startGap = i === 0 && p.kind === "player" ? ROUTE_START_GAP : acts.has(i - 1) ? ACT_GAP : 0;
+                    const endGap = acts.has(i) ? ACT_GAP : 0;
+                    let vFrom = from, vSeg = s;
+                    if (startGap) { const t = trimSegStart(vFrom, vSeg, startGap, strokeAR); if (t) { vFrom = t.from; vSeg = t.seg; } }
+                    if (endGap) { const t = trimSegEnd(vFrom, vSeg, endGap, strokeAR); if (t) vSeg = t.seg; }
+                    const vD = (startGap || endGap) ? segD(vFrom, vSeg) : d;
                     return (
                       <g key={`${p.id}/${i}`}>
                         {/* invisible ref path is always present — timing measures it */}
                         <path d={d} fill="none" stroke="none"
                           ref={el => { if (el) segRefs.current[`${p.id}/${i}`] = el; }} />
                         {showRoutes && !bent && (bwd
-                          ? <polyline points={zigzagPoints(from, s, strokeAR)} {...style} strokeLinejoin="round" pointerEvents="none" />
+                          ? <polyline points={zigzagPoints(vFrom, vSeg, strokeAR)} {...style} strokeLinejoin="round" pointerEvents="none" />
                           : wig
-                          ? <polyline points={wigglePoints(from, s, strokeAR, isLast)} {...style} strokeLinejoin="round" pointerEvents="none" />
-                          : <path d={d} {...style} pointerEvents="none" />)}
+                          ? <polyline points={wigglePoints(vFrom, vSeg, strokeAR, isLast || acts.has(i))} {...style} strokeLinejoin="round" pointerEvents="none" />
+                          : <path d={vD} {...style} pointerEvents="none" />)}
                         {showRoutes && (
                           <path d={d} fill="none" stroke="transparent" strokeWidth={4}
                             onPointerDown={e => lineDown(e, p.id, i)} style={{ cursor: "pointer" }} />
@@ -4830,12 +5090,13 @@ export default function DrillAnimator() {
                     );
                   })}
                   {bent && (
-                    <polyline points={bent.map(q => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" ")}
+                    <polyline points={(p.kind === "player" ? trimPolyStart(bent, ROUTE_START_GAP, strokeAR) : bent).map(q => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" ")}
                       {...segStroke(p, p.path[p.path.length - 1] || {}, false)}
                       strokeLinejoin="round" pointerEvents="none" />
                   )}
-                  {/* arrow last so it sits ON TOP of the line (raw or bent) */}
-                  {showRoutes && p.path.length > 0 && renderArrow(p, bent)}
+                  {/* arrow + action badges last so they sit ON TOP of the line */}
+                  {showRoutes && p.path.length > 0 && renderArrow(p, bent, acts)}
+                  {showRoutes && renderActionMarks(p, bent, acts)}
                 </g>
               );
             })}
