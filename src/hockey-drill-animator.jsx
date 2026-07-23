@@ -4773,15 +4773,19 @@ export default function DrillAnimator() {
     // multiple shots landing on the same net stop at staggered distances so their
     // arrowheads queue up in front of it instead of piling into one busy clump
     // group shots by the NET they land on (landings scatter a few feet, so bucket
-    // by nearest net, not exact point) and stagger their stop distances
+    // by nearest net, not exact point), then stagger by LENGTH: the closest
+    // (shortest) shots keep their room right at the net, and the farther (longer)
+    // shots step back — so nothing overlaps and short shots still read accurately
     const shotTargets = pieces.filter(q => q.kind === "net" || q.kind === "passer" || q.kind === "bumper" || q.kind === "tire");
     const nearNet = (x, y) => { let best = "?", bd = 24; for (const nt of shotTargets) { const d = Math.hypot(nt.x - x, nt.y - y); if (d < bd) { bd = d; best = nt.id; } } return best; };
-    const netSeen = {}, shotStagger = {};   // `${pk}/${k}` → extra feet in front of the net
+    const byNet = {}, shotStagger = {};   // `${pk}/${k}` → extra feet in front of the net
     pieces.filter(q => q.kind === "puck" && plans[q.id]).forEach(q => plans[q.id].legs.forEach((L, k, legs) => {
       if (L.type === "fly" && L.shot && (!legs[k + 1] || legs[k + 1].type !== "fly")) {
-        const key = nearNet(L.x1, L.y1); shotStagger[`${q.id}/${k}`] = (netSeen[key] || 0) * 9; netSeen[key] = (netSeen[key] || 0) + 1;
+        const net = nearNet(L.x1, L.y1);
+        (byNet[net] = byNet[net] || []).push({ id: `${q.id}/${k}`, len: Math.hypot(L.x1 - L.x0, L.y1 - L.y0) });
       }
     }));
+    Object.values(byNet).forEach(list => list.sort((a, b) => a.len - b.len).forEach((s, i) => { shotStagger[s.id] = i * 9; }));
     return pieces
       .filter(q => q.kind === "puck" && plans[q.id])
       .map(q => plans[q.id].legs.map((L, k, legs) => {
