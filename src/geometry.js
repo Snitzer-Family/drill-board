@@ -83,28 +83,34 @@ export function splitSeg(prev, s, t) {
 // segment that carries the route's arrowhead.
 export function wigglePoints(prev, s, ar = 1, taperEnd = false) {
   const wlen = (ax, ay, bx, by) => Math.hypot((bx - ax) * ar, by - ay);
-  const approx =
+  const poly =                                             // control-polygon estimate → sample count
     s.type === "L" ? wlen(prev.x, prev.y, s.x, s.y)
     : s.type === "Q" ? wlen(prev.x, prev.y, s.cx, s.cy) + wlen(s.cx, s.cy, s.x, s.y)
     : wlen(prev.x, prev.y, s.c1x, s.c1y) + wlen(s.c1x, s.c1y, s.c2x, s.c2y) + wlen(s.c2x, s.c2y, s.x, s.y);
-  const cycles = Math.max(1, Math.round(approx / 3.4));   // ~3.4 screen units per wave
-  const n = Math.max(14, cycles * 10), A = 0.85;          // amplitude in screen units
+  const n = Math.max(14, Math.max(1, Math.round(poly / 3.4)) * 10);
+  // measure the TRUE arc length (screen-weighted) by sampling — the control-polygon
+  // estimate over-counts a curve, which would leave the end-taper never reaching
+  // zero on a curved leg (the wiggle would run wavy straight into the arrowhead)
+  const samp = [evalSeg(prev, s, 0)];
+  let total = 0;
+  for (let i = 1; i <= n; i++) { const q = evalSeg(prev, s, i / n); total += wlen(samp[i - 1].x, samp[i - 1].y, q.x, q.y); samp.push(q); }
+  const cycles = Math.max(1, Math.round(total / 3.4));   // ~3.4 screen units per wave
+  const A = 0.85;                                         // amplitude in screen units
   // the wiggle ends in a SMALL FIXED straight run before an end mark (arrowhead /
   // ‖): dead-straight for the final STRAIGHT feet, with a short EASE back into the
   // wiggle. Keyed only on distance-from-the-end, so it never scales with line length.
   const STRAIGHT = 4.5, EASE = 1.5;
   const pts = [];
-  let cum = 0, prevPt = evalSeg(prev, s, 0);
+  let cum = 0;
   for (let i = 0; i <= n; i++) {
-    const t = i / n, pt = evalSeg(prev, s, t);
-    if (i > 0) cum += wlen(prevPt.x, prevPt.y, pt.x, pt.y);
-    prevPt = pt;
+    const pt = samp[i];
+    if (i > 0) cum += wlen(samp[i - 1].x, samp[i - 1].y, pt.x, pt.y);
     if (i === 0 || i === n) { pts.push(pt); continue; }
-    const ahead = evalSeg(prev, s, Math.min(1, t + 0.005));
+    const ahead = samp[i + 1];                               // next sample → local direction
     const tx = (ahead.x - pt.x) * ar, ty = ahead.y - pt.y;   // screen-space tangent
     const px = -ty, py = tx, l = Math.hypot(px, py) || 1;    // screen-space normal
-    const taper = taperEnd ? Math.max(0, Math.min(1, (approx - cum - STRAIGHT) / EASE)) : 1;
-    const a = Math.sin((cum / (approx || 1)) * cycles * 2 * Math.PI) * A * taper;
+    const taper = taperEnd ? Math.max(0, Math.min(1, (total - cum - STRAIGHT) / EASE)) : 1;
+    const a = Math.sin((cum / (total || 1)) * cycles * 2 * Math.PI) * A * taper;
     pts.push({ x: pt.x + (px / l) * a / ar, y: pt.y + (py / l) * a });
   }
   return pts.map(q => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" ");
