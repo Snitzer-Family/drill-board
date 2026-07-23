@@ -3,9 +3,10 @@
 export const STYLES = `
         .hd-root { position:fixed; inset:0; background:#0c1014; color:#e8edf2; overflow:hidden;
           --hd-b: var(--hd-safe-b, min(env(safe-area-inset-bottom, 0px), 34px));
-          --hd-scrub: 0px;   /* reserved height for the timeline scrubber band (0 when hidden) */
+          --hd-scrub: 0px;   /* reserved height for the player bar band (0 when hidden) */
+          --hd-pintop: 10px; /* no floating top dock any more — popups can ride the top edge */
           font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
-        .hd-root.scrub-on { --hd-scrub: 44px; }
+        .hd-root.scrub-on { --hd-scrub: 48px; }
         /* the ice starts below the Dynamic Island / status bar and ends
            above the home-indicator band — iOS 26 standalone composites an
            opaque system bar there that web content cannot render under */
@@ -17,47 +18,22 @@ export const STYLES = `
         .hd-canvas svg.hd-ice { width:100%; height:100%; display:block; }
         .hd-stage, .hd-canvas, .hd-canvas svg, .hd-canvas svg * { touch-action:none;
           -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
-        /* floating controls */
-        .hd-fab { position:absolute; z-index:40; width:46px; height:46px; border-radius:50%;
-          background:rgba(23,29,37,.88); border:1px solid #33404f; color:#dbe4ec;
-          font-size:18px; display:flex; align-items:center; justify-content:center;
-          cursor:pointer; box-shadow:0 4px 14px rgba(0,0,0,.45); backdrop-filter:blur(4px); }
-        .hd-fab.on { background:#1f4fa3; border-color:#1f4fa3; }
-        .hd-fab.draw-on { background:#b58900; border-color:#b58900; }
-        .hd-fab.play { background:#d7263d; border-color:#d7263d; color:#fff; }
-        .hd-fab small { font-size:10px; font-weight:800; letter-spacing:.05em; }
-        .hd-fab.small { position:static; width:38px; height:38px; box-shadow:none; font-size:30px; line-height:1; }
-        /* the mobile play/pause is enlarged for an easy thumb target */
-        .hd-playdock .hd-fab.play { width:54px; height:54px; font-size:22px; }
-        /* draggable play dock — floats over the ice, movable by its grip */
-        .hd-playdock { position:absolute; z-index:46; top:max(10px, env(safe-area-inset-top));
-          left:50%; transform:translateX(-50%);
-          display:flex; align-items:center; gap:6px; padding:4px 6px 4px 8px;
-          background:rgba(23,29,37,.9); border:1px solid #33404f; border-radius:999px;
-          box-shadow:0 4px 14px rgba(0,0,0,.45); backdrop-filter:blur(4px); touch-action:none; }
-        .hd-playdock .hd-grip { cursor:grab; padding:6px 4px; font-size:15px; }
-        .hd-playdock .hd-grip:active { cursor:grabbing; }
-        /* subtle "hide" button on the dock */
-        .hd-fab.small.hd-playhide { width:30px; height:30px; background:transparent;
-          border-color:transparent; box-shadow:none; color:#8b99a8; }
-        /* collapsed play-dock tab: tucked to an edge, tap to bring the dock back */
-        .hd-playtab { position:absolute; z-index:46; display:flex; align-items:center;
-          justify-content:center; width:54px; height:26px; padding:0; color:#cdd8e2;
-          background:rgba(23,29,37,.92); border:1px solid #33404f;
-          box-shadow:0 4px 14px rgba(0,0,0,.45); backdrop-filter:blur(4px); cursor:pointer; }
-        .hd-playtab.top { border-radius:0 0 13px 13px; border-top:none; }
-        .hd-playtab.bottom { border-radius:13px 13px 0 0; }
-        .hd-playtab.left { width:26px; height:54px; border-radius:0 13px 13px 0; border-left:none; }
-        .hd-playtab.right { width:26px; height:54px; border-radius:13px 0 0 13px; border-right:none; }
-        /* timeline scrubber — a thin strip above the menu bar; seek + drop notes */
-        /* the scrubber sits in its own reserved band between the ice and the menu
-           bar (see --hd-scrub on .hd-root) — it never overlaps the ice sheet */
+        /* player bar — transport controls + seek scrubber in one strip above the
+           menu bar; sits in its own reserved band (--hd-scrub) so it never overlaps
+           the ice sheet */
         .hd-scrub { position:absolute; z-index:44; left:8px; right:8px;
-          bottom:calc(54px + var(--hd-b) + 4px); height:36px;
-          display:flex; align-items:center; gap:9px; padding:5px 10px;
-          background:rgba(23,29,37,.84); border:1px solid #2c3846; border-radius:11px;
+          bottom:calc(54px + var(--hd-b) + 4px); height:40px;
+          display:flex; align-items:center; gap:6px; padding:4px 8px;
+          background:rgba(23,29,37,.84); border:1px solid #2c3846; border-radius:12px;
           box-shadow:0 3px 12px rgba(0,0,0,.4); backdrop-filter:blur(4px); }
-        .hd-scrubtrack { position:relative; flex:1; min-width:0; height:22px; display:flex; align-items:center; }
+        /* transport buttons */
+        .hd-scrubbtn { flex:none; width:32px; height:32px; border-radius:9px; background:#1b232c;
+          border:1px solid #33404f; color:#dbe4ec; display:flex; align-items:center;
+          justify-content:center; cursor:pointer; }
+        .hd-scrubbtn.on { background:#1f4fa3; border-color:#1f4fa3; }
+        .hd-scrubbtn.play { width:34px; height:34px; border-radius:50%;
+          background:#d7263d; border-color:#d7263d; color:#fff; margin-right:2px; }
+        .hd-scrubtrack { position:relative; flex:1; min-width:0; height:22px; display:flex; align-items:center; margin:0 4px; }
         .hd-scrubtrack::before { content:""; position:absolute; left:0; right:0; top:50%;
           height:4px; margin-top:-2px; border-radius:2px; background:#3a4756; }
         .hd-tick { position:absolute; top:50%; width:2px; height:10px; margin-top:-5px;
@@ -89,22 +65,6 @@ export const STYLES = `
         .hd-barbtn.on { background:#1f4fa3; border-color:#1f4fa3; }
         .hd-barbtn.draw-on { background:#b58900; border-color:#b58900; }
         .hd-barbtn small { font-size:10px; font-weight:800; letter-spacing:.05em; }
-        /* play controls in the bar: desktop only (mobile uses the float dock) */
-        .hd-barplay { display:none; font-size:25px; line-height:1; }
-        .hd-barplay.play { background:#d7263d; border-color:#d7263d; color:#fff; }
-        @media (pointer: fine) and (min-width: 760px) {
-          .hd-playdock, .hd-playtab { display:none; }
-          .hd-barplay { display:flex; }
-          /* no floating top dock on desktop — pinned popups can ride the top edge */
-          :root { --hd-pintop: 10px; }
-        }
-        /* landscape on a touch phone/tablet: vertical room is tight, so dock the
-           play controls into the bottom bar instead of the floating top dock */
-        @media (pointer: coarse) and (orientation: landscape) {
-          .hd-playdock, .hd-playtab { display:none; }
-          .hd-barplay { display:flex; }
-          :root { --hd-pintop: 10px; }
-        }
         .hd-barhint { flex:1 1 0; min-width:0; font-size:12px; color:#8b99a8; text-align:right;
           white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
         /* the version never runs off the edge: vN stays put, only the build
