@@ -4,7 +4,7 @@ import { VIEWS, COLORS, vb, APP_VERSION, ICON_SCALE, ROUTE_START_GAP, BUILD_STAM
 import { parseDrill, serializeDrill, extractDrill, deriveInventory } from "./drill-format.js";
 import { drillSvg } from "./drill-svg.js";
 import { mdEscape, mdInline, mdBlock } from "./md.js";
-import { clampX, clampY, segEnd, segD, nearestT, splitSeg, zigzagPoints, wigglePoints, convertSeg, fitRoute, evalSeg, rdp, catmullToBezier, alignJoint, mirrorJoint, translateJointHandles, trimSegStart, trimSegEnd, trimPolyStart } from "./geometry.js";
+import { clampX, clampY, segEnd, segD, nearestT, splitSeg, zigzagPoints, wigglePoints, wigglePoly, zigzagPoly, convertSeg, fitRoute, evalSeg, rdp, catmullToBezier, alignJoint, mirrorJoint, translateJointHandles, trimSegStart, trimSegEnd, trimPolyStart } from "./geometry.js";
 import * as boards from "./boards.js";
 import { netShapes, bumperShapes, solidShapes, detourRoute, segCrossesNet } from "./net-collide.js";
 import { RinkMarkings } from "./rink.jsx";
@@ -242,8 +242,21 @@ function DelayTrigger({ value, onChange, sub, players, actorIds, nameOf }) {
 const SAVE_KEY = "drillboard:autosave";   // the whole board, persisted across refreshes
 
 export default function DrillAnimator() {
-  // boot from the last auto-saved board if there is one, else the built-in demo
-  const init = (() => {
+  // a shared drill link (#d=<url-safe base64 DSL> — the preview-link format from
+  // previewLink()) boots straight into that drill. It wins over the autosave, and
+  // (see the auto-save effect) doesn't overwrite the saved board until you edit.
+  const linkDrill = (() => {
+    try {
+      const h = typeof window !== "undefined" ? window.location.hash : "";
+      const m = /[#&]d=([^&]+)/.exec(h || "");
+      if (!m) return null;
+      const dsl = decodeURIComponent(escape(atob(m[1].replace(/-/g, "+").replace(/_/g, "/"))));
+      const r = parseDrill(dsl);
+      return r.errors.length ? null : r;
+    } catch { return null; }   // malformed link → fall through to autosave/demo
+  })();
+  // boot from a link, else the last auto-saved board, else the built-in demo
+  const init = linkDrill || (() => {
     try {
       const saved = localStorage.getItem(SAVE_KEY);
       if (saved) { const r = parseDrill(saved); if (!r.errors.length) return r; }
@@ -1387,9 +1400,14 @@ export default function DrillAnimator() {
   function routeDetour(p) {
     if (!collisions) return null;                    // avoidance off — draw routes exactly as authored
     if (!p.path.length || (p.kind !== "player" && p.kind !== "puck")) return null;
-    if (detourCache.has(p.id)) return detourCache.get(p.id);
+    // Key by path LENGTH too: the drawn line passes the base piece while the
+    // animation passes the fork-inclusive `effOf` piece (longer path). Sharing by
+    // id alone let a base-only detour (ending at the branch point) drive the
+    // animation, freezing the skater there instead of continuing onto the fork.
+    const key = `${p.id}:${p.path.length}`;
+    if (detourCache.has(key)) return detourCache.get(key);
     const obstacles = detourObstaclesFor(p.id);
-    if (!obstacles.length) { detourCache.set(p.id, null); return null; }
+    if (!obstacles.length) { detourCache.set(key, null); return null; }
     const pts = [{ x: p.x, y: p.y }];
     let prev = { x: p.x, y: p.y }, origLen = 0;
     for (const s of p.path) {
@@ -1399,7 +1417,7 @@ export default function DrillAnimator() {
     }
     const det = detourRoute(pts, obstacles);
     const out = det !== pts ? { pts: det, origLen } : null;
-    detourCache.set(p.id, out);
+    detourCache.set(key, out);
     return out;
   }
   // point + heading at fraction f (0..1 by arc length) along a polyline
@@ -1983,8 +2001,12 @@ export default function DrillAnimator() {
   // app being killed. Debounced so a drag's frames coalesce into one write.
   // Skipped during AI play (that mutates pieces transiently, not real edits).
   const saveTimer = useRef(0);
+  // when booted from a shared #d= link, skip the first (mount) save so the user's
+  // existing autosave survives until they actually edit the linked drill
+  const skipFirstSave = useRef(!!linkDrill);
   useEffect(() => {
     if (aiPlay) return;
+    if (skipFirstSave.current) { skipFirstSave.current = false; return; }
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
       try { localStorage.setItem(SAVE_KEY, serializeDrill(rink, pieces, drillTitle, drillDesc, drillSteps, drillNotes, drillItems)); }
@@ -5053,11 +5075,22 @@ export default function DrillAnimator() {
                       </g>
                     );
                   })}
-                  {bent && (
-                    <polyline points={(p.kind === "player" ? trimPolyStart(bent, ROUTE_START_GAP, strokeAR) : bent).map(q => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" ")}
-                      {...segStroke(p, p.path[p.path.length - 1] || {}, false)}
-                      strokeLinejoin="round" pointerEvents="none" />
-                  )}
+                  {bent && (() => {
+                    // a detour collapses the route to one polyline — keep the
+                    // hockey-diagram styling: wiggle a full carry, zigzag a fully
+                    // backward leg, plain otherwise (or when it's mixed)
+                    const line = p.kind === "player" ? trimPolyStart(bent, ROUTE_START_GAP, strokeAR) : bent;
+                    const allCarry = p.kind === "player" && carry && p.path.length > 0 && p.path.every((_, i) => carry.has(i));
+                    const allBwd = p.kind === "player" && p.path.length > 0 && p.path.every(s => s.dir === "bwd");
+                    const shaped = allCarry ? wigglePoly(line, strokeAR, true)
+                      : allBwd ? zigzagPoly(line, strokeAR)
+                      : line;
+                    return (
+                      <polyline points={shaped.map(q => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" ")}
+                        {...segStroke(p, p.path[p.path.length - 1] || {}, false)}
+                        strokeLinejoin="round" pointerEvents="none" />
+                    );
+                  })()}
                   {/* arrow + action badges last so they sit ON TOP of the line */}
                   {showRoutes && p.path.length > 0 && renderArrow(p, bent, acts)}
                   {showRoutes && renderActionMarks(p, bent, acts)}
