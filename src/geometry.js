@@ -142,6 +142,82 @@ export function zigzagPoints(prev, s, ar = 1) {
   return pts.map(q => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" ");
 }
 
+// Resample a polyline to a uniform `step` spacing (measured in screen-weighted
+// space, x scaled by ar). Endpoints preserved. The detour polylines have very
+// uneven vertex spacing (dense on the arc, up to ~4ft apart on the straights);
+// walking them directly under-samples the wiggle/zigzag wave and leaves it
+// jagged — resampling first makes the applied wave render smoothly.
+function resamplePoly(pts, ar, step) {
+  const wl = (a, b) => Math.hypot((b.x - a.x) * ar, b.y - a.y);
+  const out = [{ x: pts[0].x, y: pts[0].y }];
+  let leftover = step;
+  for (let i = 1; i < pts.length; i++) {
+    let a = out[out.length - 1], b = pts[i], d = wl(a, b);
+    while (d >= leftover && d > 1e-9) {
+      const t = leftover / d;
+      const p = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+      out.push(p);
+      a = p; d = wl(a, b); leftover = step;
+    }
+    leftover -= d;
+  }
+  const last = pts[pts.length - 1];
+  if (wl(out[out.length - 1], last) > 1e-6) out.push({ x: last.x, y: last.y });
+  return out;
+}
+
+// Apply the carry "wiggle" along an ALREADY-SAMPLED polyline (the net/bumper
+// detour case, where the whole route is one arc instead of authored segments).
+// Mirrors wigglePoints' screen-space wavelength / amplitude / end-taper so a
+// detoured carry route still reads as stickhandling instead of a flat line.
+// Returns a new points array (objects), endpoints preserved.
+export function wigglePoly(pts, ar = 1, taperEnd = false) {
+  if (!pts || pts.length < 3) return pts;
+  const wlen = (ax, ay, bx, by) => Math.hypot((bx - ax) * ar, by - ay);
+  const res = resamplePoly(pts, ar, 0.34);               // fine, even samples (≈ wigglePoints density)
+  const cum = [0];
+  for (let i = 1; i < res.length; i++) cum.push(cum[i - 1] + wlen(res[i - 1].x, res[i - 1].y, res[i].x, res[i].y));
+  const total = cum[cum.length - 1];
+  if (total < 1e-3) return pts;
+  const cycles = Math.max(1, Math.round(total / 3.4));   // ~3.4 screen units per wave
+  const A = 0.85, STRAIGHT = 4.5, EASE = 1.5;            // amplitude + end-straight run (screen units)
+  const out = [];
+  for (let i = 0; i < res.length; i++) {
+    const pt = res[i];
+    if (i === 0 || i === res.length - 1) { out.push({ x: pt.x, y: pt.y }); continue; }
+    const ahead = res[i + 1];
+    const tx = (ahead.x - pt.x) * ar, ty = ahead.y - pt.y;   // screen-space tangent
+    const px = -ty, py = tx, l = Math.hypot(px, py) || 1;    // screen-space normal
+    const taper = taperEnd ? Math.max(0, Math.min(1, (total - cum[i] - STRAIGHT) / EASE)) : 1;
+    const a = Math.sin((cum[i] / total) * cycles * 2 * Math.PI) * A * taper;
+    out.push({ x: pt.x + (px / l) * a / ar, y: pt.y + (py / l) * a });
+  }
+  return out;
+}
+
+// Backward-skating zigzag along an already-sampled polyline (detour counterpart
+// of zigzagPoints). Alternating perpendicular bumps at a fixed screen spacing.
+export function zigzagPoly(pts, ar = 1) {
+  if (!pts || pts.length < 3) return pts;
+  const res = resamplePoly(pts, ar, 0.6);                // even samples so the bumps are uniform
+  const cum = [0];
+  for (let i = 1; i < res.length; i++) cum.push(cum[i - 1] + Math.hypot((res[i].x - res[i - 1].x) * ar, res[i].y - res[i - 1].y));
+  const total = cum[cum.length - 1];
+  if (total < 1e-3) return pts;
+  const A = 0.9, STEP = 2.4;                              // bump amplitude + spacing (screen units)
+  const out = [];
+  for (let i = 0; i < res.length; i++) {
+    const pt = res[i];
+    if (i === 0 || i === res.length - 1) { out.push({ x: pt.x, y: pt.y }); continue; }
+    const ahead = res[i + 1];
+    const tx = (ahead.x - pt.x) * ar, ty = ahead.y - pt.y;
+    const px = -ty, py = tx, l = Math.hypot(px, py) || 1;
+    const a = (Math.round(cum[i] / STEP) % 2 ? 1 : -1) * A;
+    out.push({ x: pt.x + (px / l) * a / ar, y: pt.y + (py / l) * a });
+  }
+  return out;
+}
+
 export function convertSeg(seg, prev) {
   const { x, y, mode = "carry", dir = "fwd", stop = 0, rate = 1 } = seg;
   const nx = -(y - prev.y), ny = x - prev.x;
