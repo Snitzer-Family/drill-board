@@ -118,7 +118,9 @@ Places a piece. `id` is any unique token (e.g. `F1`, `PK1`, `N2`).
 |---|---|---|
 | `#RRGGBB` / `#RGB` | any | Colour. On a `light` this is the idle screen colour (shown before/without a cue timeline). |
 | `cues=<hex>:<dur>;…` | light | Cue timeline: the colours the screen shows, each for `<dur>` seconds (hex has no leading `#`; steps separated by `;`). The drill runs at least as long as one cycle. e.g. `cues=2ea043:3;e5342b:2`. |
-| `rand=off` | light | Turn off **reactive** mode. Lights default to reactive: the cue order is **shuffled each cycle and looped**, seeded per run so a "read the light" reaction is unpredictable and differs on every replay. `rand=off` plays the cues in the authored order, once, holding the last. |
+| `mode=<mode>` | light | How a "read the light" fork picks its route. `reactive` (**default**, may be omitted): cue order **shuffled each cycle and looped**, seeded per run → unpredictable, differs every replay, still keyed to *when* the player reaches the branch. `sequence`: cues in **authored order, once**, holding the last → the route is **consistent** every run. `random`: a **random route each play** (independent of cue durations) — the screen flashes through cues, then snaps to the chosen route's colour just as the player reaches the branch, so the cut reads as a reaction to the light. `always:<hex>`: the route for the designated cue colour **always** runs, no matter what (hex has no leading `#`, e.g. `mode=always:e5342b`). |
+| `rand=off` | light | *Legacy* alias for `mode=sequence` (still parsed for older drills). |
+| `light=<id>` | player | The reaction `light` this branching player reads (overrides the default nearest-light pick when several cue-lights exist). Covers its base and chained branches. |
 | *bare word* | player | Jersey label (e.g. `F1`) |
 | `"quoted text"` | label | The label's text (spaces and commas allowed) |
 | `size=<n>` | label, net, tire | label: font scale · **net**: `1` NHL / `0.62` mite · **tire**: `1` large / `0.55` small |
@@ -225,13 +227,16 @@ FORK P1 2ea043/e5342b shoot L 165,42            #   …then red → shoot
 FORK P1 2ea043/2f6df6 skate L 160,60            #   …or blue → skate to the corner (chains again)
 FORK P1 e5342b chip L 120,20                     # red at the first branch → chip
 ``` Give a player one `FORK` per cue
-colour of the governing light (the nearest `light` with a `cues=` timeline). The
-hex has no leading `#`.
+colour of the governing light — the nearest `light` with a `cues=` timeline, or the
+one the player names via `light=<id>` when several exist. The hex has no leading `#`.
 
-At playback the player skates their base route, and **on arrival at the branch**
-takes the fork whose colour matches the light's cue **at that instant** — modelling
-a "skate in, read the light, react" drill. Branch arrival time depends only on the
-base route, so the choice is deterministic. In the app the reaction controls live
+At playback the player skates their base route and, **on arrival at the branch**,
+takes the fork the light's `mode=` picks — modelling a "skate in, read the light,
+react" drill. In the timing-based modes (`reactive`, `sequence`) the fork whose
+colour matches the light's cue **at that instant** wins; `random` picks a fork at
+random each play; `always:<hex>` always takes the designated colour's fork. Branch
+arrival time depends only on the base route (never on screen geometry). The branch
+waypoint carries its own reaction-light action circle. In the app the controls live
 on the **branch waypoint** (the route's end, nearest the light — tap that waypoint;
 a route-less player shows them on its own popup): a **Light reactions** row with
 *Draw* / *Redraw* / *Edit* / *Clear* per cue colour. *Draw* sketches the reaction

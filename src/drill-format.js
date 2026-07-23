@@ -149,7 +149,8 @@ export function parseDrill(text) {
         let text = "", size = 1;                          // label piece: text + font scale
         let speed = 1, hand = "R", carrier = null, facing = 0, shotAt = null, pickup = null, rimAt = null, chipAt = null, chipAim = null, rimAim = null, chipDist = null, rimDist = null;
         let net = null, holdLine = false, goalie = false, defense = false, wait = null, group = null, crease = false;
-        let cues = [], rand = true;                       // light: cue timeline + reactive (shuffle/loop) default on
+        let cues = [], rand = true, lmode = null, alwaysColor = null;   // light: cue timeline + route mode
+        let lightId = null;                               // player: designated reaction light to read (else nearest)
         const transfers = [];
         rest.forEach(r => {
           if (quoted(r)) { text = unq(r); }              // a "quoted string" → label text
@@ -223,14 +224,25 @@ export function parseDrill(text) {
                 const m6 = /^([0-9a-fA-F]{3,6}):(\d+(?:\.\d+)?)$/.exec(seg);
                 if (m6) cues.push({ color: "#" + m6[1], dur: parseFloat(m6[2]) });
               });
-            } else if (key === "rand") { rand = !/^(off|0|false|no)$/i.test(v); }   // light: reactive mode (default on)
+            } else if (key === "rand") { rand = !/^(off|0|false|no)$/i.test(v); }   // legacy: reactive on/off → mode
+            else if (key === "mode") {
+              // light route mode: reactive (default) | sequence | random | always[:<hex>]
+              // — how a "read the light" fork chooses its route. always:<hex> designates
+              // the one cue colour whose route always runs.
+              const [mm, hex] = v.split(":");
+              const mk = (mm || "").toLowerCase();
+              if (["reactive", "sequence", "random", "always"].includes(mk)) lmode = mk;
+              if (hex && /^[0-9a-fA-F]{3,6}$/.test(hex)) alwaysColor = "#" + hex;
+            } else if (key === "always") { if (/^#?[0-9a-fA-F]{3,6}$/.test(v)) alwaysColor = "#" + v.replace(/^#/, ""); }
+            else if (key === "light") lightId = v;         // player: designated reaction light to read
             else if (key === "group") group = v.replace(/_/g, " ").trim() || null;   // named group membership
           } else if (r === "goalie") goalie = true;
           else if (r === "crease") crease = true;
           else if (r === "defense") defense = true;
           else label = r;
         });
-        const p = { id, kind, x, y, color, label, text, size, speed, hand, carrier, facing, transfers, shotAt, pickup, rimAt, chipAt, chipAim, rimAim, chipDist, rimDist, net, holdLine, goalie, defense, wait, group, crease, cues, rand, forks: [], path: [] };
+        const mode = lmode || (rand === false ? "sequence" : "reactive");   // legacy rand=off → sequence
+        const p = { id, kind, x, y, color, label, text, size, speed, hand, carrier, facing, transfers, shotAt, pickup, rimAt, chipAt, chipAim, rimAim, chipDist, rimDist, net, holdLine, goalie, defense, wait, group, crease, cues, mode, alwaysColor, lightId, forks: [], path: [] };
         pieces.push(p); byId[id] = p;
       } else if (cmd === "PATH") {
         const id = tok[1];
@@ -396,11 +408,19 @@ export function serializeDrill(rink, pieces, title = "", desc = "", steps = [], 
     const df = p.kind === "player" && p.defense ? " defense" : "";
     const siz = (p.kind === "net" || p.kind === "tire") && p.size && p.size !== 1 ? ` size=${f2(p.size)}` : "";
     const grp = p.group ? ` group=${String(p.group).trim().replace(/\s+/g, "_")}` : "";
+    // player: the reaction light it's designated to read (else nearest is used)
+    const lgt = p.kind === "player" && p.lightId ? ` light=${p.lightId}` : "";
     const cue = p.kind === "light" && (p.cues || []).length
       ? ` cues=${p.cues.map(c => `${String(c.color || "").replace("#", "")}:${f1(c.dur || 0)}`).join(";")}` : "";
-    // lights are reactive (shuffle + loop) by default; note the exception
-    const rnd = p.kind === "light" && p.rand === false ? " rand=off" : "";
-    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${car}${gp}${pas}${sht}${rmT}${chT}${nt}${hld}${wt}${fac}${gl}${crs}${df}${siz}${grp}${cue}${rnd}${spd}`);
+    // lights are reactive (shuffle + loop) by default; note any other route mode.
+    // always:<hex> carries the designated cue colour whose route always runs.
+    const lm = p.kind === "light" ? (p.mode || (p.rand === false ? "sequence" : "reactive")) : null;
+    const rnd = lm && lm !== "reactive"
+      ? (lm === "always"
+          ? ` mode=always${p.alwaysColor || (p.cues && p.cues[0] && p.cues[0].color) ? ":" + String(p.alwaysColor || p.cues[0].color).replace("#", "") : ""}`
+          : ` mode=${lm}`)
+      : "";
+    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${car}${gp}${pas}${sht}${rmT}${chT}${nt}${hld}${wt}${fac}${gl}${crs}${df}${siz}${grp}${lgt}${cue}${rnd}${spd}`);
     if (p.path.length) out.push(`PATH ${p.id} ${p.path.map(segToStr).join(" ")}`);
     // light-reaction forks (players): one continuation per cue colour, with the
     // action the player performs on it (skate default → omitted). Reactions nest —

@@ -33,6 +33,8 @@ const ICONS = {
   net: <><path d="M4 19V8h16v11" /><path d="M4 8l3-2.5h10L20 8" /><path d="M8 8v11M12 8v11M16 8v11M4 13.5h16" /></>,
   // a puck dropping into a tray = collect a loose puck
   collect: <><path d="M12 3.5v9" /><path d="M8.5 9l3.5 3.5L15.5 9" /><path d="M4.5 15v3a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-3" /></>,
+  // reaction-light decision: a flashing burst — read the light, then react
+  react: <><circle cx="12" cy="12" r="3" {...F} /><path d="M12 2v3.2M12 18.8v3.2M2 12h3.2M18.8 12h3.2M5.4 5.4l2.2 2.2M16.4 16.4l2.2 2.2M18.6 5.4l-2.2 2.2M7.6 16.4l-2.2 2.2" /></>,
   // a raised arc + landing = sauce pass
   sauce: <><path d="M3.5 17.5C7 6 17 6 20.5 17.5" /><path d="M16.5 14l4 3.5-5 1.2" {...F} /></>,
   // return loop = give-and-go / rebounder pass

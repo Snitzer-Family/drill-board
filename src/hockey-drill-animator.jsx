@@ -242,8 +242,19 @@ function DelayTrigger({ value, onChange, sub, players, actorIds, nameOf }) {
 const SAVE_KEY = "drillboard:autosave";   // the whole board, persisted across refreshes
 
 export default function DrillAnimator() {
-  // boot from the last auto-saved board if there is one, else the built-in demo
+  // boot from a #d=<base64url DSL> link if present (shareable preview link, same
+  // encoding as previewLink() — wins over autosave so a link always loads its
+  // drill), else the last auto-saved board, else the built-in demo
   const init = (() => {
+    try {
+      const h = window.location.hash || "";
+      const m = h.match(/[#&]d=([^&]+)/);
+      if (m) {
+        const b64 = m[1].replace(/-/g, "+").replace(/_/g, "/");
+        const dsl = decodeURIComponent(escape(atob(b64)));
+        const r = parseDrill(dsl); if (!r.errors.length) return r;
+      }
+    } catch { /* malformed link → fall through to autosave/demo */ }
     try {
       const saved = localStorage.getItem(SAVE_KEY);
       if (saved) { const r = parseDrill(saved); if (!r.errors.length) return r; }
@@ -1442,17 +1453,79 @@ export default function DrillAnimator() {
     while (diff < -Math.PI) diff += 2 * Math.PI;
     return (diff >= 0 ? 1 : -1) * w * 60;   // degrees, tunable
   }
-  // per-run cue seed for a light: reactive (shuffle + loop) unless turned off.
-  // Keyed by playSeed so each run reshuffles; null → the fixed authored sequence.
-  // A function declaration (hoisted) since resolveForks runs during render, above.
+  // a light's route mode: how a "read the light" fork chooses its route.
+  //   reactive — cue order shuffled + looped, different every run (timing-based)
+  //   sequence — cues in authored order, once → consistent every run (timing-based)
+  //   random   — a random route each run, independent of timing (screen still flashes)
+  //   always   — one designated cue colour's route, always (alwaysColor)
+  // Normalises legacy boards (pre-mode `rand` flag). Function declarations (hoisted)
+  // since resolveForks runs during render, above.
+  function lightMode(l) { return l && l.mode ? l.mode : (l && l.rand === false ? "sequence" : "reactive"); }
+  // per-run cue seed for a light's SCREEN: shuffle + loop for reactive/random (so it
+  // flashes unpredictably), else null (authored order / steady). Keyed by playSeed.
   function cueSeed(light) {
-    return (light && light.rand !== false && (light.cues || []).length) ? hashInt(light.id + "|" + playSeed) : null;
+    const m = lightMode(light);
+    return ((m === "reactive" || m === "random") && (light.cues || []).length) ? hashInt(light.id + "|" + playSeed) : null;
   }
-  // the colour a cognitive-training light is showing right now: its cue timeline
-  // resolved at the current animation time, else (no cues / before play) its idle
-  // base colour.
+  // the cue colour that decides a fork at a branch, per the light's mode. `forks` is
+  // the branch's fork list (random picks uniformly among the drawn ones); `depth` is
+  // the branch index down a chain so nested "read again" branches pick independently.
+  function chosenForkColor(light, forks, arrivalT, depth) {
+    const m = lightMode(light);
+    if (m === "random") {
+      const avail = (forks || []).filter(f => f.path && f.path.length);
+      if (!avail.length) return null;
+      return avail[(hashInt(light.id + "|" + playSeed + "|" + depth) >>> 0) % avail.length].color;
+    }
+    if (m === "always") return light.alwaysColor || null;
+    const cues = light.cues || [];
+    if (!cues.length) return null;
+    return cueColorAt(cues, arrivalT, m === "reactive" ? cueSeed(light) : null);
+  }
+  // the reaction moments a light drives in `random` mode: for every branch this light
+  // governs (across all branching players, chains included), the player's branch-arrival
+  // time and the randomly chosen route colour — so the screen can show that colour AS
+  // the player hits the branch (a real reaction, not an out-of-sync flash). Same walk
+  // as resolveForks/chosenForkRefs, and the same chosenForkColor pick, so it agrees.
+  function lightReactionEvents(light) {
+    const evs = [];
+    for (const p of pieces) {
+      if (p.kind !== "player" || !(p.forks || []).length) continue;
+      let arrivalT = baseRouteTime(p), branchPt = branchPoint(p), forks = p.forks, effLen = p.path.length, depth = 0, guard = 0;
+      while (forks && forks.length && guard++ < 16) {
+        const gl = governingLightFor(pieces, p, branchPt);
+        if (!gl) break;
+        const color = chosenForkColor(gl, forks, arrivalT, depth++);
+        const fork = forks.find(f => sameColor(f.color, color));
+        if (!fork || !fork.path || !fork.path.length) break;
+        if (gl.id === light.id) evs.push({ t: arrivalT, color: fork.color });
+        arrivalT += pathSegTime(p, fork.path, effLen);
+        effLen += fork.path.length;
+        const last = fork.path[fork.path.length - 1]; branchPt = { x: last.x, y: last.y };
+        if ((fork.action || "skate") !== "skate") break;
+        forks = fork.forks;
+      }
+    }
+    return evs.sort((a, b) => a.t - b.t);
+  }
+  // the colour a cognitive-training light is showing right now: steady designated
+  // colour in `always` mode, else its cue timeline resolved at the current animation
+  // time, else (no cues / before play) its idle base colour.
   function lightColor(p) {
-    return cueColorAt(p.cues, animT <= 0 ? 0 : animT * totalTime, cueSeed(p)) ?? p.color;
+    if (!(p.cues || []).length) return p.color;
+    const m = lightMode(p);
+    if (m === "always") return p.alwaysColor || p.color;
+    const e = animT <= 0 ? 0 : animT * totalTime;
+    if (m === "random" && e > 0) {
+      // random routes still read as a REACTION: flash through the cues, then snap to
+      // the chosen route's colour a beat before the player reaches the branch and hold
+      // it through the reaction leg, so the cut looks cued by the light.
+      const LEAD = 0.4;                                  // show the cue just before arrival
+      let held = null;
+      for (const ev of lightReactionEvents(p)) { if (e >= ev.t - LEAD) held = ev.color; else break; }
+      if (held) return held;
+    }
+    return cueColorAt(p.cues, e, cueSeed(p)) ?? p.color;
   }
 
   /* ----- light reactions (branch forks) ----- */
@@ -1539,7 +1612,17 @@ export default function DrillAnimator() {
     const d = q => Math.hypot(q.x - pt.x, q.y - pt.y);
     return lights.reduce((a, q) => (d(q) < d(a) ? q : a));
   }
-  function governingLight(ps, p) { return governingLightNear(ps, branchPoint(p)); }
+  function governingLight(ps, p) { return governingLightFor(ps, p, branchPoint(p)); }
+  // the light a branching player reads: its explicitly designated `lightId` (so it can
+  // opt out of the nearest one when several lights exist), else the nearest cue-light.
+  // Designation covers all of that player's branches, base and chained.
+  function governingLightFor(ps, p, pt) {
+    if (p && p.lightId) {
+      const desig = ps.find(q => q.id === p.lightId && q.kind === "light" && (q.cues || []).length);
+      if (desig) return desig;
+    }
+    return governingLightNear(ps, pt);
+  }
   // seconds to skate a run of segments sitting at effective indices startIdx.. (the
   // same arc-length ÷ pace formula, measured off the rendered refs) — used to find
   // when a chained reaction's next branch is reached.
@@ -1571,11 +1654,11 @@ export default function DrillAnimator() {
     let out = ps;
     for (const p of branching) {
       let effPath = p.path.slice(), arrivalT = baseRouteTime(p), branchPt = branchPoint(p);
-      let forks = p.forks, terminal = null, terminalIdx = -1, guard = 0;
+      let forks = p.forks, terminal = null, terminalIdx = -1, guard = 0, depth = 0;
       while (forks && forks.length && guard++ < 16) {
-        const light = governingLightNear(ps, branchPt);
+        const light = governingLightFor(ps, p, branchPt);
         if (!light) break;
-        const color = cueColorAt(light.cues, arrivalT, cueSeed(light));
+        const color = chosenForkColor(light, forks, arrivalT, depth++);
         const fork = forks.find(f => sameColor(f.color, color));
         if (!fork || !fork.path || !fork.path.length) break;
         const startIdx = effPath.length;
@@ -1672,13 +1755,26 @@ export default function DrillAnimator() {
     const branchPt = parentRef
       ? (() => { const f = forkAt(p, parentRef); return f && f.path.length ? { x: f.path[f.path.length - 1].x, y: f.path[f.path.length - 1].y } : branchPoint(p); })()
       : branchPoint(p);
-    const light = governingLightNear(pieces, branchPt);
+    const light = governingLightFor(pieces, p, branchPt);
     if (!light) return null;
     const colors = [...new Set((light.cues || []).map(c => c.color))];
     const selStyle = { background: "#1b2530", color: "#eaf0f6", border: "1px solid rgba(255,255,255,0.16)",
       borderRadius: 6, padding: "3px 6px", fontSize: 13, cursor: "pointer" };
+    // when several cue-lights exist, let this player designate which one to read
+    // (else the nearest wins); the designation covers its base + chained branches
+    const cueLights = pieces.filter(q => q.kind === "light" && (q.cues || []).length);
     return (
       <>
+        {!parentRef && cueLights.length > 1 && (
+          <div className="hd-poprow">
+            <span style={{ fontSize: 11, color: "#8b99a8" }}>Read light</span>
+            <select value={p.lightId || ""} style={selStyle}
+              onChange={e => updateById(p.id, { lightId: e.target.value || null })}>
+              <option value="">Nearest ({governingLightNear(pieces, branchPt)?.id || "—"})</option>
+              {cueLights.map(l => <option key={l.id} value={l.id}>{l.id}</option>)}
+            </select>
+          </div>
+        )}
         <div className="hd-poprow">
           <span style={{ fontSize: 11, color: "#8b99a8" }}>
             {parentRef ? "Chain a reaction" : "Light reactions"} ({light.id}) — a route per cue, from here
@@ -1716,17 +1812,30 @@ export default function DrillAnimator() {
       </>
     );
   }
-  // the set of fork refs (lower-cased) on a player's CHOSEN reaction chain — for
-  // highlighting the reaction path they'll actually take (walks the same chain
-  // resolveForks does, tracking effective indices for the branch arrival times).
+  // the set of fork refs (lower-cased) to draw SOLID (the others dashed) — the
+  // player's chosen reaction path. Walks the same chain resolveForks does. In
+  // REACTIVE mode during playback it's time-aware: at the branch the player is still
+  // skating toward, the solid fork tracks the light's LIVE colour (so it rotates as
+  // the light cycles), then locks to the committed fork once the player passes the
+  // branch — the "read the light and react on the fly" look. Other modes / not
+  // playing → the committed chain throughout.
   function chosenForkRefs(p) {
     const set = new Set();
     if (!(p.forks || []).length) return set;
-    let effLen = p.path.length, arrivalT = baseRouteTime(p), branchPt = branchPoint(p), forks = p.forks, prefix = "", guard = 0;
+    const E = animT <= 0 ? 0 : animT * totalTime;
+    let effLen = p.path.length, arrivalT = baseRouteTime(p), branchPt = branchPoint(p), forks = p.forks, prefix = "", guard = 0, depth = 0;
     while (forks && forks.length && guard++ < 16) {
-      const light = governingLightNear(pieces, branchPt);
+      const light = governingLightFor(pieces, p, branchPt);
       if (!light) break;
-      const color = cueColorAt(light.cues, arrivalT, cueSeed(light));
+      // branch not yet reached, reactive, mid-play → highlight the live-colour fork and
+      // stop (downstream branches aren't in play until this one is committed)
+      if (playing && lightMode(light) === "reactive" && E < arrivalT) {
+        const live = cueColorAt(light.cues, E, cueSeed(light));
+        const lf = (forks || []).find(f => sameColor(f.color, live) && f.path && f.path.length);
+        if (lf) set.add(String(prefix ? prefix + "/" + lf.color : lf.color).toLowerCase());
+        break;
+      }
+      const color = chosenForkColor(light, forks, arrivalT, depth++);
       const fork = forks.find(f => sameColor(f.color, color));
       if (!fork || !fork.path || !fork.path.length) break;
       const ref = prefix ? prefix + "/" + fork.color : fork.color;
@@ -3349,10 +3458,10 @@ export default function DrillAnimator() {
   // the shared route end-mark: an open chevron, or a ‖ stop mark. Drawn rink-scaled
   // in the stretch-cancelling frame so a route's END and an ACTION-CIRCLE entry look
   // identical — same shape, weight, and scaling.
-  function routeMark(key, endPt, ang, stop, color) {
+  function routeMark(key, endPt, ang, stop, color, opacity = 1) {
     const fx = iconXf({ x: endPt.x, y: endPt.y, a: ang });
     return (
-      <g key={key} transform={fx.t} pointerEvents="none">
+      <g key={key} transform={fx.t} pointerEvents="none" opacity={opacity}>
         {stop
           // ‖ stop mark: the incoming line ends at the FIRST bar (the line's end);
           // the second bar sits just PAST it, so the line doesn't run through both
@@ -3361,6 +3470,33 @@ export default function DrillAnimator() {
       </g>
     );
   }
+  // a round action circle: opaque white disc, colour-stroked, with an icon (counter-
+  // rotated to read upright under rink rotation) and an optional count bubble. Shared
+  // by base-route action marks, reaction-light branch badges, and reaction-fork ends,
+  // so every action circle in the app is identical.
+  function iconBadge(pt, iconName, color, key, opacity = 1, count = 0) {
+    const cfx = iconXf({ x: pt.x, y: pt.y, a: 0 });
+    return (
+      <g key={key} transform={cfx.t} pointerEvents="none" opacity={opacity}>
+        <circle cx={0} cy={0} r={ACT_R} fill="#fff" stroke={color} strokeWidth={0.5} />
+        <g transform={`rotate(${-cfx.th})`}>
+          <g style={{ color }} transform={`scale(0.178) translate(-12 -12)`}
+            fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round">
+            {ICONS[iconName]}
+          </g>
+          {count > 1 && (
+            <g transform={`translate(${ACT_R * 0.74} ${-ACT_R * 0.74})`}>
+              <circle cx={0} cy={0} r={1.55} fill={color} />
+              <text x={0} y={0} textAnchor="middle" dominantBaseline="central" fontSize={2.2}
+                fontWeight={800} fill="#fff" style={{ fontFamily: "system-ui, sans-serif" }}>{count}</text>
+            </g>
+          )}
+        </g>
+      </g>
+    );
+  }
+  // fork action → its action-circle icon (skate has none — its end is a carat/stop)
+  const forkActionIcon = a => a === "shoot" ? "net" : a === "pass" ? "pass" : a === "chip" ? "chip" : a === "rim" ? "rim" : null;
   function renderActionMarks(p, bentPts, acts) {
     if (!acts || !acts.size) return null;
     const n = p.path.length, els = [];
@@ -3379,30 +3515,19 @@ export default function DrillAnimator() {
       // the SAME glyph as a route end
       const mp = gmMove(s.x, s.y, -tx / tl, -ty / tl, ACT_GAP);
       els.push(routeMark(`am${i}`, mp, ang, s.endStop, p.color));
-      // badge circle + action icon (+ count). The icon and number counter-rotate
-      // by the frame's screen angle (like player labels) so they read upright on
-      // screen even when the rink is shown rotated (portrait).
-      const cfx = iconXf({ x: s.x, y: s.y, a: 0 });
-      els.push(
-        <g key={`ab${i}`} transform={cfx.t} pointerEvents="none">
-          <circle cx={0} cy={0} r={ACT_R} fill="#fff" stroke={p.color} strokeWidth={0.5} />
-          <g transform={`rotate(${-cfx.th})`}>
-            <g style={{ color: p.color }} transform={`scale(0.178) translate(-12 -12)`}
-              fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round">
-              {ICONS[actionIconName(info.type)]}
-            </g>
-            {info.count > 1 && (
-              <g transform={`translate(${ACT_R * 0.74} ${-ACT_R * 0.74})`}>
-                <circle cx={0} cy={0} r={1.55} fill={p.color} />
-                <text x={0} y={0} textAnchor="middle" dominantBaseline="central" fontSize={2.2}
-                  fontWeight={800} fill="#fff" style={{ fontFamily: "system-ui, sans-serif" }}>{info.count}</text>
-              </g>
-            )}
-          </g>
-        </g>
-      );
+      // badge circle + action icon (+ count), counter-rotated to read upright on screen
+      els.push(iconBadge({ x: s.x, y: s.y }, actionIconName(info.type), p.color, `ab${i}`, 1, info.count));
     }
     return <g>{els}</g>;
+  }
+
+  // an action circle at a light-reaction branch point: the same round badge as a
+  // puck-action circle, but stamped with the reaction-light "burst" glyph, since
+  // the waypoint's job is "read the light, then react" (routes fork out of here).
+  // Drawn opaque in the stretch-cancelling frame so the converging/diverging routes
+  // read as emanating from its edge; the glyph counter-rotates to stay upright.
+  function reactionBadge(pt, color, key) {
+    return iconBadge(pt, "react", color, key);
   }
 
   // Arrowhead at a route's end, drawn in the stretch-cancelling icon frame so it
@@ -3439,25 +3564,6 @@ export default function DrillAnimator() {
     // the same glyph as an action-circle entry: a chevron, or a ‖ stop mark
     return routeMark(`arw-${p.id}`, endPt, ang, !!(p.path[n - 1] && p.path[n - 1].endStop), p.color);
   }
-  // a carat (chevron ">") arrowhead, tip AT `endPt` pointing along heading `ang`
-  // (deg), drawn in the stretch-cancelling icon frame so it stays a clean, open
-  // chevron (SVG markers get sheared by the fill-mode stretch). Used by reaction forks.
-  function caratHead(endPt, ang, color, key, opacity = 1) {
-    const fx = iconXf({ x: endPt.x, y: endPt.y, a: ang });
-    // hold a constant SCREEN size (counter the pinch-zoom) so the head stays
-    // locked to the non-scaling line and is equally distinctive at any zoom
-    const z = 1 / (view.s || 1);
-    return (
-      <g key={key} transform={fx.t} pointerEvents="none" opacity={opacity}>
-        <g transform={`scale(${z})`}>
-          {/* open chevron: two strokes meeting at the tip (0,0) */}
-          <path d="M -4.6 -2.7 L 0 0 L -4.6 2.7" fill="none" stroke={color}
-            strokeWidth={1.1} strokeLinecap="round" strokeLinejoin="round" />
-        </g>
-      </g>
-    );
-  }
-
   // end point + heading (deg) of a route path array that begins at `start`; null
   // if empty or degenerate. Shared by base routes and reaction forks.
   function pathEndArrow(pathArr, start) {
@@ -4254,17 +4360,46 @@ export default function DrillAnimator() {
                       onClick={() => updateById(p.id, { color: c })} />
                   ))}
                 </div>
+                {(() => {
+                  const mode = lightMode(p);
+                  const MODES = [
+                    ["reactive", "Reactive", "shuffles + loops the cues — different route each run, based on timing"],
+                    ["sequence", "Sequence", "plays the cues in order, once — consistent route every run"],
+                    ["random", "Random", "a random route each play — the light cues it as the player reaches the branch"],
+                    ["always", "Always", "one designated cue's route always runs, no matter what"],
+                  ];
+                  const distinct = [...new Set(cues.map(c => c.color))];
+                  const hint = (MODES.find(m => m[0] === mode) || MODES[0])[2];
+                  return (
+                    <>
+                      <div className="hd-poprow">
+                        <span>Mode</span>
+                        {MODES.map(([m, lbl]) => (
+                          <button key={m} className={`hd-mini${mode === m ? " on" : ""}`}
+                            onClick={() => updateById(p.id, { mode: m, ...(m === "always" && !p.alwaysColor ? { alwaysColor: distinct[0] || p.color } : {}) })}>
+                            {lbl}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="hd-poprow">
+                        <span style={{ fontSize: 11, color: "#8b99a8" }}>{hint}</span>
+                      </div>
+                      {mode === "always" && (
+                        <div className="hd-poprow">
+                          <span>Route</span>
+                          {distinct.length
+                            ? distinct.map(c => (
+                                <div key={c} className={`hd-swatch${sameColor(p.alwaysColor, c) ? " on" : ""}`} title="the cue whose route always runs"
+                                  style={{ background: c, cursor: "pointer" }} onClick={() => updateById(p.id, { alwaysColor: c })} />
+                              ))
+                            : <span style={{ fontSize: 11, color: "#8b99a8" }}>add a cue colour below first</span>}
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
                 <div className="hd-poprow">
-                  <button className={`hd-mini${p.rand !== false ? " on" : ""}`}
-                    onClick={() => updateById(p.id, { rand: p.rand === false ? true : false })}>
-                    {p.rand !== false ? "✓ Reactive (random + loop)" : "Fixed sequence"}
-                  </button>
-                  <span style={{ fontSize: 11, color: "#8b99a8" }}>
-                    {p.rand !== false ? "shuffles + loops the cues, different each run" : "plays the cues in order, once"}
-                  </span>
-                </div>
-                <div className="hd-poprow">
-                  <span style={{ fontSize: 11, color: "#8b99a8" }}>Cue timeline — the colours the screen shows{p.rand !== false ? " (order randomised per run)" : ""}</span>
+                  <span style={{ fontSize: 11, color: "#8b99a8" }}>Cue timeline — the colours the screen shows{(lightMode(p) === "reactive" || lightMode(p) === "random") ? " (order randomised per run)" : ""}</span>
                 </div>
                 {cues.map((c, i) => (
                   <div className="hd-poprow" key={i}>
@@ -4659,16 +4794,26 @@ export default function DrillAnimator() {
             <div className="hd-poprow" style={{ color: "#8b99a8", fontSize: 12 }}>End of {fork ? "reaction" : "route"}</div>
           )}
           {/* route end: mark that the player stops here → a ‖ stop mark replaces
-              the direction arrowhead (skating-diagram convention) */}
-          {!next && p.kind === "player" && !fork && (
-            <div className="hd-poprow">
-              <button className={`hd-mini${s.endStop ? " on" : ""}`}
-                onClick={() => uSeg(i, { endStop: s.endStop ? undefined : true })}>
-                {s.endStop ? "✓ Stops here" : "Stops here"}
-              </button>
-              <span style={{ fontSize: 11, color: "#8b99a8" }}>ends with a ‖ stop mark, not an arrow</span>
-            </div>
-          )}
+              the direction arrowhead (skating-diagram convention). Offered on a base
+              route end and on a skate reaction that ends here (not one that passes/
+              shoots — that end is an action circle — nor one that chains onward). */}
+          {!next && p.kind === "player" && (() => {
+            if (fork) {
+              const fn = forkAt(p, fork);
+              const isSkate = fn && (fn.action || "skate") === "skate";
+              const chains = fn && (fn.forks || []).some(g => g.path && g.path.length);
+              if (!isSkate || chains) return null;
+            }
+            return (
+              <div className="hd-poprow">
+                <button className={`hd-mini${s.endStop ? " on" : ""}`}
+                  onClick={() => uSeg(i, { endStop: s.endStop ? undefined : true })}>
+                  {s.endStop ? "✓ Stops here" : "Stops here"}
+                </button>
+                <span style={{ fontSize: 11, color: "#8b99a8" }}>ends with a ‖ stop mark, not an arrow</span>
+              </div>
+            );
+          })()}
           {p.kind === "player" && !fork && ActionSteps(p, i)}
           <div className="hd-poprow">
             <button className="hd-mini danger" onClick={() => deleteSeg(p.id, i, fork)}>Delete point</button>
@@ -5087,27 +5232,40 @@ export default function DrillAnimator() {
             {showRoutes && !aiPlay && pieces.map(p => {
               if (p.kind !== "player" || !(p.forks || []).length) return null;
               const chosen = chosenForkRefs(p);
+              const carriesPuck = !!reactionPuck(pieces, p.id);   // a puck held into the branch → wiggle the reaction
               // draw each reaction from where it forks; recurse into nested reactions
-              // (a skate reaction's end) so a whole chained tree renders
-              const renderLevel = (forks, origin, prefix) => (forks || []).map(f => {
+              // (a skate reaction's end) so a whole chained tree renders. Each level
+              // that actually draws a fork stamps an action circle at its origin (the
+              // branch point where routes fork out of a light reaction).
+              const renderLevel = (forks, origin, prefix) => {
+                const items = (forks || []).map(f => {
                 if (!f.path || !f.path.length) return null;
                 const ref = prefix ? prefix + "/" + f.color : f.color;
                 const editThis = editingFork && editingFork.id === p.id && forkEq(editingFork.color, ref);
                 const active = chosen.has(String(ref).toLowerCase());
                 const end = f.path[f.path.length - 1];
+                const op = editThis ? 1 : active ? 0.95 : 0.5, solid = editThis || active;
+                // the drawn (solid) reaction carries the puck the player brought into the
+                // branch → wiggle line like a base route; the alternatives stay dashed
+                const line = { stroke: f.color, fill: "none", strokeWidth: sw(solid ? 0.55 : 0.42),
+                  vectorEffect: "non-scaling-stroke", strokeLinecap: "round", strokeLinejoin: "round",
+                  opacity: op, pointerEvents: "none" };
                 let prev = origin;
                 return (
                   <g key={ref}>
                     {f.path.map((s, i) => {
-                      const d = segD(prev, s);
+                      const from = prev, d = segD(prev, s);
                       prev = { x: s.x, y: s.y };
+                      const isLast = i === f.path.length - 1;
+                      const bwd = solid && s.dir === "bwd";          // backward skating → zigzag
+                      const wig = solid && carriesPuck && !bwd;      // carrying the puck → wiggle
                       return (
                         <g key={i}>
-                          <path d={d} fill="none" stroke={f.color}
-                            strokeWidth={sw(editThis || active ? 0.55 : 0.42)} vectorEffect="non-scaling-stroke"
-                            strokeDasharray={editThis || active ? undefined : sdash("1.6 1.1")}
-                            strokeLinecap="round" strokeLinejoin="round"
-                            opacity={editThis ? 1 : active ? 0.95 : 0.5} pointerEvents="none" />
+                          {bwd
+                            ? <polyline points={zigzagPoints(from, s, strokeAR)} {...line} strokeLinejoin="round" />
+                            : wig
+                            ? <polyline points={wigglePoints(from, s, strokeAR, isLast)} {...line} strokeLinejoin="round" />
+                            : <path d={d} {...line} strokeDasharray={solid ? undefined : sdash("1.6 1.1")} />}
                           {editing && !playing && (
                             <path d={d} fill="none" stroke="transparent" strokeWidth={4}
                               onPointerDown={e => lineDown(e, p.id, i, ref)} style={{ cursor: "pointer" }} />
@@ -5115,20 +5273,29 @@ export default function DrillAnimator() {
                         </g>
                       );
                     })}
-                    {(() => {                             // carat at this reaction's end
-                      // …unless it chains into further reactions (then it's a
-                      // branch point, not an endpoint)
-                      const branches = (f.action || "skate") === "skate"
-                        && (f.forks || []).some(g => g.path && g.path.length);
-                      if (branches) return null;
+                    {(() => {                             // mark this reaction's end
+                      const act = f.action || "skate";
+                      // a skate reaction that chains onward is a branch point (the reaction
+                      // badge marks it), not an endpoint
+                      if (act === "skate" && (f.forks || []).some(g => g.path && g.path.length)) return null;
                       const ea = pathEndArrow(f.path, origin);
-                      return ea ? caratHead(ea.endPt, ea.ang, f.color, ref + "/arw",
-                        editThis ? 1 : active ? 0.95 : 0.5) : null;
+                      if (!ea) return null;
+                      const icon = forkActionIcon(act);
+                      // a terminal action → its action circle (pass/shoot/chip/rim); a plain
+                      // skate → the same route end-mark as a base route (carat, or ‖ stop)
+                      return icon
+                        ? iconBadge(ea.endPt, icon, f.color, ref + "/act", op)
+                        : routeMark(ref + "/end", ea.endPt, ea.ang, !!end.endStop, f.color, op);
                     })()}
                     {(f.action || "skate") === "skate" ? renderLevel(f.forks, { x: end.x, y: end.y }, ref) : null}
                   </g>
                 );
-              });
+                });
+                if (!items.some(Boolean)) return items;   // nothing drawn here → no branch badge
+                // badge last so the action circle sits ON TOP of the converging routes
+                items.push(reactionBadge(origin, p.color, `rb-${p.id}-${prefix || "base"}`));
+                return items;
+              };
               return <g key={`fkv-${p.id}`}>{renderLevel(p.forks, branchPoint(p), "")}</g>;
             })}
 
