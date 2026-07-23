@@ -1368,13 +1368,31 @@ export default function DrillAnimator() {
     const g = goaliePos(net, displayPosRaw);
     return mergeDiscs({ cx: sh.cx, cy: sh.cy, r: sh.r }, { cx: g.x, cy: g.y, r: GOALIE_R });
   });
+  // the round props (roughly circular footprints): passers, tires, dekers
+  const roundPropDiscs = () => [
+    ...pieces.filter(q => q.kind === "passer").map(q => ({ cx: q.x, cy: q.y, r: 2.6 })),
+    ...pieces.filter(q => q.kind === "tire").map(q => ({ cx: q.x, cy: q.y, r: 2.6 * ICON_SCALE * (q.size || 1) + 0.6 })),
+    ...pieces.filter(q => q.kind === "deker").map(q => ({ cx: q.x, cy: q.y, r: 2.6 })),
+  ];
   // solid props routes curve around: bumpers (a long bar enclosed by a disc),
   // passers, tires, and dekers. A jump over one lets it sit on the path instead.
   const propDiscs = () => [
     ...bumperShapes(pieces).map(sh => ({ cx: sh.cx, cy: sh.cy, r: sh.r })),
-    ...pieces.filter(q => q.kind === "passer").map(q => ({ cx: q.x, cy: q.y, r: 2.6 })),
-    ...pieces.filter(q => q.kind === "tire").map(q => ({ cx: q.x, cy: q.y, r: 2.6 * ICON_SCALE * (q.size || 1) + 0.6 })),
-    ...pieces.filter(q => q.kind === "deker").map(q => ({ cx: q.x, cy: q.y, r: 2.6 })),
+    ...roundPropDiscs(),
+  ];
+  // closest point on segment A→B to p
+  const nearOnSeg = (A, B, p) => {
+    const dx = B.x - A.x, dy = B.y - A.y, l2 = dx * dx + dy * dy || 1;
+    const t = Math.max(0, Math.min(1, ((p.x - A.x) * dx + (p.y - A.y) * dy) / l2));
+    return { x: A.x + dx * t, y: A.y + dy * t };
+  };
+  // prop discs for puck-shielding, measured from a reference point `ref` (the
+  // carrier's blade tip): a bumper is a long bar, so shield off the NEAREST point
+  // on its spine (capsule) — the puck tucks around the actual edge/face it's
+  // passing, not the bar's distant center.
+  const shieldPropDiscs = ref => [
+    ...bumperShapes(pieces).map(sh => { const c = nearOnSeg(sh.spine[0], sh.spine[1], ref); return { cx: c.x, cy: c.y, r: sh.capR }; }),
+    ...roundPropDiscs(),
   ];
   // where a player's route jumps (the waypoint at the start of a `jump` leg)
   const jumpPointsOf = p => (p && p.kind === "player" ? p.path : [])
@@ -1800,7 +1818,8 @@ export default function DrillAnimator() {
       if (carries) {
         // skip props the carrier jumps over (hopped, not routed around)
         const jps = jumpPointsOf(p);
-        const props = propDiscs().filter(d => !jps.some(j => Math.hypot(j.x - d.cx, j.y - d.cy) < d.r + 3));
+        const bTip = bladeAtWorld(x, y, a, TIP_FWD, TIP_LAT, side);   // reach off the strong-side blade
+        const props = shieldPropDiscs(bTip).filter(d => !jps.some(j => Math.hypot(j.x - d.cx, j.y - d.cy) < d.r + 3));
         a += shieldDelta(x, y, a, side, [...netObstacles, ...others, ...gDiscs, ...props]);
       }
       return { ...res, x, y, a };
