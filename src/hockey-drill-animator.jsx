@@ -1388,10 +1388,12 @@ export default function DrillAnimator() {
   };
   // prop discs for puck-shielding, measured from a reference point `ref` (the
   // carrier's blade tip): a bumper is a long bar, so shield off the NEAREST point
-  // on its spine (capsule) — the puck tucks around the actual edge/face it's
-  // passing, not the bar's distant center.
+  // on its spine — the puck tucks around the actual edge/face it's passing, not
+  // the bar's distant center. The reach uses the bar's own avoidance radius
+  // (`sh.r`, same as the route detour) so the shield engages over the whole arc
+  // the carrier routes around, not just a sliver right at the surface.
   const shieldPropDiscs = ref => [
-    ...bumperShapes(pieces).map(sh => { const c = nearOnSeg(sh.spine[0], sh.spine[1], ref); return { cx: c.x, cy: c.y, r: sh.capR }; }),
+    ...bumperShapes(pieces).map(sh => { const c = nearOnSeg(sh.spine[0], sh.spine[1], ref); return { cx: c.x, cy: c.y, r: sh.r }; }),
     ...roundPropDiscs(),
   ];
   // where a player's route jumps (the waypoint at the start of a `jump` leg)
