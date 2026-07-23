@@ -3392,8 +3392,8 @@ export default function DrillAnimator() {
         {stop
           // ‖ stop mark: the incoming line ends at the FIRST bar (the line's end);
           // the second bar sits just PAST it, so the line doesn't run through both
-          ? <path d="M 0 -2.8 L 0 2.8 M 1.8 -2.8 L 1.8 2.8" fill="none" stroke={color} strokeWidth={1.2} strokeLinecap="round" />
-          : <path d="M -4.8 -2.9 L 0 0 L -4.8 2.9" fill="none" stroke={color} strokeWidth={1.2} strokeLinecap="round" strokeLinejoin="round" />}
+          ? <path d="M 0 -2.4 L 0 2.4 M 1.5 -2.4 L 1.5 2.4" fill="none" stroke={color} strokeWidth={1.1} strokeLinecap="round" />
+          : <path d="M -4.1 -2.5 L 0 0 L -4.1 2.5" fill="none" stroke={color} strokeWidth={1.1} strokeLinecap="round" strokeLinejoin="round" />}
       </g>
     );
   }
