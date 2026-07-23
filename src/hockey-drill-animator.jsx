@@ -1387,13 +1387,13 @@ export default function DrillAnimator() {
     return { x: A.x + dx * t, y: A.y + dy * t };
   };
   // prop discs for puck-shielding, measured from a reference point `ref` (the
-  // carrier's blade tip): a bumper is a long bar, so shield off the NEAREST point
-  // on its spine — the puck tucks around the actual edge/face it's passing, not
-  // the bar's distant center. The reach uses the bar's own avoidance radius
-  // (`sh.r`, same as the route detour) so the shield engages over the whole arc
-  // the carrier routes around, not just a sliver right at the surface.
+  // carrier's blade tip): a bumper is a long bar, so it TRIGGERS off the nearest
+  // point on its spine (tight — engages only near the bar, over the whole arc the
+  // carrier routes around), but opens AWAY FROM ITS CENTRE (`dcx`/`dcy`) so the
+  // body swings smoothly and never snaps 180° when rounding the bar's end. The
+  // reach uses the bar's own avoidance radius (`sh.r`, same as the route detour).
   const shieldPropDiscs = ref => [
-    ...bumperShapes(pieces).map(sh => { const c = nearOnSeg(sh.spine[0], sh.spine[1], ref); return { cx: c.x, cy: c.y, r: sh.r }; }),
+    ...bumperShapes(pieces).map(sh => { const c = nearOnSeg(sh.spine[0], sh.spine[1], ref); return { cx: c.x, cy: c.y, r: sh.r, dcx: sh.cx, dcy: sh.cy }; }),
     ...roundPropDiscs(),
   ];
   // where a player's route jumps (the waypoint at the start of a `jump` leg)
@@ -1472,10 +1472,14 @@ export default function DrillAnimator() {
       if (d < bd) { bd = d; near = sh; }
     }
     if (w <= 0 || !near) return 0;
-    // rotate the blade (whole icon) so it points further AWAY from the net
+    // rotate the blade (whole icon) so it points further AWAY from the obstacle.
+    // A disc may carry a separate direction anchor (dcx/dcy): a bumper triggers
+    // off its nearest edge point but opens AWAY FROM ITS CENTRE, so the body
+    // doesn't snap 180° as the carrier rounds the bar's end.
     const a = (aDeg * Math.PI) / 180;
+    const dcx = near.dcx ?? near.cx, dcy = near.dcy ?? near.cy;
     const bladeAng = Math.atan2(Math.sin(a) * TIP_FWD + Math.cos(a) * TIP_LAT * side, Math.cos(a) * TIP_FWD - Math.sin(a) * TIP_LAT * side);
-    let diff = bladeAng - Math.atan2(near.cy - y, near.cx - x);
+    let diff = bladeAng - Math.atan2(dcy - y, dcx - x);
     while (diff > Math.PI) diff -= 2 * Math.PI;
     while (diff < -Math.PI) diff += 2 * Math.PI;
     return (diff >= 0 ? 1 : -1) * w * 60;   // degrees, tunable
@@ -1814,9 +1818,14 @@ export default function DrillAnimator() {
         if (d < MIN && d > 1e-3) { const push = (MIN - d) * 0.3; x += (dx / d) * push; y += (dy / d) * push; }
       }
       // open the body to shield a carried puck from a net, goalie, another
-      // player, or an obstacle tool (bumper/tire/passer/deker) it routes around
+      // player, or an obstacle tool (bumper/tire/passer/deker) it routes around.
+      // Test the puck against my RAW blade (authored frame, matching the puck
+      // branch below) — NOT the detoured centre (x,y), which diverges from the
+      // puck by several feet at a detour's apex and would cut the shield off
+      // exactly when the carrier is rounding the obstacle.
+      const rawBlade = bladeAtWorld(res.x, res.y, res.a || 0, BLADE_FWD, BLADE_LAT, side);
       const carries = collisions && pieces.some(q => q.kind === "puck"
-        && Math.hypot(displayPosRaw(q).x - x, displayPosRaw(q).y - y) < 5.5);
+        && Math.hypot(displayPosRaw(q).x - rawBlade.x, displayPosRaw(q).y - rawBlade.y) < 2.2);
       if (carries) {
         // skip props the carrier jumps over (hopped, not routed around)
         const jps = jumpPointsOf(p);
