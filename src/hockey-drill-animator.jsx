@@ -640,44 +640,7 @@ export default function DrillAnimator() {
     };
   }, []);
 
-  /* ----- draggable play dock ----- */
-  const [playPos, setPlayPos] = useState(null);
   const [showDiag, setShowDiag] = useState(false);
-  const playRef = useRef(null);
-  const playDrag = useRef(null);
-  function playDragStart(e) {
-    e.stopPropagation();
-    e.preventDefault();
-    e.currentTarget.setPointerCapture?.(e.pointerId);
-    const root = playRef.current && playRef.current.parentElement;
-    if (!root) return;
-    const rr = root.getBoundingClientRect();
-    const r = playRef.current.getBoundingClientRect();
-    playDrag.current = { sx: e.clientX, sy: e.clientY, x: r.left - rr.left, y: r.top - rr.top,
-      w: r.width, h: r.height, rw: rr.width, rh: rr.height };
-  }
-  function playDragMove(e) {
-    const d = playDrag.current;
-    if (!d) return;
-    setPlayPos({
-      x: Math.max(4, Math.min(d.rw - d.w - 4, d.x + e.clientX - d.sx)),
-      y: Math.max(4, Math.min(d.rh - d.h - 4, d.y + e.clientY - d.sy)),
-    });
-  }
-  function playDragEnd() { playDrag.current = null; }
-  // hide the floating play dock (portrait phone) to its nearest edge, leaving a
-  // small tab to bring it back. {edge, cross} in the dock container's px coords.
-  const [playHide, setPlayHide] = useState(null);
-  function hidePlayDock() {
-    const el = playRef.current, root = el && el.parentElement;
-    if (!el || !root) { setPlayHide({ edge: "top", cross: 0 }); return; }
-    const rr = root.getBoundingClientRect(), r = el.getBoundingClientRect();
-    const cx = r.left + r.width / 2 - rr.left, cy = r.top + r.height / 2 - rr.top;
-    const dl = cx, dr = rr.width - cx, dt = cy, db = rr.height - cy;
-    const m = Math.min(dl, dr, dt, db);
-    const edge = m === dt ? "top" : m === db ? "bottom" : m === dl ? "left" : "right";
-    setPlayHide({ edge, cross: (edge === "top" || edge === "bottom") ? cx : cy });
-  }
 
   // iOS 26 standalone bug: the viewport is sized as if the status bar were
   // opaque (screen − safeTop) but positioned as if translucent (at y=0),
@@ -3324,7 +3287,8 @@ export default function DrillAnimator() {
   function addCustomItem() {
     let k = "gear", n = 1;
     while (drillItems.some(it => it.custom && it.key === k)) k = "gear" + (++n);
-    setDrillItems(prev => [...prev, { key: k, custom: true, count: 1, label: "New item" }]);
+    // no default label — the field shows its "Gear…" placeholder so you type straight in
+    setDrillItems(prev => [...prev, { key: k, custom: true, count: 1 }]);
   }
   function importTxt(e) {
     const f = e.target.files?.[0];
@@ -5391,40 +5355,15 @@ export default function DrillAnimator() {
         );
       })()}
 
-      {/* ---------- draggable play dock (mobile) ---------- */}
-      <div className="hd-playdock" ref={playRef} style={{
-        ...(playPos ? { left: playPos.x, top: playPos.y, transform: "none" } : {}),
-        ...(aiPlay || playHide ? { display: "none" } : {}),
-      }}>
-        <span className="hd-grip" onPointerDown={playDragStart} onPointerMove={playDragMove}
-          onPointerUp={playDragEnd} onPointerCancel={playDragEnd}><Icon name="grip" size={16} /></span>
-        <button className={`hd-fab small${loopMode ? " on" : ""}`} title="Loop"
-          onClick={() => setLoopMode(v => !v)}><Icon name="loop" size={19} /></button>
-        <button className="hd-fab small play" onClick={togglePlay}><Icon name={playing ? "pause" : "play"} size={22} /></button>
-        <button className="hd-fab small" title={playing ? "Stop" : "Reset"} onClick={resetPlay}><Icon name={playing ? "stop" : "reset"} size={19} /></button>
-        <button className="hd-fab small hd-playhide" title="Hide controls" onClick={hidePlayDock}><Icon name="close" size={18} /></button>
-      </div>
-      {/* collapsed tab: tucked to the nearest edge, tap to bring the dock back */}
-      {!aiPlay && playHide && (() => {
-        const { edge, cross } = playHide;
-        const horiz = edge === "top" || edge === "bottom";
-        const rot = { top: 0, bottom: 180, left: -90, right: 90 }[edge];
-        // keep the bottom tab clear of the menu bar
-        const anchor = edge === "bottom" ? { bottom: "calc(56px + var(--hd-b))" } : { [edge]: 0 };
-        const pos = horiz
-          ? { ...anchor, left: `clamp(30px, ${cross}px, calc(100% - 30px))`, transform: "translateX(-50%)" }
-          : { ...anchor, top: `clamp(30px, ${cross}px, calc(100% - 30px))`, transform: "translateY(-50%)" };
-        return (
-          <button className={`hd-playtab ${edge}`} style={pos} title="Show play controls"
-            onClick={() => setPlayHide(null)}>
-            <Icon name="chevronDown" size={18} style={{ transform: `rotate(${rot}deg)` }} />
-          </button>
-        );
-      })()}
-
-      {/* ---------- timeline scrubber ---------- */}
+      {/* ---------- player bar: transport + scrubber in one strip ---------- */}
       {!aiPlay && !holdStep && (
         <div className="hd-scrub">
+          <button className="hd-scrubbtn play" onClick={togglePlay} title={playing ? "Pause" : "Play"}>
+            <Icon name={playing ? "pause" : "play"} size={20} /></button>
+          <button className="hd-scrubbtn" onClick={resetPlay} title={playing ? "Stop" : "Reset"}>
+            <Icon name={playing ? "stop" : "reset"} size={17} /></button>
+          <button className={`hd-scrubbtn${loopMode ? " on" : ""}`} onClick={() => setLoopMode(v => !v)} title="Loop">
+            <Icon name="loop" size={17} /></button>
           <div className="hd-scrubtrack">
             {wpTicks.map((f, k) => <span key={"w" + k} className="hd-tick wp" style={{ left: f * 100 + "%" }} />)}
             {stepTicks.map((f, k) => <span key={"s" + k} className="hd-tick step" style={{ left: f * 100 + "%" }} />)}
@@ -5454,13 +5393,6 @@ export default function DrillAnimator() {
           onClick={undoLast} style={undoCount ? undefined : { opacity: 0.4 }}><Icon name="undo" /></button>
         <button className="hd-barbtn" title="Redo" disabled={!redoCount}
           onClick={redoLast} style={redoCount ? undefined : { opacity: 0.4 }}><Icon name="redo" /></button>
-        {/* play controls live in the bar on desktop (hidden on mobile via CSS) */}
-        {!aiPlay && <>
-          <button className={`hd-barbtn hd-barplay${loopMode ? " on" : ""}`} title="Loop"
-            onClick={() => setLoopMode(v => !v)}><Icon name="loop" /></button>
-          <button className="hd-barbtn hd-barplay play" onClick={togglePlay}><Icon name={playing ? "pause" : "play"} size={19} /></button>
-          <button className="hd-barbtn hd-barplay" title={playing ? "Stop" : "Reset"} onClick={resetPlay}><Icon name={playing ? "stop" : "reset"} /></button>
-        </>}
         <div className="hd-barhint">{toolHint || ""}</div>
         <div className="hd-ver"><span className="hd-vernum">v{APP_VERSION}</span><span className="hd-verstamp">&nbsp;· {BUILD_STAMP}</span></div>
       </div>

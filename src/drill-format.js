@@ -31,8 +31,10 @@ export function deriveInventory(pieces, items = []) {
     return { key: k, label: o.label || INV_LABELS[k], custom: false,
       autoCount: auto[k] || 0, count: o.count != null ? o.count : (auto[k] || 0), hide: !!o.hide };
   });
+  // label is the raw user text (may be empty while editing — the `key` is the
+  // internal id, NEVER shown as a fallback, so clearing the field stays cleared)
   const custom = (items || []).filter(it => it.custom).map(it => ({
-    key: it.key, label: it.label || it.key, custom: true,
+    key: it.key, label: it.label || "", custom: true,
     autoCount: null, count: it.count != null ? it.count : 0, hide: !!it.hide }));
   return [...rows, ...custom];
 }
