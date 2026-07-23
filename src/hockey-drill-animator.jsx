@@ -3382,6 +3382,19 @@ export default function DrillAnimator() {
   // draw, at each action waypoint: the incoming end-mark (chevron, or ‖ when the
   // player stops there) plus a circular badge with the main action's icon and, if
   // several actions land there, a count. The route's segment trims leave the gaps.
+  // the shared route end-mark: an open chevron, or a ‖ stop mark. Drawn rink-scaled
+  // in the stretch-cancelling frame so a route's END and an ACTION-CIRCLE entry look
+  // identical — same shape, weight, and scaling.
+  function routeMark(key, endPt, ang, stop, color) {
+    const fx = iconXf({ x: endPt.x, y: endPt.y, a: ang });
+    return (
+      <g key={key} transform={fx.t} pointerEvents="none">
+        {stop
+          ? <path d="M 0 -2.8 L 0 2.8 M -1.8 -2.8 L -1.8 2.8" fill="none" stroke={color} strokeWidth={1.2} strokeLinecap="round" />
+          : <path d="M -4.8 -2.9 L 0 0 L -4.8 2.9" fill="none" stroke={color} strokeWidth={1.2} strokeLinecap="round" strokeLinejoin="round" />}
+      </g>
+    );
+  }
   function renderActionMarks(p, bentPts, acts) {
     if (!acts || !acts.size) return null;
     const n = p.path.length, els = [];
@@ -3396,16 +3409,10 @@ export default function DrillAnimator() {
         if (Math.hypot(tx, ty) < 1e-4) { tx = s.x - prev.x; ty = s.y - prev.y; }
       }
       const tl = Math.hypot(tx, ty) || 1, ang = (Math.atan2(ty, tx) * 180) / Math.PI;
-      // incoming end-mark, just outside the round badge on the incoming side
+      // incoming end-mark, just outside the round badge on the incoming side —
+      // the SAME glyph as a route end
       const mp = gmMove(s.x, s.y, -tx / tl, -ty / tl, ACT_GAP);
-      const mfx = iconXf({ x: mp.x, y: mp.y, a: ang });
-      els.push(
-        <g key={`am${i}`} transform={mfx.t} pointerEvents="none">
-          {s.endStop
-            ? <path d="M 0 -1.9 L 0 1.9 M -1.5 -1.9 L -1.5 1.9" fill="none" stroke={p.color} strokeWidth={0.7} strokeLinecap="round" />
-            : <path d="M -3 -1.9 L 0 0 L -3 1.9" fill="none" stroke={p.color} strokeWidth={0.7} strokeLinecap="round" strokeLinejoin="round" />}
-        </g>
-      );
+      els.push(routeMark(`am${i}`, mp, ang, s.endStop, p.color));
       // badge circle + action icon (+ count). The icon and number counter-rotate
       // by the frame's screen angle (like player labels) so they read upright on
       // screen even when the rink is shown rotated (portrait).
@@ -3460,25 +3467,8 @@ export default function DrillAnimator() {
     }
     if (!tx && !ty) return null;
     const ang = (Math.atan2(ty, tx) * 180) / Math.PI;
-    const fx = iconXf({ x: endPt.x, y: endPt.y, a: ang });
-    // hold a constant SCREEN size (counter the pinch-zoom) so the head stays
-    // locked to the non-scaling line and is equally distinctive at any zoom
-    const z = 1 / (view.s || 1);
-    return (
-      <g key={`arw-${p.id}`} transform={fx.t} pointerEvents="none">
-        <g transform={`scale(${z})`}>
-          {p.path[n - 1] && p.path[n - 1].endStop
-            // stop mark ("||"): the player stops here — two short bars across the
-            // line's end instead of a direction arrowhead
-            ? <path d="M 0 -2.8 L 0 2.8 M -1.8 -2.8 L -1.8 2.8" fill="none" stroke={p.color}
-                strokeWidth={1.2} strokeLinecap="round" />
-            // open chevron head (skating-route convention): two barbs meeting at
-            // the tip, which sits on the line's end
-            : <path d="M -4.8 -2.9 L 0 0 L -4.8 2.9" fill="none" stroke={p.color}
-                strokeWidth={1.2} strokeLinecap="round" strokeLinejoin="round" />}
-        </g>
-      </g>
-    );
+    // the same glyph as an action-circle entry: a chevron, or a ‖ stop mark
+    return routeMark(`arw-${p.id}`, endPt, ang, !!(p.path[n - 1] && p.path[n - 1].endStop), p.color);
   }
 
   function renderHandles(p, yf = yFix, fork = null) {
@@ -4778,6 +4768,18 @@ export default function DrillAnimator() {
     // a fly leg launches/lands at the player's STICK, ~a stick-length off the
     // waypoint centre where the badge sits — so match within that reach
     const nearBadge = (x, y) => { let best = null, bd = 6; for (const b of badges) { const d = Math.hypot(b.x - x, b.y - y); if (d < bd) { bd = d; best = b; } } return best; };
+    // multiple shots landing on the same net stop at staggered distances so their
+    // arrowheads queue up in front of it instead of piling into one busy clump
+    // group shots by the NET they land on (landings scatter a few feet, so bucket
+    // by nearest net, not exact point) and stagger their stop distances
+    const shotTargets = pieces.filter(q => q.kind === "net" || q.kind === "passer" || q.kind === "bumper" || q.kind === "tire");
+    const nearNet = (x, y) => { let best = "?", bd = 24; for (const nt of shotTargets) { const d = Math.hypot(nt.x - x, nt.y - y); if (d < bd) { bd = d; best = nt.id; } } return best; };
+    const netSeen = {}, shotStagger = {};   // `${pk}/${k}` → extra feet in front of the net
+    pieces.filter(q => q.kind === "puck" && plans[q.id]).forEach(q => plans[q.id].legs.forEach((L, k, legs) => {
+      if (L.type === "fly" && L.shot && (!legs[k + 1] || legs[k + 1].type !== "fly")) {
+        const key = nearNet(L.x1, L.y1); shotStagger[`${q.id}/${k}`] = (netSeen[key] || 0) * 9; netSeen[key] = (netSeen[key] || 0) + 1;
+      }
+    }));
     return pieces
       .filter(q => q.kind === "puck" && plans[q.id])
       .map(q => plans[q.id].legs.map((L, k, legs) => {
@@ -4795,7 +4797,7 @@ export default function DrillAnimator() {
         // end: a shot stops just short of the net; a pass/rim/chip into a receiver's
         // badge stops just off its edge, pointing at it from outside (not buried in it)
         const eb = runEnd && !L.shot ? nearBadge(L.x1, L.y1) : null;
-        const ep = L.shot && runEnd ? gmMove(L.x1, L.y1, -ux, -uy, 4.5)
+        const ep = L.shot && runEnd ? gmMove(L.x1, L.y1, -ux, -uy, 4.5 + (shotStagger[`${q.id}/${k}`] || 0))
           : eb ? gmMove(eb.x, eb.y, -ux, -uy, START_OFF) : { x: L.x1, y: L.y1 };
         const ex = ep.x, ey = ep.y;
         return (
