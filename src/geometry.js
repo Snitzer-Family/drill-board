@@ -155,6 +155,42 @@ export function convertSeg(seg, prev) {
   };
 }
 
+// Trim a small gap off the START of a segment for DRAWING only (the ref path and
+// timing still use the full segment). Returns { from, seg } — the sub-segment
+// beginning `gap` feet from the original start — or null if the segment ends
+// within the gap. Used so a route line starts just clear of the player icon.
+export function trimSegStart(from, s, gap) {
+  const N = 64;
+  let pT = 0, pD = 0;
+  for (let i = 1; i <= N; i++) {
+    const t = i / N, pt = evalSeg(from, s, t);
+    const d = Math.hypot(pt.x - from.x, pt.y - from.y);
+    if (d >= gap) {                          // interpolate the crossing for a gap-accurate cut
+      const f = Math.max(0, Math.min(1, (gap - pD) / (d - pD || 1)));
+      const [first, second] = splitSeg(from, s, pT + (t - pT) * f);
+      return { from: { x: first.x, y: first.y }, seg: second };
+    }
+    pT = t; pD = d;
+  }
+  return null;                               // whole segment sits within the gap
+}
+
+// Drop a `gap`-foot lead off the start of a polyline (the net-detour case),
+// interpolating the exact cut point. Returns a new points array.
+export function trimPolyStart(pts, gap) {
+  if (!pts || pts.length < 2) return pts;
+  const start = pts[0];
+  for (let i = 1; i < pts.length; i++) {
+    if (Math.hypot(pts[i].x - start.x, pts[i].y - start.y) >= gap) {
+      const a = pts[i - 1], b = pts[i];
+      const segLen = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+      const f = Math.max(0, Math.min(1, (gap - Math.hypot(a.x - start.x, a.y - start.y)) / segLen));
+      return [{ x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f }, ...pts.slice(i)];
+    }
+  }
+  return pts;                                // whole polyline within the gap
+}
+
 /* ---- waypoint "join" (Illustrator-style point types) ----
    A waypoint's two bézier handles are stored on two different segments: the
    INCOMING handle is the control of the leg ENDING at the waypoint (c2 for a

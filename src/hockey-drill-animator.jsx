@@ -1,10 +1,10 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo } from "react";
-import { VIEWS, COLORS, vb, APP_VERSION, ICON_SCALE, BUILD_STAMP, DEFAULT_TEXT, SPEED,
+import { VIEWS, COLORS, vb, APP_VERSION, ICON_SCALE, ROUTE_START_GAP, BUILD_STAMP, DEFAULT_TEXT, SPEED,
   SAVE_PROB, MISS_POST, MISS_WIDE, MISS_OVER, SHOT_AIR_PROB, BOUNCE_REST } from "./constants.js";
 import { parseDrill, serializeDrill, extractDrill, deriveInventory } from "./drill-format.js";
 import { drillSvg } from "./drill-svg.js";
 import { mdEscape, mdInline, mdBlock } from "./md.js";
-import { clampX, clampY, segEnd, segD, nearestT, splitSeg, zigzagPoints, wigglePoints, convertSeg, fitRoute, evalSeg, rdp, catmullToBezier, alignJoint, mirrorJoint, translateJointHandles } from "./geometry.js";
+import { clampX, clampY, segEnd, segD, nearestT, splitSeg, zigzagPoints, wigglePoints, convertSeg, fitRoute, evalSeg, rdp, catmullToBezier, alignJoint, mirrorJoint, translateJointHandles, trimSegStart, trimPolyStart } from "./geometry.js";
 import * as boards from "./boards.js";
 import { netShapes, bumperShapes, solidShapes, detourRoute, segCrossesNet } from "./net-collide.js";
 import { RinkMarkings } from "./rink.jsx";
@@ -204,6 +204,7 @@ function DelayTrigger({ value, onChange, sub, players, actorIds, nameOf }) {
      WACT <player> <pt>    hold until that player RELEASES the puck at <pt> (0 = any action)
      RATE <mult>           speed multiplier for this leg
      JOIN smooth|sym       link this waypoint's curve handles
+     ENDSTOP               end the route in a ‖ stop mark (player)
    JOIN links the two bézier handles meeting at a waypoint so
    editing keeps them collinear (smooth) or collinear + equal
    length (sym); omitted = a corner with independent handles.
@@ -2093,7 +2094,8 @@ export default function DrillAnimator() {
       // leg continues the heading instead of kinking off with wild split handles
       const build = arr => {
         let path = [...arr, seg];
-        const j = n - 1;   // the waypoint the new leg grows from
+        const j = n - 1;   // the waypoint the new leg grows from (the old route end)
+        if (j >= 0 && path[j].endStop) path[j] = { ...path[j], endStop: undefined };   // no longer the end
         if (j >= 0 && (type === "C" || type === "Q") && (path[j].type === "C" || path[j].type === "Q"))
           path = alignJoint(path, j, "smooth", { x: rp.x, y: rp.y });
         return path;
@@ -3380,10 +3382,15 @@ export default function DrillAnimator() {
     return (
       <g key={`arw-${p.id}`} transform={fx.t} pointerEvents="none">
         <g transform={`scale(${z})`}>
-          {/* open chevron head (skating-route convention): two barbs meeting at
-              the tip, which sits on the line's end */}
-          <path d="M -4.8 -2.9 L 0 0 L -4.8 2.9" fill="none" stroke={p.color}
-            strokeWidth={1.2} strokeLinecap="round" strokeLinejoin="round" />
+          {p.path[n - 1] && p.path[n - 1].endStop
+            // stop mark ("||"): the player stops here — two short bars across the
+            // line's end instead of a direction arrowhead
+            ? <path d="M 0 -2.8 L 0 2.8 M -1.8 -2.8 L -1.8 2.8" fill="none" stroke={p.color}
+                strokeWidth={1.2} strokeLinecap="round" />
+            // open chevron head (skating-route convention): two barbs meeting at
+            // the tip, which sits on the line's end
+            : <path d="M -4.8 -2.9 L 0 0 L -4.8 2.9" fill="none" stroke={p.color}
+                strokeWidth={1.2} strokeLinecap="round" strokeLinejoin="round" />}
         </g>
       </g>
     );
@@ -4570,6 +4577,17 @@ export default function DrillAnimator() {
           ) : (
             <div className="hd-poprow" style={{ color: "#8b99a8", fontSize: 12 }}>End of {fork ? "reaction" : "route"}</div>
           )}
+          {/* route end: mark that the player stops here → a ‖ stop mark replaces
+              the direction arrowhead (skating-diagram convention) */}
+          {!next && p.kind === "player" && !fork && (
+            <div className="hd-poprow">
+              <button className={`hd-mini${s.endStop ? " on" : ""}`}
+                onClick={() => uSeg(i, { endStop: s.endStop ? undefined : true })}>
+                {s.endStop ? "✓ Stops here" : "Stops here"}
+              </button>
+              <span style={{ fontSize: 11, color: "#8b99a8" }}>ends with a ‖ stop mark, not an arrow</span>
+            </div>
+          )}
           {p.kind === "player" && !fork && ActionSteps(p, i)}
           <div className="hd-poprow">
             <button className="hd-mini danger" onClick={() => deleteSeg(p.id, i, fork)}>Delete point</button>
@@ -4884,16 +4902,21 @@ export default function DrillAnimator() {
                     // straight otherwise (hockey diagram convention)
                     const bwd = p.kind === "player" && s.dir === "bwd";
                     const wig = !bwd && carry && carry.has(i);
+                    // the VISIBLE first leg starts a touch clear of the player icon;
+                    // the ref path + hit area above/below still use the full segment
+                    const trim = i === 0 && p.kind === "player" ? trimSegStart(from, s, ROUTE_START_GAP) : null;
+                    const vFrom = trim ? trim.from : from, vSeg = trim ? trim.seg : s;
+                    const vD = trim ? segD(vFrom, vSeg) : d;
                     return (
                       <g key={`${p.id}/${i}`}>
                         {/* invisible ref path is always present — timing measures it */}
                         <path d={d} fill="none" stroke="none"
                           ref={el => { if (el) segRefs.current[`${p.id}/${i}`] = el; }} />
                         {showRoutes && !bent && (bwd
-                          ? <polyline points={zigzagPoints(from, s, strokeAR)} {...style} strokeLinejoin="round" pointerEvents="none" />
+                          ? <polyline points={zigzagPoints(vFrom, vSeg, strokeAR)} {...style} strokeLinejoin="round" pointerEvents="none" />
                           : wig
-                          ? <polyline points={wigglePoints(from, s, strokeAR, isLast)} {...style} strokeLinejoin="round" pointerEvents="none" />
-                          : <path d={d} {...style} pointerEvents="none" />)}
+                          ? <polyline points={wigglePoints(vFrom, vSeg, strokeAR, isLast)} {...style} strokeLinejoin="round" pointerEvents="none" />
+                          : <path d={vD} {...style} pointerEvents="none" />)}
                         {showRoutes && (
                           <path d={d} fill="none" stroke="transparent" strokeWidth={4}
                             onPointerDown={e => lineDown(e, p.id, i)} style={{ cursor: "pointer" }} />
@@ -4902,7 +4925,7 @@ export default function DrillAnimator() {
                     );
                   })}
                   {bent && (
-                    <polyline points={bent.map(q => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" ")}
+                    <polyline points={(p.kind === "player" ? trimPolyStart(bent, ROUTE_START_GAP) : bent).map(q => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" ")}
                       {...segStroke(p, p.path[p.path.length - 1] || {}, false)}
                       strokeLinejoin="round" pointerEvents="none" />
                   )}
