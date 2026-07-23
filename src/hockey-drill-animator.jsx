@@ -4796,11 +4796,13 @@ export default function DrillAnimator() {
         const sb = runStart ? nearBadge(L.x0, L.y0) : null;
         const sp = sb ? gmMove(sb.x, sb.y, ux, uy, START_OFF) : { x: L.x0, y: L.y0 };
         const sx = sp.x, sy = sp.y;
-        // end: a shot stops just short of the net; a pass/rim/chip into a receiver's
-        // badge stops just off its edge, pointing at it from outside (not buried in it)
+        // end: a shot stops just short of the net (+ stagger for several on one net);
+        // a pass/rim/chip into a receiver's badge stops just off its edge. Clamp the
+        // offset so a SHORT leg's arrow never overshoots its own start and reverses.
         const eb = runEnd && !L.shot ? nearBadge(L.x1, L.y1) : null;
-        const ep = L.shot && runEnd ? gmMove(L.x1, L.y1, -ux, -uy, 4.5 + (shotStagger[`${q.id}/${k}`] || 0))
-          : eb ? gmMove(eb.x, eb.y, -ux, -uy, START_OFF) : { x: L.x1, y: L.y1 };
+        let eGap = L.shot && runEnd ? 4.5 + (shotStagger[`${q.id}/${k}`] || 0) : eb ? START_OFF : 0;
+        if (eGap > 0) eGap = Math.min(eGap, Math.max(0, Math.hypot((L.x1 - sx) * gmSar, (L.y1 - sy) / gmSar) - 2));
+        const ep = eGap > 0 ? gmMove(L.x1, L.y1, -ux, -uy, eGap) : { x: L.x1, y: L.y1 };
         const ex = ep.x, ey = ep.y;
         return (
           <g key={`pf-${q.id}-${k}`} pointerEvents="none" opacity={0.62}>
