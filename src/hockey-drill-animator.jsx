@@ -4762,6 +4762,9 @@ export default function DrillAnimator() {
     const badges = [];
     pieces.forEach(p => { if (p.kind === "player" && p.path.length) { const m = actionWaypoints(p); for (const i of m.keys()) badges.push({ x: p.path[i].x, y: p.path[i].y }); } });
     const START_OFF = ACT_R * ICON_SCALE + 0.9;   // badge radius (rink ft) + a slight gap
+    // a fly leg launches/lands at the player's STICK, ~a stick-length off the
+    // waypoint centre where the badge sits — so match within that reach
+    const nearBadge = (x, y) => { let best = null, bd = 6; for (const b of badges) { const d = Math.hypot(b.x - x, b.y - y); if (d < bd) { bd = d; best = b; } } return best; };
     return pieces
       .filter(q => q.kind === "puck" && plans[q.id])
       .map(q => plans[q.id].legs.map((L, k, legs) => {
@@ -4770,14 +4773,16 @@ export default function DrillAnimator() {
         const runEnd = !nxt || nxt.type !== "fly";   // last fly leg of a pass/shot/rim/chip run
         const runStart = k === 0 || legs[k - 1].type !== "fly";   // first fly leg of the run
         const dx = L.x1 - L.x0, dy = L.y1 - L.y0;
-        const len = Math.hypot(dx, dy) || 1;
-        // start: launched from an action badge → begin just past its edge
-        const soff = runStart && badges.some(b => Math.hypot(b.x - L.x0, b.y - L.y0) < 1.2) ? START_OFF : 0;
-        const sx = L.x0 + (dx / len) * soff, sy = L.y0 + (dy / len) * soff;
-        // a shot's grey path points AT the net but stops short of it (the arrow
-        // sits just in front of the goal, not buried in the cage)
-        const gap = L.shot && runEnd ? 4.5 : 0;
-        const ex = L.x1 - (dx / len) * gap, ey = L.y1 - (dy / len) * gap;
+        const len = Math.hypot(dx, dy) || 1, ux = dx / len, uy = dy / len;
+        // start: released AT an action badge → begin just outside its edge, measured
+        // from the badge CENTRE (not the stick); off a standing stick → start there
+        const sb = runStart ? nearBadge(L.x0, L.y0) : null;
+        const sx = sb ? sb.x + ux * START_OFF : L.x0, sy = sb ? sb.y + uy * START_OFF : L.y0;
+        // end: a shot stops just short of the net; a pass/rim/chip into a receiver's
+        // badge stops just off its edge, pointing at it from outside (not buried in it)
+        const eb = runEnd && !L.shot ? nearBadge(L.x1, L.y1) : null;
+        const ex = L.shot && runEnd ? L.x1 - ux * 4.5 : eb ? eb.x - ux * START_OFF : L.x1;
+        const ey = L.shot && runEnd ? L.y1 - uy * 4.5 : eb ? eb.y - uy * START_OFF : L.y1;
         return (
           <g key={`pf-${q.id}-${k}`} pointerEvents="none" opacity={0.62}>
             <line x1={sx} y1={sy} x2={ex} y2={ey} vectorEffect={ve}
