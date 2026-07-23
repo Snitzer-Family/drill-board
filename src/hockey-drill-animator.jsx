@@ -3447,6 +3447,9 @@ export default function DrillAnimator() {
     const n = p.path.length;
     if (!n) return null;
     if (acts && acts.has(n - 1)) return null;   // an action badge marks this end instead
+    // a route that branches into reaction-light forks doesn't END here — its mark
+    // sits at the branch point, so drop it and let the forks' carats mark the ends
+    if ((p.forks || []).some(f => f.path && f.path.length)) return null;
     // anchor the tip at the drawn line's END and point it along that line's end
     // tangent — use the detoured (bent) polyline when there is one so the head
     // lines up with the curve actually shown, not the raw path
@@ -3471,6 +3474,43 @@ export default function DrillAnimator() {
     const ang = (Math.atan2(ty, tx) * 180) / Math.PI;
     // the same glyph as an action-circle entry: a chevron, or a ‖ stop mark
     return routeMark(`arw-${p.id}`, endPt, ang, !!(p.path[n - 1] && p.path[n - 1].endStop), p.color);
+  }
+  // a carat (chevron ">") arrowhead, tip AT `endPt` pointing along heading `ang`
+  // (deg), drawn in the stretch-cancelling icon frame so it stays a clean, open
+  // chevron (SVG markers get sheared by the fill-mode stretch). Used by reaction forks.
+  function caratHead(endPt, ang, color, key, opacity = 1) {
+    const fx = iconXf({ x: endPt.x, y: endPt.y, a: ang });
+    // hold a constant SCREEN size (counter the pinch-zoom) so the head stays
+    // locked to the non-scaling line and is equally distinctive at any zoom
+    const z = 1 / (view.s || 1);
+    return (
+      <g key={key} transform={fx.t} pointerEvents="none" opacity={opacity}>
+        <g transform={`scale(${z})`}>
+          {/* open chevron: two strokes meeting at the tip (0,0) */}
+          <path d="M -4.6 -2.7 L 0 0 L -4.6 2.7" fill="none" stroke={color}
+            strokeWidth={1.1} strokeLinecap="round" strokeLinejoin="round" />
+        </g>
+      </g>
+    );
+  }
+
+  // end point + heading (deg) of a route path array that begins at `start`; null
+  // if empty or degenerate. Shared by base routes and reaction forks.
+  function pathEndArrow(pathArr, start) {
+    const n = pathArr.length;
+    if (!n) return null;
+    const last = pathArr[n - 1];
+    const prev = n >= 2 ? { x: pathArr[n - 2].x, y: pathArr[n - 2].y } : start;
+    const endPt = { x: last.x, y: last.y };
+    const near = evalSeg(prev, last, 0.9);
+    let tx = last.x - near.x, ty = last.y - near.y;
+    if (Math.hypot(tx, ty) < 1e-4) {               // degenerate (control on the endpoint)
+      if (last.type === "C") { tx = last.x - last.c2x; ty = last.y - last.c2y; }
+      else if (last.type === "Q") { tx = last.x - last.cx; ty = last.y - last.cy; }
+      else { tx = last.x - prev.x; ty = last.y - prev.y; }
+    }
+    if (!tx && !ty) return null;
+    return { endPt, ang: (Math.atan2(ty, tx) * 180) / Math.PI };
   }
 
   function renderHandles(p, yf = yFix, fork = null) {
@@ -5111,6 +5151,16 @@ export default function DrillAnimator() {
                         </g>
                       );
                     })}
+                    {(() => {                             // carat at this reaction's end
+                      // …unless it chains into further reactions (then it's a
+                      // branch point, not an endpoint)
+                      const branches = (f.action || "skate") === "skate"
+                        && (f.forks || []).some(g => g.path && g.path.length);
+                      if (branches) return null;
+                      const ea = pathEndArrow(f.path, origin);
+                      return ea ? caratHead(ea.endPt, ea.ang, f.color, ref + "/arw",
+                        editThis ? 1 : active ? 0.95 : 0.5) : null;
+                    })()}
                     {(f.action || "skate") === "skate" ? renderLevel(f.forks, { x: end.x, y: end.y }, ref) : null}
                   </g>
                 );
