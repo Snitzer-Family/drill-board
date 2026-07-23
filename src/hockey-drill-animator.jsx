@@ -4757,21 +4757,30 @@ export default function DrillAnimator() {
     const ve = flat ? undefined : "non-scaling-stroke";
     const { plans } = getIntentPlan();   // draw the shot's intent (on net), not a realistic miss
     const z = 1 / (view.s || 1);
+    // action-badge centres: a pass/shot released AT a waypoint (not off a player's
+    // stick at their standing spot) begins just outside that badge's edge
+    const badges = [];
+    pieces.forEach(p => { if (p.kind === "player" && p.path.length) { const m = actionWaypoints(p); for (const i of m.keys()) badges.push({ x: p.path[i].x, y: p.path[i].y }); } });
+    const START_OFF = ACT_R * ICON_SCALE + 0.9;   // badge radius (rink ft) + a slight gap
     return pieces
       .filter(q => q.kind === "puck" && plans[q.id])
       .map(q => plans[q.id].legs.map((L, k, legs) => {
         if (L.type !== "fly") return null;
         const nxt = legs[k + 1];
         const runEnd = !nxt || nxt.type !== "fly";   // last fly leg of a pass/shot/rim/chip run
+        const runStart = k === 0 || legs[k - 1].type !== "fly";   // first fly leg of the run
         const dx = L.x1 - L.x0, dy = L.y1 - L.y0;
+        const len = Math.hypot(dx, dy) || 1;
+        // start: launched from an action badge → begin just past its edge
+        const soff = runStart && badges.some(b => Math.hypot(b.x - L.x0, b.y - L.y0) < 1.2) ? START_OFF : 0;
+        const sx = L.x0 + (dx / len) * soff, sy = L.y0 + (dy / len) * soff;
         // a shot's grey path points AT the net but stops short of it (the arrow
         // sits just in front of the goal, not buried in the cage)
-        const len = Math.hypot(dx, dy) || 1;
         const gap = L.shot && runEnd ? 4.5 : 0;
         const ex = L.x1 - (dx / len) * gap, ey = L.y1 - (dy / len) * gap;
         return (
           <g key={`pf-${q.id}-${k}`} pointerEvents="none" opacity={0.62}>
-            <line x1={L.x0} y1={L.y0} x2={ex} y2={ey} vectorEffect={ve}
+            <line x1={sx} y1={sy} x2={ex} y2={ey} vectorEffect={ve}
               stroke="#14171a" strokeWidth={W(L.shot ? 1.1 : 0.55)}
               strokeDasharray={L.shot ? undefined : D("2.4 1.8")} />
             {runEnd && (dx || dy) && (flat

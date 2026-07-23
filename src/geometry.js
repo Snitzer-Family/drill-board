@@ -91,7 +91,7 @@ export function wigglePoints(prev, s, ar = 1, taperEnd = false) {
   const n = Math.max(14, cycles * 10), A = 0.85;          // amplitude in screen units
   // the wiggle settles into a straight run before an end mark (arrowhead / ‖):
   // dead-straight for the final FLAT units, ramping up over the next (TAPER-FLAT)
-  const TAPER = 8, FLAT = 4;
+  const TAPER = 14, FLAT = 8;
   const pts = [];
   let cum = 0, prevPt = evalSeg(prev, s, 0);
   for (let i = 0; i <= n; i++) {
