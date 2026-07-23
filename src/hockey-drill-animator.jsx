@@ -5599,6 +5599,8 @@ export default function DrillAnimator() {
             <Icon name={playing ? "stop" : "reset"} size={17} /></button>
           <button className={`hd-scrubbtn${loopMode ? " on" : ""}`} onClick={() => setLoopMode(v => !v)} title="Loop">
             <Icon name="loop" size={17} /></button>
+          <button className={`hd-scrubbtn${presentation ? " on" : ""}`} onClick={() => setPresentation(v => !v)} title="Presentation mode">
+            <Icon name="presentation" size={17} /></button>
           <div className="hd-scrubtrack">
             {wpTicks.map((f, k) => <span key={"w" + k} className="hd-tick wp" style={{ left: f * 100 + "%" }} />)}
             {stepTicks.map((f, k) => <span key={"s" + k} className="hd-tick step" style={{ left: f * 100 + "%" }} />)}
