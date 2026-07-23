@@ -3287,7 +3287,8 @@ export default function DrillAnimator() {
   function addCustomItem() {
     let k = "gear", n = 1;
     while (drillItems.some(it => it.custom && it.key === k)) k = "gear" + (++n);
-    setDrillItems(prev => [...prev, { key: k, custom: true, count: 1, label: "New item" }]);
+    // no default label — the field shows its "Gear…" placeholder so you type straight in
+    setDrillItems(prev => [...prev, { key: k, custom: true, count: 1 }]);
   }
   function importTxt(e) {
     const f = e.target.files?.[0];
