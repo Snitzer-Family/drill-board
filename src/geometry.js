@@ -168,12 +168,14 @@ export function convertSeg(seg, prev) {
 // timing still use the full segment). Returns { from, seg } — the sub-segment
 // beginning `gap` feet from the original start — or null if the segment ends
 // within the gap. Used so a route line starts just clear of the player icon.
-export function trimSegStart(from, s, gap) {
+export function trimSegStart(from, s, gap, ar = 1) {
+  const sar = Math.sqrt(ar);                 // geometric-mean metric: gaps read the same
+  const gm = (ax, ay, bx, by) => Math.hypot((bx - ax) * sar, (by - ay) / sar);
   const N = 64;
   let pT = 0, pD = 0;
   for (let i = 1; i <= N; i++) {
     const t = i / N, pt = evalSeg(from, s, t);
-    const d = Math.hypot(pt.x - from.x, pt.y - from.y);
+    const d = gm(from.x, from.y, pt.x, pt.y);
     if (d >= gap) {                          // interpolate the crossing for a gap-accurate cut
       const f = Math.max(0, Math.min(1, (gap - pD) / (d - pD || 1)));
       const [first, second] = splitSeg(from, s, pT + (t - pT) * f);
@@ -186,13 +188,15 @@ export function trimSegStart(from, s, gap) {
 
 // Trim a gap off the END of a segment for drawing (mirror of trimSegStart) —
 // leaves the leg stopping `gap` feet short of its endpoint. Returns { seg } or null.
-export function trimSegEnd(from, s, gap) {
+export function trimSegEnd(from, s, gap, ar = 1) {
+  const sar = Math.sqrt(ar);
+  const gm = (ax, ay, bx, by) => Math.hypot((bx - ax) * sar, (by - ay) / sar);
   const end = { x: s.x, y: s.y };
   const N = 64;
   let pT = 1, pD = 0;
   for (let i = N - 1; i >= 0; i--) {
     const t = i / N, pt = evalSeg(from, s, t);
-    const d = Math.hypot(pt.x - end.x, pt.y - end.y);
+    const d = gm(end.x, end.y, pt.x, pt.y);
     if (d >= gap) {
       const f = Math.max(0, Math.min(1, (gap - pD) / (d - pD || 1)));
       const [first] = splitSeg(from, s, pT + (t - pT) * f);
@@ -205,14 +209,16 @@ export function trimSegEnd(from, s, gap) {
 
 // Drop a `gap`-foot lead off the start of a polyline (the net-detour case),
 // interpolating the exact cut point. Returns a new points array.
-export function trimPolyStart(pts, gap) {
+export function trimPolyStart(pts, gap, ar = 1) {
   if (!pts || pts.length < 2) return pts;
+  const sar = Math.sqrt(ar);
+  const gm = (ax, ay, bx, by) => Math.hypot((bx - ax) * sar, (by - ay) / sar);
   const start = pts[0];
   for (let i = 1; i < pts.length; i++) {
-    if (Math.hypot(pts[i].x - start.x, pts[i].y - start.y) >= gap) {
+    if (gm(start.x, start.y, pts[i].x, pts[i].y) >= gap) {
       const a = pts[i - 1], b = pts[i];
-      const segLen = Math.hypot(b.x - a.x, b.y - a.y) || 1;
-      const f = Math.max(0, Math.min(1, (gap - Math.hypot(a.x - start.x, a.y - start.y)) / segLen));
+      const segLen = gm(a.x, a.y, b.x, b.y) || 1;
+      const f = Math.max(0, Math.min(1, (gap - gm(start.x, start.y, a.x, a.y)) / segLen));
       return [{ x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f }, ...pts.slice(i)];
     }
   }

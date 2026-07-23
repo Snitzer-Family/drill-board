@@ -802,6 +802,14 @@ export default function DrillAnimator() {
   // vector-effect:non-scaling-stroke keep their intended on-ice weight
   const strokeAR = iconGeom.Sx / iconGeom.Sy;
   const strokeK = Math.sqrt(iconGeom.Sx * iconGeom.Sy);
+  // move `g` geometric-mean feet from (cx,cy) along raw unit dir (ux,uy) — so a gap
+  // clears the round (stretch-compensated) badge/icon by the same amount in every
+  // direction, regardless of the fill-mode stretch (badges vs raw-rink offsets)
+  const gmSar = Math.sqrt(strokeAR);
+  const gmMove = (cx, cy, ux, uy, g) => {
+    const gl = Math.hypot(ux * gmSar, uy / gmSar) || 1;
+    return { x: cx + ux * (g / gl), y: cy + uy * (g / gl) };
+  };
   // scale a stroke width (rink feet) to non-scaling-stroke screen px
   const sw = w => +(w * strokeK).toFixed(2);
   // scale a dash pattern string ("2.4 1.8") the same way
@@ -3388,8 +3396,9 @@ export default function DrillAnimator() {
         if (Math.hypot(tx, ty) < 1e-4) { tx = s.x - prev.x; ty = s.y - prev.y; }
       }
       const tl = Math.hypot(tx, ty) || 1, ang = (Math.atan2(ty, tx) * 180) / Math.PI;
-      // incoming end-mark, just outside the badge on the incoming side
-      const mfx = iconXf({ x: s.x - (tx / tl) * ACT_GAP, y: s.y - (ty / tl) * ACT_GAP, a: ang });
+      // incoming end-mark, just outside the round badge on the incoming side
+      const mp = gmMove(s.x, s.y, -tx / tl, -ty / tl, ACT_GAP);
+      const mfx = iconXf({ x: mp.x, y: mp.y, a: ang });
       els.push(
         <g key={`am${i}`} transform={mfx.t} pointerEvents="none">
           {s.endStop
@@ -4774,15 +4783,17 @@ export default function DrillAnimator() {
         const runStart = k === 0 || legs[k - 1].type !== "fly";   // first fly leg of the run
         const dx = L.x1 - L.x0, dy = L.y1 - L.y0;
         const len = Math.hypot(dx, dy) || 1, ux = dx / len, uy = dy / len;
-        // start: released AT an action badge → begin just outside its edge, measured
-        // from the badge CENTRE (not the stick); off a standing stick → start there
+        // start: released AT an action badge → begin just outside its round edge,
+        // measured from the badge CENTRE (not the stick); off a standing stick → start there
         const sb = runStart ? nearBadge(L.x0, L.y0) : null;
-        const sx = sb ? sb.x + ux * START_OFF : L.x0, sy = sb ? sb.y + uy * START_OFF : L.y0;
+        const sp = sb ? gmMove(sb.x, sb.y, ux, uy, START_OFF) : { x: L.x0, y: L.y0 };
+        const sx = sp.x, sy = sp.y;
         // end: a shot stops just short of the net; a pass/rim/chip into a receiver's
         // badge stops just off its edge, pointing at it from outside (not buried in it)
         const eb = runEnd && !L.shot ? nearBadge(L.x1, L.y1) : null;
-        const ex = L.shot && runEnd ? L.x1 - ux * 4.5 : eb ? eb.x - ux * START_OFF : L.x1;
-        const ey = L.shot && runEnd ? L.y1 - uy * 4.5 : eb ? eb.y - uy * START_OFF : L.y1;
+        const ep = L.shot && runEnd ? gmMove(L.x1, L.y1, -ux, -uy, 4.5)
+          : eb ? gmMove(eb.x, eb.y, -ux, -uy, START_OFF) : { x: L.x1, y: L.y1 };
+        const ex = ep.x, ey = ep.y;
         return (
           <g key={`pf-${q.id}-${k}`} pointerEvents="none" opacity={0.62}>
             <line x1={sx} y1={sy} x2={ex} y2={ey} vectorEffect={ve}
@@ -5004,8 +5015,8 @@ export default function DrillAnimator() {
                     const startGap = i === 0 && p.kind === "player" ? ROUTE_START_GAP : acts.has(i - 1) ? ACT_GAP : 0;
                     const endGap = acts.has(i) ? ACT_GAP : 0;
                     let vFrom = from, vSeg = s;
-                    if (startGap) { const t = trimSegStart(vFrom, vSeg, startGap); if (t) { vFrom = t.from; vSeg = t.seg; } }
-                    if (endGap) { const t = trimSegEnd(vFrom, vSeg, endGap); if (t) vSeg = t.seg; }
+                    if (startGap) { const t = trimSegStart(vFrom, vSeg, startGap, strokeAR); if (t) { vFrom = t.from; vSeg = t.seg; } }
+                    if (endGap) { const t = trimSegEnd(vFrom, vSeg, endGap, strokeAR); if (t) vSeg = t.seg; }
                     const vD = (startGap || endGap) ? segD(vFrom, vSeg) : d;
                     return (
                       <g key={`${p.id}/${i}`}>
@@ -5025,7 +5036,7 @@ export default function DrillAnimator() {
                     );
                   })}
                   {bent && (
-                    <polyline points={(p.kind === "player" ? trimPolyStart(bent, ROUTE_START_GAP) : bent).map(q => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" ")}
+                    <polyline points={(p.kind === "player" ? trimPolyStart(bent, ROUTE_START_GAP, strokeAR) : bent).map(q => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" ")}
                       {...segStroke(p, p.path[p.path.length - 1] || {}, false)}
                       strokeLinejoin="round" pointerEvents="none" />
                   )}
