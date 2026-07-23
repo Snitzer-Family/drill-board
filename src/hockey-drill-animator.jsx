@@ -4,7 +4,7 @@ import { VIEWS, COLORS, vb, APP_VERSION, ICON_SCALE, ROUTE_START_GAP, BUILD_STAM
 import { parseDrill, serializeDrill, extractDrill, deriveInventory } from "./drill-format.js";
 import { drillSvg } from "./drill-svg.js";
 import { mdEscape, mdInline, mdBlock } from "./md.js";
-import { clampX, clampY, segEnd, segD, nearestT, splitSeg, zigzagPoints, wigglePoints, convertSeg, fitRoute, evalSeg, rdp, catmullToBezier, alignJoint, mirrorJoint, translateJointHandles, trimSegStart, trimSegEnd, trimPolyStart } from "./geometry.js";
+import { clampX, clampY, segEnd, segD, nearestT, splitSeg, zigzagPoints, wigglePoints, wigglePoly, zigzagPoly, convertSeg, fitRoute, evalSeg, rdp, catmullToBezier, alignJoint, mirrorJoint, translateJointHandles, trimSegStart, trimSegEnd, trimPolyStart } from "./geometry.js";
 import * as boards from "./boards.js";
 import { netShapes, bumperShapes, solidShapes, detourRoute, segCrossesNet } from "./net-collide.js";
 import { RinkMarkings } from "./rink.jsx";
@@ -242,19 +242,21 @@ function DelayTrigger({ value, onChange, sub, players, actorIds, nameOf }) {
 const SAVE_KEY = "drillboard:autosave";   // the whole board, persisted across refreshes
 
 export default function DrillAnimator() {
-  // boot from a #d=<base64url DSL> link if present (shareable preview link, same
-  // encoding as previewLink() — wins over autosave so a link always loads its
-  // drill), else the last auto-saved board, else the built-in demo
-  const init = (() => {
+  // a shared drill link (#d=<url-safe base64 DSL> — the preview-link format from
+  // previewLink()) boots straight into that drill. It wins over the autosave, and
+  // (see the auto-save effect) doesn't overwrite the saved board until you edit.
+  const linkDrill = (() => {
     try {
-      const h = window.location.hash || "";
-      const m = h.match(/[#&]d=([^&]+)/);
-      if (m) {
-        const b64 = m[1].replace(/-/g, "+").replace(/_/g, "/");
-        const dsl = decodeURIComponent(escape(atob(b64)));
-        const r = parseDrill(dsl); if (!r.errors.length) return r;
-      }
-    } catch { /* malformed link → fall through to autosave/demo */ }
+      const h = typeof window !== "undefined" ? window.location.hash : "";
+      const m = /[#&]d=([^&]+)/.exec(h || "");
+      if (!m) return null;
+      const dsl = decodeURIComponent(escape(atob(m[1].replace(/-/g, "+").replace(/_/g, "/"))));
+      const r = parseDrill(dsl);
+      return r.errors.length ? null : r;
+    } catch { return null; }   // malformed link → fall through to autosave/demo
+  })();
+  // boot from a link, else the last auto-saved board, else the built-in demo
+  const init = linkDrill || (() => {
     try {
       const saved = localStorage.getItem(SAVE_KEY);
       if (saved) { const r = parseDrill(saved); if (!r.errors.length) return r; }
@@ -1366,13 +1368,33 @@ export default function DrillAnimator() {
     const g = goaliePos(net, displayPosRaw);
     return mergeDiscs({ cx: sh.cx, cy: sh.cy, r: sh.r }, { cx: g.x, cy: g.y, r: GOALIE_R });
   });
+  // the round props (roughly circular footprints): passers, tires, dekers
+  const roundPropDiscs = () => [
+    ...pieces.filter(q => q.kind === "passer").map(q => ({ cx: q.x, cy: q.y, r: 2.6 })),
+    ...pieces.filter(q => q.kind === "tire").map(q => ({ cx: q.x, cy: q.y, r: 2.6 * ICON_SCALE * (q.size || 1) + 0.6 })),
+    ...pieces.filter(q => q.kind === "deker").map(q => ({ cx: q.x, cy: q.y, r: 2.6 })),
+  ];
   // solid props routes curve around: bumpers (a long bar enclosed by a disc),
   // passers, tires, and dekers. A jump over one lets it sit on the path instead.
   const propDiscs = () => [
     ...bumperShapes(pieces).map(sh => ({ cx: sh.cx, cy: sh.cy, r: sh.r })),
-    ...pieces.filter(q => q.kind === "passer").map(q => ({ cx: q.x, cy: q.y, r: 2.6 })),
-    ...pieces.filter(q => q.kind === "tire").map(q => ({ cx: q.x, cy: q.y, r: 2.6 * ICON_SCALE * (q.size || 1) + 0.6 })),
-    ...pieces.filter(q => q.kind === "deker").map(q => ({ cx: q.x, cy: q.y, r: 2.6 })),
+    ...roundPropDiscs(),
+  ];
+  // closest point on segment A→B to p
+  const nearOnSeg = (A, B, p) => {
+    const dx = B.x - A.x, dy = B.y - A.y, l2 = dx * dx + dy * dy || 1;
+    const t = Math.max(0, Math.min(1, ((p.x - A.x) * dx + (p.y - A.y) * dy) / l2));
+    return { x: A.x + dx * t, y: A.y + dy * t };
+  };
+  // prop discs for puck-shielding, measured from a reference point `ref` (the
+  // carrier's blade tip): a bumper is a long bar, so it TRIGGERS off the nearest
+  // point on its spine (tight — engages only near the bar, over the whole arc the
+  // carrier routes around), but opens AWAY FROM ITS CENTRE (`dcx`/`dcy`) so the
+  // body swings smoothly and never snaps 180° when rounding the bar's end. The
+  // reach uses the bar's own avoidance radius (`sh.r`, same as the route detour).
+  const shieldPropDiscs = ref => [
+    ...bumperShapes(pieces).map(sh => { const c = nearOnSeg(sh.spine[0], sh.spine[1], ref); return { cx: c.x, cy: c.y, r: sh.r, dcx: sh.cx, dcy: sh.cy }; }),
+    ...roundPropDiscs(),
   ];
   // where a player's route jumps (the waypoint at the start of a `jump` leg)
   const jumpPointsOf = p => (p && p.kind === "player" ? p.path : [])
@@ -1398,9 +1420,14 @@ export default function DrillAnimator() {
   function routeDetour(p) {
     if (!collisions) return null;                    // avoidance off — draw routes exactly as authored
     if (!p.path.length || (p.kind !== "player" && p.kind !== "puck")) return null;
-    if (detourCache.has(p.id)) return detourCache.get(p.id);
+    // Key by path LENGTH too: the drawn line passes the base piece while the
+    // animation passes the fork-inclusive `effOf` piece (longer path). Sharing by
+    // id alone let a base-only detour (ending at the branch point) drive the
+    // animation, freezing the skater there instead of continuing onto the fork.
+    const key = `${p.id}:${p.path.length}`;
+    if (detourCache.has(key)) return detourCache.get(key);
     const obstacles = detourObstaclesFor(p.id);
-    if (!obstacles.length) { detourCache.set(p.id, null); return null; }
+    if (!obstacles.length) { detourCache.set(key, null); return null; }
     const pts = [{ x: p.x, y: p.y }];
     let prev = { x: p.x, y: p.y }, origLen = 0;
     for (const s of p.path) {
@@ -1410,7 +1437,7 @@ export default function DrillAnimator() {
     }
     const det = detourRoute(pts, obstacles);
     const out = det !== pts ? { pts: det, origLen } : null;
-    detourCache.set(p.id, out);
+    detourCache.set(key, out);
     return out;
   }
   // point + heading at fraction f (0..1 by arc length) along a polyline
@@ -1445,10 +1472,14 @@ export default function DrillAnimator() {
       if (d < bd) { bd = d; near = sh; }
     }
     if (w <= 0 || !near) return 0;
-    // rotate the blade (whole icon) so it points further AWAY from the net
+    // rotate the blade (whole icon) so it points further AWAY from the obstacle.
+    // A disc may carry a separate direction anchor (dcx/dcy): a bumper triggers
+    // off its nearest edge point but opens AWAY FROM ITS CENTRE, so the body
+    // doesn't snap 180° as the carrier rounds the bar's end.
     const a = (aDeg * Math.PI) / 180;
+    const dcx = near.dcx ?? near.cx, dcy = near.dcy ?? near.cy;
     const bladeAng = Math.atan2(Math.sin(a) * TIP_FWD + Math.cos(a) * TIP_LAT * side, Math.cos(a) * TIP_FWD - Math.sin(a) * TIP_LAT * side);
-    let diff = bladeAng - Math.atan2(near.cy - y, near.cx - x);
+    let diff = bladeAng - Math.atan2(dcy - y, dcx - x);
     while (diff > Math.PI) diff -= 2 * Math.PI;
     while (diff < -Math.PI) diff += 2 * Math.PI;
     return (diff >= 0 ? 1 : -1) * w * 60;   // degrees, tunable
@@ -1884,10 +1915,22 @@ export default function DrillAnimator() {
         const dx = x - gd.cx, dy = y - gd.cy, d = Math.hypot(dx, dy), MIN = PLAYER_R + gd.r;
         if (d < MIN && d > 1e-3) { const push = (MIN - d) * 0.3; x += (dx / d) * push; y += (dy / d) * push; }
       }
-      // open the body to shield a carried puck from a net, goalie, or another player
+      // open the body to shield a carried puck from a net, goalie, another
+      // player, or an obstacle tool (bumper/tire/passer/deker) it routes around.
+      // Test the puck against my RAW blade (authored frame, matching the puck
+      // branch below) — NOT the detoured centre (x,y), which diverges from the
+      // puck by several feet at a detour's apex and would cut the shield off
+      // exactly when the carrier is rounding the obstacle.
+      const rawBlade = bladeAtWorld(res.x, res.y, res.a || 0, BLADE_FWD, BLADE_LAT, side);
       const carries = collisions && pieces.some(q => q.kind === "puck"
-        && Math.hypot(displayPosRaw(q).x - x, displayPosRaw(q).y - y) < 5.5);
-      if (carries) a += shieldDelta(x, y, a, side, [...netObstacles, ...others, ...gDiscs]);
+        && Math.hypot(displayPosRaw(q).x - rawBlade.x, displayPosRaw(q).y - rawBlade.y) < 2.2);
+      if (carries) {
+        // skip props the carrier jumps over (hopped, not routed around)
+        const jps = jumpPointsOf(p);
+        const bTip = bladeAtWorld(x, y, a, TIP_FWD, TIP_LAT, side);   // reach off the strong-side blade
+        const props = shieldPropDiscs(bTip).filter(d => !jps.some(j => Math.hypot(j.x - d.cx, j.y - d.cy) < d.r + 3));
+        a += shieldDelta(x, y, a, side, [...netObstacles, ...others, ...gDiscs, ...props]);
+      }
       return { ...res, x, y, a };
     }
     // a carried puck sits on its carrier's blade tip (so it stays on the stick
@@ -2092,8 +2135,12 @@ export default function DrillAnimator() {
   // app being killed. Debounced so a drag's frames coalesce into one write.
   // Skipped during AI play (that mutates pieces transiently, not real edits).
   const saveTimer = useRef(0);
+  // when booted from a shared #d= link, skip the first (mount) save so the user's
+  // existing autosave survives until they actually edit the linked drill
+  const skipFirstSave = useRef(!!linkDrill);
   useEffect(() => {
     if (aiPlay) return;
+    if (skipFirstSave.current) { skipFirstSave.current = false; return; }
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
       try { localStorage.setItem(SAVE_KEY, serializeDrill(rink, pieces, drillTitle, drillDesc, drillSteps, drillNotes, drillItems)); }
@@ -5191,6 +5238,16 @@ export default function DrillAnimator() {
                           : wig
                           ? <polyline points={wigglePoints(vFrom, vSeg, strokeAR, isLast || acts.has(i))} {...style} strokeLinejoin="round" pointerEvents="none" />
                           : <path d={vD} {...style} pointerEvents="none" />)}
+                        {/* detour active → the authored route lingers as a faint,
+                            dashed ghost so the user can still see + grab it (add
+                            waypoints / edit); the transparent hit path below drives
+                            the interaction, so the ghost stays pointer-transparent */}
+                        {showRoutes && bent && (
+                          <path d={vD} fill="none" stroke={p.color}
+                            strokeWidth={sw(0.5)} strokeDasharray={sdash("1.4 1.6")}
+                            strokeLinecap="round" vectorEffect="non-scaling-stroke"
+                            opacity={0.22} pointerEvents="none" />
+                        )}
                         {showRoutes && (
                           <path d={d} fill="none" stroke="transparent" strokeWidth={4}
                             onPointerDown={e => lineDown(e, p.id, i)} style={{ cursor: "pointer" }} />
@@ -5198,11 +5255,22 @@ export default function DrillAnimator() {
                       </g>
                     );
                   })}
-                  {bent && (
-                    <polyline points={(p.kind === "player" ? trimPolyStart(bent, ROUTE_START_GAP, strokeAR) : bent).map(q => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" ")}
-                      {...segStroke(p, p.path[p.path.length - 1] || {}, false)}
-                      strokeLinejoin="round" pointerEvents="none" />
-                  )}
+                  {bent && (() => {
+                    // a detour collapses the route to one polyline — keep the
+                    // hockey-diagram styling: wiggle a full carry, zigzag a fully
+                    // backward leg, plain otherwise (or when it's mixed)
+                    const line = p.kind === "player" ? trimPolyStart(bent, ROUTE_START_GAP, strokeAR) : bent;
+                    const allCarry = p.kind === "player" && carry && p.path.length > 0 && p.path.every((_, i) => carry.has(i));
+                    const allBwd = p.kind === "player" && p.path.length > 0 && p.path.every(s => s.dir === "bwd");
+                    const shaped = allCarry ? wigglePoly(line, strokeAR, true)
+                      : allBwd ? zigzagPoly(line, strokeAR)
+                      : line;
+                    return (
+                      <polyline points={shaped.map(q => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" ")}
+                        {...segStroke(p, p.path[p.path.length - 1] || {}, false)}
+                        strokeLinejoin="round" pointerEvents="none" />
+                    );
+                  })()}
                   {/* arrow + action badges last so they sit ON TOP of the line */}
                   {showRoutes && p.path.length > 0 && renderArrow(p, bent, acts)}
                   {showRoutes && renderActionMarks(p, bent, acts)}
