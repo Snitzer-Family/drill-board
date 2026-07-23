@@ -64,6 +64,9 @@ const ICONS = {
   ptSmooth: <><path d="M4 17L20 7" /><circle cx="9.5" cy="13.7" r="2.2" fill="none" /><circle cx="4" cy="17" r="1.9" {...F} /><circle cx="20" cy="7" r="1.9" {...F} /></>,
   ptSym: <><path d="M4 17L20 7" /><circle cx="12" cy="12" r="2.2" fill="none" /><circle cx="4" cy="17" r="1.9" {...F} /><circle cx="20" cy="7" r="1.9" {...F} /></>,
 };
+// the raw 24×24 glyph fragments, for embedding an icon directly inside other SVG
+// (e.g. an on-ice action badge) rather than through the <Icon> wrapper
+export { ICONS };
 export function Icon({ name, size = 17, style }) {
   const p = ICONS[name];
   if (!p) return null;

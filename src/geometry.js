@@ -175,6 +175,25 @@ export function trimSegStart(from, s, gap) {
   return null;                               // whole segment sits within the gap
 }
 
+// Trim a gap off the END of a segment for drawing (mirror of trimSegStart) —
+// leaves the leg stopping `gap` feet short of its endpoint. Returns { seg } or null.
+export function trimSegEnd(from, s, gap) {
+  const end = { x: s.x, y: s.y };
+  const N = 64;
+  let pT = 1, pD = 0;
+  for (let i = N - 1; i >= 0; i--) {
+    const t = i / N, pt = evalSeg(from, s, t);
+    const d = Math.hypot(pt.x - end.x, pt.y - end.y);
+    if (d >= gap) {
+      const f = Math.max(0, Math.min(1, (gap - pD) / (d - pD || 1)));
+      const [first] = splitSeg(from, s, pT + (t - pT) * f);
+      return { seg: first };
+    }
+    pT = t; pD = d;
+  }
+  return null;                               // whole segment sits within the gap
+}
+
 // Drop a `gap`-foot lead off the start of a polyline (the net-detour case),
 // interpolating the exact cut point. Returns a new points array.
 export function trimPolyStart(pts, gap) {
