@@ -127,6 +127,7 @@ Places a piece. `id` is any unique token (e.g. `F1`, `PK1`, `N2`).
 | `goalie` | net | A goalie who tracks the puck (pucks also enter only from the front — the sides/back are solid) |
 | `speed=<n>` | player, puck | Pace multiplier (1 = default; players default 1.5) |
 | `hand=L` / `hand=R` | player, stick | Shooting hand — mirrors the player's stick, or flips the on-ice stick prop's blade for a left/right-handed stick |
+| `sym=<text>` | player | Whiteboard-mode symbol (≤3 chars, e.g. `X`, `O`, `F`, `W1`; underscores read as spaces). Shown instead of the skater when **Whiteboard mode** is on (Settings). Unset players default to `X` if `defense`, else `O`. |
 | `face=<deg>` | route-less player, net, bumper, deker, passer | Facing angle (0 = +x / toward the right) |
 | `defense` | player | Auto-reacting defenceman (holds the slot, stays goal-side) |
 | `lock` | any | Pin the piece in place — it can't be dragged, rotated, or edited until unlocked. Toggle *🔒 Lock* on the piece popup, or lock/unlock everything via **☰ → Lock board**. (Bare word, parsed before the jersey-label catch-all.) |

@@ -137,7 +137,7 @@ export function DiagPanel({ drillVersion }) {
 
 /* ---------------- piece icon ---------------- */
 
-export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStickDown, swing = 0, noShadow = false, hitOff = false }) {
+export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStickDown, swing = 0, noShadow = false, hitOff = false, wb = false }) {
   const frame = xf || `translate(${pos.x} ${pos.y}) rotate(${pos.a || 0}) scale(${ICON_SCALE})`;
   let body;
   if (p.kind === "puck")
@@ -286,6 +286,22 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
         <rect x={0.85} y={-2.6} width={0.75} height={5.2} rx={0.3} fill={col} />
       </g>
     );
+  } else if (wb && p.kind === "player") {
+    // whiteboard mode: the classic coach's symbol (X / O / F / W1…) instead of
+    // the skater art — flat (no shadow), upright via the label's counter-rotation
+    const sym = (p.sym && p.sym.trim()) || (p.defense ? "X" : "O");
+    const fs = sym.length >= 3 ? 3.4 : sym.length === 2 ? 4.5 : 5.6;
+    body = (
+      <g pointerEvents="none">
+        {selected && <circle cx={0} cy={0} r={4.6} fill="none" stroke="#ffd447" strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
+        <text transform={`rotate(${-thDeg})`} textAnchor="middle" dominantBaseline="central"
+          fontSize={fs} fontWeight={900} fill={p.color}
+          style={{ userSelect: "none", fontFamily: "system-ui, sans-serif",
+            paintOrder: "stroke", stroke: "rgba(255,255,255,0.9)", strokeWidth: 0.55 }}>
+          {sym}
+        </text>
+      </g>
+    );
   } else {
     const dark = "#1d2126";
     body = (
@@ -339,7 +355,7 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
   return (
     <g opacity={dim ? 0.92 : 1} transform={frame}>
       {sz !== 1 ? <g transform={`scale(${sz})`}>{body}{grab}</g> : <>{body}{grab}</>}
-      {onStickDown && p.kind === "player" && (
+      {onStickDown && p.kind === "player" && !wb && (
         <circle cx={4.7} cy={p.hand === "L" ? -2.55 : 2.55} r={3.3} fill="transparent"
           pointerEvents={hPE} style={{ cursor: "grab" }} onPointerDown={onStickDown} />
       )}

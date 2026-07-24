@@ -156,7 +156,7 @@ export function parseDrill(text) {
           : kind === "label" ? "#14202b" : kind === "tire" ? "#1c1c1e" : kind === "stick" ? "#20242a" : kind === "light" ? "#2ea043" : "#d7263d";
         let label = kind === "player" ? id : "";
         let text = "", size = 1;                          // label piece: text + font scale
-        let speed = 1, hand = "R", carrier = null, facing = 0, shotAt = null, pickup = null, rimAt = null, chipAt = null, chipAim = null, rimAim = null, chipDist = null, rimDist = null, shotRef = null, rimRef = null, chipRef = null;
+        let speed = 1, hand = "R", sym = "", carrier = null, facing = 0, shotAt = null, pickup = null, rimAt = null, chipAt = null, chipAim = null, rimAim = null, chipDist = null, rimDist = null, shotRef = null, rimRef = null, chipRef = null;
         const xterms = [];                                      // overflow same-kind branch terminals
         let net = null, holdLine = false, goalie = false, defense = false, wait = null, group = null, crease = false, lock = false;
         let cues = [], rand = true, lmode = null, alwaysColor = null;   // light: cue timeline + route mode
@@ -175,6 +175,8 @@ export function parseDrill(text) {
               const n = parseFloat(v);
               if (!isNaN(n) && n > 0) size = n;
             } else if (key === "hand") hand = v.toUpperCase() === "L" ? "L" : "R";
+            else if (key === "sym") sym = unq(v).replace(/_/g, " ").trim().slice(0, 3);  // whiteboard symbol
+
             else if (key === "on") carrier = v;
             else if (key === "pass") {
               // pass=[<ref>.]<pt>:<to>[@[<ref>.]<recvPt>][^<passer>][!] — an optional
@@ -263,7 +265,7 @@ export function parseDrill(text) {
           else label = r;
         });
         const mode = lmode || (rand === false ? "sequence" : "reactive");   // legacy rand=off → sequence
-        const p = { id, kind, x, y, color, label, text, size, speed, hand, carrier, facing, transfers, shotAt, pickup, rimAt, chipAt, chipAim, rimAim, chipDist, rimDist, ...(shotRef ? { shotRef } : {}), ...(rimRef ? { rimRef } : {}), ...(chipRef ? { chipRef } : {}), ...(xterms.length ? { xterms } : {}), net, holdLine, goalie, defense, wait, group, crease, lock, cues, mode, alwaysColor, lightId, forks: [], path: [] };
+        const p = { id, kind, x, y, color, label, text, size, speed, hand, sym, carrier, facing, transfers, shotAt, pickup, rimAt, chipAt, chipAim, rimAim, chipDist, rimDist, ...(shotRef ? { shotRef } : {}), ...(rimRef ? { rimRef } : {}), ...(chipRef ? { chipRef } : {}), ...(xterms.length ? { xterms } : {}), net, holdLine, goalie, defense, wait, group, crease, lock, cues, mode, alwaysColor, lightId, forks: [], path: [] };
         pieces.push(p); byId[id] = p;
       } else if (cmd === "PATH") {
         const id = tok[1];
@@ -416,6 +418,9 @@ export function serializeDrill(rink, pieces, title = "", desc = "", steps = [], 
     const lbl = p.label ? " " + String(p.label).replace(/[\s,]+/g, "_") : "";
     const spd = p.speed && p.speed !== 1 ? ` speed=${f2(p.speed)}` : "";
     const hnd = (p.kind === "player" || p.kind === "stick") && p.hand === "L" ? " hand=L" : "";
+    // whiteboard-mode symbol (X/O/F/W1…); underscore-escaped like label/group
+    const sm = p.kind === "player" && p.sym && String(p.sym).trim()
+      ? ` sym=${String(p.sym).trim().slice(0, 3).replace(/[\s,]+/g, "_")}` : "";
     const car = p.kind === "puck" && p.carrier ? ` on=${p.carrier}` : "";
     const gp = p.kind === "puck" && !p.carrier && p.pickup ? ` pickup=${p.pickup.to}@${ixRef(p.pickup.at, p.pickup.atRef)}${p.pickup.nearest ? "*" : ""}` : "";
     // chain transfers in order: pass= passes, rebound= shot handoffs, rim=/chip= board plays.
@@ -466,7 +471,7 @@ export function serializeDrill(rink, pieces, title = "", desc = "", steps = [], 
           ? ` mode=always${p.alwaysColor || (p.cues && p.cues[0] && p.cues[0].color) ? ":" + String(p.alwaysColor || p.cues[0].color).replace("#", "") : ""}`
           : ` mode=${lm}`)
       : "";
-    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${car}${gp}${pas}${sht}${rmT}${chT}${xts}${nt}${hld}${wt}${fac}${gl}${crs}${df}${lck}${siz}${grp}${lgt}${cue}${rnd}${spd}`);
+    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${sm}${car}${gp}${pas}${sht}${rmT}${chT}${xts}${nt}${hld}${wt}${fac}${gl}${crs}${df}${lck}${siz}${grp}${lgt}${cue}${rnd}${spd}`);
     if (p.path.length) out.push(`PATH ${p.id} ${p.path.map(segToStr).join(" ")}`);
     // route branches (players): one conditional continuation per cue colour, with
     // the action the player performs at its end (skate default → omitted). Branches
