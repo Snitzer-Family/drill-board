@@ -4,7 +4,7 @@ import { VIEWS, COLORS, vb, APP_VERSION, ICON_SCALE, ROUTE_START_GAP, BUILD_STAM
 import { parseDrill, serializeDrill, extractDrill, deriveInventory } from "./drill-format.js";
 import { drillSvg } from "./drill-svg.js";
 import { mdEscape, mdInline, mdBlock } from "./md.js";
-import { clampX, clampY, segEnd, segD, nearestT, splitSeg, zigzagPoints, wigglePoints, wigglePoly, zigzagPoly, convertSeg, fitRoute, evalSeg, rdp, catmullToBezier, alignJoint, mirrorJoint, translateJointHandles, trimSegStart, trimSegEnd, trimPolyStart } from "./geometry.js";
+import { clampX, clampY, segEnd, segD, nearestT, splitSeg, zigzagPoints, wigglePoints, wigglePoly, zigzagPoly, convertSeg, fitRoute, evalSeg, rdp, catmullToBezier, alignJoint, mirrorJoint, translateJointHandles, trimSegStart, trimSegEnd, trimPolyStart, trimPolyEnd } from "./geometry.js";
 import * as boards from "./boards.js";
 import { netShapes, bumperShapes, solidShapes, detourRoute, segCrossesNet } from "./net-collide.js";
 import { RinkMarkings } from "./rink.jsx";
@@ -302,6 +302,7 @@ export default function DrillAnimator() {
   const [collisions, setCollisions] = useState(true);  // route avoidance (nets/goalie/players)
   const [avoidanceVisuals, setAvoidanceVisuals] = useState(true); // DRAW the detour bend + ghost (animation still avoids either way)
   const [previewAllBranches, setPreviewAllBranches] = useState(false); // ghost a player down EVERY candidate branch at once
+  const [arrowStagger, setArrowStagger] = useState(true); // tidy arrowheads: stagger converging heads + recess off crossing lines (off = marks land exactly where drawn)
   const [realisticShots, setRealisticShots] = useState(true); // random goal/post/wide/over + air; off = always bury flat
   const [detailAnim, setDetailAnim] = useState(true);  // skater stride sway, stick swing, dribble cradle
   const [lineScale, setLineScale] = useState(1);       // route line-thickness multiplier
@@ -3401,6 +3402,12 @@ export default function DrillAnimator() {
       const dd = Math.hypot(route[w].x - pt.x, route[w].y - pt.y);
       if (dd < bd) { bd = dd; best = w; }
     }
+    // a staggered end ARROWHEAD is a tap alias for the last waypoint — the head
+    // sits pulled back on the line, away from the true endpoint it stands for
+    if (!fork && route.length && endStagger[id]) {
+      const hp = staggeredEndPt(p, endStagger[id]);
+      if (hp && Math.hypot(hp.x - pt.x, hp.y - pt.y) < bd) best = route.length - 1;
+    }
     return best;
   }
   function lineDown(e, id, segIdx, fork = null) {
@@ -3876,6 +3883,12 @@ export default function DrillAnimator() {
   /* ---- action badges at waypoints ---- */
   // gap (rink ft) the line leaves around an action badge; badge radius in icon-frame units
   const ACT_GAP = 3.4, ACT_R = 3.0;
+  // route ends converging on one waypoint queue their arrowheads back along their
+  // own lines (same idea as the shot stagger in puckPathNodes) instead of clumping
+  const ARROW_CLUSTER_R = 2;      // ft: only ends that directly overlap share a stagger group
+  const ARROW_STAGGER_STEP = 2.5; // ft each queued arrowhead steps back (~one chevron depth)
+  const ARROW_MIN_KEEP = 2;       // ft of last leg that must survive the trim
+  const ARROW_LINE_CLEAR = 1.2;   // ft a head keeps clear of any foreign route line
   // priority for picking the "main" action shown in a badge with several actions
   const ACT_PRI = { shot: 5, pass: 4, rim: 3, chip: 2, receive: 1, collect: 1, pickup: 1 };
   const stepActionType = st => st.role === "pickup" ? "pickup" : st.role === "receive" ? "receive"
@@ -3978,9 +3991,103 @@ export default function DrillAnimator() {
     return iconBadge(pt, "react", color, key);
   }
 
+  // Where p's end mark actually renders once its stagger pull-back is applied —
+  // the endpoint of the last leg trimmed by `gap` (the same trim the visible line
+  // and renderArrow use, so all three agree). Shared by the stagger's clearance
+  // pass, the arrowhead grab alias in renderHandles, and waypointUnderTap.
+  function staggeredEndPt(p, gap) {
+    const n = p.path.length;
+    const last = p.path[n - 1];
+    if (!last) return null;
+    if (!(gap > 0)) return { x: last.x, y: last.y };
+    const prev = n >= 2 ? segEnd(p, n - 2) : { x: p.x, y: p.y };
+    const t = trimSegEnd(prev, last, gap, strokeAR);
+    return t ? { x: t.seg.x, y: t.seg.y } : { x: last.x, y: last.y };
+  }
+
+  // Several route ends converging on one waypoint would stamp their end marks on
+  // the exact same spot — group ends within ARROW_CLUSTER_R and pull each mark
+  // back along its OWN line by a spaced interval so the heads queue up readably
+  // (the same de-confliction puckPathNodes does for shots on one net). Shortest
+  // last leg keeps the true endpoint; the pull-back is clamped so a short leg
+  // never trims past its own start. A second pass then RECESSES any head sitting
+  // on a foreign route's line until it clears it. Cosmetic only — ref paths/
+  // timing untouched.
+  function routeEndStagger() {
+    const ends = [];
+    for (const p of pieces) {
+      const n = (p.path || []).length;
+      if (!n) continue;
+      // mirror renderArrow's early exits so only ends that DRAW a mark cluster
+      if (p.kind === "player" && actionWaypoints(p).has(n - 1)) continue;
+      if ((p.forks || []).some(f => f.path && f.path.length)) continue;
+      const last = p.path[n - 1];
+      const prev = n >= 2 ? segEnd(p, n - 2) : { x: p.x, y: p.y };
+      ends.push({ p, id: p.id, x: last.x, y: last.y,
+        len: Math.hypot((last.x - prev.x) * gmSar, (last.y - prev.y) / gmSar) });
+    }
+    const clusters = [];
+    for (const e of ends) {
+      let c = clusters.find(c => Math.hypot(c.seed.x - e.x, c.seed.y - e.y) <= ARROW_CLUSTER_R);
+      if (!c) { c = { seed: e, list: [] }; clusters.push(c); }
+      c.list.push(e); e.cluster = c;
+    }
+    const out = {};
+    for (const c of clusters) {
+      if (c.list.length < 2) continue;
+      c.list.sort((a, b) => a.len - b.len).forEach((e, i) => {
+        if (i) out[e.id] = Math.min(i * ARROW_STAGGER_STEP, Math.max(0, e.len - ARROW_MIN_KEEP));
+      });
+    }
+    // clearance pass: a head landing on a FOREIGN route's line recesses further
+    // back along its own line until it clears. Same-cluster lines are excluded —
+    // they converge on the shared point by definition, and the along-line stagger
+    // above is their de-confliction. Distances in gm space so clearance reads the
+    // same in every direction under the fill-mode stretch. If a head can never
+    // clear (a near-parallel foreign line), it keeps its base spot.
+    if (ends.length) {
+      const lines = pieces.filter(q => (q.path || []).length).map(q => {
+        const pts = [{ x: q.x * gmSar, y: q.y / gmSar }];
+        let prev = { x: q.x, y: q.y };
+        for (const s of q.path) {
+          for (let k = 1; k <= 12; k++) { const t = evalSeg(prev, s, k / 12); pts.push({ x: t.x * gmSar, y: t.y / gmSar }); }
+          prev = { x: s.x, y: s.y };
+        }
+        return { id: q.id, pts };
+      });
+      const segd = (P, a, b) => {   // point-to-segment distance (gm space)
+        const vx = b.x - a.x, vy = b.y - a.y, L2 = vx * vx + vy * vy;
+        const t = L2 ? Math.max(0, Math.min(1, ((P.x - a.x) * vx + (P.y - a.y) * vy) / L2)) : 0;
+        return Math.hypot(P.x - (a.x + vx * t), P.y - (a.y + vy * t));
+      };
+      for (const e of ends) {
+        const own = new Set(e.cluster.list.map(m => m.id));
+        const foreign = lines.filter(l => !own.has(l.id));
+        if (!foreign.length) continue;
+        const maxGap = Math.max(0, e.len - ARROW_MIN_KEEP);
+        let gap = out[e.id] || 0, clearAt = null;
+        for (let tries = 0; tries < 12; tries++) {
+          const hp = staggeredEndPt(e.p, gap);
+          const P = { x: hp.x * gmSar, y: hp.y / gmSar };
+          const hit = foreign.some(l => {
+            for (let k = 1; k < l.pts.length; k++) if (segd(P, l.pts[k - 1], l.pts[k]) < ARROW_LINE_CLEAR) return true;
+            return false;
+          });
+          if (!hit) { clearAt = gap; break; }
+          if (gap >= maxGap) break;
+          gap = Math.min(maxGap, gap + 0.75);
+        }
+        if (clearAt != null && clearAt > 0) out[e.id] = clearAt;
+      }
+    }
+    return out;
+  }
+
   // Arrowhead at a route's end, drawn in the stretch-cancelling icon frame so it
   // stays a clean triangle (SVG markers get sheared by the fill-mode stretch).
-  function renderArrow(p, bentPts, acts) {
+  // `gap` (rink ft) pulls the mark back along the line — the converging-waypoint
+  // stagger; the visible line is trimmed by the same amount at the call site.
+  function renderArrow(p, bentPts, acts, gap = 0) {
     const n = p.path.length;
     if (!n) return null;
     if (acts && acts.has(n - 1)) return null;   // an action badge marks this end instead
@@ -3992,12 +4099,18 @@ export default function DrillAnimator() {
     // lines up with the curve actually shown, not the raw path
     let endPt, tx, ty;
     if (bentPts && bentPts.length >= 2) {
-      endPt = bentPts[bentPts.length - 1];
-      const b = bentPts[Math.max(0, bentPts.length - 4)];
+      const pts = gap > 0 ? trimPolyEnd(bentPts, gap, strokeAR) : bentPts;
+      endPt = pts[pts.length - 1];
+      const b = pts[Math.max(0, pts.length - 4)];
       tx = endPt.x - b.x; ty = endPt.y - b.y;
     } else {
-      const last = p.path[n - 1];
+      let last = p.path[n - 1];
       const prev = n >= 2 ? segEnd(p, n - 2) : { x: p.x, y: p.y };
+      if (gap > 0) {
+        // the SAME trim the visible line got, so head and line end agree
+        const t = trimSegEnd(prev, last, gap, strokeAR);
+        if (t) last = t.seg;
+      }
       endPt = { x: last.x, y: last.y };
       const near = evalSeg(prev, last, 0.97);   // sample the TRUE end tangent so the carat lines up with the line's final run
       tx = last.x - near.x; ty = last.y - near.y;
@@ -4101,6 +4214,16 @@ export default function DrillAnimator() {
           onPointerDown: e => handleDown(e, { kind: "anchor", id: p.id, seg: i, wp: i, ...(fork ? { fork } : {}) }) }));
       }
     });
+    // the staggered end ARROWHEAD doubles as a grab target for the last waypoint —
+    // when the head is pulled back off the true endpoint (converging-waypoint
+    // stagger), grabbing/tapping the visual you see still edits that endpoint
+    if (!fork && route.length && endStagger[p.id]) {
+      const li = route.length - 1, ls = route[li];
+      const lkOffA = (p.lock || ls.lock) && !lockedSelectable;
+      const hp = staggeredEndPt(p, endStagger[p.id]);
+      if (hp && !lkOffA) els.push(hd(hp.x, hp.y, DOT_R, { key: "arwgrab", fill: "transparent", style: { cursor: "grab" },
+        onPointerDown: e => handleDown(e, { kind: "anchor", id: p.id, seg: li, wp: li }) }));
+    }
     // while a leg popup is open ("Add point here"), ghost the would-be waypoint —
     // a dashed anchor at the tap's projection onto the curve, where the split lands
     if (popup && popup.type === "line" && popup.id === p.id && forkEq(popup.fork, fork) && popup.pt && route[popup.seg]) {
@@ -5908,6 +6031,9 @@ export default function DrillAnimator() {
   // during playback the "Routes on play" setting controls what stays visible;
   // while editing everything shows regardless
   const showRoutes = !aiPlay && (editing || playRoutes !== "hide");   // player route lines + stops
+  // converging-waypoint arrow pull-backs; the "Tidy arrowheads" setting turns the
+  // whole feature off, landing every mark exactly where its waypoint was drawn
+  const endStagger = showRoutes && arrowStagger ? routeEndStagger() : {};
   const showPuckPaths = !aiPlay && (editing || playRoutes === "all"); // planned pass / shot lines
   // while previewing all branches during playback, the branching players (and the pucks
   // they carry) are hidden — only the ghosts play out, one per candidate route
@@ -6036,7 +6162,7 @@ export default function DrillAnimator() {
                     // action badge (before this waypoint / after the previous one);
                     // the ref path + hit area below still use the full segment
                     const startGap = i === 0 && p.kind === "player" ? ROUTE_START_GAP : acts.has(i - 1) ? ACT_GAP : 0;
-                    const endGap = acts.has(i) ? ACT_GAP : 0;
+                    const endGap = acts.has(i) ? ACT_GAP : isLast ? (endStagger[p.id] || 0) : 0;
                     let vFrom = from, vSeg = s;
                     if (startGap) { const t = trimSegStart(vFrom, vSeg, startGap, strokeAR); if (t) { vFrom = t.from; vSeg = t.seg; } }
                     if (endGap) { const t = trimSegEnd(vFrom, vSeg, endGap, strokeAR); if (t) vSeg = t.seg; }
@@ -6073,7 +6199,8 @@ export default function DrillAnimator() {
                     // a detour collapses the route to one polyline — keep the
                     // hockey-diagram styling: wiggle a full carry, zigzag a fully
                     // backward leg, plain otherwise (or when it's mixed)
-                    const line = p.kind === "player" ? trimPolyStart(bent, ROUTE_START_GAP, strokeAR) : bent;
+                    let line = p.kind === "player" ? trimPolyStart(bent, ROUTE_START_GAP, strokeAR) : bent;
+                    if (endStagger[p.id]) line = trimPolyEnd(line, endStagger[p.id], strokeAR);
                     const allCarry = p.kind === "player" && carry && p.path.length > 0 && p.path.every((_, i) => carry.has(i));
                     const allBwd = p.kind === "player" && p.path.length > 0 && p.path.every(s => s.dir === "bwd");
                     const shaped = allCarry ? wigglePoly(line, strokeAR, true)
@@ -6086,7 +6213,7 @@ export default function DrillAnimator() {
                     );
                   })()}
                   {/* arrow + action badges last so they sit ON TOP of the line */}
-                  {showRoutes && p.path.length > 0 && renderArrow(p, bent, acts)}
+                  {showRoutes && p.path.length > 0 && renderArrow(p, bent, acts, endStagger[p.id] || 0)}
                   {showRoutes && renderActionMarks(p, bent, acts)}
                 </g>
               );
@@ -6734,6 +6861,11 @@ export default function DrillAnimator() {
               <span style={{ fontSize: 11, color: "#8b99a8" }}>draw the curved detour + ghost (off = straight lines; the skater still avoids)</span>
             </div>
           )}
+          <div className="hd-poprow">
+            <button className={`hd-mini${arrowStagger ? " on" : ""}`}
+              onClick={() => setArrowStagger(v => !v)}>{arrowStagger ? "✓ Tidy arrowheads" : "Tidy arrowheads"}</button>
+            <span style={{ fontSize: 11, color: "#8b99a8" }}>stagger converging arrows &amp; keep heads clear of crossing lines — off lands them exactly where drawn</span>
+          </div>
           <div className="hd-poprow">
             <button className={`hd-mini${previewAllBranches ? " on" : ""}`}
               onClick={() => setPreviewAllBranches(v => !v)}>{previewAllBranches ? "✓ Preview all branches" : "Preview all branches"}</button>

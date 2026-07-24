@@ -301,6 +301,24 @@ export function trimPolyStart(pts, gap, ar = 1) {
   return pts;                                // whole polyline within the gap
 }
 
+// Drop a `gap`-foot tail off the END of a polyline (mirror of trimPolyStart),
+// interpolating the exact cut point. Returns a new points array.
+export function trimPolyEnd(pts, gap, ar = 1) {
+  if (!pts || pts.length < 2) return pts;
+  const sar = Math.sqrt(ar);
+  const gm = (ax, ay, bx, by) => Math.hypot((bx - ax) * sar, (by - ay) / sar);
+  const end = pts[pts.length - 1];
+  for (let i = pts.length - 2; i >= 0; i--) {
+    if (gm(end.x, end.y, pts[i].x, pts[i].y) >= gap) {
+      const a = pts[i], b = pts[i + 1];
+      const segLen = gm(a.x, a.y, b.x, b.y) || 1;
+      const f = Math.max(0, Math.min(1, (gap - gm(end.x, end.y, b.x, b.y)) / segLen));
+      return [...pts.slice(0, i + 1), { x: b.x + (a.x - b.x) * f, y: b.y + (a.y - b.y) * f }];
+    }
+  }
+  return pts;                                // whole polyline within the gap
+}
+
 /* ---- waypoint "join" (Illustrator-style point types) ----
    A waypoint's two bézier handles are stored on two different segments: the
    INCOMING handle is the control of the leg ENDING at the waypoint (c2 for a
