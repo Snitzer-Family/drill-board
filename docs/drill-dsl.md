@@ -126,7 +126,7 @@ Places a piece. `id` is any unique token (e.g. `F1`, `PK1`, `N2`).
 | `size=<n>` | label, net, tire | label: font scale · **net**: `1` NHL / `0.62` mite · **tire**: `1` large / `0.55` small |
 | `goalie` | net | A goalie who tracks the puck (pucks also enter only from the front — the sides/back are solid) |
 | `speed=<n>` | player, puck | Pace multiplier (1 = default; players default 1.5) |
-| `hand=L` / `hand=R` | player | Shooting hand |
+| `hand=L` / `hand=R` | player, stick | Shooting hand — mirrors the player's stick, or flips the on-ice stick prop's blade for a left/right-handed stick |
 | `face=<deg>` | route-less player, net, bumper, deker, passer | Facing angle (0 = +x / toward the right) |
 | `defense` | player | Auto-reacting defenceman (holds the slot, stays goal-side) |
 | `hold=line` | player | Wait at the blue line until the puck enters the zone |

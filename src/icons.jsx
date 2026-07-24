@@ -238,15 +238,21 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
     const wood = p.color || "#20242a";
     body = (
       <g pointerEvents="none">
-        {selected && <rect x={-6.2} y={-2.5} width={12.6} height={5} rx={0.8} fill="none" stroke="#ffd447" strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
+        {selected && <rect x={-6.2} y={-3.0} width={12.6} height={5.6} rx={0.8} fill="none" stroke="#ffd447" strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
         <ellipse cx={0.5} cy={0.35} rx={6} ry={0.7} fill="#0a0f14" opacity={0.16} />
         {/* butt knob */}
         <rect x={-5.85} y={-0.5} width={0.7} height={1} rx={0.3} fill="#e7ebef" stroke="#9aa2ab" strokeWidth={0.1} />
         {/* shaft */}
-        <rect x={-5.3} y={-0.32} width={9} height={0.64} rx={0.3} fill={wood} stroke="#0c1014" strokeWidth={0.12} />
-        {/* heel + blade angled off the toe (with a slight curve) */}
-        <path d="M 3.5 -0.32 L 6.3 -1.85 Q 6.95 -1.6 6.85 -0.95 L 4.3 0.32 Z" fill={wood} stroke="#0c1014" strokeWidth={0.12} strokeLinejoin="round" />
-        <path d="M 4 -0.05 L 6.2 -1.25" stroke="#4a5058" strokeWidth={0.12} opacity={0.6} />
+        <rect x={-5.3} y={-0.32} width={8.8} height={0.64} rx={0.3} fill={wood} stroke="#0c1014" strokeWidth={0.12} />
+        {/* heel + blade angled up off the toe (steeper lie). The blade's TOP edge
+            peels off the shaft low (near centreline) so the heel stays thin, then
+            the back edge sweeps up to the toe; the bottom edge drapes flush over the
+            shaft toe so the joint reads as one continuous piece — no bulge.
+            hand=L mirrors the blade across the shaft for a left-handed stick. */}
+        <g transform={p.hand === "L" ? "scale(1 -1)" : undefined}>
+          <path d="M 3.45 -0.05 Q 4.3 -1.35 5.55 -2.95 Q 6.1 -2.78 5.95 -2.25 L 4.65 0.02 Q 4.3 0.34 3.7 0.33 L 2.6 0.32 Z" fill={wood} stroke="#0c1014" strokeWidth={0.12} strokeLinejoin="round" />
+          <path d="M 4.25 -0.95 L 5.3 -2.45" stroke="#4a5058" strokeWidth={0.12} opacity={0.6} />
+        </g>
       </g>
     );
   } else if (p.kind === "deker") {

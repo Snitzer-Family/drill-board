@@ -4793,6 +4793,18 @@ export default function DrillAnimator() {
               </div>
             </>
           )}
+          {p.kind === "stick" && (
+            <div className="hd-field">
+              <div className="hd-sectitle">Shoots</div>
+              <div className="hd-poprow">
+                <button className={`hd-mini${(p.hand || "R") === "R" ? " on" : ""}`}
+                  onClick={() => updateById(p.id, { hand: "R" })}>R</button>
+                <button className={`hd-mini${p.hand === "L" ? " on" : ""}`}
+                  onClick={() => updateById(p.id, { hand: "L" })}>L</button>
+              </div>
+              <div className="hd-sechint">Flips the blade for a left- or right-handed stick · drag to move · ring to rotate.</div>
+            </div>
+          )}
           {p.kind === "light" && (() => {
             const cues = p.cues || [];
             const nextColor = c => LIGHT_COLORS[(LIGHT_COLORS.indexOf(c) + 1) % LIGHT_COLORS.length];
@@ -6117,15 +6129,9 @@ export default function DrillAnimator() {
                 vectorEffect="non-scaling-stroke" pointerEvents="none" />
             )}
 
-            {pieces.map(p => (
-              <g key={`h-${p.id}`}>
-                {renderHandles(p)}
-                {/* a reaction fork open for editing gets its own handles */}
-                {editingFork && editingFork.id === p.id && forkOf(p, editingFork.color)
-                  ? renderHandles(p, yFix, editingFork.color) : null}
-              </g>
-            ))}
-            {renderMarkHandles()}
+            {/* route/mark editing handles are painted LAST (below, after the piece
+                icons) so grabbing a waypoint always wins over any prop stacked on
+                top of it — see the handles block after the pieces map. */}
 
             {/* preview all branches: while playing, a faint ghost of the player skates
                down EVERY candidate route at once, so the coach sees each reaction option
@@ -6277,6 +6283,18 @@ export default function DrillAnimator() {
                     ? e => stickDown(e, p) : undefined} />
               );
             })}
+            {/* editing handles ON TOP of all piece icons: a waypoint's grab target
+                must beat any prop (stick/cone/…) stacked over it, so these paint
+                after the pieces — same layer convention as the rotate/aim handles. */}
+            {pieces.map(p => (
+              <g key={`h-${p.id}`}>
+                {renderHandles(p)}
+                {/* a reaction fork open for editing gets its own handles */}
+                {editingFork && editingFork.id === p.id && forkOf(p, editingFork.color)
+                  ? renderHandles(p, yFix, editingFork.color) : null}
+              </g>
+            ))}
+            {renderMarkHandles()}
             {selected && renderRotateHandle(selected)}
           <g opacity={markMO}>{pieces.map(p => <g key={`ca-${p.id}`}>{renderAim(p)}</g>)}</g>
             {!aiPlay && renderLabels()}

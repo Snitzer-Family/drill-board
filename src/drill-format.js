@@ -407,7 +407,7 @@ export function serializeDrill(rink, pieces, title = "", desc = "", steps = [], 
     }
     const lbl = p.label ? " " + String(p.label).replace(/[\s,]+/g, "_") : "";
     const spd = p.speed && p.speed !== 1 ? ` speed=${f2(p.speed)}` : "";
-    const hnd = p.kind === "player" && p.hand === "L" ? " hand=L" : "";
+    const hnd = (p.kind === "player" || p.kind === "stick") && p.hand === "L" ? " hand=L" : "";
     const car = p.kind === "puck" && p.carrier ? ` on=${p.carrier}` : "";
     const gp = p.kind === "puck" && !p.carrier && p.pickup ? ` pickup=${p.pickup.to}@${ixRef(p.pickup.at, p.pickup.atRef)}${p.pickup.nearest ? "*" : ""}` : "";
     // chain transfers in order: pass= passes, rebound= shot handoffs, rim=/chip= board plays.
