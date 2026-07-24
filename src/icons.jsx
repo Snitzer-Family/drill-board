@@ -53,6 +53,8 @@ const ICONS = {
   upload: <><path d="M12 20.5v-11" /><path d="M7.5 14l4.5-4.5L16.5 14" /><path d="M4.5 4.5h15" /></>,
   image: <><rect x="3.5" y="4.5" width="17" height="15" rx="2.2" /><circle cx="8.5" cy="9.5" r="1.6" /><path d="M20 16l-5-5-8 8" /></>,
   keyboard: <><rect x="2.5" y="6" width="19" height="12" rx="2" /><path d="M6 9.5h.01M9.5 9.5h.01M13 9.5h.01M16.5 9.5h.01M7.5 14h9" /></>,
+  // presentation board on a stand with a rising line = presentation mode
+  presentation: <><rect x="3.5" y="3.5" width="17" height="12" rx="1.5" /><path d="M7 12l3-3.5 2.5 2L16.5 6" /><path d="M12 15.5v3" /><path d="M8.5 21l3.5-2.5 3.5 2.5" /></>,
   grid: <><rect x="3.5" y="3.5" width="7" height="7" rx="1" /><rect x="13.5" y="3.5" width="7" height="7" rx="1" /><rect x="3.5" y="13.5" width="7" height="7" rx="1" /><rect x="13.5" y="13.5" width="7" height="7" rx="1" /></>,
   gauge: <><path d="M4 18a8 8 0 1 1 16 0" /><path d="M12 18l4-5" /></>,
   sliders: <><path d="M5 5v14M12 5v14M19 5v14" /><circle cx="5" cy="9" r="1.9" {...F} /><circle cx="12" cy="14" r="1.9" {...F} /><circle cx="19" cy="8" r="1.9" {...F} /></>,
