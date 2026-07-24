@@ -5455,6 +5455,24 @@ export default function DrillAnimator() {
   const togglePlay = () => { if (animT >= 1) resetAnim(); if (!playing && animT === 0) setPlaySeed(s => s + 1); setPopup(null); setOpenMenu(null); setHoldStep(null); setPlacingStep(null); holdRef.current = 0; setPlaying(p => !p); };
   const resetPlay = () => { setPlaying(false); resetAnim(); };
 
+  // keyboard control for presentation / playback (laptop + projector use)
+  useEffect(() => {
+    const onKey = (e) => {
+      const el = e.target;
+      // never hijack typing in the group-name input, etc.
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
+      if (e.key === " " || e.code === "Space") {
+        e.preventDefault();
+        if (presentation && holdStep) skipHold();  // caption held → advance early
+        else togglePlay();                         // otherwise pause / continue
+      } else if (e.key === "Escape") {
+        if (playing) { e.preventDefault(); resetPlay(); }   // stop & reset
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [presentation, holdStep, playing]); // eslint-disable-line
+
   // during playback the "Routes on play" setting controls what stays visible;
   // while editing everything shows regardless
   const showRoutes = !aiPlay && (editing || playRoutes !== "hide");   // player route lines + stops
