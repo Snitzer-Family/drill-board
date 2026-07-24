@@ -109,8 +109,10 @@ function puckActors(pieces) {
 // subset that release a puck (for Action mode).
 function DelayTrigger({ value, onChange, sub, players, actorIds, nameOf }) {
   // mode is UI-local so switching to a type with no candidates still shows its
-  // hint; storage (via onChange) follows once a real trigger is chosen
-  const [uiMode, setUiMode] = useState(value.mode || "timer");
+  // hint; storage (via onChange) follows once a real trigger is chosen. Default
+  // is "None" (no delay): the parent passes {mode:"timer", secs:0} when nothing
+  // is set, so infer None from an empty trigger + zero timer.
+  const [uiMode, setUiMode] = useState(value.on ? (value.mode || "waypoint") : (value.secs ? "timer" : "none"));
   const mode = uiMode;
   const wpPlayers = players.filter(q => q.path && q.path.length > 0);
   const actPlayers = players.filter(q => actorIds.has(q.id));
@@ -118,6 +120,7 @@ function DelayTrigger({ value, onChange, sub, players, actorIds, nameOf }) {
 
   const pickMode = m => {
     setUiMode(m);
+    if (m === "none") { onChange({ mode: "none" }); return; }
     if (m === "timer") { onChange({ mode: "timer", secs: value.secs || 0 }); return; }
     const pool = m === "action" ? actPlayers : wpPlayers;
     const on = (value.on && pool.some(q => q.id === value.on)) ? value.on : (pool[0] && pool[0].id) || null;
@@ -141,10 +144,11 @@ function DelayTrigger({ value, onChange, sub, players, actorIds, nameOf }) {
   );
 
   return (
-    <>
+    <div className="hd-field">
+      <div className="hd-sectitle">Delay trigger</div>
+      <div className="hd-sechint">{sub} until a timer, a teammate’s arrival, or their puck action.</div>
       <div className="hd-poprow">
-        <span>Delay trigger</span>
-        {[["timer", "Timer"], ["waypoint", "Waypoint"], ["action", "Action"]].map(([m, lab]) => (
+        {[["none", "None"], ["timer", "Timer"], ["waypoint", "Waypoint"], ["action", "Action"]].map(([m, lab]) => (
           <button key={m} className={`hd-mini${mode === m ? " on" : ""}`} onClick={() => pickMode(m)}>{lab}</button>
         ))}
       </div>
@@ -181,7 +185,7 @@ function DelayTrigger({ value, onChange, sub, players, actorIds, nameOf }) {
           </select>
         </div>
       ) : hint("No player releases a puck yet (add a pass, shot, rim, or chip)."))}
-    </>
+    </div>
   );
 }
 
@@ -342,6 +346,12 @@ export default function DrillAnimator() {
   const [popPos, setPopPos] = useState(null);
   const [popDim, setPopDim] = useState(null);
   const [placeToken, setPlaceToken] = useState(0);   // bumped to run clear-space placement after a fresh open renders
+  // pinned panel: keep the editor open and re-target it to whatever's tapped next.
+  //   null | "float" (mobile-style floating, any screen) | "dock" (right sidebar, wide only)
+  const [pinMode, setPinMode] = useState(null);
+  const [isWide, setIsWide] = useState(() =>
+    typeof matchMedia === "function" &&
+    matchMedia("(pointer: fine) and (min-width: 760px)").matches);
   const [stageSize, setStageSize] = useState({ w: 800, h: 500 });
 
   const svgRef = useRef(null);
@@ -391,6 +401,20 @@ export default function DrillAnimator() {
 
   const selected = pieces.find(p => p.id === selectedId) || null;
   const editing = animT === 0 && !playing && !aiPlay;
+  // a pinned panel stays open + re-targets on the next tap (empty-tap keeps the
+  // last item); "dock" renders as a right sidebar but only on a wide/fine-pointer
+  // screen — a "dock" panel on a narrow screen falls back to the float render
+  const pinned = pinMode !== null;
+  const docked = pinMode === "dock" && isWide;
+  // keep isWide current so the sidebar/dock affordance appears/vanishes and a
+  // docked panel re-flows to floating when an iPad rotates across the breakpoint
+  useEffect(() => {
+    if (typeof matchMedia !== "function") return;
+    const mq = matchMedia("(pointer: fine) and (min-width: 760px)");
+    const on = () => setIsWide(mq.matches);
+    mq.addEventListener ? mq.addEventListener("change", on) : mq.addListener(on);
+    return () => { mq.removeEventListener ? mq.removeEventListener("change", on) : mq.removeListener(on); };
+  }, []);
 
   // stepping Prev/Next through a piece's waypoints keeps the popup put when it
   // isn't covering the route (see navPopup); this ref tells the reset effects to
@@ -402,7 +426,7 @@ export default function DrillAnimator() {
   // runs first, so it checks the flag but leaves it for the passive effect to
   // clear last — both must see it on a preserved Prev/Next step)
   useLayoutEffect(() => {
-    if (preservePopPos.current) return;                 // Prev/Next kept it in place
+    if (preservePopPos.current || pinned) return;       // Prev/Next, or a pinned panel, keeps its spot + size
     // fresh open: reset to the auto edge-anchor at default size, then (next
     // render) run clear-space placement now that the real content is measurable
     setPopState("mid"); setPopPos(null); setPopDim(null);
@@ -471,7 +495,26 @@ export default function DrillAnimator() {
     if (!d) return;
     setPopOff({ x: d.ox + e.clientX - d.sx, y: d.oy + e.clientY - d.sy });
   }
-  function popDragEnd() { popDrag.current = null; }
+  function popDragEnd() { popDrag.current = null; if (pinned) freezePopSpot(); }
+
+  // freeze the panel's current on-screen rect into an explicit popPos so a pinned
+  // (float) panel keeps its spot as it re-targets to each next item tapped (the
+  // reset-on-target effect is skipped while pinned, so popPos/popDim then stick)
+  function freezePopSpot() {
+    const el = popRef.current;
+    if (!el) return;
+    const par = el.offsetParent || el.parentElement;
+    const pr = par.getBoundingClientRect();
+    const r = el.getBoundingClientRect();               // includes the current popOff translate
+    setPopOff({ x: 0, y: 0 });                          // popOff folded into popPos
+    setPopPos({ top: r.top - pr.top, left: r.left - pr.left });
+  }
+  function togglePin() {
+    if (pinMode === "float") { setPinMode(null); return; }
+    if (pinMode !== "dock") freezePopSpot();            // hold the current floating spot across re-targets
+    setPinMode("float");
+  }
+  function toggleDock() { setPinMode(m => m === "dock" ? null : "dock"); }
 
   // resize handles: "h" (bottom bar → height only) or "wh" (corner → both). The
   // first grab detaches the popup from its auto edge-anchor into an explicit
@@ -2006,7 +2049,9 @@ export default function DrillAnimator() {
     // (else the nearest wins); the designation covers its base + chained branches
     const cueLights = pieces.filter(q => q.kind === "light" && (q.cues || []).length);
     return (
-      <>
+      <div className="hd-field">
+        <div className="hd-sectitle">{parentRef ? "Chain a reaction" : "Light reactions"} ({light.id})</div>
+        <div className="hd-sechint">A route per cue — Edit a route to set its waypoint actions.</div>
         {!parentRef && cueLights.length > 1 && (
           <div className="hd-poprow">
             <span style={{ fontSize: 11, color: "#8b99a8" }}>Read light</span>
@@ -2017,11 +2062,6 @@ export default function DrillAnimator() {
             </select>
           </div>
         )}
-        <div className="hd-poprow">
-          <span style={{ fontSize: 11, color: "#8b99a8" }}>
-            {parentRef ? "Chain a reaction" : "Light reactions"} ({light.id}) — a route per cue; Edit a route to set its waypoint actions
-          </span>
-        </div>
         {colors.map(c => {
           const ref = parentRef ? parentRef + "/" + c : c;
           const fk = forkAt(p, ref);
@@ -2056,7 +2096,7 @@ export default function DrillAnimator() {
             </div>
           );
         })}
-      </>
+      </div>
     );
   }
   // the set of fork refs (lower-cased) to draw SOLID (the others dashed) — the
@@ -3011,7 +3051,9 @@ export default function DrillAnimator() {
       setTool("select");
       return;
     }
-    setPopup(null);
+    // pinned: an empty-ice tap keeps the last-edited item in the panel (don't
+    // close it) — but still allow double-tap "add here" and box-select below
+    if (!(pinned && editing)) setPopup(null);
     if (!editing) { setSelectedId(null); setMultiSel(null); return; }
     // double-click / double-tap on empty ice → "add here" menu
     const now = performance.now();
@@ -3328,7 +3370,7 @@ export default function DrillAnimator() {
       if (Math.hypot(pt.x - d.start.x, pt.y - d.start.y) < TAP_DIST) return;
       d.moved = true;
       d.last = d.start;
-      setPopup(null);
+      if (!pinned) setPopup(null);   // a pinned/docked panel stays open while dragging
     }
     // box-select: track the rectangle (no loupe — it's not a precise handle drag)
     if (d.kind === "marquee") { d.last = pt; setMarquee({ x0: d.start.x, y0: d.start.y, x1: pt.x, y1: pt.y }); return; }
@@ -4338,7 +4380,32 @@ export default function DrillAnimator() {
   }
 
   function renderPopout() {
-    if (!popup || !editing || tool === "draw") return null;
+    // a pinned/docked panel stays up while the animation runs so the last
+    // selected item keeps its info in view; an unpinned popup only shows while
+    // stopped at the start (editing). "draw" always hides it; a missing target
+    // = nothing to show.
+    const noTarget = !popup || tool === "draw" ||
+      (popup.type !== "add" && !pieces.find(q => q.id === popup.id));
+    const hidden = noTarget || (!editing && !pinned);
+    // docked sidebar with nothing valid to show: keep the reserved column in
+    // place with a hint instead of collapsing it to an empty gap
+    if (docked && hidden) {
+      return (
+        <div className="hd-pop pinned dock" ref={popRef} onPointerDown={e => e.stopPropagation()}>
+          <div className="hd-pophead">
+            <span className="hd-poptitle">Edit</span>
+            <button className="hd-x on" title="Un-dock" onPointerDown={e => e.stopPropagation()}
+              onClick={toggleDock}><Icon name="sidebar" size={15} /></button>
+            <button className="hd-x" title="Close" onPointerDown={e => e.stopPropagation()}
+              onClick={() => { setPopup(null); setPinMode(null); }}><Icon name="close" size={15} /></button>
+          </div>
+          <div className="hd-poprow" style={{ color: "#8b99a8", fontSize: 12 }}>
+            Tap a player, puck, or point to edit it here.
+          </div>
+        </div>
+      );
+    }
+    if (hidden) return null;
     const p = pieces.find(q => q.id === popup.id);
     if (!p && popup.type !== "add") return null;
 
@@ -4380,6 +4447,24 @@ export default function DrillAnimator() {
 
     const ActionSteps = (p, i, fork = null) => {
       const steps = stepsAt(p, i, fork);
+      // at the START spot (i<0): if a puck the player is carrying here is passed
+      // or shot at a LATER waypoint of theirs, lock the start Actions — adding an
+      // action here would take that puck away before it reaches the downchain
+      // action that needs it. Edit the action at that waypoint instead.
+      const startLocked = i < 0 && p.kind === "player" && pieces.some(pk => {
+        if (pk.kind !== "puck") return false;
+        const chain = puckChain(pk);
+        const carriedHere = pk.carrier === p.id
+          || (pk.pickup && pk.pickup.to === p.id && (pk.pickup.at == null || pk.pickup.at < 0));
+        if (!carriedHere) return false;
+        const ts = pk.transfers || [];
+        const releaseDown = ts.some((t, s) => (t.by || chain[s]) === p.id && t.at != null && t.at >= 0);
+        const termActor = pk.termBy || chain[chain.length - 1];
+        const termDown = termActor === p.id && (
+          (pk.shotAt != null && pk.shotAt >= 0) || (pk.rimAt != null && pk.rimAt >= 0)
+          || (pk.chipAt != null && pk.chipAt >= 0) || (pk.xterms || []).some(xt => xt.at != null && xt.at >= 0));
+        return releaseDown || termDown;
+      });
       // this spot's route: puck actions authored here carry the branch ref so
       // resolveForks can lower them to the chosen run's flat index (base = no ref)
       const relRef = fork ? { atRef: fork } : {};
@@ -4550,8 +4635,14 @@ export default function DrillAnimator() {
         </div>
       );
       return (
-        <div style={{ margin: "6px 0", padding: "7px 8px", background: "rgba(120,140,160,0.12)", borderRadius: 8 }}>
-          <div className="hd-mh" style={{ marginBottom: 5 }}>Action — {i < 0 ? "waypoint 0 · start" : `waypoint ${i + 1}`}</div>
+        <div style={{ margin: "6px 0", padding: "7px 8px", background: "rgba(120,140,160,0.12)", borderRadius: 8,
+          opacity: startLocked ? 0.5 : 1, pointerEvents: startLocked ? "none" : "auto" }}>
+          <div className="hd-mh" style={{ marginBottom: 5 }}>Actions</div>
+          {startLocked && (
+            <div className="hd-poprow"><span style={{ fontSize: 10.5, color: "#c98a2b" }}>
+              This puck is passed or shot at a later waypoint — set that action there.
+            </span></div>
+          )}
           {rows.length > 0 && addRow("addtop")}
           {rows.map(({ st, opts }, n) => {
             const t = typeOfStep(st);
@@ -4602,7 +4693,18 @@ export default function DrillAnimator() {
       );
     } else if (popup.type === "piece") {
       anchorPt = { x: p.x, y: p.y };
-      title = p.kind === "player" ? `Player ${p.id}` : p.kind === "puck" ? `Puck ${p.id}`
+      // one shared "Route" field (title above, instruction, curve buttons) —
+      // used at the top of the player menu and in the puck editor
+      const routeField = () => (
+        <div className="hd-field">
+          <div className="hd-sectitle">Route</div>
+          <div className="hd-sechint">
+            {p.path.length ? "Click a shape to extend the route, or draw freehand." : "Click a shape to start a route, or draw freehand."}
+          </div>
+          <div className="hd-poprow">{curveButtons(t => addSegment(p.id, t), () => drawRouteMode(p.id))}</div>
+        </div>
+      );
+      title = p.kind === "player" ? `Player ${p.label || p.id}` : p.kind === "puck" ? `Puck ${p.id}`
         : p.kind === "net" ? `Net ${p.id}` : p.kind === "bumper" ? `Bumper ${p.id}`
         : p.kind === "deker" ? `Deker ${p.id}` : p.kind === "passer" ? `Passer ${p.id}`
         : p.kind === "label" ? `Label ${p.id}` : p.kind === "tire" ? `Tire ${p.id}` : p.kind === "stick" ? `Stick ${p.id}`
@@ -4611,66 +4713,83 @@ export default function DrillAnimator() {
         <>
           {p.kind === "label" && (
             <>
-              <div className="hd-poprow">
-                <span>Text</span>
-                <input className="hd-input" style={{ flex: 1, minWidth: 120 }} value={p.text || ""}
-                  placeholder="Label text" autoFocus
-                  onChange={e => updateById(p.id, { text: e.target.value })} />
+              <div className="hd-field">
+                <div className="hd-sectitle">Text</div>
+                <div className="hd-poprow">
+                  <input className="hd-input" style={{ flex: 1, minWidth: 120 }} value={p.text || ""}
+                    placeholder="Label text" autoFocus
+                    onChange={e => updateById(p.id, { text: e.target.value })} />
+                </div>
               </div>
-              <div className="hd-poprow">
-                <span>Size</span>
-                <Stepper value={+(p.size || 1).toFixed(2)} onChange={v => updateById(p.id, { size: Math.max(0.4, v) })} step={0.2} min={0.4} suffix="×" />
-                <span style={{ fontSize: 11, color: "#8b99a8" }}>drag to move · corner to resize</span>
+              <div className="hd-field">
+                <div className="hd-sectitle">Size</div>
+                <div className="hd-poprow">
+                  <Stepper value={+(p.size || 1).toFixed(2)} onChange={v => updateById(p.id, { size: Math.max(0.4, v) })} step={0.2} min={0.4} suffix="×" />
+                </div>
+                <div className="hd-sechint">Drag to move · corner to resize.</div>
               </div>
-              <div className="hd-poprow">
-                {LABEL_COLORS.map(c => (
-                  <div key={c} className={`hd-swatch${p.color === c ? " on" : ""}`} style={{ background: c }}
-                    onClick={() => updateById(p.id, { color: c })} />
-                ))}
+              <div className="hd-field">
+                <div className="hd-sectitle">Color</div>
+                <div className="hd-poprow">
+                  {LABEL_COLORS.map(c => (
+                    <div key={c} className={`hd-swatch${p.color === c ? " on" : ""}`} style={{ background: c }}
+                      onClick={() => updateById(p.id, { color: c })} />
+                  ))}
+                </div>
               </div>
             </>
           )}
           {p.kind === "net" && (
             <>
-              <div className="hd-poprow">
-                <button className={`hd-mini${p.goalie ? " on" : ""}`}
-                  onClick={() => updateById(p.id, { goalie: !p.goalie })}>
-                  {p.goalie ? "✓ Goalie in net" : "🥅 Goalie in net"}
-                </button>
-                <span style={{ fontSize: 11, color: "#8b99a8" }}>drag to move · ring to rotate</span>
+              <div className="hd-field">
+                <div className="hd-poprow">
+                  <button className={`hd-mini${p.goalie ? " on" : ""}`}
+                    onClick={() => updateById(p.id, { goalie: !p.goalie })}>
+                    {p.goalie ? "✓ Goalie in net" : "🥅 Goalie in net"}
+                  </button>
+                </div>
+                <div className="hd-sechint">Drag to move · ring to rotate.</div>
               </div>
-              <div className="hd-poprow">
-                <button className={`hd-mini${p.crease ? " on" : ""}`}
-                  onClick={() => updateById(p.id, { crease: !p.crease })}>
-                  {p.crease ? "✓ Crease drawn" : "◗ Draw crease"}
-                </button>
-                <span style={{ fontSize: 11, color: "#8b99a8" }}>an arc in front — for a net off the goal line</span>
+              <div className="hd-field">
+                <div className="hd-poprow">
+                  <button className={`hd-mini${p.crease ? " on" : ""}`}
+                    onClick={() => updateById(p.id, { crease: !p.crease })}>
+                    {p.crease ? "✓ Crease drawn" : "◗ Draw crease"}
+                  </button>
+                </div>
+                <div className="hd-sechint">An arc in front — for a net off the goal line.</div>
               </div>
-              <div className="hd-poprow">
-                <span>Size</span>
-                <button className={`hd-mini${(p.size || 1) >= 0.85 ? " on" : ""}`}
-                  onClick={() => updateById(p.id, { size: 1 })}>NHL</button>
-                <button className={`hd-mini${(p.size || 1) < 0.85 ? " on" : ""}`}
-                  onClick={() => updateById(p.id, { size: 0.62 })}>Mite</button>
+              <div className="hd-field">
+                <div className="hd-sectitle">Size</div>
+                <div className="hd-poprow">
+                  <button className={`hd-mini${(p.size || 1) >= 0.85 ? " on" : ""}`}
+                    onClick={() => updateById(p.id, { size: 1 })}>NHL</button>
+                  <button className={`hd-mini${(p.size || 1) < 0.85 ? " on" : ""}`}
+                    onClick={() => updateById(p.id, { size: 0.62 })}>Mite</button>
+                </div>
               </div>
             </>
           )}
           {p.kind === "tire" && (
             <>
-              <div className="hd-poprow">
-                <button className={`hd-mini${p.goalie ? " on" : ""}`}
-                  onClick={() => updateById(p.id, { goalie: !p.goalie })}>
-                  {p.goalie ? "✓ Keeper on the tire" : "🥅 Keeper on the tire"}
-                </button>
-                <span style={{ fontSize: 11, color: "#8b99a8" }}>defends shots all the way around</span>
+              <div className="hd-field">
+                <div className="hd-poprow">
+                  <button className={`hd-mini${p.goalie ? " on" : ""}`}
+                    onClick={() => updateById(p.id, { goalie: !p.goalie })}>
+                    {p.goalie ? "✓ Keeper on the tire" : "🥅 Keeper on the tire"}
+                  </button>
+                </div>
+                <div className="hd-sechint">Defends shots all the way around.</div>
               </div>
-              <div className="hd-poprow">
-                <span>Size</span>
-                <button className={`hd-mini${(p.size || 1) >= 0.8 ? " on" : ""}`}
-                  onClick={() => updateById(p.id, { size: 1 })}>Large</button>
-                <button className={`hd-mini${(p.size || 1) < 0.8 ? " on" : ""}`}
-                  onClick={() => updateById(p.id, { size: 0.55 })}>Small</button>
-                <span style={{ fontSize: 11, color: "#8b99a8" }}>drag to move</span>
+              <div className="hd-field">
+                <div className="hd-sectitle">Size</div>
+                <div className="hd-poprow">
+                  <button className={`hd-mini${(p.size || 1) >= 0.8 ? " on" : ""}`}
+                    onClick={() => updateById(p.id, { size: 1 })}>Large</button>
+                  <button className={`hd-mini${(p.size || 1) < 0.8 ? " on" : ""}`}
+                    onClick={() => updateById(p.id, { size: 0.55 })}>Small</button>
+                </div>
+                <div className="hd-sechint">Drag to move.</div>
               </div>
             </>
           )}
@@ -4680,12 +4799,14 @@ export default function DrillAnimator() {
             const setCues = next => updateById(p.id, { cues: next });
             return (
               <>
-                <div className="hd-poprow">
-                  <span>Idle</span>
-                  {LIGHT_COLORS.map(c => (
-                    <div key={c} className={`hd-swatch${p.color === c ? " on" : ""}`} style={{ background: c }}
-                      onClick={() => updateById(p.id, { color: c })} />
-                  ))}
+                <div className="hd-field">
+                  <div className="hd-sectitle">Idle color</div>
+                  <div className="hd-poprow">
+                    {LIGHT_COLORS.map(c => (
+                      <div key={c} className={`hd-swatch${p.color === c ? " on" : ""}`} style={{ background: c }}
+                        onClick={() => updateById(p.id, { color: c })} />
+                    ))}
+                  </div>
                 </div>
                 {(() => {
                   const mode = lightMode(p);
@@ -4699,144 +4820,167 @@ export default function DrillAnimator() {
                   const hint = (MODES.find(m => m[0] === mode) || MODES[0])[2];
                   return (
                     <>
-                      <div className="hd-poprow">
-                        <span>Mode</span>
-                        {MODES.map(([m, lbl]) => (
-                          <button key={m} className={`hd-mini${mode === m ? " on" : ""}`}
-                            onClick={() => updateById(p.id, { mode: m, ...(m === "always" && !p.alwaysColor ? { alwaysColor: distinct[0] || p.color } : {}) })}>
-                            {lbl}
-                          </button>
-                        ))}
-                      </div>
-                      <div className="hd-poprow">
-                        <span style={{ fontSize: 11, color: "#8b99a8" }}>{hint}</span>
+                      <div className="hd-field">
+                        <div className="hd-sectitle">Mode</div>
+                        <div className="hd-sechint">{hint}</div>
+                        <div className="hd-poprow">
+                          {MODES.map(([m, lbl]) => (
+                            <button key={m} className={`hd-mini${mode === m ? " on" : ""}`}
+                              onClick={() => updateById(p.id, { mode: m, ...(m === "always" && !p.alwaysColor ? { alwaysColor: distinct[0] || p.color } : {}) })}>
+                              {lbl}
+                            </button>
+                          ))}
+                        </div>
                       </div>
                       {mode === "always" && (
-                        <div className="hd-poprow">
-                          <span>Route</span>
-                          {distinct.length
-                            ? distinct.map(c => (
-                                <div key={c} className={`hd-swatch${sameColor(p.alwaysColor, c) ? " on" : ""}`} title="the cue whose route always runs"
-                                  style={{ background: c, cursor: "pointer" }} onClick={() => updateById(p.id, { alwaysColor: c })} />
-                              ))
-                            : <span style={{ fontSize: 11, color: "#8b99a8" }}>add a cue colour below first</span>}
+                        <div className="hd-field">
+                          <div className="hd-sectitle">Route</div>
+                          <div className="hd-poprow">
+                            {distinct.length
+                              ? distinct.map(c => (
+                                  <div key={c} className={`hd-swatch${sameColor(p.alwaysColor, c) ? " on" : ""}`} title="the cue whose route always runs"
+                                    style={{ background: c, cursor: "pointer" }} onClick={() => updateById(p.id, { alwaysColor: c })} />
+                                ))
+                              : <span style={{ fontSize: 11, color: "#8b99a8" }}>add a cue colour below first</span>}
+                          </div>
                         </div>
                       )}
                     </>
                   );
                 })()}
-                <div className="hd-poprow">
-                  <span style={{ fontSize: 11, color: "#8b99a8" }}>Cue timeline — the colours the screen shows{(lightMode(p) === "reactive" || lightMode(p) === "random") ? " (order randomised per run)" : ""}</span>
-                </div>
-                {cues.map((c, i) => (
-                  <div className="hd-poprow" key={i}>
-                    <div className="hd-swatch on" title="tap to change colour" style={{ background: c.color, cursor: "pointer" }}
-                      onClick={() => setCues(cues.map((q, j) => j === i ? { ...q, color: nextColor(q.color) } : q))} />
-                    <Stepper value={+(c.dur || 0).toFixed(1)} step={0.5} min={0.5}
-                      onChange={v => setCues(cues.map((q, j) => j === i ? { ...q, dur: v } : q))} />
-                    <button className="hd-mini" onClick={() => setCues(cues.filter((_, j) => j !== i))}>×</button>
+                <div className="hd-field">
+                  <div className="hd-sectitle">Cue timeline</div>
+                  <div className="hd-sechint">The colours the screen shows{(lightMode(p) === "reactive" || lightMode(p) === "random") ? " (order randomised per run)" : ""}. Cognitive-training light · drag to move · ring to rotate.</div>
+                  {cues.map((c, i) => (
+                    <div className="hd-poprow" key={i}>
+                      <div className="hd-swatch on" title="tap to change colour" style={{ background: c.color, cursor: "pointer" }}
+                        onClick={() => setCues(cues.map((q, j) => j === i ? { ...q, color: nextColor(q.color) } : q))} />
+                      <Stepper value={+(c.dur || 0).toFixed(1)} step={0.5} min={0.5}
+                        onChange={v => setCues(cues.map((q, j) => j === i ? { ...q, dur: v } : q))} />
+                      <button className="hd-mini" onClick={() => setCues(cues.filter((_, j) => j !== i))}>×</button>
+                    </div>
+                  ))}
+                  <div className="hd-poprow">
+                    <button className="hd-mini" onClick={() => setCues([...cues, { color: LIGHT_COLORS[cues.length % LIGHT_COLORS.length], dur: 2 }])}>
+                      + Add cue
+                    </button>
                   </div>
-                ))}
-                <div className="hd-poprow">
-                  <button className="hd-mini" onClick={() => setCues([...cues, { color: LIGHT_COLORS[cues.length % LIGHT_COLORS.length], dur: 2 }])}>
-                    + Add cue
-                  </button>
-                  <span style={{ fontSize: 11, color: "#8b99a8" }}>cognitive-training light · drag to move · ring to rotate</span>
                 </div>
               </>
             );
           })()}
           {(p.kind === "bumper" || p.kind === "deker" || p.kind === "passer") && (
-            <div className="hd-poprow">
-              <span style={{ fontSize: 11, color: "#8b99a8" }}>
-                {p.kind === "deker" ? "stickhandle under the stick · " : p.kind === "passer" ? "pucks rebound off the face · " : ""}drag to move · ring to rotate
-              </span>
+            <div className="hd-field">
+              <div className="hd-sechint">
+                {p.kind === "deker" ? "Stickhandle under the stick · " : p.kind === "passer" ? "Pucks rebound off the face · " : ""}drag to move · ring to rotate.
+              </div>
             </div>
           )}
           {p.kind === "mark" && (
             <>
-              <div className="hd-poprow">
-                {["#ffd447", "#d7263d", "#1f8a4c", "#3a8dff", "#e0731d", "#ffffff", "#14202b"].map(c => (
-                  <div key={c} className={`hd-swatch${p.color === c ? " on" : ""}`} style={{ background: c }}
-                    onClick={() => updateById(p.id, { color: c })} />
-                ))}
+              <div className="hd-field">
+                <div className="hd-sectitle">Color</div>
+                <div className="hd-poprow">
+                  {["#ffd447", "#d7263d", "#1f8a4c", "#3a8dff", "#e0731d", "#ffffff", "#14202b"].map(c => (
+                    <div key={c} className={`hd-swatch${p.color === c ? " on" : ""}`} style={{ background: c }}
+                      onClick={() => updateById(p.id, { color: c })} />
+                  ))}
+                </div>
               </div>
-              <div className="hd-poprow">
-                <span>Style</span>
-                {[["solid", "Solid"], ["dashed", "Dashed"], ["dotted", "Dotted"], ["wavy", "Wavy"]].map(([s, lbl]) => (
-                  <button key={s} className={`hd-mini${(p.style || "solid") === s ? " on" : ""}`} onClick={() => updateById(p.id, { style: s })}>{lbl}</button>
-                ))}
+              <div className="hd-field">
+                <div className="hd-sectitle">Style</div>
+                <div className="hd-poprow">
+                  {[["solid", "Solid"], ["dashed", "Dashed"], ["dotted", "Dotted"], ["wavy", "Wavy"]].map(([s, lbl]) => (
+                    <button key={s} className={`hd-mini${(p.style || "solid") === s ? " on" : ""}`} onClick={() => updateById(p.id, { style: s })}>{lbl}</button>
+                  ))}
+                </div>
               </div>
-              <div className="hd-poprow">
-                <span>Thickness</span>
-                <input type="range" min={0.5} max={3} step={0.1} value={p.width || 1.1} style={{ flex: 1, minWidth: 80 }}
-                  onChange={e => updateById(p.id, { width: parseFloat(e.target.value) })} />
+              <div className="hd-field">
+                <div className="hd-sectitle">Thickness</div>
+                <div className="hd-poprow">
+                  <input type="range" min={0.5} max={3} step={0.1} value={p.width || 1.1} style={{ flex: 1, minWidth: 80 }}
+                    onChange={e => updateById(p.id, { width: parseFloat(e.target.value) })} />
+                </div>
               </div>
-              <div className="hd-poprow">
-                <button className={`hd-mini${markEdit ? " on" : ""}`} onClick={() => setMarkEdit(v => !v)}>
-                  {markEdit ? "Done editing" : "Edit points"}
-                </button>
-                {markEdit && <span style={{ fontSize: 11, color: "#8b99a8" }}>drag a dot to re-shape</span>}
+              <div className="hd-field">
+                <div className="hd-poprow">
+                  <button className={`hd-mini${markEdit ? " on" : ""}`} onClick={() => setMarkEdit(v => !v)}>
+                    {markEdit ? "Done editing" : "Edit points"}
+                  </button>
+                </div>
+                {markEdit && <div className="hd-sechint">Drag a dot to re-shape.</div>}
               </div>
             </>
           )}
           {p.kind === "player" && (
             <>
-              {/* the player is waypoint 1 (the start) — step into the route */}
+              {/* Waypoint navigator at the very top — the player is waypoint 1
+                  (the start); step into the route from here */}
               {p.path.length > 0 && (
-                <div className="hd-poprow">
-                  <button className="hd-mini" disabled style={{ opacity: 0.4 }}>‹ Prev</button>
-                  <span style={{ fontSize: 11, color: "#8b99a8" }}>1 / {p.path.length + 1}</span>
-                  <button className="hd-mini" onClick={() => navPopup({ type: "point", id: p.id, seg: 0 })}>Next ›</button>
+                <div className="hd-field">
+                  <div className="hd-poprow">
+                    <button className="hd-mini" disabled style={{ opacity: 0.4 }}>‹ Prev</button>
+                    <span style={{ fontSize: 11, color: "#8b99a8" }}>1 / {p.path.length + 1}</span>
+                    <button className="hd-mini" onClick={() => navPopup({ type: "point", id: p.id, seg: 0 })}>Next ›</button>
+                  </div>
                 </div>
               )}
-              <div className="hd-poprow">
-                <span>Name</span>
-                <input className="hd-input" style={{ width: 56 }} value={p.label} maxLength={3}
-                  onChange={e => updateById(p.id, { label: e.target.value })} />
-              </div>
-              <div className="hd-poprow">
-                {COLORS.map(c => (
-                  <div key={c} className={`hd-swatch${p.color === c ? " on" : ""}`} style={{ background: c }}
-                    onClick={() => updateById(p.id, { color: c })} />
-                ))}
-              </div>
-              <div className="hd-poprow">
-                <span>Shoots</span>
-                <button className={`hd-mini${(p.hand || "R") === "R" ? " on" : ""}`}
-                  onClick={() => updateById(p.id, { hand: "R" })}>R</button>
-                <button className={`hd-mini${p.hand === "L" ? " on" : ""}`}
-                  onClick={() => updateById(p.id, { hand: "L" })}>L</button>
-                {(() => {
-                  // a carried puck now sits under the player, so surface a
-                  // direct route to its popup here instead of tapping the blade
-                  const carried = pieces.find(q => q.kind === "puck" && q.carrier === p.id);
-                  return carried ? (
-                    <button className="hd-mini" onClick={() => {
-                      setSelectedId(carried.id);
-                      setPopup({ type: "piece", id: carried.id });
-                    }}>● Edit puck</button>
-                  ) : (
-                    <button className="hd-mini" onClick={() => {
-                      const pk = makePiece("puck", { x: p.x, y: p.y });
-                      pk.carrier = p.id;
-                      setPieces(ps => [...ps, pk]);
-                    }}>● Give puck</button>
-                  );
-                })()}
-              </div>
+              {/* Route — build/extend the skating path */}
+              {!p.defense && routeField()}
+              {/* initial skate direction — the first leg out of the start */}
               {p.path.length > 0 && !p.defense && (
-                <div className="hd-poprow">
-                  <button className={`hd-mini${p.holdLine ? " on" : ""}`}
-                    onClick={() => updateById(p.id, { holdLine: !p.holdLine })}>
-                    {p.holdLine ? "✓ Hold at blue line" : "Hold at blue line"}
-                  </button>
-                  <span style={{ fontSize: 11, color: "#8b99a8" }}>waits for the puck to enter the zone</span>
+                <div className="hd-field">
+                  <div className="hd-sectitle">Skate direction</div>
+                  <div className="hd-poprow">
+                    <button className={`hd-mini${(p.path[0].dir || "fwd") === "fwd" ? " on" : ""}`}
+                      onClick={() => updateSeg(p.id, 0, { dir: "fwd" })}>Forwards</button>
+                    <button className={`hd-mini${p.path[0].dir === "bwd" ? " on" : ""}`}
+                      onClick={() => updateSeg(p.id, 0, { dir: "bwd" })}>Backwards</button>
+                  </div>
                 </div>
               )}
-              {/* light reactions live on the branch waypoint (route end, nearest the
-                  light); a route-less player branches from its start, so show them here */}
-              {!p.path.length && renderLightReactions(p)}
+              <div className="hd-field">
+                <div className="hd-sectitle">Name</div>
+                <div className="hd-poprow">
+                  <input className="hd-input" style={{ width: 56 }} value={p.label} maxLength={3}
+                    onChange={e => updateById(p.id, { label: e.target.value })} />
+                </div>
+              </div>
+              <div className="hd-field">
+                <div className="hd-sectitle">Color</div>
+                <div className="hd-poprow">
+                  {COLORS.map(c => (
+                    <div key={c} className={`hd-swatch${p.color === c ? " on" : ""}`} style={{ background: c }}
+                      onClick={() => updateById(p.id, { color: c })} />
+                  ))}
+                </div>
+              </div>
+              <div className="hd-field">
+                <div className="hd-sectitle">Shoots</div>
+                <div className="hd-poprow">
+                  <button className={`hd-mini${(p.hand || "R") === "R" ? " on" : ""}`}
+                    onClick={() => updateById(p.id, { hand: "R" })}>R</button>
+                  <button className={`hd-mini${p.hand === "L" ? " on" : ""}`}
+                    onClick={() => updateById(p.id, { hand: "L" })}>L</button>
+                </div>
+              </div>
+              {(() => {
+                // a carried puck now sits under the player, so surface a direct
+                // route to its popup here instead of tapping the blade
+                const carried = pieces.find(q => q.kind === "puck" && q.carrier === p.id);
+                return (
+                  <div className="hd-field">
+                    <div className="hd-sectitle">Puck</div>
+                    <div className="hd-poprow">
+                      {carried ? (
+                        <button className="hd-mini" onClick={() => { setSelectedId(carried.id); setPopup({ type: "piece", id: carried.id }); }}>● Edit puck</button>
+                      ) : (
+                        <button className="hd-mini" onClick={() => { const pk = makePiece("puck", { x: p.x, y: p.y }); pk.carrier = p.id; setPieces(ps => [...ps, pk]); }}>● Give puck</button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
               {/* unified delay trigger: hold the whole route at the start until a
                   timer, another player's arrival, or another player's puck action */}
               {p.path.length > 0 && !p.defense && (
@@ -4849,48 +4993,76 @@ export default function DrillAnimator() {
                     ? { mode: p.wait.mode || "waypoint", on: p.wait.on, at: p.wait.at, secs: 0 }
                     : { mode: "timer", secs: (p.path[0] && p.path[0].stop) || 0 }}
                   onChange={v => {
-                    if (v.mode === "timer") { updateById(p.id, { wait: null }); updateSeg(p.id, 0, { stop: v.secs || 0 }); }
+                    if (v.mode === "none") { updateById(p.id, { wait: null }); updateSeg(p.id, 0, { stop: 0 }); }
+                    else if (v.mode === "timer") { updateById(p.id, { wait: null }); updateSeg(p.id, 0, { stop: v.secs || 0 }); }
                     else if (v.on) { updateById(p.id, { wait: { on: v.on, at: v.at, mode: v.mode } }); updateSeg(p.id, 0, { stop: 0 }); }
                     else updateById(p.id, { wait: null });
                   }}
                 />
               )}
-              <div className="hd-poprow">
-                <button className={`hd-mini${p.defense ? " on" : ""}`}
-                  onClick={() => updateById(p.id, { defense: !p.defense })}>
-                  {p.defense ? "✓ Auto defense" : "🛡 Auto defense"}
-                </button>
-                <span style={{ fontSize: 11, color: "#8b99a8" }}>holds the slot, tracks the puck goal-side</span>
+              {/* light reactions live on the branch waypoint (route end, nearest the
+                  light); a route-less player branches from its start, so show them here */}
+              {!p.path.length && renderLightReactions(p)}
+              {/* additional options — the on/off behaviours grouped together */}
+              <div className="hd-field">
+                <div className="hd-sectitle">Additional options</div>
+                {p.path.length > 0 && !p.defense && (
+                  <>
+                    <div className="hd-poprow">
+                      <button className={`hd-mini${p.holdLine ? " on" : ""}`}
+                        onClick={() => updateById(p.id, { holdLine: !p.holdLine })}>
+                        {p.holdLine ? "✓ Hold at blue line" : "Hold at blue line"}
+                      </button>
+                    </div>
+                    <div className="hd-sechint">Waits for the puck to enter the zone.</div>
+                  </>
+                )}
+                <div className="hd-poprow">
+                  <button className={`hd-mini${p.defense ? " on" : ""}`}
+                    onClick={() => updateById(p.id, { defense: !p.defense })}>
+                    {p.defense ? "✓ Auto defense" : "🛡 Auto defense"}
+                  </button>
+                </div>
+                <div className="hd-sechint">Holds the slot, tracks the puck goal-side.</div>
               </div>
-              {/* collect a loose puck at the player's standing spot */}
-              {/* the unified Action panel at the player's standing/start spot */}
-              {ActionSteps(p, -1)}
             </>
           )}
           {p.kind === "puck" && chainEvents(p).length > 0 && chainList(p, null)}
           {p.kind === "puck" && (
-            <div className="hd-poprow">
-              <button className="hd-mini" onClick={() => makePuckPile(p.id)}>
-                <Icon name="puck" size={13} /> Make a pile
-              </button>
-              <span style={{ fontSize: 11, color: "#8b99a8" }}>scatters a few loose pucks here</span>
+            <div className="hd-field">
+              <div className="hd-poprow">
+                <button className="hd-mini" onClick={() => makePuckPile(p.id)}>
+                  <Icon name="puck" size={13} /> Make a pile
+                </button>
+              </div>
+              <div className="hd-sechint">Scatters a few loose pucks here.</div>
             </div>
           )}
-          {p.kind === "puck" && pieces.some(q => q.kind === "player") && (
-            <>
+          {p.kind === "puck" && pieces.some(q => q.kind === "player") && (() => {
+            // a player can only carry one puck — disable any already holding a
+            // DIFFERENT puck (this puck's own carrier stays enabled to un-assign)
+            const takenBy = new Set(pieces.filter(q => q.kind === "puck" && q.id !== p.id && q.carrier).map(q => q.carrier));
+            const anyTaken = pieces.some(pl => pl.kind === "player" && takenBy.has(pl.id) && p.carrier !== pl.id);
+            return (
+            <div className="hd-field">
+              <div className="hd-sectitle">On stick of</div>
               <div className="hd-poprow">
-                <span>On stick of</span>
-                {pieces.filter(q => q.kind === "player").map(pl => (
-                  <button key={pl.id} className={`hd-mini${p.carrier === pl.id ? " on" : ""}`}
-                    onClick={() => updateById(p.id, { carrier: p.carrier === pl.id ? null : pl.id })}>
-                    {nameOf(pl.id)}
-                  </button>
-                ))}
+                {pieces.filter(q => q.kind === "player").map(pl => {
+                  const taken = takenBy.has(pl.id) && p.carrier !== pl.id;
+                  return (
+                    <button key={pl.id} className={`hd-mini${p.carrier === pl.id ? " on" : ""}`}
+                      disabled={taken} style={taken ? { opacity: 0.4, cursor: "not-allowed" } : undefined}
+                      title={taken ? `${nameOf(pl.id)} already has a puck` : undefined}
+                      onClick={() => updateById(p.id, { carrier: p.carrier === pl.id ? null : pl.id })}>
+                      {nameOf(pl.id)}
+                    </button>
+                  );
+                })}
               </div>
+              {anyTaken && <div className="hd-sechint">Greyed-out players already carry another puck.</div>}
               {p.carrier && p.path.length > 0 && (
-                <div className="hd-poprow" style={{ fontSize: 11.5, color: "#8b99a8" }}>
-                  Rides the blade, releases when the carrier reaches the puck's
-                  spot (dashed ring), then runs its own route.
+                <div className="hd-sechint">
+                  Rides the blade, releases when the carrier reaches the puck’s spot (dashed ring), then runs its own route.
                 </div>
               )}
               {(() => {
@@ -4900,51 +5072,59 @@ export default function DrillAnimator() {
                 const hp = head && pieces.find(q => q.id === head && q.kind === "player");
                 if (!hp || hp.path.length) return null;
                 return (
-                  <div className="hd-poprow" style={{ fontSize: 11.5, color: "#8b99a8" }}>
-                    {hp.id} has no route — set its pass / shoot / rebound from the
-                    {hp.id} player popup.
+                  <div className="hd-sechint">
+                    {hp.id} has no route — set its pass / shoot / rebound from the {hp.id} player popup.
                   </div>
                 );
               })()}
-            </>
-          )}
+            </div>
+            );
+          })()}
+          {/* Route — pucks build their own path here; players have it at the top */}
+          {p.kind === "puck" && !p.defense && routeField()}
           {(p.kind === "player" || p.kind === "puck") && (
-            <div className="hd-poprow">
-              <span>Speed ×{(p.speed || 1).toFixed(2)}</span>
-              <input type="range" min={0.5} max={2} step={0.05} value={p.speed || 1} style={{ flex: 1, minWidth: 80 }}
-                onChange={e => updateById(p.id, { speed: parseFloat(e.target.value) })} />
+            <div className="hd-field">
+              <div className="hd-sectitle">{p.kind === "player" ? "Skating speed" : "Speed"} ×{(p.speed || 1).toFixed(2)}</div>
+              <div className="hd-poprow">
+                <input type="range" min={0.5} max={2} step={0.05} value={p.speed || 1} style={{ flex: 1, minWidth: 80 }}
+                  onChange={e => updateById(p.id, { speed: parseFloat(e.target.value) })} />
+              </div>
             </div>
           )}
           {p.kind !== "player" && p.path.length > 0 && (
-            <div className="hd-poprow">
-              <span>Start delay</span>
-              <Stepper value={p.path[0].stop || 0} onChange={v => updateSeg(p.id, 0, { stop: v })} />
-            </div>
-          )}
-          {(p.kind === "player" || p.kind === "puck") && !p.defense && (
-            <div className="hd-poprow">
-              <span>{p.path.length ? "Extend route" : "Add route"}</span>
-              {curveButtons(t => addSegment(p.id, t), () => drawRouteMode(p.id))}
-              <span style={{ fontSize: 11, color: "#8b99a8" }}>a waypoint, or draw freehand</span>
+            <div className="hd-field">
+              <div className="hd-sectitle">Start delay</div>
+              <div className="hd-poprow">
+                <Stepper value={p.path[0].stop || 0} onChange={v => updateSeg(p.id, 0, { stop: v })} />
+                <span style={{ fontSize: 11, color: "#8b99a8" }}>seconds</span>
+              </div>
             </div>
           )}
           {p.kind !== "player" && p.kind !== "label" && (
-            <div className="hd-poprow">
-              <span>Name</span>
-              <input className="hd-input" style={{ flex: 1, minWidth: 90 }} value={p.label || ""} placeholder={p.id}
-                onChange={e => updateById(p.id, { label: e.target.value.replace(/[\s,]+/g, "_") })} />
+            <div className="hd-field">
+              <div className="hd-sectitle">Name</div>
+              <div className="hd-poprow">
+                <input className="hd-input" style={{ flex: 1, minWidth: 90 }} value={p.label || ""} placeholder={p.id}
+                  onChange={e => updateById(p.id, { label: e.target.value.replace(/[\s,]+/g, "_") })} />
+              </div>
             </div>
           )}
           {p.group && (
-            <div className="hd-poprow">
-              <span>◇ {p.group}</span>
-              <button className="hd-mini" title="Select the whole group"
-                onClick={() => { setPopup(null); setSelectedId(null); setMultiSel(groupMembers(p.group)); }}>Select group</button>
-              <button className="hd-mini" title="Remove this piece from the group"
-                onClick={() => updateById(p.id, { group: undefined })}>Leave</button>
+            <div className="hd-field">
+              <div className="hd-sectitle">Group</div>
+              <div className="hd-poprow">
+                <span>◇ {p.group}</span>
+                <button className="hd-mini" title="Select the whole group"
+                  onClick={() => { setPopup(null); setSelectedId(null); setMultiSel(groupMembers(p.group)); }}>Select group</button>
+                <button className="hd-mini" title="Remove this piece from the group"
+                  onClick={() => updateById(p.id, { group: undefined })}>Leave</button>
+              </div>
             </div>
           )}
-          <div className="hd-poprow">
+          {/* Actions panel at the player's standing/start spot — just above the
+              bottom row of buttons */}
+          {p.kind === "player" && ActionSteps(p, -1)}
+          <div className="hd-poprow" style={{ marginTop: 2 }}>
             {p.path.length > 0 && (
               <button className="hd-mini" onClick={() => { updateById(p.id, { path: [] }); setPopup(null); }}>Clear route</button>
             )}
@@ -4979,6 +5159,12 @@ export default function DrillAnimator() {
       if (!s) return null;
       anchorPt = { x: s.x, y: s.y };
       const next = route[i + 1];
+      // TITLE counts only the actual waypoints (not the standing start): route
+      // waypoint i (0-based) is "Waypoint i+1 of route.length". The NAV counter
+      // below still includes the start as position 1 (so start=1, wp0=2, …), so
+      // it uses wpNum/wpTotal instead.
+      const wpNum = fork ? i + 1 : i + 2;
+      const wpTotal = fork ? route.length : route.length + 1;
       title = fork ? `Reaction · waypoint ${i + 1} of ${route.length}` : `Waypoint ${i + 1} of ${route.length}`;
       // Prev at waypoint 0: a fork steps back to its branch (the base route's end);
       // a base route steps back to the player/start popup.
@@ -4988,44 +5174,62 @@ export default function DrillAnimator() {
       body = (
         <>
           {route.length > 0 && (
-            <div className="hd-poprow">
-              <button className="hd-mini" onClick={() => goSeg(i - 1)}>‹ {fork && i === 0 ? "Branch" : "Prev"}</button>
-              <span style={{ fontSize: 11, color: "#8b99a8" }}>{i + 1} / {route.length}</span>
-              <button className="hd-mini" disabled={i >= route.length - 1} style={{ opacity: i >= route.length - 1 ? 0.4 : 1 }}
-                onClick={() => goSeg(i + 1)}>Next ›</button>
+            <div className="hd-field">
+              <div className="hd-poprow">
+                <button className="hd-mini" onClick={() => goSeg(i - 1)}>‹ {fork && i === 0 ? "Branch" : "Prev"}</button>
+                <span style={{ fontSize: 11, color: "#8b99a8" }}>{wpNum} / {wpTotal}</span>
+                <button className="hd-mini" disabled={i >= route.length - 1} style={{ opacity: i >= route.length - 1 ? 0.4 : 1 }}
+                  onClick={() => goSeg(i + 1)}>Next ›</button>
+              </div>
             </div>
           )}
+          {/* whose route this waypoint belongs to — quick facts + a click-through
+              into that piece's own editor (position preserved when pinned) */}
+          <div className="hd-field">
+            <div className="hd-sectitle">{p.kind === "player" ? "Player" : "Puck"} on this {fork ? "reaction" : "route"}</div>
+            <div className="hd-poprow">
+              <span className="hd-swatch" style={{ background: p.color, width: 16, height: 16, cursor: "default" }} />
+              <span style={{ fontWeight: 700 }}>{nameOf(p.id)}</span>
+              <button className="hd-mini" onClick={() => navPopup({ type: "piece", id: p.id })}>Open ›</button>
+            </div>
+          </div>
           {/* the branch waypoint carries the reaction controls: the base route's end
               (light reactions), or a SKATE reaction's end (chain another reaction) */}
           {p.kind === "player" && i === route.length - 1 && (!fork
             ? renderLightReactions(p, null)
             : branchEndsOpen(p, fork) ? renderLightReactions(p, fork) : null)}
-          <div className="hd-poprow">
-            <span>Note</span>
-            <input className="hd-input" style={{ flex: 1, minWidth: 90 }}
-              value={s.desc != null ? s.desc : (s.name || "")}
-              placeholder={zoneAt(s.x, s.y) || "describe this spot"}
-              onChange={e => uSeg(i, { desc: e.target.value || undefined, name: undefined })} />
+          <div className="hd-field">
+            <div className="hd-sectitle">Note</div>
+            <div className="hd-poprow">
+              <input className="hd-input" style={{ flex: 1, minWidth: 90 }}
+                value={s.desc != null ? s.desc : (s.name || "")}
+                placeholder={zoneAt(s.x, s.y) || "describe this spot"}
+                onChange={e => uSeg(i, { desc: e.target.value || undefined, name: undefined })} />
+            </div>
           </div>
           {(s.desc != null ? s.desc : s.name) && (
-            <div className="hd-poprow">
-              <span>Show as</span>
-              {[["auto", "Auto"], ["preso", "Present"], ["label", "Label"]].map(([m, lab]) => (
-                <button key={m} className={`hd-mini${(s.dmode || "auto") === m ? " on" : ""}`}
-                  onClick={() => uSeg(i, {
-                    desc: s.desc != null ? s.desc : s.name, name: undefined,   // migrate legacy NAME
-                    ...(m === "label"
-                      ? { dmode: "label", dsize: s.dsize || 1, dox: s.dox || 0, doy: s.doy != null ? s.doy : -5 }
-                      : { dmode: m }),
-                  })}>{lab}</button>
-              ))}
+            <div className="hd-field">
+              <div className="hd-sectitle">Show as</div>
+              <div className="hd-poprow">
+                {[["auto", "Auto"], ["preso", "Present"], ["label", "Label"]].map(([m, lab]) => (
+                  <button key={m} className={`hd-mini${(s.dmode || "auto") === m ? " on" : ""}`}
+                    onClick={() => uSeg(i, {
+                      desc: s.desc != null ? s.desc : s.name, name: undefined,   // migrate legacy NAME
+                      ...(m === "label"
+                        ? { dmode: "label", dsize: s.dsize || 1, dox: s.dox || 0, doy: s.doy != null ? s.doy : -5 }
+                        : { dmode: m }),
+                    })}>{lab}</button>
+                ))}
+              </div>
             </div>
           )}
           {s.dmode === "label" && (s.desc != null ? s.desc : s.name) && (
-            <div className="hd-poprow">
-              <span>Label size</span>
-              <Stepper value={+(s.dsize || 1).toFixed(2)} onChange={v => uSeg(i, { dsize: Math.max(0.4, v) })} step={0.2} min={0.4} suffix="×" />
-              <span style={{ fontSize: 11, color: "#8b99a8" }}>drag it to move</span>
+            <div className="hd-field">
+              <div className="hd-sectitle">Label size</div>
+              <div className="hd-poprow">
+                <Stepper value={+(s.dsize || 1).toFixed(2)} onChange={v => uSeg(i, { dsize: Math.max(0.4, v) })} step={0.2} min={0.4} suffix="×" />
+                <span style={{ fontSize: 11, color: "#8b99a8" }}>drag it to move</span>
+              </div>
             </div>
           )}
           {next ? (
@@ -5043,79 +5247,91 @@ export default function DrillAnimator() {
                     ? { mode: next.waitOn.mode || "waypoint", on: next.waitOn.on, at: next.waitOn.at, secs: 0 }
                     : { mode: "timer", secs: next.stop || 0 }}
                   onChange={v => {
-                    if (v.mode === "timer") uSeg(i + 1, { waitOn: null, stop: v.secs || 0 });
+                    if (v.mode === "none") uSeg(i + 1, { waitOn: null, stop: 0 });
+                    else if (v.mode === "timer") uSeg(i + 1, { waitOn: null, stop: v.secs || 0 });
                     else if (v.on) uSeg(i + 1, { waitOn: { on: v.on, at: v.at, mode: v.mode }, stop: 0 });
                     else uSeg(i + 1, { waitOn: null });
                   }}
                 />
               ) : (
-                <div className="hd-poprow">
-                  <span>Pause here for</span>
-                  <Stepper value={next.stop || 0} onChange={v => uSeg(i + 1, { stop: v })} />
-                  <span style={{ fontSize: 11, color: "#8b99a8" }}>seconds</span>
+                <div className="hd-field">
+                  <div className="hd-sectitle">Pause here</div>
+                  <div className="hd-poprow">
+                    <Stepper value={next.stop || 0} onChange={v => uSeg(i + 1, { stop: v })} />
+                    <span style={{ fontSize: 11, color: "#8b99a8" }}>seconds</span>
+                  </div>
                 </div>
               )}
               {p.kind === "player" && (
-                <div className="hd-poprow">
-                  <button className={`hd-mini${next.jump ? " on" : ""}`}
-                    onClick={() => uSeg(i + 1, { jump: !next.jump })}>
-                    <Icon name={next.jump ? "check" : "sauce"} size={15} /> Jump here
-                  </button>
-                  <span style={{ fontSize: 11, color: "#8b99a8" }}>hops as they pass this spot</span>
+                <div className="hd-field">
+                  <div className="hd-poprow">
+                    <button className={`hd-mini${next.jump ? " on" : ""}`}
+                      onClick={() => uSeg(i + 1, { jump: !next.jump })}>
+                      <Icon name={next.jump ? "check" : "sauce"} size={15} /> Jump here
+                    </button>
+                  </div>
+                  <div className="hd-sechint">Hops as they pass this spot.</div>
                 </div>
               )}
-              <div className="hd-poprow">
-                <span>Speed after ×{(next.rate || 1).toFixed(2)}</span>
-                <input type="range" min={0.5} max={2} step={0.05} value={next.rate || 1} style={{ flex: 1, minWidth: 70 }}
-                  onChange={e => uSeg(i + 1, { rate: parseFloat(e.target.value) })} />
+              <div className="hd-field">
+                <div className="hd-sectitle">{p.kind === "player" ? "Skating speed after" : "Speed after"} ×{(next.rate || 1).toFixed(2)}</div>
+                <div className="hd-poprow">
+                  <input type="range" min={0.5} max={2} step={0.05} value={next.rate || 1} style={{ flex: 1, minWidth: 70 }}
+                    onChange={e => uSeg(i + 1, { rate: parseFloat(e.target.value) })} />
+                </div>
               </div>
-              <div className="hd-poprow">
-                <span>Next leg</span>
-                {[["L", "segLine", "Straight"], ["Q", "segQuad", "Curve"], ["C", "segCubic", "S-curve"]].map(([t, ic, lbl]) => (
-                  <button key={t} className={`hd-mini${next.type === t ? " on" : ""}`} title={lbl}
-                    onClick={() => changeSegType(p.id, i + 1, t, fork)}><Icon name={ic} /></button>
-                ))}
+              <div className="hd-field">
+                <div className="hd-sectitle">Next leg</div>
+                <div className="hd-poprow">
+                  {curveButtons(t => changeSegType(p.id, i + 1, t, fork), () => drawRouteMode(p.id, fork), next.type)}
+                </div>
               </div>
               {/* point type — only when both adjoining legs are curves (there's a
                   handle on each side to link). Corner = independent handles;
                   Smooth = handles kept collinear (auto-smooths); Sym = collinear + equal */}
               {s.type !== "L" && next.type !== "L" && (
-                <div className="hd-poprow">
-                  <span>Point</span>
-                  {[["corner", "ptCorner", "Corner — independent handles"],
-                    ["smooth", "ptSmooth", "Smooth — linked handles, auto-smooths"],
-                    ["sym", "ptSym", "Symmetric — linked, equal-length handles"]].map(([j, ic, lbl]) => (
-                    <button key={j} className={`hd-mini${(s.join || "corner") === j ? " on" : ""}`} title={lbl}
-                      onClick={() => setJoint(p.id, i, j, fork)}><Icon name={ic} /></button>
-                  ))}
+                <div className="hd-field">
+                  <div className="hd-sectitle">Point</div>
+                  <div className="hd-poprow">
+                    {[["corner", "ptCorner", "Corner — independent handles"],
+                      ["smooth", "ptSmooth", "Smooth — linked handles, auto-smooths"],
+                      ["sym", "ptSym", "Symmetric — linked, equal-length handles"]].map(([j, ic, lbl]) => (
+                      <button key={j} className={`hd-mini${(s.join || "corner") === j ? " on" : ""}`} title={lbl}
+                        onClick={() => setJoint(p.id, i, j, fork)}><Icon name={ic} /></button>
+                    ))}
+                  </div>
                 </div>
               )}
               {p.kind === "player" && (
-                <div className="hd-poprow">
-                  <span>Then skate</span>
-                  <button className={`hd-mini${(next.dir || "fwd") === "fwd" ? " on" : ""}`}
-                    onClick={() => uSeg(i + 1, { dir: "fwd" })}>Fwd</button>
-                  <button className={`hd-mini${next.dir === "bwd" ? " on" : ""}`}
-                    onClick={() => uSeg(i + 1, { dir: "bwd" })}>Bwd</button>
+                <div className="hd-field">
+                  <div className="hd-sectitle">Transition</div>
+                  <div className="hd-poprow">
+                    <button className={`hd-mini${(next.dir || "fwd") === "fwd" ? " on" : ""}`}
+                      onClick={() => uSeg(i + 1, { dir: "fwd" })}>Forwards</button>
+                    <button className={`hd-mini${next.dir === "bwd" ? " on" : ""}`}
+                      onClick={() => uSeg(i + 1, { dir: "bwd" })}>Backwards</button>
+                  </div>
                 </div>
               )}
               {p.kind === "puck" && (
-                <div className="hd-poprow">
-                  <span>Then</span>
-                  {["carry", "pass", "shot"].map(m => (
-                    <button key={m} className={`hd-mini${(next.mode || "carry") === m ? " on" : ""}`}
-                      onClick={() => uSeg(i + 1, { mode: m })}>
-                      {m[0].toUpperCase() + m.slice(1)}
-                    </button>
-                  ))}
+                <div className="hd-field">
+                  <div className="hd-sectitle">Then</div>
+                  <div className="hd-poprow">
+                    {["carry", "pass", "shot"].map(m => (
+                      <button key={m} className={`hd-mini${(next.mode || "carry") === m ? " on" : ""}`}
+                        onClick={() => uSeg(i + 1, { mode: m })}>
+                        {m[0].toUpperCase() + m.slice(1)}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
             </>
           ) : (p.kind === "player" || p.kind === "puck") && !p.defense ? (
-            <div className="hd-poprow">
-              <span>Extend {fork ? "reaction" : "route"}</span>
-              {curveButtons(t => addSegment(p.id, t, fork), () => drawRouteMode(p.id, fork))}
-              <span style={{ fontSize: 11, color: "#8b99a8" }}>a waypoint, or draw freehand</span>
+            <div className="hd-field">
+              <div className="hd-sectitle">Route</div>
+              <div className="hd-sechint">Click a shape to extend the {fork ? "reaction" : "route"}, or draw freehand.</div>
+              <div className="hd-poprow">{curveButtons(t => addSegment(p.id, t, fork), () => drawRouteMode(p.id, fork))}</div>
             </div>
           ) : (
             <div className="hd-poprow" style={{ color: "#8b99a8", fontSize: 12 }}>End of {fork ? "reaction" : "route"}</div>
@@ -5131,17 +5347,19 @@ export default function DrillAnimator() {
               if (!branchEndsOpen(p, fork) || chains) return null;
             }
             return (
-              <div className="hd-poprow">
-                <button className={`hd-mini${s.endStop ? " on" : ""}`}
-                  onClick={() => uSeg(i, { endStop: s.endStop ? undefined : true })}>
-                  {s.endStop ? "✓ Stops here" : "Stops here"}
-                </button>
-                <span style={{ fontSize: 11, color: "#8b99a8" }}>ends with a ‖ stop mark, not an arrow</span>
+              <div className="hd-field">
+                <div className="hd-poprow">
+                  <button className={`hd-mini${s.endStop ? " on" : ""}`}
+                    onClick={() => uSeg(i, { endStop: s.endStop ? undefined : true })}>
+                    {s.endStop ? "✓ Stops here" : "Stops here"}
+                  </button>
+                </div>
+                <div className="hd-sechint">Ends with a ‖ stop mark, not an arrow.</div>
               </div>
             );
           })()}
           {p.kind === "player" && ActionSteps(p, i, fork)}
-          <div className="hd-poprow">
+          <div className="hd-poprow" style={{ marginTop: 2 }}>
             <button className="hd-mini danger" onClick={() => deleteSeg(p.id, i, fork)}>Delete point</button>
           </div>
         </>
@@ -5152,14 +5370,16 @@ export default function DrillAnimator() {
     // (e.g. a far waypoint during Prev/Next) must not blank it out
     const a = popoutAnchor(anchorPt) || (popPos ? { lx: 50, ty: 50 } : null);
     if (!a) return null;
-    // EVERY popup pins to the edge OPPOSITE the item it belongs to so it opens
-    // completely clear of what's being selected/edited (and its handles) — no
-    // need to move or minimize just to see the item. Item in the top half →
+    // An UNPINNED popup pins to the edge OPPOSITE the item it belongs to so it
+    // opens completely clear of what's being selected/edited (and its handles) —
+    // no need to move or minimize just to see the item. Item in the top half →
     // popup pins along the bottom (above the play bar); item in the bottom half →
     // pins along the top (below the floating play dock). All popups carry a
     // minimize (header only) + maximize (fill the height) control, and drag the
-    // header to move it (bounded — it can't leave the screen).
-    const collapsed = popState === "min";
+    // header to move it (bounded — it can't leave the screen). The pin toggle
+    // keeps it open + re-targeting (float), and — on a wide screen — the dock
+    // toggle moves it to a fixed right sidebar (finalStyle ignored; CSS owns it).
+    const collapsed = !docked && popState === "min";   // the sidebar always shows its body
     const maxed = popState === "max";
     const lx = Math.max(16, Math.min(84, a.lx));
     const atBottom = a.ty < 50;
@@ -5190,28 +5410,40 @@ export default function DrillAnimator() {
     const boxed = !collapsed && (popPos || popDim);
     const usePreset = () => { setPopPos(null); setPopDim(null); };   // presets re-anchor at default size
     return (
-      <div className="hd-pop pinned" style={finalStyle} ref={popRef}
+      <div className={`hd-pop pinned${docked ? " dock" : ""}`} style={docked ? undefined : finalStyle} ref={popRef}
         onScroll={syncPopScroll} onPointerDown={e => e.stopPropagation()}>
         {/* always-visible scrollbar thumb: sticky rail pinned to the viewport
             top, thumb positioned/sized imperatively in syncPopScroll */}
         <div className="hd-sbrail" aria-hidden="true"><div className="hd-sbthumb" ref={sbThumbRef} /></div>
         <div className="hd-pophead"
-          onPointerDown={popDragStart} onPointerMove={popDragMove}
-          onPointerUp={popDragEnd} onPointerCancel={popDragEnd}>
-          <span className="hd-grip"><Icon name="grip" size={14} /></span>
+          {...(docked ? {} : { onPointerDown: popDragStart, onPointerMove: popDragMove,
+            onPointerUp: popDragEnd, onPointerCancel: popDragEnd })}>
+          {!docked && <span className="hd-grip"><Icon name="grip" size={14} /></span>}
           <span className="hd-poptitle">{title}</span>
-          {!collapsed && (
+          {/* pin (float) + dock (sidebar, wide only): the first .hd-x gets
+              margin-left:auto, right-aligning the whole control cluster */}
+          <button className={`hd-x${pinMode === "float" ? " on" : ""}`} onPointerDown={e => e.stopPropagation()}
+            title={pinMode === "float" ? "Un-pin" : "Pin (floating)"}
+            onClick={togglePin}><Icon name="pin" size={15} /></button>
+          {isWide && (
+            <button className={`hd-x${docked ? " on" : ""}`} onPointerDown={e => e.stopPropagation()}
+              title={docked ? "Un-dock" : "Dock to sidebar"}
+              onClick={toggleDock}><Icon name="sidebar" size={15} /></button>
+          )}
+          {!docked && !collapsed && (
             <button className="hd-x" onPointerDown={e => e.stopPropagation()} title="Minimize"
               onClick={() => { usePreset(); setPopState("min"); }}><Icon name="chevronUp" size={15} /></button>
           )}
-          <button className="hd-x" onPointerDown={e => e.stopPropagation()} title={maxed ? "Restore" : "Maximize"}
-            onClick={() => { usePreset(); setPopState(maxed && !boxed ? "mid" : collapsed ? "mid" : "max"); }}>
-            <Icon name={collapsed ? "chevronDown" : (maxed && !boxed) ? "restore" : "expand"} size={15} /></button>
+          {!docked && (
+            <button className="hd-x" onPointerDown={e => e.stopPropagation()} title={maxed ? "Restore" : "Maximize"}
+              onClick={() => { usePreset(); setPopState(maxed && !boxed ? "mid" : collapsed ? "mid" : "max"); }}>
+              <Icon name={collapsed ? "chevronDown" : (maxed && !boxed) ? "restore" : "expand"} size={15} /></button>
+          )}
           <button className="hd-x" onPointerDown={e => e.stopPropagation()}
-            onClick={() => setPopup(null)}><Icon name="close" size={15} /></button>
+            onClick={() => { setPopup(null); setPinMode(null); }}><Icon name="close" size={15} /></button>
         </div>
         {!collapsed && body}
-        {!collapsed && (
+        {!collapsed && !docked && (
           // resize: a bottom bar (height) + a bottom-right corner (both). Sticky
           // so they ride the popup's visible bottom edge even while it scrolls.
           <div className="hd-resizebar">
@@ -5491,7 +5723,7 @@ export default function DrillAnimator() {
   }
 
   return (
-    <div className={`hd-root${aiPlay ? "" : " scrub-on"}`} ref={rootRef}>
+    <div className={`hd-root${aiPlay ? "" : " scrub-on"}${docked ? " dock-open" : ""}`} ref={rootRef}>
       <style>{STYLES}</style>
 
       {/* ---------- the ice, filling the screen ---------- */}
