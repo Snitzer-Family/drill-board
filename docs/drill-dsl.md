@@ -132,7 +132,7 @@ Places a piece. `id` is any unique token (e.g. `F1`, `PK1`, `N2`).
 | `hold=line` | player | Wait at the blue line until the puck enters the zone |
 | `wait=<player>[@<pt>]` | player | Hold at the start until `<player>` **reaches** point `<pt>`, then run the route. Chains resolve (A waits for B waits for C). In the app: *Delay trigger → Waypoint* on the player popup. |
 | `act=<player>[@<pt>]` | player | Hold at the start until `<player>` **releases the puck** (pass/chip/rim/shot) at point `<pt>`; omit `@<pt>` to fire at any of their actions. Correct for stationary passers / held passes where arrival time is wrong. In the app: *Delay trigger → Action*. |
-| `net=<id>` | puck | What a shot targets (default: nearest net/passer). Can be a `bumper` id (the puck mirror-deflects off its face) or a `tire` id (the puck deflects off the round rubber by where it strikes) — bumpers/tires never auto-attract a shot; they must be named. |
+| `net=<id>` | puck | **Legacy (read-only).** What a shot targets; on load it is applied to any `shoot=` terminal lacking its own `>net`. The app now writes each shot's target inline (`shoot=<pt>>N2`) so every terminal aims independently — absence of `>net` means nearest net/passer. The target can be a `bumper` id (the puck mirror-deflects off its face) or a `tire` id (deflects off the round rubber by where it strikes) — bumpers/tires never auto-attract a shot; they must be named. |
 | `goalie` | net, tire | A keeper defends shots. On a net it plays post-to-post; on a `tire` it works the full circle — a save stops the puck out front, a beaten keeper lets it deflect off the rubber. |
 | `on=<playerId>` | puck | The puck starts on that player's blade (carried) |
 
@@ -141,11 +141,13 @@ Places a piece. `id` is any unique token (e.g. `F1`, `PK1`, `N2`).
 | Modifier | Meaning |
 |---|---|
 | `pass=<pt>:<to>[@<recv>]` | Pass at point `pt` to player `to`, caught at their point `recv` |
+| `pass=<pt>:<to>[@<recv>]%<by>` | …released by a specific player. Any transfer form (`pass=`/`rebound=`/`rim=`/`chip=` handoffs) takes a `%<by>` suffix pinning WHO performs it — required after sibling-branch receivers, where several players each hold the puck on their own mutually-exclusive run and the releaser can't be inferred. Written only when it differs from the inferred holder, so linear chains are unchanged. (For `pass=`, `%<by>` sits after `^<passer>` and before the sauce `!`.) |
 | `pass=<pt>:<to>[@<recv>]^<passer>` | Give-and-go: pass at `pt` into passer `<passer>`, which returns it to `to` (usually the passer themselves) at their point `recv`. In the app, tap a passer's id in the *Pass to* row (marked ⟲). |
 | `pass=<pt>:<to>[@<recv>]!` | Sauce (raised) pass — a trailing `!`. The puck arcs up over ice obstacles and bounces on landing (with a shadow under it in flight). Toggle *Sauce pass ⤴* on the pass. |
-| `shoot=<pt>` | Terminal shot at point `pt` — the puck caroms off the net and lands loose |
-| `rim=<pt>[~<deg>][*<ft>]` | Hard-rim **release** around the boards. `~<deg>` sets the direction, `*<ft>` the distance — or drag the on-ice handle at the end of the rim to set both. The puck lands loose. |
-| `chip=<pt>[~<deg>][*<ft>]` | Chip **release** into space (banks off the boards). `~<deg>` sets the direction (default: the chipper's facing), `*<ft>` the distance — or drag the on-ice handle. The puck lands loose. |
+| `shoot=<pt>[^<shooter>][>net]` | Terminal shot at point `pt` — the puck caroms off the net and lands loose. `>net` targets a specific net (absent = nearest). Several `shoot=` tokens may coexist on one puck: each is an independent chain end tied to its own shooter/branch, and exactly one fires per run (the resolved final holder's). |
+| `shoot=<pt>^<shooter>` | …by a specific player. Needed when two conditional receivers (on mutually-exclusive branches) could each be the final holder — `^<shooter>` says which one shoots, so the shot lands on that player's run only, not both. The app always pins `^<shooter>` on newly authored shots. |
+| `rim=<pt>[^<shooter>][~<deg>][*<ft>]` | Hard-rim **release** around the boards. `~<deg>` sets the direction, `*<ft>` the distance — or drag the on-ice handle at the end of the rim to set both. The puck lands loose. `^<shooter>` pins the acting player when several conditional receivers could each be the final holder (as with `shoot=`). |
+| `chip=<pt>[^<shooter>][~<deg>][*<ft>]` | Chip **release** into space (banks off the boards). `~<deg>` sets the direction (default: the chipper's facing), `*<ft>` the distance — or drag the on-ice handle. The puck lands loose. `^<shooter>` pins the acting player as above. |
 | `pickup=<to>@<pt>[*]` | A loose puck hops onto player `to`'s blade at their point `pt`. A trailing `*` marks a **nearest** collect: instead of binding to this specific puck, it re-resolves to whichever loose puck sits closest to `to`'s gather spot each time the drill plays or is edited (the app's default *Collect puck → Nearest puck*). |
 
 **Releases + Collect puck.** `shoot` / `rim` / `chip` are *releases*: the puck
@@ -174,6 +176,19 @@ playback `resolveForks` lowers each `(ref, pt)` to a flat index on the chosen ru
 route behaves like a normal route — its waypoints carry the ordinary puck actions,
 rather than a single action declared on the fork. (The legacy per-`BRANCH` `action`
 still loads.)
+
+**Conditional terminals (cross-player possession).** A terminal (`shoot=`/`rim=`/
+`chip=`) may be authored by a player who only *receives* the puck on some upstream
+branch — e.g. a puck `on=P1 pass=2ea043.2:P3@1 shoot=2` passes to P3 **only** on P1's
+green branch, and P3 shoots at their own waypoint 2. Authoring sees possession as a
+*possibility* (P3 is offered the shot because the pass could reach them), but the
+terminal **fires only on runs whose resolved final holder is that shooter**: on P1's
+green run the pass lands, P3 is the holder, and P3's shot fires; on P1's red run the
+pass is dropped (branch not taken), P1 keeps the puck, and P3's `shoot=2` is
+suppressed while P1's own red-branch terminal fires instead. The shooter is inferred
+from the terminal's branch ref (a base — unqualified — terminal belongs to the chain's
+natural final holder), so no extra token is needed and existing single-chain drills
+are unaffected.
 
 ### `PATH <id> <segments…>`
 The route for a player or puck. Points are numbered **1…N** in order; **point 0**
@@ -229,10 +244,37 @@ reaction-light cue matching the ref colour, i.e. today's behavior):
   decides; `if=` sets an explicit cue colour when it differs from the ref colour).
 - `rand` / `rand=<weight>` — **random** each run, weighted; needs no light at all.
 - `seq=<n>` — **sequence**: cycles branches on successive runs, ordered by `n`.
-- `always` — the **default/fallback** taken when nothing else fires.
+- `always` — an unconditional **override**: if present it wins over every other
+  condition at that waypoint (use it for "no matter what, run this route").
+- `has` — **possession**: taken when *this* player is holding the puck at the branch
+  point on the resolved run (e.g. after a conditional pass reached them). Its sibling
+  branch is the "didn't get it" route.
+- `has=<player>` — **another player's possession**: taken when `<player>` is holding
+  a puck on the resolved run (e.g. a defender collapses while the attacker still has
+  it). In the app: condition *If holding…* → pick the player.
+- `link=<player>/<route>` — **route link**: taken when `<player>` skated `<route>`
+  (a cue colour-path, `#`-less, `/`-separated; ancestor-or-self match). Models "if P1
+  went the *other* way, I do this instead." Routes are numbered R1, R2, … in the
+  order their `BRANCH` lines appear in the DSL — the app's route picker uses these
+  numbers and, while a route condition is being edited, overlays them faintly on the
+  ice over each branch.
+- `when=<player>@<pt>` / `when=<player>!<pt>` — **event**: taken when `<player>`
+  reached waypoint `pt` (`@`) or released the puck (`!`, trailing `pt` optional) on
+  the resolved run.
 
-When several branches leave one waypoint, precedence is light → random → sequence →
-always. A branch's puck actions are authored on **its own waypoints** like any route
+These last three select on **resolved state** (routes, possession, releases), so the
+run is solved with a bounded, seed-deterministic fixpoint (routes → possession →
+routes); an unmet condition falls through to its sibling default, and a cyclic/unstable
+case settles on that safe default. Selection stays a pure function of geometry + seed +
+the other players' resolved routes — no animation-time state.
+
+When several branches leave one waypoint, an `always` branch (if any) overrides
+everything. Otherwise every condition that **succeeds** is raced by the time its
+trigger fires and the **earliest-firing** one wins ("first successful condition
+wins"; ties break to authored order) — a cue/possession is read at the reactor's own
+arrival, a link/event fires when the watched player gets there, and a link/event
+winner makes the reactor **wait** at the branch until its trigger. If none succeed,
+`sequence` + `random` split the run. A branch's puck actions are authored on **its own waypoints** like any route
 (see the `<ref>.<pt>` action forms under PIECE) — a reaction route is just a normal
 route. A legacy optional **action** right after `cond` (`shoot[:<net>]` · `chip` ·
 `rim` · `pass:<player>`, applied to the carried puck at the branch's end) still

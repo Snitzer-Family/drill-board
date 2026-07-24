@@ -35,6 +35,9 @@ const ICONS = {
   collect: <><path d="M12 3.5v9" /><path d="M8.5 9l3.5 3.5L15.5 9" /><path d="M4.5 15v3a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-3" /></>,
   // reaction-light decision: a flashing burst — read the light, then react
   react: <><circle cx="12" cy="12" r="3" {...F} /><path d="M12 2v3.2M12 18.8v3.2M2 12h3.2M18.8 12h3.2M5.4 5.4l2.2 2.2M16.4 16.4l2.2 2.2M18.6 5.4l-2.2 2.2M7.6 16.4l-2.2 2.2" /></>,
+  // a brain (two hemispheres + a central seam + a brain stem) = a read-and-react
+  // DECISION point. Scaled up ~16% about its centre so it fills the glyph better.
+  brain: <g transform="translate(12 11.5) scale(1.16) translate(-12 -11.5)"><path d="M12 5.2c-1-1-2.9-.9-3.7.4-1.4-.5-2.9.6-2.8 2.1-1.3.5-1.7 2.2-.7 3.2-.6 1.2.2 2.7 1.6 2.9.4 1.3 2 1.9 3.2 1.1.8.6 2 .5 2.4-.4" /><path d="M12 5.2c1-1 2.9-.9 3.7.4 1.4-.5 2.9.6 2.8 2.1 1.3.5 1.7 2.2.7 3.2.6 1.2-.2 2.7-1.6 2.9-.4 1.3-2 1.9-3.2 1.1-.8.6-2 .5-2.4-.4" /><path d="M12 5.2v13.3" /><path d="M10.6 16.3q1.4 1.1 2.8 0" /></g>,
   // a raised arc + landing = sauce pass
   sauce: <><path d="M3.5 17.5C7 6 17 6 20.5 17.5" /><path d="M16.5 14l4 3.5-5 1.2" {...F} /></>,
   // return loop = give-and-go / rebounder pass

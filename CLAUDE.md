@@ -30,6 +30,9 @@ Live: https://snitzer-family.github.io/drill-board/
   circles render round)
 - `icons.jsx` — PieceIcon (screen-true matrix frames), Stepper, DiagPanel
 - `styles.js` — ALL CSS, including the hard-won safe-area layout rules
+- `possession.js` — the possession ledger: pure, condition-aware possession
+  stints + loose-puck intervals per puck (branch-choice atom conjunctions prove
+  cross-player mutual exclusion); node-testable, no seed/DOM
 - `timing.js` — createTiming() factory: leg timing, pass/shot/pickup planner,
   receiver time-warps, warp-aware positions
 - `hockey-drill-animator.jsx` — App shell: state, pointer interaction, popouts,

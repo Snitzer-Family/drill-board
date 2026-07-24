@@ -155,8 +155,8 @@ export function parseDrill(text) {
           : kind === "label" ? "#14202b" : kind === "tire" ? "#1c1c1e" : kind === "stick" ? "#20242a" : kind === "light" ? "#2ea043" : "#d7263d";
         let label = kind === "player" ? id : "";
         let text = "", size = 1;                          // label piece: text + font scale
-        let speed = 1, hand = "R", carrier = null, facing = 0, shotAt = null, pickup = null, rimAt = null, chipAt = null, chipAim = null, rimAim = null, chipDist = null, rimDist = null, shotRef = null, rimRef = null, chipRef = null;
-        const xterms = [];                                      // overflow same-kind branch terminals
+        let speed = 1, hand = "R", carrier = null, facing = 0, pickup = null;
+        const terminals = [];                                   // uniform list of chain ENDS — each { kind:"shot"|"rim"|"chip", at, ref, by?, net?/aim?/dist? } — so every branch's end is independent
         let net = null, holdLine = false, goalie = false, defense = false, wait = null, group = null, crease = false;
         let cues = [], rand = true, lmode = null, alwaysColor = null;   // light: cue timeline + route mode
         let lightId = null;                               // player: designated reaction light to read (else nearest)
@@ -176,46 +176,49 @@ export function parseDrill(text) {
             } else if (key === "hand") hand = v.toUpperCase() === "L" ? "L" : "R";
             else if (key === "on") carrier = v;
             else if (key === "pass") {
-              // pass=[<ref>.]<pt>:<to>[@[<ref>.]<recvPt>][^<passer>][!] — an optional
-              // <ref># qualifies a release/reception on a branch route; a ^passer makes
-              // it a give-and-go; a trailing ! is a sauce (raised) pass
-              const m2 = /^(?:([0-9a-fA-F/]+)\.)?(\d+):([^@\s^!]+)(?:@(?:([0-9a-fA-F/]+)\.)?(\d+))?(?:\^([^!\s]+))?(!)?$/.exec(v);
+              // pass=[<ref>.]<pt>:<to>[@[<ref>.]<recvPt>][^<passer>][%<by>][!] — an
+              // optional <ref># qualifies a release/reception on a branch route; a
+              // ^passer makes it a give-and-go; %<by> pins WHO releases (needed after
+              // sibling-branch receivers, where the holder is per-run ambiguous); a
+              // trailing ! is a sauce (raised) pass
+              const m2 = /^(?:([0-9a-fA-F/]+)\.)?(\d+):([^@\s^!%]+)(?:@(?:([0-9a-fA-F/]+)\.)?(\d+))?(?:\^([^!%\s]+))?(?:%([^!\s]+))?(!)?$/.exec(v);
               if (m2) transfers.push({ at: parseInt(m2[2], 10) - 1, to: m2[3],
                 recvAt: m2[4] || m2[5] ? parseInt(m2[5], 10) - 1 : null, kind: "pass",
                 ...(m2[1] ? { atRef: wireToMemRef(m2[1]) } : {}), ...(m2[4] ? { recvRef: wireToMemRef(m2[4]) } : {}),
-                ...(m2[6] ? { via: m2[6] } : {}), ...(m2[7] ? { sauce: true } : {}) });
+                ...(m2[6] ? { via: m2[6] } : {}), ...(m2[7] ? { by: m2[7] } : {}), ...(m2[8] ? { sauce: true } : {}) });
             } else if (key === "rebound") {
               // shot whose carom is collected by a player: shoot at <pt>, they
               // gather at their @<pt> (else route end / where they stand)
-              // rebound=[<ref>.]<pt>:<to>[@[<ref>.]<recvPt>][>net] — >net gives this rebound its own target
-              const m4 = /^(?:([0-9a-fA-F/]+)\.)?(\d+):([^@\s>]+)(?:@(?:([0-9a-fA-F/]+)\.)?(\d+))?(?:>(\S+))?$/.exec(v);
+              // rebound=[<ref>.]<pt>:<to>[@[<ref>.]<recvPt>][>net][%<by>] — >net gives
+              // this rebound its own target; %<by> pins the shooter (as with pass=)
+              const m4 = /^(?:([0-9a-fA-F/]+)\.)?(\d+):([^@\s>%]+)(?:@(?:([0-9a-fA-F/]+)\.)?(\d+))?(?:>([^%\s]+))?(?:%(\S+))?$/.exec(v);
               if (m4) transfers.push({ at: parseInt(m4[2], 10) - 1, to: m4[3],
                 recvAt: m4[4] || m4[5] ? parseInt(m4[5], 10) - 1 : null, kind: "shot",
                 ...(m4[1] ? { atRef: wireToMemRef(m4[1]) } : {}), ...(m4[4] ? { recvRef: wireToMemRef(m4[4]) } : {}),
-                ...(m4[6] ? { net: m4[6] } : {}) });
+                ...(m4[6] ? { net: m4[6] } : {}), ...(m4[7] ? { by: m4[7] } : {}) });
             } else if (key === "shoot") {
-              // shoot=[<ref>.]<pt>[>net] — a terminal shot; a second same-kind terminal
-              // on another branch overflows into xterms[] (the first fills the scalar)
-              const ms = /^(?:([0-9a-fA-F/]+)\.)?(\d+)(?:>(\S+))?$/.exec(v);
-              if (ms) {
-                const at = parseInt(ms[2], 10) - 1, ref = ms[1] ? wireToMemRef(ms[1]) : null;
-                if (shotAt == null) { shotAt = at; shotRef = ref; if (ms[3]) net = ms[3]; }
-                else xterms.push({ kind: "shot", at, ref: ref || "", ...(ms[3] ? { net: ms[3] } : {}) });
-              }
+              // shoot=[<ref>.]<pt>[^<shooter>][>net] — a terminal shot. `^<shooter>` pins
+              // WHICH player shoots (when several conditional receivers could each be the
+              // final holder). Each terminal is its own independent entry in terminals[].
+              const ms = /^(?:([0-9a-fA-F/]+)\.)?(\d+)(?:\^([^>\s]+))?(?:>(\S+))?$/.exec(v);
+              if (ms) terminals.push({ kind: "shot", at: parseInt(ms[2], 10) - 1, ref: ms[1] ? wireToMemRef(ms[1]) : "", ...(ms[3] ? { by: ms[3] } : {}), ...(ms[4] ? { net: ms[4] } : {}) });
             } else if (key === "rim" || key === "chip") {
               // rim=[<ref>.]<pt> / chip=… is a terminal release into space; a handle
               // sets its direction (~<deg>) and distance (*<ft>). The player-handoff
-              // form rim=[<ref>.]<pt>:<player>[@[<ref>.]<pt>] carries to a collector instead.
-              const m5 = /^(?:([0-9a-fA-F/]+)\.)?(\d+)(?::([^@\s~*]+)(?:@(?:([0-9a-fA-F/]+)\.)?(\d+))?)?(?:~(-?\d+(?:\.\d+)?))?(?:\*(\d+(?:\.\d+)?))?$/.exec(v);
+              // form rim=[<ref>.]<pt>:<player>[@[<ref>.]<pt>][%<by>] carries to a
+              // collector instead, %<by> pinning who releases (as with pass=).
+              // …the TERMINAL form pins its player with `^<shooter>` (before ~aim/*dist),
+              // like shoot=, so a cross-run rim/chip lands on the right receiver only.
+              const m5 = /^(?:([0-9a-fA-F/]+)\.)?(\d+)(?::([^@\s~*^%]+)(?:@(?:([0-9a-fA-F/]+)\.)?(\d+))?)?(?:\^([^~*%\s]+))?(?:%([^~*\s]+))?(?:~(-?\d+(?:\.\d+)?))?(?:\*(\d+(?:\.\d+)?))?$/.exec(v);
               if (m5) {
-                const aim = m5[6] != null ? parseFloat(m5[6]) : null;
-                const dist = m5[7] != null ? parseFloat(m5[7]) : null;
-                const at = parseInt(m5[2], 10) - 1, ref = m5[1] ? wireToMemRef(m5[1]) : null;
+                const aim = m5[8] != null ? parseFloat(m5[8]) : null;
+                const dist = m5[9] != null ? parseFloat(m5[9]) : null;
+                const at = parseInt(m5[2], 10) - 1, ref = m5[1] ? wireToMemRef(m5[1]) : null, by = m5[6] || null, tby = m5[7] || null;
                 if (m5[3]) transfers.push({ at, to: m5[3],
                   recvAt: m5[4] || m5[5] ? parseInt(m5[5], 10) - 1 : null, kind: key,
-                  ...(ref ? { atRef: ref } : {}), ...(m5[4] ? { recvRef: wireToMemRef(m5[4]) } : {}), ...(aim != null ? { aim } : {}) });
-                else if (key === "rim") { if (rimAt == null) { rimAt = at; rimAim = aim; rimDist = dist; rimRef = ref; } else xterms.push({ kind: "rim", at, ref: ref || "", aim, dist }); }
-                else { if (chipAt == null) { chipAt = at; chipAim = aim; chipDist = dist; chipRef = ref; } else xterms.push({ kind: "chip", at, ref: ref || "", aim, dist }); }
+                  ...(ref ? { atRef: ref } : {}), ...(m5[4] ? { recvRef: wireToMemRef(m5[4]) } : {}),
+                  ...(tby ? { by: tby } : {}), ...(aim != null ? { aim } : {}) });
+                else terminals.push({ kind: key, at, ref: ref || "", ...(by ? { by } : {}), ...(aim != null ? { aim } : {}), ...(dist != null ? { dist } : {}) });
               }
             } else if (key === "pickup") {
               // pickup=<player>@[<ref>.]<pt>[*] — trailing * = a live "nearest loose puck"
@@ -261,7 +264,9 @@ export function parseDrill(text) {
           else label = r;
         });
         const mode = lmode || (rand === false ? "sequence" : "reactive");   // legacy rand=off → sequence
-        const p = { id, kind, x, y, color, label, text, size, speed, hand, carrier, facing, transfers, shotAt, pickup, rimAt, chipAt, chipAim, rimAim, chipDist, rimDist, ...(shotRef ? { shotRef } : {}), ...(rimRef ? { rimRef } : {}), ...(chipRef ? { chipRef } : {}), ...(xterms.length ? { xterms } : {}), net, holdLine, goalie, defense, wait, group, crease, cues, mode, alwaysColor, lightId, forks: [], path: [] };
+        // a bare net= token targets every shot terminal that didn't carry its own >net
+        if (net) terminals.forEach(t => { if (t.kind === "shot" && !t.net) t.net = net; });
+        const p = { id, kind, x, y, color, label, text, size, speed, hand, carrier, facing, transfers, pickup, ...(terminals.length ? { terminals } : {}), net, holdLine, goalie, defense, wait, group, crease, cues, mode, alwaysColor, lightId, forks: [], path: [] };
         pieces.push(p); byId[id] = p;
       } else if (cmd === "PATH") {
         const id = tok[1];
@@ -286,12 +291,21 @@ export function parseDrill(text) {
         const atm = /^at=(\d+)$/i.exec(tok[j] || "");
         if (atm) { at = parseInt(atm[1], 10) - 1; j++; }
         // optional selection condition (default = light cue matching the ref colour):
-        // rand[=weight] · seq=<n> · always · if=<hex> (explicit light cue colour)
+        // rand[=weight] · seq=<n> · always · if=<hex> (explicit light cue colour) ·
+        // has (this player holds the puck) · link=<player>/<route> (that player took that
+        // route) · when=<player>@<pt> (reached wp) / when=<player>!<pt> (released puck)
         let cm; const ct = tok[j] || "";
         if (/^rand(=[\d.]+)?$/i.test(ct)) { cond = { type: "random", ...(ct.includes("=") ? { weight: parseFloat(ct.split("=")[1]) } : {}) }; j++; }
         else if ((cm = /^seq=(\d+)$/i.exec(ct))) { cond = { type: "sequence", ord: parseInt(cm[1], 10) }; j++; }
         else if (/^always$/i.test(ct)) { cond = { type: "always" }; j++; }
-        else if ((cm = /^if=([0-9a-fA-F]{3,6})$/i.exec(ct))) { cond = { type: "light", color: "#" + cm[1] }; j++; }
+        else if ((cm = /^if=([0-9a-fA-F]{3,6})(?:@(\S+))?$/i.exec(ct))) { cond = { type: "light", color: "#" + cm[1], ...(cm[2] ? { lightId: cm[2] } : {}) }; j++; }
+        else if ((cm = /^has(?:=(\S+))?$/i.exec(ct))) { cond = { type: "possession", ...(cm[1] ? { player: cm[1] } : {}) }; j++; }   // has = I hold; has=<player> = THEY hold
+        else if ((cm = /^link=([^/\s]+)\/([0-9a-fA-F/]+)$/i.exec(ct))) { cond = { type: "link", player: cm[1], route: wireToMemRef(cm[2]) }; j++; }
+        else if ((cm = /^when=([^@!\s]+)([@!])?(\d+)?$/i.exec(ct))) {
+          const mode = cm[2] === "@" ? "waypoint" : "action";
+          cond = { type: "event", on: cm[1], mode, ...(cm[3] ? { at: parseInt(cm[3], 10) - 1 } : (mode === "waypoint" ? { at: 0 } : {})) };
+          j++;
+        }
         const am = /^(skate|shoot|chip|rim|pass)(?::(\S+))?$/i.exec(tok[j] || "");
         if (am) { action = am[1].toLowerCase(); if (action === "shoot") net = am[2] || null; else if (action === "pass") to = am[2] || null; j++; }
         // navigate/create the parent chain (parents are emitted before children), add leaf
@@ -411,27 +425,45 @@ export function serializeDrill(rink, pieces, title = "", desc = "", steps = [], 
     const car = p.kind === "puck" && p.carrier ? ` on=${p.carrier}` : "";
     const gp = p.kind === "puck" && !p.carrier && p.pickup ? ` pickup=${p.pickup.to}@${ixRef(p.pickup.at, p.pickup.atRef)}${p.pickup.nearest ? "*" : ""}` : "";
     // chain transfers in order: pass= passes, rebound= shot handoffs, rim=/chip= board plays.
-    // Only the VALID prefix is saved: an impossible step (an actor that never has
-    // the puck) and everything after it is dropped, and the intended-actor tags
-    // (`by` / `termBy`) are editor-only, not part of the DSL.
+    // Validity is POSSIBILITY-based: every receiver so far could be the holder on their
+    // own branch's run, so a sibling-branch releaser is valid. An impossible step (an
+    // actor never in the chain by then) is dropped — but ONLY that step: entries after
+    // it are independent parallel runs, not a dependent linear tail.
     const kw = t => t.kind === "shot" ? "rebound" : t.kind === "rim" ? "rim" : t.kind === "chip" ? "chip" : "pass";
-    let vts = [], lastCarrier = (p.carrier || (p.pickup && p.pickup.to)) || null;
-    if (p.kind === "puck") for (const t of (p.transfers || [])) { if (t.by && t.by !== lastCarrier) break; vts.push(t); lastCarrier = t.to; }
+    // who releases transfer s, inferred the same way the app does (holder on the
+    // release lineage) — `%<by>` is emitted only when the pin DIFFERS from this, so
+    // legacy linear chains round-trip byte-stable.
+    const isAnc = (a, b) => { const A = String(a || "").toLowerCase(), B = String(b || "").toLowerCase(); return !A || A === B || B.startsWith(A + "/"); };
+    const inferRel = s => { const ts = p.transfers || [], t = ts[s];
+      let h = p.carrier || (p.pickup && isAnc(p.pickup.atRef, t.atRef) ? p.pickup.to : null);
+      for (let k = 0; k < s; k++) if (isAnc(ts[k].atRef, t.atRef)) h = ts[k].to;
+      return h; };
+    let vts = [];
+    if (p.kind === "puck") {
+      const held = new Set([(p.carrier || (p.pickup && p.pickup.to)) || null]);
+      (p.transfers || []).forEach((t, s) => {
+        if (!held.has(t.by || inferRel(s))) return;
+        vts.push({ t, s }); held.add(t.to);
+      });
+    }
     const head = p.kind === "puck" && (p.carrier || p.pickup);
     const pas = head && vts.length
-      ? vts.map(t => ` ${kw(t)}=${ixRef(t.at, t.atRef)}:${t.to}${t.recvAt != null ? "@" + ixRef(t.recvAt, t.recvRef) : ""}${t.via ? "^" + t.via : ""}${t.sauce ? "!" : ""}${t.kind === "shot" && t.net ? ">" + t.net : ""}${(t.kind === "chip" || t.kind === "rim") && t.aim != null ? "~" + f1(t.aim) : ""}`).join("")
+      ? vts.map(({ t, s }) => {
+          const pby = t.by && t.by !== inferRel(s) ? "%" + t.by : "";
+          return ` ${kw(t)}=${ixRef(t.at, t.atRef)}:${t.to}${t.recvAt != null ? "@" + ixRef(t.recvAt, t.recvRef) : ""}${t.via ? "^" + t.via : ""}${t.kind === "shot" && t.net ? ">" + t.net : ""}${pby}${t.sauce ? "!" : ""}${(t.kind === "chip" || t.kind === "rim") && t.aim != null ? "~" + f1(t.aim) : ""}`;
+        }).join("")
       : "";
-    const termOk = !p.termBy || p.termBy === lastCarrier;
-    const sht = head && termOk && p.shotAt != null ? ` shoot=${ixRef(p.shotAt, p.shotRef)}` : "";
-    const rmT = head && termOk && p.rimAt != null ? ` rim=${ixRef(p.rimAt, p.rimRef)}${p.rimAim != null ? "~" + f1(p.rimAim) : ""}${p.rimDist != null ? "*" + f1(p.rimDist) : ""}` : "";
-    const chT = head && termOk && p.chipAt != null ? ` chip=${ixRef(p.chipAt, p.chipRef)}${p.chipAim != null ? "~" + f1(p.chipAim) : ""}${p.chipDist != null ? "*" + f1(p.chipDist) : ""}` : "";
-    // overflow same-kind branch terminals (each its own token; shots carry their own >net)
-    const xts = head && termOk && (p.xterms || []).length
-      ? (p.xterms || []).map(t => t.kind === "shot" ? ` shoot=${ixRef(t.at, t.ref)}${t.net ? ">" + t.net : ""}`
-          : ` ${t.kind}=${ixRef(t.at, t.ref)}${t.aim != null ? "~" + f1(t.aim) : ""}${t.dist != null ? "*" + f1(t.dist) : ""}`).join("")
+    // every terminal is an independent chain END — one token each, in authored order,
+    // pinning its shooter with `^<by>` (before ~aim/*dist for rim/chip) and its own
+    // >net for a shot, so sibling-branch terminals never overwrite each other.
+    const byTag = a => a ? "^" + a : "";
+    const terms = head && (p.terminals || []).length
+      ? (p.terminals || []).map(t => t.kind === "shot" ? ` shoot=${ixRef(t.at, t.ref)}${byTag(t.by)}${t.net ? ">" + t.net : ""}`
+          : ` ${t.kind}=${ixRef(t.at, t.ref)}${byTag(t.by)}${t.aim != null ? "~" + f1(t.aim) : ""}${t.dist != null ? "*" + f1(t.dist) : ""}`).join("")
       : "";
-    const hasShot = p.kind === "puck" && ((termOk && p.shotAt != null) || vts.some(t => t.kind === "shot"));
-    const nt = hasShot && p.net ? ` net=${p.net}` : "";
+    // no bare net= is written: a shot terminal carries its own >net (absence = nearest,
+    // which a bare token would wrongly re-pin on reload) and rebound transfers theirs.
+    // The parser still READS net= so legacy drills load.
     const rotatable = p.kind === "net" || p.kind === "bumper" || p.kind === "deker" || p.kind === "passer" || p.kind === "stick" || p.kind === "light" || (p.kind === "player" && !p.path.length);
     const fac = rotatable && p.facing ? ` face=${f1(p.facing)}` : "";
     const hld = p.kind === "player" && p.holdLine ? " hold=line" : "";
@@ -457,7 +489,7 @@ export function serializeDrill(rink, pieces, title = "", desc = "", steps = [], 
           ? ` mode=always${p.alwaysColor || (p.cues && p.cues[0] && p.cues[0].color) ? ":" + String(p.alwaysColor || p.cues[0].color).replace("#", "") : ""}`
           : ` mode=${lm}`)
       : "";
-    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${car}${gp}${pas}${sht}${rmT}${chT}${xts}${nt}${hld}${wt}${fac}${gl}${crs}${df}${siz}${grp}${lgt}${cue}${rnd}${spd}`);
+    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${car}${gp}${pas}${terms}${hld}${wt}${fac}${gl}${crs}${df}${siz}${grp}${lgt}${cue}${rnd}${spd}`);
     if (p.path.length) out.push(`PATH ${p.id} ${p.path.map(segToStr).join(" ")}`);
     // route branches (players): one conditional continuation per cue colour, with
     // the action the player performs at its end (skate default → omitted). Branches
@@ -476,7 +508,10 @@ export function serializeDrill(rink, pieces, title = "", desc = "", steps = [], 
         : c.type === "random" ? ` rand${c.weight != null && c.weight !== 1 ? "=" + c.weight : ""}`
         : c.type === "sequence" ? ` seq=${c.ord ?? 0}`
         : c.type === "always" ? " always"
-        : (c.type === "light" && hex(c.color) && hex(c.color) !== hex(f.color)) ? ` if=${hex(c.color)}`
+        : c.type === "possession" ? ` has${c.player ? "=" + c.player : ""}`
+        : (c.type === "link" && c.player && c.route) ? ` link=${c.player}/${memToWireRef(c.route)}`
+        : (c.type === "event" && c.on) ? ` when=${c.on}${c.mode === "waypoint" ? "@" + ((c.at ?? 0) + 1) : "!" + (c.at != null ? c.at + 1 : "")}`
+        : (c.type === "light" && ((c.color && hex(c.color) !== hex(f.color)) || c.lightId)) ? ` if=${hex(c.color || f.color)}${c.lightId ? "@" + c.lightId : ""}`
         : "";
       const act = f.action && f.action !== "skate"
         ? " " + f.action + (f.action === "shoot" && f.net ? ":" + f.net : f.action === "pass" && f.to ? ":" + f.to : "")
