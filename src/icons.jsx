@@ -51,6 +51,9 @@ const ICONS = {
   puck: <ellipse cx="12" cy="12" rx="8" ry="4.4" {...F} />,
   check: <path d="M5 12.5l4.5 4.5L19 6.5" />,
   grip: <><circle cx="9" cy="7" r="1.4" {...F} /><circle cx="15" cy="7" r="1.4" {...F} /><circle cx="9" cy="12" r="1.4" {...F} /><circle cx="15" cy="12" r="1.4" {...F} /><circle cx="9" cy="17" r="1.4" {...F} /><circle cx="15" cy="17" r="1.4" {...F} /></>,
+  // a pushpin (keep the editor floating) + a panel with a right column (dock to sidebar)
+  pin: <><path d="M9.5 3.5h5l-.8 5 2.8 2.8v1.7H7.5v-1.7l2.8-2.8-.8-5z" /><path d="M12 13v7.5" /></>,
+  sidebar: <><rect x="3.5" y="4.5" width="17" height="15" rx="2" /><path d="M14.5 4.5v15" /></>,
   share: <><circle cx="6" cy="12" r="2.6" /><circle cx="17.5" cy="6" r="2.6" /><circle cx="17.5" cy="18" r="2.6" /><path d="M8.3 10.8l7-3.6M8.3 13.2l7 3.6" /></>,
   download: <><path d="M12 3.5v11" /><path d="M7.5 10l4.5 4.5L16.5 10" /><path d="M4.5 19.5h15" /></>,
   upload: <><path d="M12 20.5v-11" /><path d="M7.5 14l4.5-4.5L16.5 14" /><path d="M4.5 4.5h15" /></>,
@@ -59,6 +62,9 @@ const ICONS = {
   // presentation board on a stand with a rising line = presentation mode
   presentation: <><rect x="3.5" y="3.5" width="17" height="12" rx="1.5" /><path d="M7 12l3-3.5 2.5 2L16.5 6" /><path d="M12 15.5v3" /><path d="M8.5 21l3.5-2.5 3.5 2.5" /></>,
   grid: <><rect x="3.5" y="3.5" width="7" height="7" rx="1" /><rect x="13.5" y="3.5" width="7" height="7" rx="1" /><rect x="3.5" y="13.5" width="7" height="7" rx="1" /><rect x="13.5" y="13.5" width="7" height="7" rx="1" /></>,
+  // a closed padlock (lock board) and an open shackle (unlock)
+  lock: <><rect x="4.5" y="10.5" width="15" height="10" rx="2" /><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" /></>,
+  unlock: <><rect x="4.5" y="10.5" width="15" height="10" rx="2" /><path d="M8 10.5V7.5a4 4 0 0 1 7.7-1.5" /></>,
   gauge: <><path d="M4 18a8 8 0 1 1 16 0" /><path d="M12 18l4-5" /></>,
   sliders: <><path d="M5 5v14M12 5v14M19 5v14" /><circle cx="5" cy="9" r="1.9" {...F} /><circle cx="12" cy="14" r="1.9" {...F} /><circle cx="19" cy="8" r="1.9" {...F} /></>,
   // line-segment types (player/waypoint popups)
@@ -134,7 +140,7 @@ export function DiagPanel({ drillVersion }) {
 
 /* ---------------- piece icon ---------------- */
 
-export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStickDown, swing = 0, noShadow = false }) {
+export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStickDown, swing = 0, noShadow = false, hitOff = false, wb = false }) {
   const frame = xf || `translate(${pos.x} ${pos.y}) rotate(${pos.a || 0}) scale(${ICON_SCALE})`;
   let body;
   if (p.kind === "puck")
@@ -238,15 +244,21 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
     const wood = p.color || "#20242a";
     body = (
       <g pointerEvents="none">
-        {selected && <rect x={-6.2} y={-2.5} width={12.6} height={5} rx={0.8} fill="none" stroke="#ffd447" strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
+        {selected && <rect x={-6.2} y={-3.0} width={12.6} height={5.6} rx={0.8} fill="none" stroke="#ffd447" strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
         <ellipse cx={0.5} cy={0.35} rx={6} ry={0.7} fill="#0a0f14" opacity={0.16} />
         {/* butt knob */}
         <rect x={-5.85} y={-0.5} width={0.7} height={1} rx={0.3} fill="#e7ebef" stroke="#9aa2ab" strokeWidth={0.1} />
         {/* shaft */}
-        <rect x={-5.3} y={-0.32} width={9} height={0.64} rx={0.3} fill={wood} stroke="#0c1014" strokeWidth={0.12} />
-        {/* heel + blade angled off the toe (with a slight curve) */}
-        <path d="M 3.5 -0.32 L 6.3 -1.85 Q 6.95 -1.6 6.85 -0.95 L 4.3 0.32 Z" fill={wood} stroke="#0c1014" strokeWidth={0.12} strokeLinejoin="round" />
-        <path d="M 4 -0.05 L 6.2 -1.25" stroke="#4a5058" strokeWidth={0.12} opacity={0.6} />
+        <rect x={-5.3} y={-0.32} width={8.8} height={0.64} rx={0.3} fill={wood} stroke="#0c1014" strokeWidth={0.12} />
+        {/* heel + blade angled up off the toe (steeper lie). The blade's TOP edge
+            peels off the shaft low (near centreline) so the heel stays thin, then
+            the back edge sweeps up to the toe; the bottom edge drapes flush over the
+            shaft toe so the joint reads as one continuous piece — no bulge.
+            hand=L mirrors the blade across the shaft for a left-handed stick. */}
+        <g transform={p.hand === "L" ? "scale(1 -1)" : undefined}>
+          <path d="M 3.45 -0.05 Q 4.3 -1.35 5.55 -2.95 Q 6.1 -2.78 5.95 -2.25 L 4.65 0.02 Q 4.3 0.34 3.7 0.33 L 2.6 0.32 Z" fill={wood} stroke="#0c1014" strokeWidth={0.12} strokeLinejoin="round" />
+          <path d="M 4.25 -0.95 L 5.3 -2.45" stroke="#4a5058" strokeWidth={0.12} opacity={0.6} />
+        </g>
       </g>
     );
   } else if (p.kind === "deker") {
@@ -275,6 +287,22 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
         <rect x={-1.6} y={-2.6} width={3.2} height={5.2} rx={0.5} fill="rgba(210,225,240,0.14)" stroke={col} strokeWidth={0.5} />
         <path d="M -1.6 -1.3 L 1.6 -1.3 M -1.6 1.3 L 1.6 1.3" stroke={col} strokeWidth={0.16} opacity={0.5} />
         <rect x={0.85} y={-2.6} width={0.75} height={5.2} rx={0.3} fill={col} />
+      </g>
+    );
+  } else if (wb && p.kind === "player") {
+    // whiteboard mode: the classic coach's symbol (X / O / F / W1…) instead of
+    // the skater art — flat (no shadow), upright via the label's counter-rotation
+    const sym = (p.sym && p.sym.trim()) || (p.defense ? "X" : "O");
+    const fs = sym.length >= 3 ? 3.4 : sym.length === 2 ? 4.5 : 5.6;
+    body = (
+      <g pointerEvents="none">
+        {selected && <circle cx={0} cy={0} r={4.6} fill="none" stroke="#ffd447" strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
+        <text transform={`rotate(${-thDeg})`} textAnchor="middle" dominantBaseline="central"
+          fontSize={fs} fontWeight={900} fill={p.color}
+          style={{ userSelect: "none", fontFamily: "system-ui, sans-serif",
+            paintOrder: "stroke", stroke: "rgba(255,255,255,0.9)", strokeWidth: 0.55 }}>
+          {sym}
+        </text>
       </g>
     );
   } else {
@@ -310,25 +338,29 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
   }
   // nets and tires come in sizes — scale the drawn body + its grab area
   const sz = (p.kind === "net" || p.kind === "tire") && p.size ? p.size : 1;
+  // a locked, non-selectable piece is click-through: its transparent grab shape
+  // hit-tests unless pointer-events is switched off, so taps fall to nearby
+  // unlocked items instead of the locked one stealing them
+  const hPE = hitOff ? "none" : undefined;
   const grab = p.kind === "net"
-    ? <rect x={-5} y={-4.2} width={5.5} height={8.4} fill="transparent" onPointerDown={onDown} style={{ cursor: "grab" }} />
+    ? <rect x={-5} y={-4.2} width={5.5} height={8.4} fill="transparent" onPointerDown={onDown} pointerEvents={hPE} style={{ cursor: "grab" }} />
     : p.kind === "tire"
-    ? <circle cx={0} cy={0} r={2.9} fill="transparent" onPointerDown={onDown} style={{ cursor: "grab" }} />
+    ? <circle cx={0} cy={0} r={2.9} fill="transparent" onPointerDown={onDown} pointerEvents={hPE} style={{ cursor: "grab" }} />
     : p.kind === "bumper"
-    ? <rect x={-7.2} y={-1.7} width={14.4} height={3.4} fill="transparent" onPointerDown={onDown} style={{ cursor: "grab" }} />
+    ? <rect x={-7.2} y={-1.7} width={14.4} height={3.4} fill="transparent" onPointerDown={onDown} pointerEvents={hPE} style={{ cursor: "grab" }} />
     : p.kind === "deker"
-    ? <rect x={-2.5} y={-3.2} width={5} height={6.4} fill="transparent" onPointerDown={onDown} style={{ cursor: "grab" }} />
+    ? <rect x={-2.5} y={-3.2} width={5} height={6.4} fill="transparent" onPointerDown={onDown} pointerEvents={hPE} style={{ cursor: "grab" }} />
     : p.kind === "passer"
-    ? <rect x={-1.9} y={-2.9} width={3.8} height={5.8} fill="transparent" onPointerDown={onDown} style={{ cursor: "grab" }} />
+    ? <rect x={-1.9} y={-2.9} width={3.8} height={5.8} fill="transparent" onPointerDown={onDown} pointerEvents={hPE} style={{ cursor: "grab" }} />
     : p.kind === "light"
-    ? <rect x={-2.4} y={-3.1} width={4.8} height={6.2} fill="transparent" onPointerDown={onDown} style={{ cursor: "grab" }} />
-    : <circle cx={0} cy={0} r={p.kind === "puck" ? 3.4 : 6.8} fill="transparent" onPointerDown={onDown} style={{ cursor: "grab" }} />;
+    ? <rect x={-2.4} y={-3.1} width={4.8} height={6.2} fill="transparent" onPointerDown={onDown} pointerEvents={hPE} style={{ cursor: "grab" }} />
+    : <circle cx={0} cy={0} r={p.kind === "puck" ? 3.4 : 6.8} fill="transparent" onPointerDown={onDown} pointerEvents={hPE} style={{ cursor: "grab" }} />;
   return (
     <g opacity={dim ? 0.92 : 1} transform={frame}>
       {sz !== 1 ? <g transform={`scale(${sz})`}>{body}{grab}</g> : <>{body}{grab}</>}
-      {onStickDown && p.kind === "player" && (
+      {onStickDown && p.kind === "player" && !wb && (
         <circle cx={4.7} cy={p.hand === "L" ? -2.55 : 2.55} r={3.3} fill="transparent"
-          style={{ cursor: "grab" }} onPointerDown={onStickDown} />
+          pointerEvents={hPE} style={{ cursor: "grab" }} onPointerDown={onStickDown} />
       )}
     </g>
   );

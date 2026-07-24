@@ -4,17 +4,64 @@ Full-screen hockey drill animator (React + Vite) for a youth hockey coach,
 used primarily as an iPhone home-screen web app at the bench.
 Live: https://snitzer-family.github.io/drill-board/
 
+## Session start (every new session)
+
+1. **Start in plan mode.** Begin every session in plan mode — investigate and
+   propose before touching files. Only leave plan mode once the user approves.
+2. **Spin up the dev server immediately.** At the start of each session, launch
+   the LAN dev server (see "Live dev server" below) without waiting to be asked,
+   so a preview is ready the moment there's something to look at.
+3. **Keep the dev server URL visible.** Once the server is up, surface its LAN
+   URL (`http://<lan-ip>:<PORT>/drill-board/`) and repeat it in your replies so
+   it stays a clickable link the user can open at any time to check visually
+   what's going on.
+
+Rules 1–2 are enforced by `.claude/settings.json`: `permissions.defaultMode:
+"plan"` starts every session in plan mode, and a `SessionStart` hook launches
+the LAN dev server on a per-session port (derived from the session id) and
+injects the URL back into context. If you edit that hook, re-open `/hooks` or
+restart so the settings watcher reloads it.
+
 ## Workflow rules (always)
 
 1. **Verify before committing:** run `npm run build` and confirm it passes.
 2. **Bump the version** on every behavioral change: `APP_VERSION` in
    `src/constants.js`. The build timestamp is injected automatically by
    `vite.config.js` — never hardcode it.
-3. **Deploy = push to `main`.** GitHub Actions builds and publishes to Pages
-   (~90s). The user verifies deploys via the version watermark in the app's
-   bottom bar (bottom-right).
+3. **Never merge or push to `main` without explicit permission.** Deploy = push
+   to `main` (GitHub Actions builds and publishes to Pages, ~90s), so it goes
+   live. Always confirm and get the user's go-ahead before merging to `main` or
+   pushing. Commit on the worktree/session branch freely; the user verifies
+   deploys via the version watermark in the app's bottom bar (bottom-right).
 4. `vite.config.js` must keep `base: "/drill-board/"` (matches repo name).
 5. No new dependencies without asking — the app is deliberately React-only.
+
+## Live dev server (start it every session — see "Session start")
+
+- **Always LAN-addressed on a strict, per-session port** so multiple concurrent
+  Claude sessions/worktrees never collide. Launch with:
+  `npx vite --host --port <PORT> --strictPort` (background it). `--host` binds
+  `0.0.0.0` so the phone can reach it; `--strictPort` fails loudly instead of
+  silently hopping to another port (which would hijack/alias another session).
+- **Pick a fixed unused port per session** (don't reuse the default 5173). Check
+  it's free first (`lsof -iTCP:<PORT> -sTCP:LISTEN`); keep the same port for the
+  life of the session. The LAN URL to hand the user is
+  `http://<lan-ip>:<PORT>/drill-board/` (get the IP via `ipconfig getifaddr en0`).
+- The `base` is `/drill-board/`, so the path segment is required.
+
+## Loading a sample drill via URL (the `#d=` hash)
+
+- The app boots straight into a drill from a URL **hash**: `#d=<enc>` where `<enc>`
+  is the drill DSL, UTF-8 → base64 → **url-safe** (`+`→`-`, `/`→`_`). Parsed in
+  the `linkDrill` IIFE (`hockey-drill-animator.jsx` ~245, regex `/[#&]d=([^&]+)/`
+  on `location.hash`) and produced by `previewLink()` (~3643). It wins over the
+  autosave and doesn't overwrite the saved board until the user edits.
+- So to demo a feature with a sample drill, write the DSL (see `docs/drill-dsl.md`),
+  url-safe-base64-encode it, and give the user
+  `http://<lan-ip>:<PORT>/drill-board/#d=<enc>` (or append `#d=<enc>` to the live
+  Pages URL). Encode in Node exactly as `previewLink()` does:
+  `Buffer.from(dsl,'utf8').toString('base64').replace(/\+/g,'-')
+  .replace(/\//g,'_').replace(/=+$/,'')` (strip trailing `=`).
 
 ## Module map (src/)
 

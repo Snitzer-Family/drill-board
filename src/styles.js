@@ -5,8 +5,12 @@ export const STYLES = `
           --hd-b: var(--hd-safe-b, min(env(safe-area-inset-bottom, 0px), 34px));
           --hd-scrub: 0px;   /* reserved height for the player bar band (0 when hidden) */
           --hd-pintop: 10px; /* no floating top dock any more — popups can ride the top edge */
+          --hd-dock-w: min(320px, 34vw);   /* width of the docked editing sidebar (desktop) */
           font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
         .hd-root.scrub-on { --hd-scrub: 48px; }
+        /* editing sidebar docked: shrink the ice to the left of it (the stage's
+           ResizeObserver re-fits the rink automatically) */
+        .hd-root.dock-open .hd-stage { right:calc(env(safe-area-inset-right, 0px) + var(--hd-dock-w)); }
         /* the ice starts below the Dynamic Island / status bar and ends
            above the home-indicator band — iOS 26 standalone composites an
            opaque system bar there that web content cannot render under */
@@ -189,9 +193,18 @@ export const STYLES = `
         .hd-x { background:none; border:none; color:#8b99a8; cursor:pointer;
           font-size:16px; padding:2px 5px; display:inline-flex; align-items:center; justify-content:center; }
         .hd-x:first-of-type { margin-left:auto; }
+        .hd-x.on { color:#ffd447; }   /* an active toggle (pinned / docked) */
         .hd-grip { display:inline-flex; align-items:center; }
         input[type=range] { accent-color:#d7263d; height:30px; }
         .hd-pop.pinned { z-index:43; }   /* just under the play dock, never behind it */
+        /* docked editing sidebar: a fixed full-height column on the right edge,
+           square outer corners, shadow only on its inner (left) edge */
+        .hd-pop.pinned.dock { position:fixed; top:env(safe-area-inset-top, 0px); right:0;
+          bottom:calc(54px + var(--hd-b) + var(--hd-scrub));
+          width:var(--hd-dock-w); max-height:none; height:auto;
+          border-radius:0; border-top:none; border-right:none; border-bottom:none;
+          box-shadow:-8px 0 24px rgba(0,0,0,.4); }
+        .hd-pop.pinned.dock .hd-pophead { cursor:default; }
         .hd-pop { position:absolute; z-index:20; box-sizing:border-box; width:256px; border:1px solid #33404f;
           border-radius:12px; padding:10px 12px; box-shadow:0 8px 24px rgba(0,0,0,.5);
           display:flex; flex-direction:column; gap:8px;
@@ -247,6 +260,15 @@ export const STYLES = `
           border-right:2px solid #7d93aa; border-bottom:2px solid #7d93aa; }
         .hd-grip { color:#5b6c7d; font-size:13px; letter-spacing:0; }
         .hd-poprow { display:flex; align-items:center; gap:7px; flex-wrap:wrap; font-size:12.5px; color:#cdd8e2; }
+        /* labeled field — the one consistent shape for every popup setting:
+           an uppercase title, an optional instruction under it, then the control
+           row. Adjacent fields get a hairline divider so groups read distinctly. */
+        .hd-field { display:flex; flex-direction:column; gap:5px; }
+        .hd-field + .hd-field { border-top:1px solid #243040; padding-top:9px; }
+        .hd-sectitle { font-size:10.5px; font-weight:700; letter-spacing:.07em;
+          text-transform:uppercase; color:#93a3b5; }
+        .hd-sechint { font-size:11px; color:#8b99a8; line-height:1.35; }
+        .hd-field .hd-poprow { gap:6px; }
         .hd-mini { padding:6px 10px; font-size:12.5px; border:1px solid #2c3846; background:#212b36;
           color:#dbe4ec; border-radius:7px; cursor:pointer; min-height:34px;
           display:inline-flex; align-items:center; justify-content:center; gap:5px; }

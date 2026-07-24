@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "defaultMode": "plan"
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "statusMessage": "Starting DrillBoard dev server…",
+            "command": "cd \"${CLAUDE_PROJECT_DIR:-$PWD}\" 2>/dev/null || exit 0; sid=$(jq -r '.session_id // empty' 2>/dev/null); [ -z \"$sid\" ] && sid=$$; port=$(( $(printf '%s' \"$sid\" | cksum | cut -d' ' -f1) % 300 + 5200 )); lan=$(ipconfig getifaddr en0 2>/dev/null || echo 127.0.0.1); url=\"http://$lan:$port/drill-board/\"; if lsof -iTCP:$port -sTCP:LISTEN >/dev/null 2>&1; then :; else ( nohup npx vite --host --port $port --strictPort >\"/tmp/drillboard-vite-$port.log\" 2>&1 & ); fi; printf '{\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"Auto-started the LAN dev server for this session at %s (log /tmp/drillboard-vite-%s.log). Keep this URL as an always-available clickable link and re-share it whenever showing a change. This project starts in plan mode.\"}}\\n' \"$url\" \"$port\""
+          }
+        ]
+      }
+    ]
+  }
+}
