@@ -244,6 +244,7 @@ function DelayTrigger({ value, onChange, sub, players, actorIds, nameOf }) {
    ============================================================ */
 
 const SAVE_KEY = "drillboard:autosave";   // the whole board, persisted across refreshes
+const WB_KEY = "drillboard:whiteboard";   // whiteboard-mode view pref, persisted on its own
 
 export default function DrillAnimator() {
   // a shared drill link (#d=<url-safe base64 DSL> — the preview-link format from
@@ -304,6 +305,14 @@ export default function DrillAnimator() {
   const [previewAllBranches, setPreviewAllBranches] = useState(false); // ghost a player down EVERY candidate branch at once
   const [realisticShots, setRealisticShots] = useState(true); // random goal/post/wide/over + air; off = always bury flat
   const [detailAnim, setDetailAnim] = useState(true);  // skater stride sway, stick swing, dribble cradle
+  // whiteboard mode: players draw as classic X/O/letter symbols, action badges
+  // collapse to arrow-into-gap, and detail animations shut off. A standing view
+  // preference, so unlike the other prefs toggles it persists across refreshes.
+  const [whiteboard, setWhiteboard] = useState(() => {
+    try { return localStorage.getItem(WB_KEY) === "1"; } catch { return false; }
+  });
+  useEffect(() => { try { localStorage.setItem(WB_KEY, whiteboard ? "1" : "0"); } catch { /* private mode */ } }, [whiteboard]);
+  const effDetail = detailAnim && !whiteboard;
   const [lineScale, setLineScale] = useState(1);       // route line-thickness multiplier
   const [markOpacity, setMarkOpacity] = useState(1);   // opacity of the drawn drill markings only (routes/forks/stops/ink/aim); players, implements + rink stay opaque
   const [defaultSpeed, setDefaultSpeed] = useState(1.5); // speed given to newly-added players
@@ -923,14 +932,14 @@ export default function DrillAnimator() {
   // → effective piece so position sampling follows the reaction, not the base end
   const effById = new Map(effPieces.map(p => [p.id, p]));
   const effOf = p => p && p.kind === "player" && (p.forks || []).length ? (effById.get(p.id) || p) : p;
-  const { getPlan, pieceTime, displayPosAt, stickSwing, waypointTime, puckInGoal } = createTiming({ pieces: effPieces, pace, segRefs, planCache, seed: playSeed, realisticShots, detail: detailAnim, odds: shotOdds });
+  const { getPlan, pieceTime, displayPosAt, stickSwing, waypointTime, puckInGoal } = createTiming({ pieces: effPieces, pace, segRefs, planCache, seed: playSeed, realisticShots, detail: effDetail, odds: shotOdds });
   // intent plan for the route preview (identical to the main plan but with misses
   // off, so shots always route on net). Only built when realistic shots are on and
   // the puck-path overlay is actually shown; otherwise the main plan already IS the
   // intent, so reuse it.
   const wantPuckPaths = !aiPlay && (editing || playRoutes === "all");
   const getIntentPlan = (!realisticShots || !wantPuckPaths) ? getPlan
-    : createTiming({ pieces: effPieces, pace, segRefs, planCache: intentPlanCache, seed: playSeed, realisticShots: false, detail: detailAnim, odds: shotOdds }).getPlan;
+    : createTiming({ pieces: effPieces, pace, segRefs, planCache: intentPlanCache, seed: playSeed, realisticShots: false, detail: effDetail, odds: shotOdds }).getPlan;
 
   // a light's cue timeline can outlast every route — keep the drill running long
   // enough to show every cue (so a "read the light" reaction has time to resolve)
@@ -2256,8 +2265,8 @@ export default function DrillAnimator() {
           const spd = Math.hypot(b2.x - a2.x, b2.y - a2.y) / 0.14;
           const fast = Math.min(1, spd / 24);
           const w = Math.sin(e * 8.5);
-          const lat = w * 1.2 * (1 - 0.5 * fast);                         // side-to-side cradle
-          const push = (0.5 + 0.5 * Math.sin(e * 8.5 + 1.3)) * 1.1 * fast; // slight fore-push when moving fast
+          const lat = effDetail ? w * 1.2 * (1 - 0.5 * fast) : 0;         // side-to-side cradle (off with detail anims)
+          const push = effDetail ? (0.5 + 0.5 * Math.sin(e * 8.5 + 1.3)) * 1.1 * fast : 0; // slight fore-push when moving fast
           const hd = ((qd.a || 0) * Math.PI) / 180;
           const lx = -Math.sin(hd), ly = Math.cos(hd), fx = Math.cos(hd), fy = Math.sin(hd);
           return { ...res, x: tip.x + lx * lat + fx * push, y: tip.y + ly * lat + fy * push };
@@ -2270,7 +2279,7 @@ export default function DrillAnimator() {
     p = effOf(p);
     if (p.kind === "player" && p.defense) return animT > 0 ? dmanPos(p) : { x: p.x, y: p.y, a: p.facing || 0 };
     const dp = displayPosAt(p, animT <= 0 ? 0 : animT * totalTime);
-    if (!detailAnim || p.kind !== "player" || !(dp.smul > 0.02)) return dp;  // no stride sway/lean when detail off
+    if (!effDetail || p.kind !== "player" || !(dp.smul > 0.02)) return dp;  // no stride sway/lean when detail off
     const r = dp.smul;                                    // effective speed multiple
     const g = Math.max(0, Math.min(1, (r - GLIDE_AT) / (HARD_AT - GLIDE_AT)));
     const strength = g * g * (3 - 2 * g);                 // 0 glide → 1 aggressive
@@ -2498,7 +2507,7 @@ export default function DrillAnimator() {
     const id = nextId(kind);
     const colorIdx = pieces.filter(p => p.kind === "player").length % COLORS.length;
     return {
-      id, kind, x: pt.x, y: pt.y, speed: kind === "player" ? defaultSpeed : 1, hand: "R", carrier: null,
+      id, kind, x: pt.x, y: pt.y, speed: kind === "player" ? defaultSpeed : 1, hand: "R", sym: "", carrier: null,
       facing: kind === "net" && pt.x >= 100 ? 180 : 0, transfers: [], shotAt: null, rimAt: null, chipAt: null, chipAim: null, rimAim: null, chipDist: null, rimDist: null, pickup: null, net: null, holdLine: false, goalie: false, defense: false,
       color: kind === "player" ? COLORS[colorIdx] : kind === "cone" ? "#e0731d" : kind === "net" ? "#c81e33"
         : kind === "bumper" ? "#1b1e22" : kind === "deker" ? "#c79a4e" : kind === "passer" ? "#57636f"
@@ -3876,6 +3885,9 @@ export default function DrillAnimator() {
   /* ---- action badges at waypoints ---- */
   // gap (rink ft) the line leaves around an action badge; badge radius in icon-frame units
   const ACT_GAP = 3.4, ACT_R = 3.0;
+  // whiteboard mode drops the badge discs, so the line-gap shrinks to a small
+  // central gap the arrows point into (nothing to clear but the waypoint itself)
+  const actGap = whiteboard ? 2.2 : ACT_GAP;
   // priority for picking the "main" action shown in a badge with several actions
   const ACT_PRI = { shot: 5, pass: 4, rim: 3, chip: 2, receive: 1, collect: 1, pickup: 1 };
   const stepActionType = st => st.role === "pickup" ? "pickup" : st.role === "receive" ? "receive"
@@ -3961,9 +3973,10 @@ export default function DrillAnimator() {
       }
       const tl = Math.hypot(tx, ty) || 1, ang = (Math.atan2(ty, tx) * 180) / Math.PI;
       // incoming end-mark, just outside the round badge — the SAME glyph as a route end
-      const mp = gmMove(s.x, s.y, -tx / tl, -ty / tl, ACT_GAP);
+      const mp = gmMove(s.x, s.y, -tx / tl, -ty / tl, actGap);
       els.push(routeMark(`${keyPrefix}am${i}`, mp, ang, s.endStop, color));
-      els.push(iconBadge({ x: s.x, y: s.y }, actionIconName(info.type), color, `${keyPrefix}ab${i}`, 1, info.count));
+      // whiteboard: no icon disc — the arrow just stops, pointing into the gap
+      if (!whiteboard) els.push(iconBadge({ x: s.x, y: s.y }, actionIconName(info.type), color, `${keyPrefix}ab${i}`, 1, info.count));
     }
     return <g>{els}</g>;
   }
@@ -3975,6 +3988,7 @@ export default function DrillAnimator() {
   // Drawn opaque in the stretch-cancelling frame so the converging/diverging routes
   // read as emanating from its edge; the glyph counter-rotates to stay upright.
   function reactionBadge(pt, color, key) {
+    if (whiteboard) return null;   // whiteboard: branches just fan out of the gap
     return iconBadge(pt, "react", color, key);
   }
 
@@ -4387,6 +4401,16 @@ export default function DrillAnimator() {
     const fx = iconXf(gp);
     const col = net.color || "#c81e33";
     const dark = "#1d2126";
+    if (whiteboard) return (
+      <g key={`goalie-${net.id}`} transform={fx.t} pointerEvents="none">
+        <text transform={`rotate(${-fx.th})`} textAnchor="middle" dominantBaseline="central"
+          fontSize={5} fontWeight={900} fill={col}
+          style={{ userSelect: "none", fontFamily: "system-ui, sans-serif",
+            paintOrder: "stroke", stroke: "rgba(255,255,255,0.9)", strokeWidth: 0.55 }}>
+          G
+        </text>
+      </g>
+    );
     return (
       <g key={`goalie-${net.id}`} transform={fx.t} pointerEvents="none">
         <ellipse cx={0.4} cy={0} rx={2.9} ry={2.6} fill="#0a1016" opacity={0.16} />
@@ -5117,6 +5141,24 @@ export default function DrillAnimator() {
                     onClick={() => updateById(p.id, { hand: "L" })}>L</button>
                 </div>
               </div>
+              {whiteboard && (
+                <div className="hd-field">
+                  <div className="hd-sectitle">Whiteboard icon</div>
+                  <div className="hd-poprow" style={{ flexWrap: "wrap" }}>
+                    <button className={`hd-mini${!(p.sym && p.sym.trim()) ? " on" : ""}`}
+                      onClick={() => updateById(p.id, { sym: "" })}>Auto ({p.defense ? "X" : "O"})</button>
+                    {["X", "O", "F", "D", "G", "C", "W", "CO", "W1", "W2"].map(s => (
+                      <button key={s} className={`hd-mini${p.sym === s ? " on" : ""}`}
+                        onClick={() => updateById(p.id, { sym: s })}>{s}</button>
+                    ))}
+                  </div>
+                  <div className="hd-poprow">
+                    <input className="hd-input" style={{ width: 56 }} value={p.sym || ""} maxLength={3}
+                      placeholder={p.defense ? "X" : "O"}
+                      onChange={e => updateById(p.id, { sym: e.target.value })} />
+                  </div>
+                </div>
+              )}
               {(() => {
                 // a carried puck now sits under the player, so surface a direct
                 // route to its popup here instead of tapping the blade
@@ -5854,7 +5896,7 @@ export default function DrillAnimator() {
           {pieces.filter(p => p.kind !== "label" && p.kind !== "mark").map(p => {
             const dp = displayPos(p);
             return (
-              <PieceIcon key={`lp${p.id}`} p={p} pos={dp} thDeg={(dp.a || 0) + screenRot}
+              <PieceIcon key={`lp${p.id}`} p={p} pos={dp} thDeg={(dp.a || 0) + screenRot} wb={whiteboard}
                 selected={p.id === selectedId} dim={animT > 0} onDown={() => {}} swing={displaySwing(p)} />
             );
           })}
@@ -5980,6 +6022,16 @@ export default function DrillAnimator() {
                 {aiRef.current.goalies.map((gl, i) => {
                   const fx = iconXf({ x: gl.x, y: gl.y, a: gl.a });
                   const col = "#2f9e57", dark = "#1d2126";
+                  if (whiteboard) return (
+                    <g key={`aig-${i}`} transform={fx.t}>
+                      <text transform={`rotate(${-fx.th})`} textAnchor="middle" dominantBaseline="central"
+                        fontSize={5} fontWeight={900} fill={col}
+                        style={{ userSelect: "none", fontFamily: "system-ui, sans-serif",
+                          paintOrder: "stroke", stroke: "rgba(255,255,255,0.9)", strokeWidth: 0.55 }}>
+                        G
+                      </text>
+                    </g>
+                  );
                   return (
                     <g key={`aig-${i}`} transform={fx.t}>
                       <ellipse cx={0.4} cy={0} rx={2.9} ry={2.6} fill="#0a1016" opacity={0.16} />
@@ -6000,8 +6052,8 @@ export default function DrillAnimator() {
                   const fx = iconXf(dp);
                   return (
                     <g key={`aip-${pl.id}`} opacity={pl.stun > 0 ? 0.4 : 1}>
-                      <PieceIcon p={{ kind: "player", color: pl.color, hand: "R", label: "" }}
-                        pos={dp} xf={fx.t} thDeg={fx.th} onDown={() => {}} />
+                      <PieceIcon p={{ kind: "player", color: pl.color, hand: "R", label: "", defense: pl.team === 1 }}
+                        pos={dp} xf={fx.t} thDeg={fx.th} wb={whiteboard} onDown={() => {}} />
                     </g>
                   );
                 })}
@@ -6035,8 +6087,8 @@ export default function DrillAnimator() {
                     // the VISIBLE line leaves a gap at the player start and around any
                     // action badge (before this waypoint / after the previous one);
                     // the ref path + hit area below still use the full segment
-                    const startGap = i === 0 && p.kind === "player" ? ROUTE_START_GAP : acts.has(i - 1) ? ACT_GAP : 0;
-                    const endGap = acts.has(i) ? ACT_GAP : 0;
+                    const startGap = i === 0 && p.kind === "player" ? ROUTE_START_GAP : acts.has(i - 1) ? actGap : 0;
+                    const endGap = acts.has(i) ? actGap : 0;
                     let vFrom = from, vSeg = s;
                     if (startGap) { const t = trimSegStart(vFrom, vSeg, startGap, strokeAR); if (t) { vFrom = t.from; vSeg = t.seg; } }
                     if (endGap) { const t = trimSegEnd(vFrom, vSeg, endGap, strokeAR); if (t) vSeg = t.seg; }
@@ -6180,8 +6232,8 @@ export default function DrillAnimator() {
                         const wig = solid && carry.has(i) && !bwd;     // carrying the puck → wiggle
                         // leave a gap at the branch origin (its reaction badge) and around any
                         // action circle, just like a base route
-                        const startGap = i === 0 ? ACT_GAP : acts.has(i - 1) ? ACT_GAP : 0;
-                        const endGap = acts.has(i) ? ACT_GAP : 0;
+                        const startGap = i === 0 ? actGap : acts.has(i - 1) ? actGap : 0;
+                        const endGap = acts.has(i) ? actGap : 0;
                         let vFrom = from, vSeg = s;
                         if (!bent && startGap) { const t = trimSegStart(vFrom, vSeg, startGap, strokeAR); if (t) { vFrom = t.from; vSeg = t.seg; } }
                         if (!bent && endGap) { const t = trimSegEnd(vFrom, vSeg, endGap, strokeAR); if (t) vSeg = t.seg; }
@@ -6233,7 +6285,7 @@ export default function DrillAnimator() {
                         if (!ea) return null;
                         // legacy branch `action` → its circle, else a plain skate carat / ‖ stop
                         const legacy = f.action && f.action !== "skate" ? forkActionIcon(f.action) : null;
-                        return legacy
+                        return legacy && !whiteboard
                           ? iconBadge(ea.endPt, legacy, f.color, ref + "/act", op)
                           : routeMark(ref + "/end", ea.endPt, ea.ang, !!end.endStop, f.color, op);
                       })()}
@@ -6403,7 +6455,7 @@ export default function DrillAnimator() {
                     const gp = samplePoly(poly, skateEnd > 0 ? Math.min(animT / skateEnd, 1) : 1);
                     const fx = iconXf(gp);
                     const gpiece = { ...p, id: `${p.id}~g${k}`, path: segs, forks: [] };
-                    const els = [<PieceIcon key="pl" p={gpiece} pos={gp} xf={fx.t} thDeg={fx.th} dim onDown={() => {}} />];
+                    const els = [<PieceIcon key="pl" p={gpiece} pos={gp} xf={fx.t} thDeg={fx.th} wb={whiteboard} dim onDown={() => {}} />];
                     if (carried) {
                       let pp;
                       if (!act || animT < tRelease) pp = bladeAtWorld(gp.x, gp.y, gp.a || 0, BLADE_FWD, BLADE_LAT, side);
@@ -6458,7 +6510,7 @@ export default function DrillAnimator() {
                         fill="#0a0f14" opacity={shOp} pointerEvents="none" />
                     </g>
                     <g transform={`translate(${lp.x} ${lp.y}) scale(${k}) translate(${-lp.x} ${-lp.y})`}>
-                      <PieceIcon p={p} pos={lp} xf={lfx.t} thDeg={lfx.th} noShadow={isJump}
+                      <PieceIcon p={p} pos={lp} xf={lfx.t} thDeg={lfx.th} noShadow={isJump} wb={whiteboard}
                         selected={p.id === selectedId} swing={isJump ? displaySwing(p) : 0} dim={animT > 0} onDown={e => pieceDown(e, p.id)}
                         hitOff={p.lock && !lockedSelectable} />
                     </g>
@@ -6467,7 +6519,7 @@ export default function DrillAnimator() {
               }
               const fx = iconXf(dp);
               return (
-                <PieceIcon key={p.id} p={p} pos={dp} xf={fx.t} thDeg={fx.th}
+                <PieceIcon key={p.id} p={p} pos={dp} xf={fx.t} thDeg={fx.th} wb={whiteboard}
                   selected={p.id === selectedId} swing={displaySwing(p)}
                   dim={animT > 0} onDown={e => pieceDown(e, p.id)}
                   hitOff={p.lock && !lockedSelectable}
@@ -6723,6 +6775,11 @@ export default function DrillAnimator() {
             <span style={{ fontSize: 11, color: "#8b99a8" }}>skater stride, stick swing, puck cradle, airborne shots</span>
           </div>
           <div className="hd-poprow">
+            <button className={`hd-mini${whiteboard ? " on" : ""}`}
+              onClick={() => setWhiteboard(v => !v)}>{whiteboard ? "✓ Whiteboard mode" : "Whiteboard mode"}</button>
+            <span style={{ fontSize: 11, color: "#8b99a8" }}>classic X &amp; O player symbols, plain arrowed routes, animations simplify</span>
+          </div>
+          <div className="hd-poprow">
             <button className={`hd-mini${collisions ? " on" : ""}`}
               onClick={() => setCollisions(v => !v)}>{collisions ? "✓ Route avoidance" : "Route avoidance"}</button>
             <span style={{ fontSize: 11, color: "#8b99a8" }}>curve routes around nets / goalie / players</span>
@@ -6948,7 +7005,8 @@ export default function DrillAnimator() {
           </div>
           <div className="hd-note">
             Feet: x 0–200, y 0–85. <b>RINK</b> full|half|quarter ·
-            <b> PIECE</b> id player|puck|cone|net|bumper|deker|passer|label|tire x y [#color] [label] [speed=1.2] [hand=L] [on=F1]
+            <b> PIECE</b> id player|puck|cone|net|bumper|deker|passer|label|tire x y [#color] [label] [speed=1.2] [hand=L] [sym=W1] [on=F1]
+            (<code>sym=</code> is a player&apos;s whiteboard symbol — ≤3 chars, shown instead of the skater when <b>Whiteboard mode</b> is on; unset defaults to X for <code>defense</code>, else O)
             (a <b>bumper</b> is a solid barrier — players skate around it and pucks carom off it; a <b>deker</b> a stickhandling gate, a <b>passer</b> a rebounder box — all take <code>face=deg</code>)
             (a <b>tire</b> is an agility prop — <code>size=1</code> large / <code>size=0.55</code> small; add <code>goalie</code> for a keeper that works the full circle to defend shots at it)
             (a <b>label</b> is a movable/resizable text note: <code>PIECE L1 label 100 40 size=1.2 "Regroup here"</code>)
