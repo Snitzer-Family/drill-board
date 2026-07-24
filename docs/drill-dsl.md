@@ -162,6 +162,19 @@ puck at that spot. Under the hood a collected release is stored as a handoff:
 These handoff forms carry the puck straight to the collector; they still load
 and play, and are what the app writes when you use *Collect puck*.
 
+**Actions on a branch route.** A waypoint index in any of the forms above may be
+qualified by the branch route it lives on: `<ref>.<pt>`, where `<ref>` is the branch
+colour-path (hex, no `#`; `.` not `#`, since `#` starts a comment) and `<pt>` is the
+1-based waypoint on *that* branch. Unqualified = the base route. So a player who
+reacts to the green cue and shoots at the 3rd waypoint of that reaction writes
+`shoot=2ea043.3`; a pass released on the green branch and caught on the receiver's red
+branch is `pass=2ea043.2:F2@e5342b.1`; a nested branch is `rim=2ea043/e5342b.2`. At
+playback `resolveForks` lowers each `(ref, pt)` to a flat index on the chosen run and
+**drops** actions that live on a branch the run didn't take. This is how a reaction
+route behaves like a normal route — its waypoints carry the ordinary puck actions,
+rather than a single action declared on the fork. (The legacy per-`BRANCH` `action`
+still loads.)
+
 ### `PATH <id> <segments…>`
 The route for a player or puck. Points are numbered **1…N** in order; **point 0**
 is the piece's starting spot (so `shoot=0` / `chip=0` releases before skating).
@@ -204,13 +217,30 @@ A waypoint **description** (`DESC "…"`) can be surfaced three ways via `SHOW`:
 Standalone text notes use the `label` **piece** instead:
 `PIECE L1 label 100 40 size=1.2 "Regroup here"`.
 
-### `FORK <player> <ref> [<action>[:target]] <segments…>`
-A **light-reaction** branch for a player: a continuation route (same segment
-grammar as `PATH`) that begins at a **branch point** and continues per the light's
-cue. An optional **action** right after the ref says what the player does on that
-reaction (a dropdown per cue colour in the app): `skate` (default — just move) ·
-`shoot[:<net>]` · `chip` · `rim` · `pass:<player>`. A non-`skate` action is applied
-to the puck the player carries into the reaction, at the reaction's end.
+### `BRANCH <player> <ref> [at=<pt>] [<cond>] [<action>[:target]] <segments…>`
+A **conditional route branch** for a player ("multiple routes off one waypoint"): a
+continuation route (same segment grammar as `PATH`) that begins at a **branch point**
+and continues when its condition fires. Optional `at=<pt>` (1-based) is the parent
+waypoint the branch departs from; omit it for the parent route's end (the default).
+
+Optional `<cond>` selects **how** the branch is chosen at that waypoint (default = a
+reaction-light cue matching the ref colour, i.e. today's behavior):
+- *(none)* / `if=<hex>` — a reaction-**light** cue (the governing cue-light's mode
+  decides; `if=` sets an explicit cue colour when it differs from the ref colour).
+- `rand` / `rand=<weight>` — **random** each run, weighted; needs no light at all.
+- `seq=<n>` — **sequence**: cycles branches on successive runs, ordered by `n`.
+- `always` — the **default/fallback** taken when nothing else fires.
+
+When several branches leave one waypoint, precedence is light → random → sequence →
+always. A branch's puck actions are authored on **its own waypoints** like any route
+(see the `<ref>.<pt>` action forms under PIECE) — a reaction route is just a normal
+route. A legacy optional **action** right after `cond` (`shoot[:<net>]` · `chip` ·
+`rim` · `pass:<player>`, applied to the carried puck at the branch's end) still
+loads for older drills, but new drills leave it off (`skate`).
+
+> `FORK` is the **legacy keyword** for this statement and is still read for
+> backward compatibility (old drills load unchanged); the serializer now writes
+> `BRANCH`.
 
 **Chaining.** A `skate` reaction can chain **another** light reaction off its end,
 recursively. The `ref` is therefore a **slash-path of cue colours** (hex, no `#`):
@@ -222,11 +252,11 @@ Branch arrival times depend only on the chosen prefix, so the whole chain is
 deterministic. Parent reactions are emitted before their children.
 
 ```drill
-FORK P1 2ea043 skate C 100,30 120,30 130,42     # green → skate to the slot…
-FORK P1 2ea043/e5342b shoot L 165,42            #   …then red → shoot
-FORK P1 2ea043/2f6df6 skate L 160,60            #   …or blue → skate to the corner (chains again)
-FORK P1 e5342b chip L 120,20                     # red at the first branch → chip
-``` Give a player one `FORK` per cue
+BRANCH P1 2ea043 skate C 100,30 120,30 130,42     # green → skate to the slot…
+BRANCH P1 2ea043/e5342b shoot L 165,42            #   …then red → shoot
+BRANCH P1 2ea043/2f6df6 skate L 160,60            #   …or blue → skate to the corner (chains again)
+BRANCH P1 e5342b chip L 120,20                     # red at the first branch → chip
+``` Give a player one `BRANCH` per cue
 colour of the governing light — the nearest `light` with a `cues=` timeline, or the
 one the player names via `light=<id>` when several exist. The hex has no leading `#`.
 
@@ -248,9 +278,9 @@ others dashed.
 PIECE LT1 light 100 30 #2ea043 cues=2ea043:2;e5342b:2;2f6df6:3
 PIECE F1 player 55 42 #d7263d F1
 PATH F1 L 95,42
-FORK F1 2ea043 L 150,20    # green → drive the far dot
-FORK F1 e5342b L 150,65    # red   → cut low
-FORK F1 2f6df6 L 175,42    # blue  → straight to the net
+BRANCH F1 2ea043 L 150,20    # green → drive the far dot
+BRANCH F1 e5342b L 150,65    # red   → cut low
+BRANCH F1 2f6df6 L 175,42    # blue  → straight to the net
 ```
 
 > Note: a fork's segments are stored in absolute coordinates from where the base

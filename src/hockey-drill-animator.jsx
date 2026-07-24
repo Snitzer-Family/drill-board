@@ -296,6 +296,8 @@ export default function DrillAnimator() {
   const [minorDesc, setMinorDesc] = useState(false);   // describe zones skated through
   const [showResult, setShowResult] = useState(true);  // Save!/Goal! splash on shots
   const [collisions, setCollisions] = useState(true);  // route avoidance (nets/goalie/players)
+  const [avoidanceVisuals, setAvoidanceVisuals] = useState(true); // DRAW the detour bend + ghost (animation still avoids either way)
+  const [previewAllBranches, setPreviewAllBranches] = useState(false); // ghost a player down EVERY candidate branch at once
   const [realisticShots, setRealisticShots] = useState(true); // random goal/post/wide/over + air; off = always bury flat
   const [detailAnim, setDetailAnim] = useState(true);  // skater stride sway, stick swing, dribble cradle
   const [lineScale, setLineScale] = useState(1);       // route line-thickness multiplier
@@ -1406,8 +1408,9 @@ export default function DrillAnimator() {
     const discs = stationaryDiscs.filter(d => !mine.some(m => m.cx === d.cx && m.cy === d.cy));
     const nets = detourNetDiscs();
     // a prop the player jumps over (a jump point sits within it) is skipped, so
-    // it stays on the path and the hop carries them over it
-    const jps = jumpPointsOf(self);
+    // it stays on the path and the hop carries them over it — resolved path, so a
+    // jump authored on a branch waypoint skips its prop too
+    const jps = jumpPointsOf(effOf(self));
     const props = propDiscs().filter(d => !jps.some(j => Math.hypot(j.x - d.cx, j.y - d.cy) < d.r + 3));
     const all = [...nets, ...props, ...discs];
     return all.length ? all : [];
@@ -1417,20 +1420,15 @@ export default function DrillAnimator() {
   // animation progress onto the detour) or null if no net is in the way. Cached
   // per render so the line and the animation share one detour.
   const detourCache = new Map();
-  function routeDetour(p) {
-    if (!collisions) return null;                    // avoidance off — draw routes exactly as authored
-    if (!p.path.length || (p.kind !== "player" && p.kind !== "puck")) return null;
-    // Key by path LENGTH too: the drawn line passes the base piece while the
-    // animation passes the fork-inclusive `effOf` piece (longer path). Sharing by
-    // id alone let a base-only detour (ending at the branch point) drive the
-    // animation, freezing the skater there instead of continuing onto the fork.
-    const key = `${p.id}:${p.path.length}`;
+  // core: sample (startPt then pathArr) into a dense polyline and arc it around the
+  // obstacles. Cached per render under `key` so the drawn line and the animation share
+  // one detour. Shared by base routes and branch routes so both bend identically.
+  function detourOf(startPt, pathArr, obstacles, key) {
     if (detourCache.has(key)) return detourCache.get(key);
-    const obstacles = detourObstaclesFor(p.id);
-    if (!obstacles.length) { detourCache.set(key, null); return null; }
-    const pts = [{ x: p.x, y: p.y }];
-    let prev = { x: p.x, y: p.y }, origLen = 0;
-    for (const s of p.path) {
+    if (!obstacles.length || !pathArr.length) { detourCache.set(key, null); return null; }
+    const pts = [{ x: startPt.x, y: startPt.y }];
+    let prev = { x: startPt.x, y: startPt.y }, origLen = 0;
+    for (const s of pathArr) {
       const n = Math.max(2, Math.min(48, Math.round((Math.hypot(s.x - prev.x, s.y - prev.y) + 4) / 2)));
       for (let k = 1; k <= n; k++) { const q = evalSeg(prev, s, k / n); const last = pts[pts.length - 1]; origLen += Math.hypot(q.x - last.x, q.y - last.y); pts.push(q); }
       prev = { x: s.x, y: s.y };
@@ -1439,6 +1437,15 @@ export default function DrillAnimator() {
     const out = det !== pts ? { pts: det, origLen } : null;
     detourCache.set(key, out);
     return out;
+  }
+  function routeDetour(p) {
+    if (!collisions) return null;                    // avoidance off — draw routes exactly as authored
+    if (!p.path.length || (p.kind !== "player" && p.kind !== "puck")) return null;
+    // Key by path LENGTH too: the drawn line passes the base piece while the
+    // animation passes the fork-inclusive `effOf` piece (longer path). Sharing by
+    // id alone let a base-only detour (ending at the branch point) drive the
+    // animation, freezing the skater there instead of continuing onto the fork.
+    return detourOf({ x: p.x, y: p.y }, p.path, detourObstaclesFor(p.id), `${p.id}:${p.path.length}`);
   }
   // point + heading at fraction f (0..1 by arc length) along a polyline
   function samplePoly(poly, f) {
@@ -1513,28 +1520,52 @@ export default function DrillAnimator() {
     if (!cues.length) return null;
     return cueColorAt(cues, arrivalT, m === "reactive" ? cueSeed(light) : null);
   }
+  // A branch's selection CONDITION (how it's chosen at its waypoint). Legacy branches
+  // carry only a colour → an implicit reaction-light condition matching that colour.
+  // Open registry: add a cue type (player stick direction, numbered light, …) as a new
+  // `type` with a picker case below + a DSL token in drill-format — nothing else changes.
+  // hoisted (resolveForks runs during the render pass at effPieces, above this line)
+  function condOf(f) { return f.cond || { type: "light", color: f.color }; }
+  // pick ONE branch from an outgoing group, honouring each branch's condition. Returns
+  // { fork, light } — `light` = the governing cue-light when a light condition decided,
+  // else null. Precedence: a matching light branch, then random (weighted), then
+  // sequence (Nth run), then a plain `always` fallback. Deterministic (geometry +
+  // playSeed only), so a run coordinates every piece on the same chosen route.
+  function pickBranch(p, group, ctx) {
+    const lightBs = (group || []).filter(f => condOf(f).type === "light");
+    if (lightBs.length) {
+      const light = governingLightFor(ctx.ps, p, ctx.pt);
+      if (light) {
+        const color = chosenForkColor(light, lightBs, ctx.arrivalT, ctx.depth);
+        const fork = lightBs.find(f => sameColor(condOf(f).color || f.color, color));
+        if (fork) return { fork, light };
+      }
+    }
+    const randBs = (group || []).filter(f => condOf(f).type === "random");
+    if (randBs.length) {
+      const w = randBs.map(f => Math.max(0, condOf(f).weight ?? 1));
+      const total = w.reduce((a, b) => a + b, 0) || randBs.length;
+      let r = ((hashInt(p.id + "|rand|" + playSeed + "|" + ctx.depth) >>> 0) % 100000) / 100000 * total;
+      for (let i = 0; i < randBs.length; i++) { r -= (w[i] || 1); if (r < 0) return { fork: randBs[i], light: null }; }
+      return { fork: randBs[randBs.length - 1], light: null };
+    }
+    const seqBs = (group || []).filter(f => condOf(f).type === "sequence")
+      .sort((a, b) => (condOf(a).ord ?? 0) - (condOf(b).ord ?? 0));
+    if (seqBs.length) return { fork: seqBs[(playSeed >>> 0) % seqBs.length], light: null };
+    const always = (group || []).find(f => condOf(f).type === "always");
+    return { fork: always || null, light: null };
+  }
   // the reaction moments a light drives in `random` mode: for every branch this light
   // governs (across all branching players, chains included), the player's branch-arrival
-  // time and the randomly chosen route colour — so the screen can show that colour AS
-  // the player hits the branch (a real reaction, not an out-of-sync flash). Same walk
-  // as resolveForks/chosenForkRefs, and the same chosenForkColor pick, so it agrees.
+  // time and the chosen route colour — so the screen can show that colour AS the player
+  // hits the branch (a real reaction, not an out-of-sync flash). Reads the one shared
+  // resolveRoute walk, so it always agrees with the spliced animation path.
   function lightReactionEvents(light) {
     const evs = [];
     for (const p of pieces) {
       if (p.kind !== "player" || !(p.forks || []).length) continue;
-      let arrivalT = baseRouteTime(p), branchPt = branchPoint(p), forks = p.forks, effLen = p.path.length, depth = 0, guard = 0;
-      while (forks && forks.length && guard++ < 16) {
-        const gl = governingLightFor(pieces, p, branchPt);
-        if (!gl) break;
-        const color = chosenForkColor(gl, forks, arrivalT, depth++);
-        const fork = forks.find(f => sameColor(f.color, color));
-        if (!fork || !fork.path || !fork.path.length) break;
-        if (gl.id === light.id) evs.push({ t: arrivalT, color: fork.color });
-        arrivalT += pathSegTime(p, fork.path, effLen);
-        effLen += fork.path.length;
-        const last = fork.path[fork.path.length - 1]; branchPt = { x: last.x, y: last.y };
-        if ((fork.action || "skate") !== "skate") break;
-        forks = fork.forks;
+      for (const node of resolveRoute(p).chain) {
+        if (node.light && node.light.id === light.id) evs.push({ t: node.arrivalT, color: node.fork.color });
       }
     }
     return evs.sort((a, b) => a.t - b.t);
@@ -1579,12 +1610,57 @@ export default function DrillAnimator() {
     return node;
   }
   const forkOf = forkAt;   // single-colour refs are just a 1-part path
-  // the point a fork forks FROM: its parent fork's end, or the base branch (top level)
+  // ref A is on the route lineage of ref B (base "" or an ancestor-or-self branch), so
+  // an action tagged A is in effect for a waypoint on branch B. SIBLING-branch actions
+  // belong to other runs — they don't touch B's possession. Lets each route off a split
+  // keep the puck independently: a shot on the red branch doesn't "use up" the puck on
+  // the blue/green branches.
+  const isAncestorRef = (a, b) => {
+    a = String(a || "").toLowerCase(); b = String(b || "").toLowerCase();
+    return a === "" || a === b || b.startsWith(a + "/");
+  };
+  // who holds puck pk along route lineage `fork` (only base + ancestor/self actions
+  // apply); the terminal (shot/rim/chip) that ends it on that lineage, if any
+  const holderOnLineage = (pk, fork) => {
+    let holder = pk.carrier || (pk.pickup && isAncestorRef(pk.pickup.atRef, fork) ? pk.pickup.to : null);
+    for (const t of (pk.transfers || [])) if (isAncestorRef(t.atRef, fork)) holder = t.to;
+    return holder;
+  };
+  const terminatedOnLineage = (pk, fork) =>
+    (pk.shotAt != null && isAncestorRef(pk.shotRef, fork)) ||
+    (pk.rimAt != null && isAncestorRef(pk.rimRef, fork)) ||
+    (pk.chipAt != null && isAncestorRef(pk.chipRef, fork)) ||
+    (pk.xterms || []).some(t => isAncestorRef(t.ref, fork));
+  // a patch that removes every terminal (scalar OR xterm overflow) whose ref is on
+  // `fork`'s lineage — a branch ends exactly one way, so authoring a new end clears any
+  // prior end on that same route (siblings keep theirs)
+  const stripLineageTerms = (pk, fork) => {
+    const patch = {};
+    for (const [f, rf, af, df] of [["shotAt", "shotRef", null, null], ["rimAt", "rimRef", "rimAim", "rimDist"], ["chipAt", "chipRef", "chipAim", "chipDist"]])
+      if (pk[f] != null && (isAncestorRef(pk[rf], fork) || isAncestorRef(fork, pk[rf]))) { patch[f] = null; patch[rf] = undefined; if (af) patch[af] = null; if (df) patch[df] = null; }
+    const xt = (pk.xterms || []).filter(t => !(isAncestorRef(t.ref, fork) || isAncestorRef(fork, t.ref)));
+    if (xt.length !== (pk.xterms || []).length) patch.xterms = xt.length ? xt : undefined;
+    return patch;
+  };
+  // a branch "ends open" — no legacy terminal action and no puck action authored on
+  // its last waypoint — so it can chain another reaction or take a ‖ stop mark
+  function branchEndsOpen(p, ref) {
+    const f = forkAt(p, ref);
+    if (!f) return true;
+    if (f.action && f.action !== "skate") return false;      // legacy terminal branch
+    return !stepsAt(p, (f.path || []).length - 1, ref).some(s => s.role === "terminal" || s.role === "release");
+  }
+  // the point a branch departs FROM: the `at` waypoint of its parent route (base for a
+  // top-level branch, else the parent branch), defaulting to that route's end.
   function forkOriginPoint(p, ref) {
     const parts = forkParts(ref);
-    if (parts.length <= 1) return branchPoint(p);
-    const parent = forkAt(p, parts.slice(0, -1).join("/"));
-    if (parent && parent.path && parent.path.length) { const s = parent.path[parent.path.length - 1]; return { x: s.x, y: s.y }; }
+    const self = forkAt(p, ref);
+    const parentSegs = parts.length <= 1 ? p.path
+      : (forkAt(p, parts.slice(0, -1).join("/"))?.path || []);
+    if (parentSegs && parentSegs.length) {
+      const at = self && self.at != null ? Math.min(self.at, parentSegs.length - 1) : parentSegs.length - 1;
+      const s = parentSegs[at]; if (s) return { x: s.x, y: s.y };
+    }
     return branchPoint(p);
   }
   // a synthetic "route piece" whose path is a fork and whose origin is where it
@@ -1620,20 +1696,16 @@ export default function DrillAnimator() {
     };
     return go(forks, 0);
   }
-  // seconds for a player to skate their BASE route to the branch — the same arc-
-  // length ÷ pace formula the timing engine uses (measured off the rendered path
-  // refs), so the fork choice lines up with where the light actually is on arrival.
-  function baseRouteTime(p) {
-    if (!p.path || !p.path.length) return 0;
-    let t = 0;
-    for (let i = 0; i < p.path.length; i++) {
-      const s = p.path[i];
-      const el = segRefs.current[`${p.id}/${i}`];
-      let L = 0; try { L = el ? el.getTotalLength() : 0; } catch { L = 0; }
-      const v = pace * SPEED[s.mode || "carry"] * (p.speed || 1) * (s.rate || 1);
-      t += (s.stop || 0) + (v > 0 ? L / v : 0);
-    }
-    return t;
+  // seconds to skate authored segment `i` of a player's route `ref` ("" = the base
+  // path; a colour-path ref = a branch), measured off its STABLE AUTHORING ref
+  // (`seg:id:ref:i`) — rendered for every authored segment, chosen or not — so branch
+  // arrival times exist BEFORE the light picks a branch (no chicken/egg for choosing).
+  // Same arc-length ÷ pace formula the timing engine uses.
+  function authoredSegTime(p, ref, i, s) {
+    const el = segRefs.current[`seg:${p.id}:${ref}:${i}`];
+    let L = 0; try { L = el ? el.getTotalLength() : 0; } catch { L = 0; }
+    const v = pace * SPEED[s.mode || "carry"] * (p.speed || 1) * (s.rate || 1);
+    return (s.stop || 0) + (v > 0 ? L / v : 0);
   }
   // the light that governs a player's reaction: the nearest one that has a cue
   // timeline (to its branch point). null if there are no cue lights.
@@ -1654,67 +1726,191 @@ export default function DrillAnimator() {
     }
     return governingLightNear(ps, pt);
   }
-  // seconds to skate a run of segments sitting at effective indices startIdx.. (the
-  // same arc-length ÷ pace formula, measured off the rendered refs) — used to find
-  // when a chained reaction's next branch is reached.
-  function pathSegTime(p, segs, startIdx) {
-    let t = 0;
-    for (let k = 0; k < segs.length; k++) {
-      const s = segs[k], el = segRefs.current[`${p.id}/${startIdx + k}`];
-      let L = 0; try { L = el ? el.getTotalLength() : 0; } catch { L = 0; }
-      const v = pace * SPEED[s.mode || "carry"] * (p.speed || 1) * (s.rate || 1);
-      t += (s.stop || 0) + (v > 0 ? L / v : 0);
-    }
-    return t;
-  }
   // the puck a player carries into a reaction: one they hold at the branch with no
   // action of its own yet (so the reaction's action decides what happens to it).
   // A function declaration (hoisted) since resolveForks runs during render, above.
   function reactionPuck(ps, playerId) {
     return ps.find(q => q.kind === "puck" && q.carrier === playerId
-      && q.shotAt == null && q.rimAt == null && q.chipAt == null && !(q.transfers || []).length) || null;
+      && q.shotAt == null && q.rimAt == null && q.chipAt == null && !(q.xterms || []).length && !(q.transfers || []).length) || null;
   }
-  // Walk each branching player's CHOSEN chain of reactions and splice it onto their
-  // path. At each branch (base end, then each skate reaction's end) the governing
-  // light's cue at the arrival time picks the next reaction; a non-skate action ends
-  // the chain and is applied to the puck the player carries into it. This is what
-  // makes chained "read the light again" reactions play back deterministically.
+  // THE single reaction-chain walk. Walks a branching player's CHOSEN chain of
+  // branches and returns everything the three consumers need, so they can't drift:
+  //   effPath  — the base path with the chosen chain spliced on (= p.path if none fired)
+  //   chain    — the ordered chosen branches, each { ref, prefix, fork, forks (siblings),
+  //              arrivalT (time the player reaches that branch), light, depth }
+  //   terminal — { fork, idx } of the ending non-skate branch (idx into effPath), or null
+  // At each branch (base end, then each skate branch's end) the governing light's cue
+  // at the arrival time picks the next branch; a non-skate action ends the chain. Keyed
+  // by geometry + playSeed only, so playback is deterministic. Hoisted (runs during the
+  // render pass at effPieces, above this line).
+  function resolveRoute(p, ps = pieces) {
+    if (p.kind !== "player" || !(p.forks || []).length) return { effPath: p.path, chain: [], terminal: null, idxMap: {} };
+    const effPath = [], chain = [], idxMap = {};             // idxMap: route ref (lc, ""=base) → { localIdx → flat effPath idx }
+    let terminal = null, arrivalT = 0, depth = 0, guard = 0;
+    // the route currently being skated: its segment list, its branch list, its ref
+    // ("" = base), its origin point, and whether it ends in a non-skate action.
+    let curPath = p.path, curForks = p.forks, curRef = "", curOrigin = { x: p.x, y: p.y };
+    let curTerminalFork = null;
+    while (guard++ < 64) {
+      const segs = curPath || [], endIdx = segs.length - 1;
+      const atOf = f => (f.at != null ? f.at : endIdx);       // undefined `at` = this route's end
+      let fired = null;
+      // positions -1 (route origin, for start/route-less branches) then each waypoint
+      for (let i = -1; i <= endIdx; i++) {
+        if (i >= 0) {
+          effPath.push(segs[i]);
+          const rk = curRef.toLowerCase();
+          (idxMap[rk] || (idxMap[rk] = {}))[i] = effPath.length - 1;   // (ref, local) → flat, for lowering puck actions
+          arrivalT += authoredSegTime(p, curRef, i, segs[i]);
+        }
+        const outgoing = (curForks || []).filter(f => atOf(f) === i && f.path && f.path.length);
+        if (!outgoing.length) continue;
+        const pt = i >= 0 ? { x: segs[i].x, y: segs[i].y } : curOrigin;
+        const d = depth++;
+        const { fork, light } = pickBranch(p, outgoing, { ps, pt, arrivalT, depth: d });
+        if (!fork) continue;                                  // nothing fired here → trunk continues
+        const ref = curRef ? curRef + "/" + fork.color : fork.color;
+        chain.push({ ref, prefix: curRef, fork, forks: outgoing, arrivalT, light, depth: d, at: i });
+        fired = { fork, ref, pt };
+        break;                                                // a branch fired here → truncate the trunk, take it
+      }
+      if (!fired) {                                           // reached this route's end with no branch firing
+        if (curTerminalFork) terminal = { fork: curTerminalFork, idx: effPath.length - 1 };
+        break;
+      }
+      // descend into the fired branch (its own path becomes the route being skated)
+      curPath = fired.fork.path; curForks = fired.fork.forks; curRef = fired.ref; curOrigin = fired.pt;
+      curTerminalFork = (fired.fork.action || "skate") !== "skate" ? fired.fork : null;
+    }
+    return { effPath, chain, terminal, idxMap };
+  }
+  // EVERY candidate root-to-leaf route through a player's branch tree (each a flat
+  // segment array), for the preview-all-branches ghosts. At a branch waypoint each
+  // outgoing branch is its own route; capped so a deep tree can't explode.
+  function enumerateRoutes(p) {
+    if (!(p.forks || []).length) return [{ path: p.path || [], ref: "" }];
+    const CAP = 12, out = [];
+    const dfs = (segs, forks, prefix, ref) => {
+      if (out.length >= CAP) return;
+      const endIdx = (segs || []).length - 1, atOf = f => (f.at != null ? f.at : endIdx);
+      const acc = prefix.slice();
+      for (let i = 0; i < (segs || []).length; i++) {
+        acc.push(segs[i]);
+        const outgoing = (forks || []).filter(f => atOf(f) === i && f.path && f.path.length);
+        if (outgoing.length) { outgoing.forEach(f => dfs(f.path, f.forks, acc, ref ? ref + "/" + f.color : f.color)); return; }
+      }
+      out.push({ path: acc, ref });                           // reached an end with no branch → a full candidate route
+    };
+    dfs(p.path, p.forks, [], "");
+    return out.slice(0, CAP);
+  }
+  // dense polyline of (start + a segment array), for ghost sampling when no detour
+  const pathPolyline = (start, segs) => {
+    const pts = [{ x: start.x, y: start.y }]; let prev = { x: start.x, y: start.y };
+    for (const s of segs || []) {
+      const n = Math.max(2, Math.min(48, Math.round((Math.hypot(s.x - prev.x, s.y - prev.y) + 4) / 2)));
+      for (let k = 1; k <= n; k++) pts.push(evalSeg(prev, s, k / n));
+      prev = { x: s.x, y: s.y };
+    }
+    return pts;
+  };
+  // Splice each branching player's chosen chain onto their path (→ effPieces), then
+  // lower every puck action authored against a route — base OR a branch waypoint — to a
+  // flat index on the resolved path. Actions on a branch the run didn't take are dropped
+  // (and the puck chain truncates there). A legacy branch-`action` still lowers too.
   function resolveForks(ps) {
     const branching = ps.filter(p => p.kind === "player" && (p.forks || []).length);
     if (!branching.length) return ps;
-    let out = ps;
-    for (const p of branching) {
-      let effPath = p.path.slice(), arrivalT = baseRouteTime(p), branchPt = branchPoint(p);
-      let forks = p.forks, terminal = null, terminalIdx = -1, guard = 0, depth = 0;
-      while (forks && forks.length && guard++ < 16) {
-        const light = governingLightFor(ps, p, branchPt);
-        if (!light) break;
-        const color = chosenForkColor(light, forks, arrivalT, depth++);
-        const fork = forks.find(f => sameColor(f.color, color));
-        if (!fork || !fork.path || !fork.path.length) break;
-        const startIdx = effPath.length;
-        effPath = effPath.concat(fork.path);
-        arrivalT += pathSegTime(p, fork.path, startIdx);
-        const last = fork.path[fork.path.length - 1];
-        branchPt = { x: last.x, y: last.y };
-        if ((fork.action || "skate") !== "skate") { terminal = fork; terminalIdx = effPath.length - 1; break; }
-        forks = fork.forks;                                  // a skate reaction chains onward
+    const R = new Map();                                     // playerId → resolved { effPath, chain, terminal, idxMap }
+    for (const p of branching) { const r = resolveRoute(p, ps); if (r.chain.length) R.set(p.id, r); }
+    // even if no branch fired, pucks carrying branch-tagged actions must have those
+    // dropped (they belong to a branch this run didn't take)
+    const anyRefs = ps.some(q => q.kind === "puck" && ((q.transfers || []).some(t => t.atRef || t.recvRef) || q.shotRef || q.rimRef || q.chipRef || (q.xterms || []).length || (q.pickup && q.pickup.atRef)));
+    if (!R.size && !anyRefs) return ps;
+    let out = ps.slice();
+    for (const [id, r] of R) { const i = out.findIndex(q => q.id === id); out[i] = { ...out[i], path: r.effPath }; }
+    // (playerId, route ref, local index) → resolved flat index, or null when that branch
+    // wasn't taken (or a mid-route-dropped base waypoint). Non-branching player = base identity.
+    const flatOf = (pid, ref, local) => {
+      if (local == null) return null;
+      const r = R.get(pid), rk = (ref || "").toLowerCase();
+      if (!r) return rk === "" ? local : null;
+      const m = r.idxMap[rk];
+      return m && m[local] != null ? m[local] : null;
+    };
+    // translate a puck's action indices; drop actions whose branch wasn't taken
+    out = out.map(pk => {
+      if (pk.kind !== "puck") return pk;
+      const head = pk.carrier || (pk.pickup && pk.pickup.to);
+      const chainIds = [head, ...(pk.transfers || []).map(t => t.to)];
+      const hasRef = (pk.transfers || []).some(t => t.atRef || t.recvRef) || pk.shotRef || pk.rimRef || pk.chipRef || (pk.xterms || []).length || (pk.pickup && pk.pickup.atRef);
+      const touches = (pk.pickup && R.has(pk.pickup.to))
+        || (pk.transfers || []).some((t, s) => R.has(t.by || chainIds[s]) || R.has(t.to))
+        || ((pk.shotAt != null || pk.rimAt != null || pk.chipAt != null) && R.has(pk.termBy || chainIds[chainIds.length - 1]));
+      if (!hasRef && !touches) return pk;                    // untouched by any branch → leave as-is
+      let np = pk, changed = false;
+      const set = patch => { np = { ...np, ...patch }; changed = true; };
+      // pickup
+      if (pk.pickup && (pk.pickup.atRef || R.has(pk.pickup.to))) {
+        const a = flatOf(pk.pickup.to, pk.pickup.atRef, pk.pickup.at);
+        if (a == null) set({ pickup: null });
+        else if (a !== pk.pickup.at || pk.pickup.atRef) { const { atRef, ...rest } = pk.pickup; set({ pickup: { ...rest, at: a } }); }
       }
-      if (effPath.length <= p.path.length) continue;         // no reaction fired
-      if (out === ps) out = ps.slice();
-      out[out.findIndex(q => q.id === p.id)] = { ...out.find(q => q.id === p.id), path: effPath };
-      if (terminal) {                                        // apply the ending action to the carried puck
-        const pk = reactionPuck(out, p.id);
-        if (pk) {
-          const pj = out.findIndex(q => q.id === pk.id), act = terminal.action, at = terminalIdx;
-          const patch = { shotAt: null, rimAt: null, chipAt: null };
-          if (act === "shoot") { patch.shotAt = at; patch.net = terminal.net || null; }
-          else if (act === "chip") { patch.chipAt = at; patch.chipAim = terminal.aim ?? null; patch.chipDist = terminal.dist ?? null; }
-          else if (act === "rim") { patch.rimAt = at; patch.rimAim = terminal.aim ?? null; patch.rimDist = terminal.dist ?? null; }
-          else if (act === "pass" && terminal.to) { patch.transfers = [...(pk.transfers || []), { at, to: terminal.to, recvAt: null, kind: "pass" }]; }
-          out[pj] = { ...out[pj], ...patch };
+      // transfers (drop this one + the rest of the chain if its route wasn't taken)
+      if ((pk.transfers || []).length) {
+        const nt = []; let broke = false, tchanged = false;
+        pk.transfers.forEach((t, s) => {
+          if (broke) { tchanged = true; return; }
+          const releaser = t.by || chainIds[s];
+          const at2 = (t.atRef || R.has(releaser)) ? flatOf(releaser, t.atRef, t.at) : t.at;
+          const rc2 = t.recvAt == null ? null : ((t.recvRef || R.has(t.to)) ? flatOf(t.to, t.recvRef, t.recvAt) : t.recvAt);
+          if (at2 == null || (t.recvAt != null && rc2 == null)) { broke = true; tchanged = true; return; }
+          if (at2 !== t.at || rc2 !== t.recvAt || t.atRef || t.recvRef) tchanged = true;
+          const { atRef, recvRef, ...rest } = t;
+          nt.push({ ...rest, at: at2, recvAt: rc2 });
+        });
+        if (tchanged) set({ transfers: nt });
+      }
+      // terminals — the scalar shot/rim/chip hold one each; extra SAME-kind branch
+      // terminals overflow into xterms[]. Different reactions can end differently. For
+      // the chosen run exactly one terminal applies: gather all candidates (scalars +
+      // xterms) and write the scalars from the one on the chosen lineage (flatOf ≠ null).
+      const hasTerm = pk.shotAt != null || pk.rimAt != null || pk.chipAt != null || (pk.xterms || []).length;
+      if (hasTerm) {
+        const lastTo = (np.transfers && np.transfers.length) ? np.transfers[np.transfers.length - 1].to : head;
+        const termPlayer = pk.termBy || lastTo;
+        const cand = [];
+        if (pk.shotAt != null) cand.push({ kind: "shot", at: pk.shotAt, ref: pk.shotRef, net: pk.net });
+        if (pk.rimAt != null) cand.push({ kind: "rim", at: pk.rimAt, ref: pk.rimRef, aim: pk.rimAim, dist: pk.rimDist });
+        if (pk.chipAt != null) cand.push({ kind: "chip", at: pk.chipAt, ref: pk.chipRef, aim: pk.chipAim, dist: pk.chipDist });
+        for (const t of (pk.xterms || [])) cand.push(t);
+        let win = null, winAt = null;
+        for (const t of cand) { const a = flatOf(t.by || termPlayer, t.ref, t.at); if (a != null) { win = t; winAt = a; break; } }
+        const tp = { shotAt: null, rimAt: null, chipAt: null, rimAim: null, chipAim: null, rimDist: null, chipDist: null };
+        if (win) {
+          if (win.kind === "shot") { tp.shotAt = winAt; tp.net = win.net ?? pk.net ?? null; }
+          else if (win.kind === "rim") { tp.rimAt = winAt; tp.rimAim = win.aim ?? null; tp.rimDist = win.dist ?? null; }
+          else { tp.chipAt = winAt; tp.chipAim = win.aim ?? null; tp.chipDist = win.dist ?? null; }
         }
+        set(tp);
       }
+      if (changed) { const c = { ...np }; delete c.shotRef; delete c.rimRef; delete c.chipRef; delete c.xterms; np = c; }
+      return changed ? np : pk;
+    });
+    // legacy: an old branch node's terminal `action` → the carried puck (kept for
+    // drills authored before per-waypoint branch actions; the reactionPuck must still
+    // be empty, so it never conflicts with a translated waypoint action above)
+    for (const [id, r] of R) {
+      if (!r.terminal || !r.terminal.fork.action || r.terminal.fork.action === "skate") continue;
+      const pk = reactionPuck(out, id);
+      if (!pk) continue;
+      const pi = out.findIndex(q => q.id === pk.id), act = r.terminal.fork.action, at = r.terminal.idx;
+      const patch = { shotAt: null, rimAt: null, chipAt: null };
+      if (act === "shoot") { patch.shotAt = at; patch.net = r.terminal.fork.net || null; }
+      else if (act === "chip") { patch.chipAt = at; patch.chipAim = r.terminal.fork.aim ?? null; patch.chipDist = r.terminal.fork.dist ?? null; }
+      else if (act === "rim") { patch.rimAt = at; patch.rimAim = r.terminal.fork.aim ?? null; patch.rimDist = r.terminal.fork.dist ?? null; }
+      else if (act === "pass" && r.terminal.fork.to) { patch.transfers = [...(pk.transfers || []), { at, to: r.terminal.fork.to, recvAt: null, kind: "pass" }]; }
+      out[pi] = { ...out[pi], ...patch };
     }
     return out;
   }
@@ -1751,17 +1947,28 @@ export default function DrillAnimator() {
     setSelectedId(id); setEditingFork({ id, color: ref });
     setPopup({ type: "point", id, seg: newIdx, fork: ref });
   }
-  // set the action a reaction performs (skate / pass / shoot / chip / rim); pass
-  // defaults its target to the first other player. Switching to skate keeps any
-  // chained nested reactions; a terminal action can't chain, so nesting is ignored.
-  function setForkAction(id, ref, action) {
+  // set how a branch is CHOSEN at its waypoint: light cue (default) / random / sequence
+  // / always. Clearing to "light" drops the explicit condition (implicit cue-of-colour).
+  function setForkCond(id, ref, type) {
     const pl = pieces.find(p => p.id === id); if (!pl) return;
-    const others = pieces.filter(q => q.kind === "player" && q.id !== id);
-    updateById(id, { forks: mapForkAt(pl.forks, ref, f => ({
-      ...f, action,
-      net: action === "shoot" ? (f.net || null) : undefined,
-      to: action === "pass" ? (f.to || (others[0] || {}).id || null) : undefined,
-    })) });
+    updateById(id, { forks: mapForkAt(pl.forks, ref, f => {
+      const nf = { ...f };
+      if (type === "light") delete nf.cond;
+      else if (type === "random") nf.cond = { type: "random" };
+      else if (type === "sequence") nf.cond = { type: "sequence", ord: 0 };
+      else if (type === "always") nf.cond = { type: "always" };
+      return nf;
+    }) });
+  }
+  // set the waypoint a TOP-LEVEL branch departs from (0-based; route end = default, so
+  // stored only when earlier). Enables "multiple routes off one waypoint" from the UI.
+  function setForkAt(id, ref, at) {
+    const pl = pieces.find(p => p.id === id); if (!pl) return;
+    updateById(id, { forks: mapForkAt(pl.forks, ref, f => {
+      const nf = { ...f };
+      if (at == null || at >= pl.path.length - 1) delete nf.at; else nf.at = Math.max(0, at);
+      return nf;
+    }) });
   }
   // the shared "curve set" of route buttons: straight / curve / S-curve, plus a
   // 4th freehand-draw button. onType(t) adds a segment of that type; onDraw()
@@ -1808,7 +2015,7 @@ export default function DrillAnimator() {
         )}
         <div className="hd-poprow">
           <span style={{ fontSize: 11, color: "#8b99a8" }}>
-            {parentRef ? "Chain a reaction" : "Light reactions"} ({light.id}) — a route per cue, from here
+            {parentRef ? "Chain a reaction" : "Light reactions"} ({light.id}) — a route per cue; Edit a route to set its waypoint actions
           </span>
         </div>
         {colors.map(c => {
@@ -1822,14 +2029,19 @@ export default function DrillAnimator() {
               {curveButtons(t => addForkSegment(p.id, ref, t), () => beginForkDraw(p.id, ref))}
               {has ? (
                 <>
-                  <select value={fk.action || "skate"} style={selStyle}
-                    onChange={e => setForkAction(p.id, ref, e.target.value)}>
-                    <option value="skate">Skate</option>
-                    <option value="pass">Pass</option>
-                    <option value="shoot">Shoot</option>
-                    <option value="chip">Chip</option>
-                    <option value="rim">Rim</option>
+                  <select value={condOf(fk).type} style={selStyle} title="how this route is chosen"
+                    onChange={e => setForkCond(p.id, ref, e.target.value)}>
+                    <option value="light">On cue</option>
+                    <option value="random">Random</option>
+                    <option value="sequence">Sequence</option>
+                    <option value="always">Always</option>
                   </select>
+                  {!parentRef && p.path.length > 1 && (
+                    <select value={fk.at != null ? fk.at : p.path.length - 1} style={selStyle} title="departs from this waypoint"
+                      onChange={e => setForkAt(p.id, ref, parseInt(e.target.value, 10))}>
+                      {p.path.map((_, wi) => <option key={wi} value={wi}>@{wi + 1}</option>)}
+                    </select>
+                  )}
                   <button className={`hd-mini${isEditing ? " on" : ""}`}
                     onClick={() => setEditingFork(isEditing ? null : { id: p.id, color: ref })}>{isEditing ? "✓ Editing" : "Edit"}</button>
                   <button className="hd-mini" onClick={() => { if (isEditing) setEditingFork(null); clearFork(p.id, ref); }}>Clear</button>
@@ -1854,29 +2066,16 @@ export default function DrillAnimator() {
     const set = new Set();
     if (!(p.forks || []).length) return set;
     const E = animT <= 0 ? 0 : animT * totalTime;
-    let effLen = p.path.length, arrivalT = baseRouteTime(p), branchPt = branchPoint(p), forks = p.forks, prefix = "", guard = 0, depth = 0;
-    while (forks && forks.length && guard++ < 16) {
-      const light = governingLightFor(pieces, p, branchPt);
-      if (!light) break;
+    for (const node of resolveRoute(p).chain) {
       // branch not yet reached, reactive, mid-play → highlight the live-colour fork and
       // stop (downstream branches aren't in play until this one is committed)
-      if (playing && lightMode(light) === "reactive" && E < arrivalT) {
-        const live = cueColorAt(light.cues, E, cueSeed(light));
-        const lf = (forks || []).find(f => sameColor(f.color, live) && f.path && f.path.length);
-        if (lf) set.add(String(prefix ? prefix + "/" + lf.color : lf.color).toLowerCase());
-        break;
+      if (playing && node.light && lightMode(node.light) === "reactive" && E < node.arrivalT) {
+        const live = cueColorAt(node.light.cues, E, cueSeed(node.light));
+        const lf = (node.forks || []).find(f => sameColor(f.color, live) && f.path && f.path.length);
+        if (lf) set.add(String(node.prefix ? node.prefix + "/" + lf.color : lf.color).toLowerCase());
+        return set;
       }
-      const color = chosenForkColor(light, forks, arrivalT, depth++);
-      const fork = forks.find(f => sameColor(f.color, color));
-      if (!fork || !fork.path || !fork.path.length) break;
-      const ref = prefix ? prefix + "/" + fork.color : fork.color;
-      set.add(String(ref).toLowerCase());
-      arrivalT += pathSegTime(p, fork.path, effLen);
-      effLen += fork.path.length;
-      const last = fork.path[fork.path.length - 1];
-      branchPt = { x: last.x, y: last.y };
-      if ((fork.action || "skate") !== "skate") break;
-      forks = fork.forks; prefix = ref;
+      set.add(String(node.ref).toLowerCase());
     }
     return set;
   }
@@ -2062,6 +2261,7 @@ export default function DrillAnimator() {
   // shrink back. Centred on the arrival time at that waypoint.
   const JUMP_DUR = 0.62;
   function jumpLift(p) {
+    p = effOf(p);                                 // hop on jumps authored on branch waypoints too (resolved path)
     if (animT <= 0 || p.kind !== "player" || !p.path.length) return 0;
     const e = animT * totalTime;
     for (let i = 0; i < p.path.length; i++) {
@@ -2088,7 +2288,7 @@ export default function DrillAnimator() {
   /* ----- edits ----- */
   const update = fn => setPieces(ps => ps.map(fn));
   const updateById = (id, patch) => update(p => (p.id === id ? { ...p, ...patch } : p));
-  const looseFields = { carrier: null, pickup: null, transfers: [], shotAt: null, rimAt: null, chipAt: null, rimAim: null, chipAim: null };
+  const looseFields = { carrier: null, pickup: null, transfers: [], shotAt: null, rimAt: null, chipAt: null, rimAim: null, chipAim: null, shotRef: undefined, rimRef: undefined, chipRef: undefined, xterms: undefined };
   // when a player is removed, auto-delete every chain action it influenced: if it
   // starts the chain (carrier/pickup) the whole chain goes; if it's a transfer
   // target, that action and everything downstream (incl. the terminal) is dropped
@@ -2104,7 +2304,7 @@ export default function DrillAnimator() {
     if (q.kind !== "puck") return q;
     if (q.carrier === goneId || (q.pickup && q.pickup.to === goneId)) return { ...q, ...looseFields };
     const idx = (q.transfers || []).findIndex(t => t.to === goneId);
-    if (idx >= 0) return { ...q, transfers: q.transfers.slice(0, idx), shotAt: null, rimAt: null, chipAt: null, rimAim: null, chipAim: null };
+    if (idx >= 0) return { ...q, transfers: q.transfers.slice(0, idx), shotAt: null, rimAt: null, chipAt: null, rimAim: null, chipAim: null, xterms: undefined };
     return q;
   });
   // remove a piece and clean up any references to it
@@ -2253,7 +2453,7 @@ export default function DrillAnimator() {
   }
   function deleteSeg(id, i, fork = null) {
     if (fork) {
-      setPieces(ps => ps.map(p => p.id === id
+      setPieces(ps => shiftActionWaypoints(ps, id, i + 1, -1, fork).map(p => p.id === id
         ? { ...p, forks: mapForkAt(p.forks, fork, f => ({ ...f, path: f.path.filter((_, j) => j !== i) })) } : p));
       setPopup(null);
       return;
@@ -2277,29 +2477,32 @@ export default function DrillAnimator() {
   // waypoint (instead of sliding onto an inserted point or duplicating). `bump`
   // shifts any index >= fromIdx by delta. Actions are: the head's pickup, each
   // transfer's release (by its carrier) and reception (recvAt), and the terminal.
-  function shiftActionWaypoints(list, playerId, fromIdx, delta) {
+  function shiftActionWaypoints(list, playerId, fromIdx, delta, ref = "") {
+    const rf = ref || "", refEq = a => (a || "") === rf;      // only re-pin actions on the SAME route (base or a specific branch)
     const bump = v => (v != null && v >= fromIdx ? v + delta : v);
     return list.map(pk => {
       if (pk.kind !== "puck") return pk;
       const chain = puckChain(pk);
       let np = pk;
-      if (pk.pickup && pk.pickup.to === playerId && bump(pk.pickup.at) !== pk.pickup.at)
+      if (pk.pickup && pk.pickup.to === playerId && refEq(pk.pickup.atRef) && bump(pk.pickup.at) !== pk.pickup.at)
         np = { ...np, pickup: { ...pk.pickup, at: bump(pk.pickup.at) } };
       if ((pk.transfers || []).length) {
         let touched = false;
         const ts = pk.transfers.map((t, s) => {
           let nt = t;
           const actor = t.by || chain[s];                       // who releases at t.at
-          if (actor === playerId && bump(t.at) !== t.at) { nt = { ...nt, at: bump(t.at) }; touched = true; }
-          if (t.to === playerId && t.recvAt != null && bump(t.recvAt) !== t.recvAt) { nt = { ...nt, recvAt: bump(t.recvAt) }; touched = true; }
+          if (actor === playerId && refEq(t.atRef) && bump(t.at) !== t.at) { nt = { ...nt, at: bump(t.at) }; touched = true; }
+          if (t.to === playerId && t.recvAt != null && refEq(t.recvRef) && bump(t.recvAt) !== t.recvAt) { nt = { ...nt, recvAt: bump(t.recvAt) }; touched = true; }
           return nt;
         });
         if (touched) np = { ...np, transfers: ts };
       }
       const termActor = pk.termBy || chain[chain.length - 1];
       if (termActor === playerId) {
-        for (const f of ["shotAt", "rimAt", "chipAt"])
-          if (np[f] != null && bump(np[f]) !== np[f]) np = { ...np, [f]: bump(np[f]) };
+        for (const [f, rf] of [["shotAt", "shotRef"], ["rimAt", "rimRef"], ["chipAt", "chipRef"]])
+          if (np[f] != null && refEq(pk[rf]) && bump(np[f]) !== np[f]) np = { ...np, [f]: bump(np[f]) };
+        if ((pk.xterms || []).some(t => refEq(t.ref) && bump(t.at) !== t.at))
+          np = { ...np, xterms: pk.xterms.map(t => refEq(t.ref) ? { ...t, at: bump(t.at) } : t) };
       }
       return np;
     });
@@ -2364,8 +2567,36 @@ export default function DrillAnimator() {
     }
     return set;
   }
-  const makeLoose = pkId => updateById(pkId, { carrier: null, pickup: null, transfers: [], shotAt: null, rimAt: null, chipAt: null, rimAim: null, chipAim: null });
-  const clearTerminal = pkId => updateById(pkId, { shotAt: null, rimAt: null, chipAt: null, rimAim: null, chipAim: null });
+  // which segments of a BRANCH route (`ref`) are skated with the puck (→ wiggle). The
+  // player carries it from the branch start (if holding it entering the branch) or a
+  // mid-branch reception, until they release it (a pass/terminal on this branch).
+  function branchCarrySegs(p, ref, segs) {
+    const set = new Set();
+    if (!(segs || []).length) return set;
+    const pref = forkParts(ref).slice(0, -1).join("/");
+    const holdsIn = pieces.some(q => q.kind === "puck" && holderOnLineage(q, pref) === p.id && !terminatedOnLineage(q, pref));
+    let R = holdsIn ? -1 : null, L = segs.length - 1;
+    for (let i = 0; i < segs.length; i++) {
+      const st = stepsAt(p, i, ref);
+      if (R == null && st.some(s => s.role === "receive" || s.role === "collect" || s.role === "pickup")) R = i;
+      if (st.some(s => s.role === "release" || s.role === "terminal")) { L = i; break; }
+    }
+    if (R == null) return set;
+    for (let i = R + 1; i <= L; i++) set.add(i);
+    return set;
+  }
+  const makeLoose = pkId => updateById(pkId, { ...looseFields });
+  // clear one terminal (by field) — so deleting a shot on one branch keeps a chip on
+  // another; no field clears them all (legacy / chain-list use)
+  const clearTerminal = (pkId, field) => updateById(pkId, field
+    ? { [field]: null, ...(field === "shotAt" ? { shotRef: undefined } : field === "rimAt" ? { rimAt: null, rimRef: undefined, rimAim: null } : { chipRef: undefined, chipAim: null }) }
+    : { shotAt: null, rimAt: null, chipAt: null, rimAim: null, chipAim: null, shotRef: undefined, rimRef: undefined, chipRef: undefined, xterms: undefined });
+  // remove one overflow (same-kind branch) terminal from xterms[]
+  function removeXterm(pkId, xt) {
+    const pk = pieces.find(q => q.id === pkId); if (!pk) return;
+    const xt2 = (pk.xterms || []).filter(t => !(t.kind === xt.kind && t.at === xt.at && (t.ref || "") === (xt.ref || "")));
+    updateById(pkId, { xterms: xt2.length ? xt2 : undefined });
+  }
   // the ordered, human-readable list of actions in a puck's chain. Each carries a
   // `del` that removes it — a transfer drops itself + everything downstream (the
   // chain is sequential), the head clears the whole chain, a terminal clears it.
@@ -2389,9 +2620,9 @@ export default function DrillAnimator() {
       evs.push({ actor, desc: `${nameOf(actor)} ${verb}`, self, del: () => setTransfer(pk.id, s, null) });
     });
     const last = chain[chain.length - 1] || pk.carrier;
-    if (pk.shotAt != null) evs.push({ actor: last, desc: `${nameOf(last)} shoots at ${pk.net || "nearest net"}`, self: `Shoot at ${pk.net || "nearest net"}`, del: () => clearTerminal(pk.id) });
-    else if (pk.rimAt != null) evs.push({ actor: last, desc: `${nameOf(last)} hard rims`, self: "Hard rim", del: () => clearTerminal(pk.id) });
-    else if (pk.chipAt != null) evs.push({ actor: last, desc: `${nameOf(last)} chips`, self: "Chip", del: () => clearTerminal(pk.id) });
+    if (pk.shotAt != null) evs.push({ actor: last, desc: `${nameOf(last)} shoots at ${pk.net || "nearest net"}`, self: `Shoot at ${pk.net || "nearest net"}`, del: () => clearTerminal(pk.id, "shotAt") });
+    else if (pk.rimAt != null) evs.push({ actor: last, desc: `${nameOf(last)} hard rims`, self: "Hard rim", del: () => clearTerminal(pk.id, "rimAt") });
+    else if (pk.chipAt != null) evs.push({ actor: last, desc: `${nameOf(last)} chips`, self: "Chip", del: () => clearTerminal(pk.id, "chipAt") });
     return evs;
   }
   // small numbered event list used by both the puck popup (full chain, `desc`)
@@ -2420,7 +2651,9 @@ export default function DrillAnimator() {
   // start / standing spot) as numbered steps. Anything the chain can't actually
   // pull off — a rebound that must pass through a net, or a step downstream of one
   // — is flagged "won't complete" so the user sees it plainly.
-  function stepsAt(p, i) {
+  function stepsAt(p, i, fork = null) {
+    const rf = fork || "";                                   // the route this spot is on ("" = base); actions carry a matching ref
+    const refEq = a => (a || "") === rf;
     const shapes = solidShapes(pieces);
     const nets = pieces.filter(q => q.kind === "net" || q.kind === "passer");
     const steps = [];
@@ -2457,7 +2690,7 @@ export default function DrillAnimator() {
         // receive waypoint, else at their standing spot i=-1)
         const rSpot = t.recvAt != null ? t.recvAt : -1;
         const self = t.to === p.id && actor === p.id;   // chip/rim and go retrieve it, or a give-and-go via a passer
-        if (t.to === p.id && (actor !== p.id || (self && (t.kind !== "pass" || t.via))) && rSpot === i) {
+        if (t.to === p.id && (actor !== p.id || (self && (t.kind !== "pass" || t.via))) && rSpot === i && refEq(t.recvRef)) {
           const rtext = t.via ? `Take the return from ${nameOf(t.via)}`
             : self ? (t.kind === "rim" ? "Collect your own rim" : "Collect your own chip")
             : t.kind === "shot" ? `Collect rebound from ${nameOf(actor)}`
@@ -2467,7 +2700,7 @@ export default function DrillAnimator() {
           steps.push({ ord: s + 0.5, text: rtext, warn: flag(s), del: () => setTransfer(pk.id, s, null),
             role: t.kind === "pass" ? "receive" : "collect", kind: t.kind, pk, stage: s, src: actor, via: t.via });
         }
-        if (actor === p.id && t.at === i) {
+        if (actor === p.id && t.at === i && refEq(t.atRef)) {
           const to = nameOf(t.to);
           const txt = t.via ? `Give-and-go off ${nameOf(t.via)}`
             : self && t.kind === "chip" ? "Chip and skate to retrieve" : self && t.kind === "rim" ? "Rim and skate to retrieve"
@@ -2476,19 +2709,27 @@ export default function DrillAnimator() {
             role: "release", kind: t.kind, pk, stage: s });
         }
       });
-      const termActor = pk.termBy || chain[chain.length - 1];
+      // the terminal's actor is the holder ON THIS ROUTE's lineage — a sibling branch's
+      // pass (which ends the global chain elsewhere) doesn't take the puck away here
+      const lineageHolder = holderOnLineage(pk, fork);
+      const termActor = pk.termBy || lineageHolder;
       if (termActor === p.id) {
-        const wt = (pk.termBy && pk.termBy !== chain[chain.length - 1]) ? `${nameOf(pk.termBy)} isn't holding the puck here — won't happen`
+        const wt = (pk.termBy && pk.termBy !== lineageHolder) ? `${nameOf(pk.termBy)} isn't holding the puck here — won't happen`
           : deadFrom < Infinity ? "won't happen — an earlier step is blocked" : null;
-        if (pk.shotAt === i) steps.push({ ord: 900, text: `Shoot ${pk.id} at ${pk.net || "nearest net"}`, warn: wt, del: () => clearTerminal(pk.id), role: "terminal", kind: "shot", pk });
-        else if (pk.rimAt === i) steps.push({ ord: 900, text: `Hard rim ${pk.id}`, warn: wt, del: () => clearTerminal(pk.id), role: "terminal", kind: "rim", pk });
-        else if (pk.chipAt === i) steps.push({ ord: 900, text: `Chip ${pk.id}`, warn: wt, del: () => clearTerminal(pk.id), role: "terminal", kind: "chip", pk });
+        if (pk.shotAt === i && refEq(pk.shotRef)) steps.push({ ord: 900, text: `Shoot ${pk.id} at ${pk.net || "nearest net"}`, warn: wt, del: () => clearTerminal(pk.id, "shotAt"), role: "terminal", kind: "shot", pk });
+        else if (pk.rimAt === i && refEq(pk.rimRef)) steps.push({ ord: 900, text: `Hard rim ${pk.id}`, warn: wt, del: () => clearTerminal(pk.id, "rimAt"), role: "terminal", kind: "rim", pk });
+        else if (pk.chipAt === i && refEq(pk.chipRef)) steps.push({ ord: 900, text: `Chip ${pk.id}`, warn: wt, del: () => clearTerminal(pk.id, "chipAt"), role: "terminal", kind: "chip", pk });
+        else for (const xt of (pk.xterms || [])) {          // overflow same-kind branch terminals
+          if (xt.at !== i || !refEq(xt.ref)) continue;
+          const txt = xt.kind === "shot" ? `Shoot ${pk.id} at ${xt.net || "nearest net"}` : xt.kind === "rim" ? `Hard rim ${pk.id}` : `Chip ${pk.id}`;
+          steps.push({ ord: 900, text: txt, warn: wt, del: () => removeXterm(pk.id, xt), role: "terminal", kind: xt.kind === "shot" ? "shot" : xt.kind, pk });
+        }
       }
       // waypoint 0 = the start (i=-1); a stationary collector shows there too. A
       // routed collect at path index k shows only at that waypoint (i=k) — no
       // more duplicating a waypoint-0 collect onto the standing spot.
       const pickI = !p.path.length || !pk.pickup || pk.pickup.at < 0 ? -1 : pk.pickup.at;
-      if (pk.pickup && pk.pickup.to === p.id && pickI === i)
+      if (pk.pickup && pk.pickup.to === p.id && pickI === i && refEq(pk.pickup.atRef))
         steps.push({ ord: -1, text: pk.pickup.nearest ? "Collect nearest puck" : `Collect ${pk.id}`, warn: null, del: () => updateById(pk.id, { pickup: null }), role: "pickup", kind: null, pk });
     }
     // order by puck first (each puck's collect→…→shoot stays together and
@@ -2503,7 +2744,7 @@ export default function DrillAnimator() {
       if (q.id !== pkId) return q;
       const ts = (q.transfers || []).slice(0, stage);
       if (tr) ts[stage] = tr;
-      return { ...q, transfers: ts, shotAt: null, rimAt: null, chipAt: null, rimAim: null, chipAim: null, termBy: null };
+      return { ...q, transfers: ts, shotAt: null, rimAt: null, chipAt: null, rimAim: null, chipAim: null, termBy: null, xterms: undefined };
     });
   }
   // append an action for a player who doesn't actually hold the puck here — it's
@@ -2546,7 +2787,7 @@ export default function DrillAnimator() {
   // this spot (waypoint index `at`, or -1 = their standing position). A loose
   // puck is a released chip / hard rim / shot, or a puck placed loose. Wires it
   // with the existing chain (release → collector) / pickup machinery.
-  function collectPuckAt(playerId, at, targetId) {
+  function collectPuckAt(playerId, at, targetId, fork = null) {
     const player = pieces.find(q => q.id === playerId);
     if (!player) return;
     // a standing collect (at = -1) pins to waypoint 0 — the player's start — so
@@ -2591,11 +2832,11 @@ export default function DrillAnimator() {
       const kind = field === "shotAt" ? "shot" : field === "rimAt" ? "rim" : "chip";
       const aim = field === "rimAt" ? target.rimAim : field === "chipAt" ? target.chipAim : null;
       setTransfer(target.id, (target.transfers || []).length,
-        { at: target[field], to: playerId, recvAt: cAt < 0 ? null : cAt, kind, ...(aim != null ? { aim } : {}) });
+        { at: target[field], to: playerId, recvAt: cAt < 0 ? null : cAt, kind, ...(aim != null ? { aim } : {}), ...(fork ? { recvRef: fork } : {}) });
     } else {
       // no explicit id → a live "nearest" collect: re-resolves to the closest
       // loose puck at play time (see resolveNearest). A chosen id stays fixed.
-      updateById(target.id, { pickup: { to: playerId, at: cAt, ...(targetId ? {} : { nearest: true }) } });
+      updateById(target.id, { pickup: { to: playerId, at: cAt, ...(targetId ? {} : { nearest: true }), ...(fork ? { atRef: fork } : {}) } });
     }
     // steps are ordered by puck array position, so move the just-collected puck
     // to the end — its collect (and any release) then sits at the END of the
@@ -2613,12 +2854,12 @@ export default function DrillAnimator() {
   // manual "Receive Pass": the chosen source player passes to `receiverId` at
   // waypoint `at`. Appends the pass onto a puck the source holds; if they hold
   // none, hand them a fresh one so the feed still happens.
-  function doReceiveFrom(receiverId, at, srcId) {
+  function doReceiveFrom(receiverId, at, srcId, fork = null) {
     const src = pieces.find(q => q.id === srcId && q.kind === "player");
     if (!src) return;
     const passAt = src.path.length ? src.path.length - 1 : -1;   // source releases from their route end / spot
     const pk = heldPuckAt(src, passAt) || pieces.find(q => q.kind === "puck" && puckChain(q).includes(src.id));
-    const tr = { at: passAt, to: receiverId, recvAt: at < 0 ? null : at, kind: "pass", by: src.id };
+    const tr = { at: passAt, to: receiverId, recvAt: at < 0 ? null : at, kind: "pass", by: src.id, ...(fork ? { recvRef: fork } : {}) };
     if (pk) appendTransfer(pk.id, tr);
     else {
       const np = makePiece("puck", { x: src.x, y: src.y });
@@ -2632,10 +2873,10 @@ export default function DrillAnimator() {
   function addPointAt(id, segIdx, pt, fork = null) {
     if (!fork) stepsOnInsert(id, segIdx);
     setPieces(ps => {
-      // inserting a waypoint at segIdx pushes this player's later waypoints up by
-      // one — shift their actions first so each stays on its own waypoint (base
-      // routes only; forks carry no puck actions)
-      const list = fork ? ps : shiftActionWaypoints(ps, id, segIdx, +1);
+      // inserting a waypoint at segIdx pushes this route's later waypoints up by one
+      // — shift their actions first so each stays on its own waypoint (on the base
+      // route, or on the specific branch being edited)
+      const list = shiftActionWaypoints(ps, id, segIdx, +1, fork || "");
       return list.map(p => {
         if (p.id !== id) return p;
         const rp = routePiece(p, fork);
@@ -2819,7 +3060,7 @@ export default function DrillAnimator() {
       return t;
     });
     // a duplicated puck starts loose (avoid two pucks glued to one carrier)
-    if (copy.kind === "puck") { copy.carrier = null; copy.transfers = []; copy.shotAt = copy.rimAt = copy.chipAt = null; copy.pickup = null; }
+    if (copy.kind === "puck") { copy.carrier = null; copy.transfers = []; copy.shotAt = copy.rimAt = copy.chipAt = null; copy.xterms = undefined; copy.pickup = null; }
     setPieces(ps => [...ps, copy]);
     setSelectedId(nid);
     setPopup({ type: "piece", id: nid });
@@ -2912,7 +3153,7 @@ export default function DrillAnimator() {
         if (c.net && idMap[c.net]) c.net = idMap[c.net];
         if (c.termBy && idMap[c.termBy]) c.termBy = idMap[c.termBy];
         // a copied puck whose carrier fell outside the group starts loose
-        if (!c.carrier && !c.pickup && p.carrier && !idMap[p.carrier]) { c.transfers = []; c.shotAt = c.rimAt = c.chipAt = null; }
+        if (!c.carrier && !c.pickup && p.carrier && !idMap[p.carrier]) { c.transfers = []; c.shotAt = c.rimAt = c.chipAt = null; c.xterms = undefined; }
       }
       return c;
     });
@@ -3487,11 +3728,13 @@ export default function DrillAnimator() {
     : t === "rim" ? "rim" : "collect";   // receive / collect / pickup all = gaining the puck
   // waypoints (index → {count, type}) where a player acts on the puck. Skips the
   // standing spot (i=-1) — the player icon already sits there.
-  function actionWaypoints(p) {
+  // action waypoints on ANY route of player p — the base path (ref "") or a branch
+  // (ref = colour-path). Reads the ref-aware stepsAt, so a branch shows its OWN actions.
+  function routeActionWaypoints(p, segs, ref) {
     const m = new Map();
-    if (p.kind !== "player" || !p.path.length) return m;
-    for (let i = 0; i < p.path.length; i++) {
-      const steps = stepsAt(p, i);
+    if (p.kind !== "player" || !(segs || []).length) return m;
+    for (let i = 0; i < segs.length; i++) {
+      const steps = stepsAt(p, i, ref);
       if (!steps.length) continue;
       let best = null, bp = -1;
       for (const st of steps) { const t = stepActionType(st), pr = ACT_PRI[t] || 0; if (pr > bp) { bp = pr; best = t; } }
@@ -3499,6 +3742,7 @@ export default function DrillAnimator() {
     }
     return m;
   }
+  function actionWaypoints(p) { return routeActionWaypoints(p, p.path, ""); }
   // draw, at each action waypoint: the incoming end-mark (chevron, or ‖ when the
   // player stops there) plus a circular badge with the main action's icon and, if
   // several actions land there, a count. The route's segment trims leave the gaps.
@@ -3513,7 +3757,7 @@ export default function DrillAnimator() {
           // ‖ stop mark: the incoming line ends at the FIRST bar (the line's end);
           // the second bar sits just PAST it, so the line doesn't run through both
           ? <path d="M 0 -2.4 L 0 2.4 M 1.5 -2.4 L 1.5 2.4" fill="none" stroke={color} strokeWidth={1.1} strokeLinecap="round" />
-          : <path d="M -4.1 -2.5 L 0 0 L -4.1 2.5" fill="none" stroke={color} strokeWidth={1.1} strokeLinecap="round" strokeLinejoin="round" />}
+          : <path d="M -3.0 -1.85 L 0 0 L -3.0 1.85" fill="none" stroke={color} strokeWidth={1.0} strokeLinecap="round" strokeLinejoin="round" />}
       </g>
     );
   }
@@ -3544,29 +3788,30 @@ export default function DrillAnimator() {
   }
   // fork action → its action-circle icon (skate has none — its end is a carat/stop)
   const forkActionIcon = a => a === "shoot" ? "net" : a === "pass" ? "pass" : a === "chip" ? "chip" : a === "rim" ? "rim" : null;
-  function renderActionMarks(p, bentPts, acts) {
+  // action circles (+ incoming end-mark) at every action waypoint of a route. Works on
+  // any route's segments + origin, so base routes and branch routes render identically.
+  function routeActionMarks(segs, origin, acts, color, bentPts, keyPrefix = "") {
     if (!acts || !acts.size) return null;
-    const n = p.path.length, els = [];
+    const n = segs.length, els = [];
     for (const [i, info] of acts) {
-      const s = p.path[i];
-      const prev = i >= 1 ? segEnd(p, i - 1) : { x: p.x, y: p.y };
+      const s = segs[i];
+      const prev = i >= 1 ? { x: segs[i - 1].x, y: segs[i - 1].y } : origin;
       let tx, ty;
       if (i === n - 1 && bentPts && bentPts.length >= 2) {
         const b = bentPts[Math.max(0, bentPts.length - 4)]; tx = s.x - b.x; ty = s.y - b.y;
       } else {
-        const near = evalSeg(prev, s, 0.85); tx = s.x - near.x; ty = s.y - near.y;
+        const near = evalSeg(prev, s, 0.95); tx = s.x - near.x; ty = s.y - near.y;   // near the end → carat aligns with the incoming run
         if (Math.hypot(tx, ty) < 1e-4) { tx = s.x - prev.x; ty = s.y - prev.y; }
       }
       const tl = Math.hypot(tx, ty) || 1, ang = (Math.atan2(ty, tx) * 180) / Math.PI;
-      // incoming end-mark, just outside the round badge on the incoming side —
-      // the SAME glyph as a route end
+      // incoming end-mark, just outside the round badge — the SAME glyph as a route end
       const mp = gmMove(s.x, s.y, -tx / tl, -ty / tl, ACT_GAP);
-      els.push(routeMark(`am${i}`, mp, ang, s.endStop, p.color));
-      // badge circle + action icon (+ count), counter-rotated to read upright on screen
-      els.push(iconBadge({ x: s.x, y: s.y }, actionIconName(info.type), p.color, `ab${i}`, 1, info.count));
+      els.push(routeMark(`${keyPrefix}am${i}`, mp, ang, s.endStop, color));
+      els.push(iconBadge({ x: s.x, y: s.y }, actionIconName(info.type), color, `${keyPrefix}ab${i}`, 1, info.count));
     }
     return <g>{els}</g>;
   }
+  function renderActionMarks(p, bentPts, acts) { return routeActionMarks(p.path, { x: p.x, y: p.y }, acts, p.color, bentPts, ""); }
 
   // an action circle at a light-reaction branch point: the same round badge as a
   // puck-action circle, but stamped with the reaction-light "burst" glyph, since
@@ -3598,7 +3843,7 @@ export default function DrillAnimator() {
       const last = p.path[n - 1];
       const prev = n >= 2 ? segEnd(p, n - 2) : { x: p.x, y: p.y };
       endPt = { x: last.x, y: last.y };
-      const near = evalSeg(prev, last, 0.9);
+      const near = evalSeg(prev, last, 0.97);   // sample the TRUE end tangent so the carat lines up with the line's final run
       tx = last.x - near.x; ty = last.y - near.y;
       if (Math.hypot(tx, ty) < 1e-4) {               // degenerate (control on the endpoint)
         if (last.type === "C") { tx = last.x - last.c2x; ty = last.y - last.c2y; }
@@ -3978,6 +4223,7 @@ export default function DrillAnimator() {
   // isn't cut off. Stretch-cancelled via the icon frame like a label.
   function renderResultSplash() {
     if (!showResult || aiPlay || animT <= 0) return null;
+    if (previewAllBranches) return null;   // no single-run goal call while previewing every branch
     const DUR = 0.9, e = animT * totalTime;
     const { plans } = getPlan();
     // gather every shot result, grouped by which net it hit (left vs right)
@@ -4128,8 +4374,12 @@ export default function DrillAnimator() {
       );
     };
 
-    const ActionSteps = (p, i) => {
-      const steps = stepsAt(p, i);
+    const ActionSteps = (p, i, fork = null) => {
+      const steps = stepsAt(p, i, fork);
+      // this spot's route: puck actions authored here carry the branch ref so
+      // resolveForks can lower them to the chosen run's flat index (base = no ref)
+      const relRef = fork ? { atRef: fork } : {};
+      const recRef = fork ? { recvRef: fork } : {};
       const others = pieces.filter(q => q.kind === "player" && q.id !== p.id);
       // give-and-go bounce targets: passers, tires, bumpers (the puck rebounds
       // off them back to this player) — available even with no other player
@@ -4140,11 +4390,10 @@ export default function DrillAnimator() {
       // chain's current last carrier and it has no terminal yet. Prefer one
       // gained right here, then the most recent.
       const heldRelease = () => {
-        const holds = pieces.filter(q => {
-          if (q.kind !== "puck") return false;
-          const ch = puckChain(q);
-          return ch[ch.length - 1] === p.id && q.shotAt == null && q.rimAt == null && q.chipAt == null;
-        });
+        // holds this puck on THIS route (branch lineage `fork`), unreleased — a sibling
+        // branch's shot/pass doesn't take it away here
+        const holds = pieces.filter(q => q.kind === "puck"
+          && holderOnLineage(q, fork) === p.id && !terminatedOnLineage(q, fork));
         const here = holds.filter(q => {
           if (q.pickup && q.pickup.to === p.id) {
             const qi = !p.path.length || q.pickup.at < 0 ? -1 : q.pickup.at;   // waypoint 0 = start (i=-1)
@@ -4157,22 +4406,38 @@ export default function DrillAnimator() {
         const pk = pool[pool.length - 1]
           || heldPuckAt(p, i) || pieces.find(q => q.kind === "puck" && puckChain(q).includes(p.id)) || pieces.find(q => q.kind === "puck");
         if (!pk) return null;
-        const ch = puckChain(pk);
-        return { pk, last: ch[ch.length - 1] === p.id };
+        return { pk, last: holderOnLineage(pk, fork) === p.id };
       };
-      const addPass = to => { const h = heldRelease(); if (h) appendTransfer(h.pk.id, { at: i, to, recvAt: null, kind: "pass", ...(h.last ? {} : { by: p.id }) }); };
+      const addPass = to => { const h = heldRelease(); if (h) appendTransfer(h.pk.id, { at: i, to, recvAt: null, kind: "pass", ...relRef, ...(h.last ? {} : { by: p.id }) }); };
       // give-and-go: bounce off a passer/tire/bumper back to this player
-      const addVia = via => { const h = heldRelease(); if (h) appendTransfer(h.pk.id, { at: i, to: p.id, recvAt: i < 0 ? null : i, kind: "pass", via, ...(h.last ? {} : { by: p.id }) }); };
+      const addVia = via => { const h = heldRelease(); if (h) appendTransfer(h.pk.id, { at: i, to: p.id, recvAt: i < 0 ? null : i, kind: "pass", via, ...relRef, ...recRef, ...(h.last ? {} : { by: p.id }) }); };
       const addTerminal = (field, net) => {
         const h = heldRelease(); if (!h) return;
-        updateById(h.pk.id, { shotAt: null, rimAt: null, chipAt: null, [field]: i,
-          ...(field === "shotAt" ? { net: net || null, rimAim: null, chipAim: null } : {}),
-          ...(field === "rimAt" ? { rimDist: h.pk.rimDist || REL_DEFAULT.rimAt } : field === "chipAt" ? { chipDist: h.pk.chipDist || REL_DEFAULT.chipAt } : {}),
-          ...(h.last ? {} : { termBy: p.id }) });
+        const pk = h.pk;
+        const KIND = { shotAt: "shot", rimAt: "rim", chipAt: "chip" };
+        const RFLD = { shotAt: "shotRef", rimAt: "rimRef", chipAt: "chipRef" };
+        const kind = KIND[field];
+        const dist = kind === "rim" ? (pk.rimDist || REL_DEFAULT.rimAt) : kind === "chip" ? (pk.chipDist || REL_DEFAULT.chipAt) : null;
+        // a branch ends one way: clear any terminal already on THIS lineage first
+        const patch = stripLineageTerms(pk, fork);
+        patch.termBy = h.last ? undefined : p.id;
+        // reuse the scalar slot for this kind when it's free (or we just cleared it),
+        // else overflow to xterms (a sibling branch owns the scalar slot)
+        const slotFree = pk[field] == null || patch[field] === null;
+        if (slotFree) {
+          patch[field] = i; patch[RFLD[field]] = fork || null;
+          if (kind === "shot") patch.net = net || null;
+          if (kind === "rim") { patch.rimDist = dist; patch.rimAim = patch.rimAim ?? null; }
+          if (kind === "chip") { patch.chipDist = dist; patch.chipAim = patch.chipAim ?? null; }
+        } else {
+          const baseX = "xterms" in patch ? (patch.xterms || []) : (pk.xterms || []);
+          patch.xterms = [...baseX, { kind, at: i, ref: fork || "", ...(kind === "shot" ? { net: net || null } : { aim: null, dist }) }];
+        }
+        updateById(pk.id, patch);
       };
       const createType = t => {
-        if (t === "receive") { const src = defaultPasser(); if (src) doReceiveFrom(p.id, i, src); else flash("Add another player to pass from"); }
-        else if (t === "collect") collectPuckAt(p.id, i);
+        if (t === "receive") { const src = defaultPasser(); if (src) doReceiveFrom(p.id, i, src, fork); else flash("Add another player to pass from"); }
+        else if (t === "collect") collectPuckAt(p.id, i, undefined, fork);
         else if (t === "pass") { const to = (others[0] || {}).id; if (to) addPass(to); else if (viaTargets[0]) addVia(viaTargets[0].id); else flash("Add a player, passer, tire, or bumper to pass to"); }
         else if (t === "shoot") addTerminal("shotAt", null);
         else if (t === "chip") addTerminal("chipAt");
@@ -4185,12 +4450,26 @@ export default function DrillAnimator() {
         const pk = st.pk;
         if (!isGain(cur) && !isGain(t)) {                       // release/terminal ↔ release/terminal, same stage/puck
           const stage = st.role === "terminal" ? (pk.transfers || []).length : st.stage;
-          if (t === "pass") setTransfer(pk.id, stage, { at: i, to: (others[0] || {}).id, recvAt: null, kind: "pass" });
+          if (t === "pass") setTransfer(pk.id, stage, { at: i, to: (others[0] || {}).id, recvAt: null, kind: "pass", ...relRef });
           else {
             const field = t === "shoot" ? "shotAt" : t === "rim" ? "rimAt" : "chipAt";
-            update(q => q.id !== pk.id ? q : { ...q, transfers: (q.transfers || []).slice(0, stage),
-              shotAt: null, rimAt: null, chipAt: null, rimAim: null, chipAim: null, termBy: null, [field]: i,
-              ...(field === "rimAt" ? { rimDist: q.rimDist || REL_DEFAULT.rimAt } : field === "chipAt" ? { chipDist: q.chipDist || REL_DEFAULT.chipAt } : {}) });
+            const RFLD = { shotAt: "shotRef", rimAt: "rimRef", chipAt: "chipRef" };
+            const kind2 = t === "shoot" ? "shot" : t;
+            update(q => {
+              if (q.id !== pk.id) return q;
+              const patch = stripLineageTerms(q, fork);         // a branch ends one way
+              patch.transfers = (q.transfers || []).slice(0, stage); patch.termBy = undefined;
+              const dist = kind2 === "rim" ? (q.rimDist || REL_DEFAULT.rimAt) : kind2 === "chip" ? (q.chipDist || REL_DEFAULT.chipAt) : null;
+              if (q[field] == null || patch[field] === null) {  // scalar slot free → use it
+                patch[field] = i; patch[RFLD[field]] = fork || null;
+                if (kind2 === "rim") { patch.rimDist = dist; patch.rimAim = null; }
+                if (kind2 === "chip") { patch.chipDist = dist; patch.chipAim = null; }
+              } else {                                          // sibling owns the slot → overflow
+                const baseX = "xterms" in patch ? (patch.xterms || []) : (q.xterms || []);
+                patch.xterms = [...baseX, { kind: kind2, at: i, ref: fork || "", ...(kind2 === "shot" ? { net: null } : { aim: null, dist }) }];
+              }
+              return { ...q, ...patch };
+            });
           }
           return;
         }
@@ -4203,8 +4482,8 @@ export default function DrillAnimator() {
           const val = tr.via ? "v:" + tr.via : "p:" + tr.to;
           return (
             <select className="hd-select on" value={val} onChange={e => { const v = e.target.value;
-              if (v[0] === "v") setTransfer(pk.id, st.stage, { at: i, to: p.id, recvAt: i < 0 ? null : i, kind: "pass", via: v.slice(2) });
-              else setTransfer(pk.id, st.stage, { ...tr, to: v.slice(2), via: undefined, at: i, kind: "pass" }); }}>
+              if (v[0] === "v") setTransfer(pk.id, st.stage, { at: i, to: p.id, recvAt: i < 0 ? null : i, kind: "pass", via: v.slice(2), ...relRef, ...recRef });
+              else setTransfer(pk.id, st.stage, { ...tr, to: v.slice(2), via: undefined, at: i, kind: "pass", ...relRef }); }}>
               {others.map(o => <option key={o.id} value={"p:" + o.id}>{nameOf(o.id)}</option>)}
               {viaTargets.map(v => <option key={v.id} value={"v:" + v.id}>{nameOf(v.id)}{v.kind === "tire" ? " (tire)" : v.kind === "bumper" ? " (bumper)" : ""} — give &amp; go ⟲</option>)}
             </select>
@@ -4225,7 +4504,7 @@ export default function DrillAnimator() {
         if (t === "receive") {
           const src = st.via || st.src || "";
           return (
-            <select className="hd-select on" value={src} onChange={e => { const v = e.target.value; st.del(); if (v) doReceiveFrom(p.id, i, v); }}>
+            <select className="hd-select on" value={src} onChange={e => { const v = e.target.value; st.del(); if (v) doReceiveFrom(p.id, i, v, fork); }}>
               {[...others, ...viaTargets].map(o => <option key={o.id} value={o.id}>{nameOf(o.id)}</option>)}
             </select>
           );
@@ -4236,7 +4515,7 @@ export default function DrillAnimator() {
           const cur = st.pk && !(st.pk.pickup && st.pk.pickup.nearest) ? st.pk.id : "nearest";
           return (
             <select className="hd-select on" value={cur}
-              onChange={e => { const v = e.target.value; st.del(); collectPuckAt(p.id, i, v === "nearest" ? undefined : v); }}>
+              onChange={e => { const v = e.target.value; st.del(); collectPuckAt(p.id, i, v === "nearest" ? undefined : v, fork); }}>
               <option value="nearest">Nearest puck</option>
               {pieces.filter(q => q.kind === "puck").map(q => <option key={q.id} value={q.id}>{q.id}</option>)}
             </select>
@@ -4249,13 +4528,10 @@ export default function DrillAnimator() {
       // at one spot, where a single possession "walk" would mislabel steps.
       const rows = steps.map(st => ({ st,
         opts: (st.role === "receive" || st.role === "collect" || st.role === "pickup") ? GAIN_TYPES : RELEASE_TYPES }));
-      // the Add control offers releases when the player is currently holding an
-      // un-released puck (the chain's last carrier), else gains
-      const holdingHere = pieces.some(q => {
-        if (q.kind !== "puck") return false;
-        const ch = puckChain(q);
-        return ch[ch.length - 1] === p.id && q.shotAt == null && q.rimAt == null && q.chipAt == null;
-      });
+      // the Add control offers releases when the player holds an un-released puck ON
+      // THIS route (a sibling branch's shot/pass doesn't take it away here), else gains
+      const holdingHere = pieces.some(q => q.kind === "puck"
+        && holderOnLineage(q, fork) === p.id && !terminatedOnLineage(q, fork));
       const addOpts = holdingHere ? RELEASE_TYPES : GAIN_TYPES;
       const typeSelect = (value, options, onChange, key) => (
         <select key={key} className={`hd-select${value !== "none" ? " on" : ""}`} style={{ flex: "0 1 auto", minWidth: 96 }} value={value} onChange={e => onChange(e.target.value)}>
@@ -4719,7 +4995,7 @@ export default function DrillAnimator() {
               (light reactions), or a SKATE reaction's end (chain another reaction) */}
           {p.kind === "player" && i === route.length - 1 && (!fork
             ? renderLightReactions(p, null)
-            : (forkAt(p, fork)?.action || "skate") === "skate" ? renderLightReactions(p, fork) : null)}
+            : branchEndsOpen(p, fork) ? renderLightReactions(p, fork) : null)}
           <div className="hd-poprow">
             <span>Note</span>
             <input className="hd-input" style={{ flex: 1, minWidth: 90 }}
@@ -4847,9 +5123,8 @@ export default function DrillAnimator() {
           {!next && p.kind === "player" && (() => {
             if (fork) {
               const fn = forkAt(p, fork);
-              const isSkate = fn && (fn.action || "skate") === "skate";
               const chains = fn && (fn.forks || []).some(g => g.path && g.path.length);
-              if (!isSkate || chains) return null;
+              if (!branchEndsOpen(p, fork) || chains) return null;
             }
             return (
               <div className="hd-poprow">
@@ -4861,7 +5136,7 @@ export default function DrillAnimator() {
               </div>
             );
           })()}
-          {p.kind === "player" && !fork && ActionSteps(p, i)}
+          {p.kind === "player" && ActionSteps(p, i, fork)}
           <div className="hd-poprow">
             <button className="hd-mini danger" onClick={() => deleteSeg(p.id, i, fork)}>Delete point</button>
           </div>
@@ -5023,6 +5298,76 @@ export default function DrillAnimator() {
       }));
   }
 
+  // Faded ghost pass/shot/chip/rim arrows for the NON-ACTIVE branches — in the planner
+  // you can see where each reaction's puck would go, not just the chosen one's (whose
+  // real arrow puckPathNodes already draws).
+  function renderBranchGhostArrows() {
+    if (!showPuckPaths) return null;   // puck-action arrows follow the Routes-on-play "All +puck" rule
+    const z = 1 / (view.s || 1);
+    const nets = pieces.filter(q => q.kind === "net" || q.kind === "passer" || q.kind === "bumper" || q.kind === "tire");
+    const nearNet = pt => nets.length ? nets.reduce((a, b) => Math.hypot(b.x - pt.x, b.y - pt.y) < Math.hypot(a.x - pt.x, a.y - pt.y) ? b : a) : null;
+    const START_OFF = ACT_R * ICON_SCALE + 0.9;
+    const arrow = (a, b, shot, key) => {
+      const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1, ux = dx / len, uy = dy / len;
+      const sp = gmMove(a.x, a.y, ux, uy, Math.min(START_OFF, len / 2));
+      const ep = gmMove(b.x, b.y, -ux, -uy, Math.min(shot ? 4.5 : START_OFF, Math.max(0, len - 2)));
+      const fx = iconXf({ x: ep.x, y: ep.y, a: (Math.atan2(dy, dx) * 180) / Math.PI });
+      return (
+        <g key={key} pointerEvents="none" opacity={0.22}>
+          <line x1={sp.x} y1={sp.y} x2={ep.x} y2={ep.y} vectorEffect="non-scaling-stroke"
+            stroke="#14171a" strokeWidth={sw(shot ? 1.1 : 0.55)} strokeDasharray={shot ? undefined : sdash("2.4 1.8")} />
+          <g transform={fx.t}><g transform={`scale(${z})`}>
+            {shot
+              ? <path d="M -3.4 -2.2 L 0 0 L -3.4 2.2 M -6.8 -2.2 L -3.4 0 L -6.8 2.2" fill="none" stroke="#14171a" strokeWidth={1} strokeLinecap="round" strokeLinejoin="round" />
+              : <path d="M 0 0 L -3.6 -2.1 L -3.6 2.1 Z" fill="#14171a" stroke="#14171a" strokeWidth={0.5} strokeLinejoin="round" />}
+          </g></g>
+        </g>
+      );
+    };
+    const els = [];
+    for (const p of pieces) {
+      if (p.kind !== "player" || !(p.forks || []).length) continue;
+      const chosen = chosenForkRefs(p);
+      const pucks = pieces.filter(q => q.kind === "puck" && puckChain(q).includes(p.id));
+      if (!pucks.length) continue;
+      const landing = (wp, kind, aim, dist) => {
+        const d = dist != null ? dist : (kind === "rim" ? REL_DEFAULT.rimAt : REL_DEFAULT.chipAt);
+        try { const path = kind === "chip" ? boards.slide(wp.x, wp.y, Math.cos((aim || 0) * Math.PI / 180), Math.sin((aim || 0) * Math.PI / 180), d) : boards.rimAround(wp, d, aim); return (path && path.length) ? path[path.length - 1] : wp; } catch { return wp; }
+      };
+      const walk = (branches, parentSegs, parentOrigin, prefix) => {
+        (branches || []).forEach(f => {
+          if (!f.path || !f.path.length) return;
+          const ref = prefix ? prefix + "/" + f.color : f.color, rl = ref.toLowerCase();
+          const at = f.at != null ? f.at : (parentSegs.length - 1);
+          const origin = parentSegs && parentSegs[at] ? { x: parentSegs[at].x, y: parentSegs[at].y } : parentOrigin;
+          if (!chosen.has(rl)) for (const pk of pucks) {
+            const wpAt = i => (i < 0 ? origin : f.path[i]);
+            const terms = [];
+            if (pk.shotAt != null && (pk.shotRef || "").toLowerCase() === rl) terms.push({ kind: "shot", at: pk.shotAt, net: pk.net });
+            if (pk.rimAt != null && (pk.rimRef || "").toLowerCase() === rl) terms.push({ kind: "rim", at: pk.rimAt, aim: pk.rimAim, dist: pk.rimDist });
+            if (pk.chipAt != null && (pk.chipRef || "").toLowerCase() === rl) terms.push({ kind: "chip", at: pk.chipAt, aim: pk.chipAim, dist: pk.chipDist });
+            for (const xt of (pk.xterms || [])) if ((xt.ref || "").toLowerCase() === rl) terms.push(xt);
+            for (const t of terms) {
+              const wp = wpAt(t.at); if (!wp) continue;
+              const tgt = t.kind === "shot" ? (() => { const n = t.net ? pieces.find(x => x.id === t.net) : nearNet(wp); return n ? { x: n.x, y: n.y } : null; })() : landing(wp, t.kind, t.aim, t.dist);
+              if (tgt) els.push(arrow({ x: wp.x, y: wp.y }, tgt, t.kind === "shot", `bg-${p.id}-${ref}-${t.kind}${t.at}`));
+            }
+            for (const t of (pk.transfers || [])) {
+              if ((t.atRef || "").toLowerCase() !== rl) continue;
+              const wp = wpAt(t.at); if (!wp) continue;
+              const rec = pieces.find(q => q.id === t.to);
+              const tgt = rec ? (rec.path.length ? { x: rec.path[rec.path.length - 1].x, y: rec.path[rec.path.length - 1].y } : { x: rec.x, y: rec.y }) : null;
+              if (tgt) els.push(arrow({ x: wp.x, y: wp.y }, tgt, t.kind === "shot", `bg-${p.id}-${ref}-t${t.at}`));
+            }
+          }
+          walk(f.forks, f.path, origin, ref);
+        });
+      };
+      walk(p.forks, p.path, branchPoint(p), "");
+    }
+    return els.length ? <g>{els}</g> : null;
+  }
+
   /* ----- touch loupe ----- */
   function renderLoupe() {
     if (!loupe) return null;
@@ -5113,6 +5458,15 @@ export default function DrillAnimator() {
   // while editing everything shows regardless
   const showRoutes = !aiPlay && (editing || playRoutes !== "hide");   // player route lines + stops
   const showPuckPaths = !aiPlay && (editing || playRoutes === "all"); // planned pass / shot lines
+  // while previewing all branches during playback, the branching players (and the pucks
+  // they carry) are hidden — only the ghosts play out, one per candidate route
+  const previewHiddenIds = new Set();
+  if (previewAllBranches && animT > 0) for (const q of pieces) {
+    if (q.kind === "player" && (q.forks || []).length && enumerateRoutes(q).length > 1) {
+      previewHiddenIds.add(q.id);
+      for (const pk of pieces) if (pk.kind === "puck" && pk.carrier === q.id) previewHiddenIds.add(pk.id);
+    }
+  }
 
   return (
     <div className={`hd-root${aiPlay ? "" : " scrub-on"}`} ref={rootRef}>
@@ -5202,7 +5556,9 @@ export default function DrillAnimator() {
 
 
             {!aiPlay && pieces.map(p => {
-              const rd = showRoutes ? routeDetour(p) : null;   // arc detour around a crossed net
+              // DRAW the detour only when avoidance visuals are on; the animation's own
+              // routeDetour (displayPos) is separate, so the skater still curves either way
+              const rd = showRoutes && avoidanceVisuals ? routeDetour(p) : null;   // arc detour around a crossed net
               const bent = rd && rd.pts;
               const carry = p.kind === "player" ? carrySegs(p) : null;   // segments skated with the puck
               const acts = showRoutes && p.kind === "player" ? actionWaypoints(p) : new Map();
@@ -5278,93 +5634,161 @@ export default function DrillAnimator() {
               );
             })}
 
-            {/* light-reaction forks: invisible ref paths so timing can measure the
-                spliced fork segments, plus visible tinted guide lines (the chosen
-                reaction solid, the others dashed/faint) */}
+            {/* (A) resolved-index refs for the CHOSEN path of every branching player —
+                timing measures each spliced segment at `id/i`. Rendered over the whole
+                effective path (not base-length + append) so a mid-route branch, which
+                truncates the trunk, still lands its segments at the right indices. */}
             {!aiPlay && effPieces.map(p => {
-              const rawP = pieces.find(q => q.id === p.id);
-              const baseLen = rawP && rawP.path ? rawP.path.length : 0;
-              if (!p.path || p.path.length <= baseLen) return null;
-              let prev = baseLen ? { x: p.path[baseLen - 1].x, y: p.path[baseLen - 1].y } : { x: p.x, y: p.y };
+              if (p.kind !== "player" || !(p.forks || []).length) return null;
+              let prev = { x: p.x, y: p.y };
               return (
                 <g key={`fkm-${p.id}`}>
-                  {p.path.slice(baseLen).map((s, k) => {
-                    const i = baseLen + k, d = segD(prev, s);
-                    prev = { x: s.x, y: s.y };
+                  {p.path.map((s, i) => {
+                    const d = segD(prev, s); prev = { x: s.x, y: s.y };
                     return <path key={i} d={d} fill="none" stroke="none"
                       ref={el => { if (el) segRefs.current[`${p.id}/${i}`] = el; }} />;
                   })}
                 </g>
               );
             })}
+            {/* (B) authoring-key refs for EVERY authored segment (base path + every
+                branch, chosen or not) at `seg:id:ref:i`, so resolveRoute can measure
+                branch-arrival times BEFORE the light picks a branch. Origin of a branch
+                is its parent's `at` waypoint (route end by default). */}
+            {!aiPlay && pieces.map(p => {
+              if (p.kind !== "player" || !(p.forks || []).length) return null;
+              const els = [];
+              const emit = (segs, origin, ref, branches) => {
+                let prev = origin;
+                (segs || []).forEach((s, i) => {
+                  const d = segD(prev, s); prev = { x: s.x, y: s.y };
+                  const key = `seg:${p.id}:${ref}:${i}`;
+                  els.push(<path key={key} d={d} fill="none" stroke="none"
+                    ref={el => { if (el) segRefs.current[key] = el; }} />);
+                });
+                (branches || []).forEach(f => {
+                  if (!f.path || !f.path.length) return;
+                  const at = f.at != null ? f.at : (segs.length - 1);
+                  const o = segs && segs[at] ? { x: segs[at].x, y: segs[at].y } : origin;
+                  emit(f.path, o, ref ? ref + "/" + f.color : f.color, f.forks);
+                });
+              };
+              emit(p.path, { x: p.x, y: p.y }, "", p.forks);
+              return <g key={`segm-${p.id}`}>{els}</g>;
+            })}
             {showRoutes && !aiPlay && pieces.map(p => {
               if (p.kind !== "player" || !(p.forks || []).length) return null;
               const chosen = chosenForkRefs(p);
-              const carriesPuck = !!reactionPuck(pieces, p.id);   // a puck held into the branch → wiggle the reaction
-              // draw each reaction from where it forks; recurse into nested reactions
-              // (a skate reaction's end) so a whole chained tree renders. Each level
-              // that actually draws a fork stamps an action circle at its origin (the
-              // branch point where routes fork out of a light reaction).
-              const renderLevel = (forks, origin, prefix) => {
-                const items = (forks || []).map(f => {
-                if (!f.path || !f.path.length) return null;
-                const ref = prefix ? prefix + "/" + f.color : f.color;
-                const editThis = editingFork && editingFork.id === p.id && forkEq(editingFork.color, ref);
-                const active = chosen.has(String(ref).toLowerCase());
-                const end = f.path[f.path.length - 1];
-                const op = editThis ? 1 : active ? 0.95 : 0.5, solid = editThis || active;
-                // the drawn (solid) reaction carries the puck the player brought into the
-                // branch → wiggle line like a base route; the alternatives stay dashed
-                const line = { stroke: f.color, fill: "none", strokeWidth: sw(solid ? 0.55 : 0.42),
-                  vectorEffect: "non-scaling-stroke", strokeLinecap: "round", strokeLinejoin: "round",
-                  opacity: op, pointerEvents: "none" };
-                let prev = origin;
-                return (
-                  <g key={ref}>
-                    {f.path.map((s, i) => {
-                      const from = prev, d = segD(prev, s);
-                      prev = { x: s.x, y: s.y };
-                      const isLast = i === f.path.length - 1;
-                      const bwd = solid && s.dir === "bwd";          // backward skating → zigzag
-                      const wig = solid && carriesPuck && !bwd;      // carrying the puck → wiggle
-                      return (
-                        <g key={i}>
-                          {bwd
-                            ? <polyline points={zigzagPoints(from, s, strokeAR)} {...line} strokeLinejoin="round" />
-                            : wig
-                            ? <polyline points={wigglePoints(from, s, strokeAR, isLast)} {...line} strokeLinejoin="round" />
-                            : <path d={d} {...line} strokeDasharray={solid ? undefined : sdash("1.6 1.1")} />}
-                          {editing && !playing && (
-                            <path d={d} fill="none" stroke="transparent" strokeWidth={4}
-                              onPointerDown={e => lineDown(e, p.id, i, ref)} style={{ cursor: "pointer" }} />
-                          )}
-                        </g>
-                      );
-                    })}
-                    {(() => {                             // mark this reaction's end
-                      const act = f.action || "skate";
-                      // a skate reaction that chains onward is a branch point (the reaction
-                      // badge marks it), not an endpoint
-                      if (act === "skate" && (f.forks || []).some(g => g.path && g.path.length)) return null;
-                      const ea = pathEndArrow(f.path, origin);
-                      if (!ea) return null;
-                      const icon = forkActionIcon(act);
-                      // a terminal action → its action circle (pass/shoot/chip/rim); a plain
-                      // skate → the same route end-mark as a base route (carat, or ‖ stop)
-                      return icon
-                        ? iconBadge(ea.endPt, icon, f.color, ref + "/act", op)
-                        : routeMark(ref + "/end", ea.endPt, ea.ang, !!end.endStop, f.color, op);
-                    })()}
-                    {(f.action || "skate") === "skate" ? renderLevel(f.forks, { x: end.x, y: end.y }, ref) : null}
-                  </g>
-                );
+              // while previewing all branches, EVERY candidate route reads as solid/active
+              const previewAll = previewAllBranches && animT > 0;
+              const obstacles = collisions && avoidanceVisuals ? detourObstaclesFor(p.id) : [];
+              // Draw each branch from the waypoint it departs (its `at`, route end by
+              // default); recurse into chained branches. Branch routes now render with
+              // the SAME machinery as base routes — line-thickness setting, obstacle
+              // detour (bent line + faint ghost), and wiggle/zigzag shaping — so a
+              // reaction line looks identical to a base line. Each distinct branch
+              // origin gets a reaction-light action circle, drawn last (on top).
+              const renderLevel = (branches, parentSegs, parentOrigin, prefix) => {
+                const items = [], badges = new Map();
+                (branches || []).forEach(f => {
+                  if (!f.path || !f.path.length) return;
+                  const ref = prefix ? prefix + "/" + f.color : f.color;
+                  const at = f.at != null ? f.at : (parentSegs.length - 1);
+                  const origin = parentSegs && parentSegs[at] ? { x: parentSegs[at].x, y: parentSegs[at].y } : parentOrigin;
+                  const editThis = editingFork && editingFork.id === p.id && forkEq(editingFork.color, ref);
+                  const active = previewAll || chosen.has(String(ref).toLowerCase());
+                  const end = f.path[f.path.length - 1];
+                  const op = editThis ? 1 : active ? 0.95 : 0.5, solid = editThis || active;
+                  const det = collisions ? detourOf(origin, f.path, obstacles, `${p.id}:fork:${ref}`) : null;
+                  const bent = det && det.pts;
+                  // a branch is a normal route: action circles at its OWN action waypoints
+                  // (every branch shows its own, faint for the non-chosen ones), and a
+                  // wiggle line wherever the player carries the puck on it
+                  const acts = routeActionWaypoints(p, f.path, ref);
+                  const carry = branchCarrySegs(p, ref, f.path);
+                  // stroke honours the global line-thickness setting (× lineScale); forks
+                  // stay a touch thinner than base routes, solid chosen / faint alternatives
+                  const line = { stroke: f.color, fill: "none", strokeWidth: sw(solid ? 0.55 : 0.42) * lineScale,
+                    vectorEffect: "non-scaling-stroke", strokeLinecap: "round", strokeLinejoin: "round",
+                    opacity: op, pointerEvents: "none" };
+                  let prev = origin;
+                  items.push(
+                    <g key={ref}>
+                      {f.path.map((s, i) => {
+                        const from = prev, d = segD(prev, s);
+                        prev = { x: s.x, y: s.y };
+                        const isLast = i === f.path.length - 1;
+                        const bwd = solid && s.dir === "bwd";          // backward skating → zigzag
+                        const wig = solid && carry.has(i) && !bwd;     // carrying the puck → wiggle
+                        // leave a gap at the branch origin (its reaction badge) and around any
+                        // action circle, just like a base route
+                        const startGap = i === 0 ? ACT_GAP : acts.has(i - 1) ? ACT_GAP : 0;
+                        const endGap = acts.has(i) ? ACT_GAP : 0;
+                        let vFrom = from, vSeg = s;
+                        if (!bent && startGap) { const t = trimSegStart(vFrom, vSeg, startGap, strokeAR); if (t) { vFrom = t.from; vSeg = t.seg; } }
+                        if (!bent && endGap) { const t = trimSegEnd(vFrom, vSeg, endGap, strokeAR); if (t) vSeg = t.seg; }
+                        const vD = (!bent && (startGap || endGap)) ? segD(vFrom, vSeg) : d;
+                        return (
+                          <g key={i}>
+                            {!bent && (bwd
+                              ? <polyline points={zigzagPoints(vFrom, vSeg, strokeAR)} {...line} strokeLinejoin="round" />
+                              : wig
+                              ? <polyline points={wigglePoints(vFrom, vSeg, strokeAR, isLast || acts.has(i))} {...line} strokeLinejoin="round" />
+                              : <path d={vD} {...line} strokeDasharray={solid ? undefined : sdash("1.6 1.1")} />)}
+                            {/* detour active → the authored branch lingers as a faint dashed
+                                ghost, exactly like a base route */}
+                            {bent && (
+                              <path d={d} fill="none" stroke={f.color} strokeWidth={sw(0.5)}
+                                strokeDasharray={sdash("1.4 1.6")} strokeLinecap="round"
+                                vectorEffect="non-scaling-stroke" opacity={0.22 * op} pointerEvents="none" />
+                            )}
+                            {editing && !playing && (
+                              <path d={d} fill="none" stroke="transparent" strokeWidth={4}
+                                onPointerDown={e => lineDown(e, p.id, i, ref)} style={{ cursor: "pointer" }} />
+                            )}
+                          </g>
+                        );
+                      })}
+                      {/* detour collapses the branch to one bent polyline (wiggle a carry,
+                          zigzag a backward leg), same as a base route */}
+                      {bent && (() => {
+                        const allBwd = solid && f.path.length > 0 && f.path.every(s => s.dir === "bwd");
+                        const allCarry = solid && f.path.length > 0 && f.path.every((_, i) => carry.has(i));
+                        const shaped = allCarry ? wigglePoly(bent, strokeAR, true) : allBwd ? zigzagPoly(bent, strokeAR) : bent;
+                        return <polyline points={shaped.map(q => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" ")}
+                          {...line} strokeDasharray={solid ? undefined : sdash("1.6 1.1")} strokeLinejoin="round" />;
+                      })()}
+                      {/* action circles at every action waypoint on this branch (all branches,
+                          dimmed to the branch's own opacity for the non-chosen ones) */}
+                      <g opacity={op}>{routeActionMarks(f.path, origin, acts, f.color, bent, `${ref}:`)}</g>
+                      {(() => {                             // the branch's END mark
+                        // chains onward (drawn child branches) → the reaction badge marks it
+                        if ((f.forks || []).some(g => g.path && g.path.length)) return null;
+                        // an action authored on the last waypoint is already an action circle
+                        if (acts.has(f.path.length - 1)) return null;
+                        let ea;
+                        if (bent && bent.length >= 2) {
+                          const eP = bent[bent.length - 1], b = bent[Math.max(0, bent.length - 4)];
+                          ea = { endPt: eP, ang: Math.atan2(eP.y - b.y, eP.x - b.x) * 180 / Math.PI };
+                        } else ea = pathEndArrow(f.path, origin);
+                        if (!ea) return null;
+                        // legacy branch `action` → its circle, else a plain skate carat / ‖ stop
+                        const legacy = f.action && f.action !== "skate" ? forkActionIcon(f.action) : null;
+                        return legacy
+                          ? iconBadge(ea.endPt, legacy, f.color, ref + "/act", op)
+                          : routeMark(ref + "/end", ea.endPt, ea.ang, !!end.endStop, f.color, op);
+                      })()}
+                      {renderLevel(f.forks, f.path, origin, ref)}
+                    </g>
+                  );
+                  const okey = `${origin.x.toFixed(2)},${origin.y.toFixed(2)}`;
+                  if (!badges.has(okey)) badges.set(okey, origin);
                 });
-                if (!items.some(Boolean)) return items;   // nothing drawn here → no branch badge
-                // badge last so the action circle sits ON TOP of the converging routes
-                items.push(reactionBadge(origin, p.color, `rb-${p.id}-${prefix || "base"}`));
+                // badges last so each action circle sits ON TOP of its converging routes
+                badges.forEach((o, k) => items.push(reactionBadge(o, p.color, `rb-${p.id}-${prefix || "base"}-${k}`)));
                 return items;
               };
-              return <g key={`fkv-${p.id}`}>{renderLevel(p.forks, branchPoint(p), "")}</g>;
+              return <g key={`fkv-${p.id}`}>{renderLevel(p.forks, p.path, branchPoint(p), "")}</g>;
             })}
 
             {showRoutes && pieces.map(p => <g key={`s-${p.id}`}>{renderStops(p)}</g>)}
@@ -5377,6 +5801,7 @@ export default function DrillAnimator() {
             )}
 
             {puckPathNodes(false)}
+            {renderBranchGhostArrows()}
 
             {drawPreview && drawPreview.length > 1 && (
               tool === "marker"
@@ -5437,11 +5862,108 @@ export default function DrillAnimator() {
             ))}
             {renderMarkHandles()}
 
+            {/* preview all branches: while playing, a faint ghost of the player skates
+               down EVERY candidate route at once, so the coach sees each reaction option
+               in one pass. If the player starts with a puck, each ghost carries a ghost
+               puck that rides along and breaks to the net / receiver when that branch's
+               action fires. Render-only — never enters timing, so the real run is unaffected. */}
+            {previewAllBranches && animT > 0 && !aiPlay && pieces.map(p => {
+              if (p.kind !== "player" || !(p.forks || []).length) return null;
+              const routes = enumerateRoutes(p);
+              if (routes.length <= 1) return null;
+              const carried = pieces.find(q => q.kind === "puck" && q.carrier === p.id);   // the puck P starts with
+              const side = p.hand === "L" ? -1 : 1;
+              const nets = pieces.filter(q => q.kind === "net" || q.kind === "passer");
+              const nearNet = pt => nets.length ? nets.reduce((a, b) => Math.hypot(b.x - pt.x, b.y - pt.y) < Math.hypot(a.x - pt.x, a.y - pt.y) ? b : a) : null;
+              // the puck action that fires on branch `leafRef` → { relPt, target }, where
+              // target is the ACTUAL completion: the net for a shot, the boards landing for
+              // a chip/rim, the receiver's LIVE position for a pass.
+              const ghostAction = leafRef => {
+                if (!carried) return null;
+                const terms = [];
+                if (carried.shotAt != null) terms.push({ kind: "shot", at: carried.shotAt, ref: carried.shotRef, net: carried.net });
+                if (carried.rimAt != null) terms.push({ kind: "rim", at: carried.rimAt, ref: carried.rimRef, aim: carried.rimAim, dist: carried.rimDist });
+                if (carried.chipAt != null) terms.push({ kind: "chip", at: carried.chipAt, ref: carried.chipRef, aim: carried.chipAim, dist: carried.chipDist });
+                for (const t of (carried.xterms || [])) terms.push(t);
+                for (const t of terms) {
+                  if (!isAncestorRef(t.ref, leafRef)) continue;
+                  const rp = routeSegs(p, t.ref), wp = t.at < 0 ? { x: p.x, y: p.y } : rp[t.at];
+                  if (!wp) continue;
+                  let target;
+                  if (t.kind === "shot") { const net = t.net ? pieces.find(n => n.id === t.net) : nearNet(wp); target = net ? { x: net.x, y: net.y } : wp; }
+                  else {
+                    const dist = t.dist != null ? t.dist : (t.kind === "rim" ? REL_DEFAULT.rimAt : REL_DEFAULT.chipAt);
+                    let path = null;
+                    try {
+                      if (t.kind === "chip") { const a = (t.aim != null ? t.aim : 0) * Math.PI / 180; path = boards.slide(wp.x, wp.y, Math.cos(a), Math.sin(a), dist); }
+                      else path = boards.rimAround(wp, dist, t.aim);
+                    } catch { path = null; }
+                    target = (path && path.length) ? path[path.length - 1] : wp;
+                  }
+                  return { kind: t.kind, relPt: { x: wp.x, y: wp.y }, target };
+                }
+                for (const t of (carried.transfers || [])) {
+                  if (t.kind !== "pass" || !isAncestorRef(t.atRef, leafRef)) continue;
+                  const rp = routeSegs(p, t.atRef), wp = t.at < 0 ? { x: p.x, y: p.y } : rp[t.at];
+                  if (!wp) continue;
+                  const rec = pieces.find(q => q.id === t.to);
+                  const live = rec ? displayPos(rec) : null;   // pass to where the receiver actually is
+                  return { kind: "pass", relPt: { x: wp.x, y: wp.y }, target: live ? { x: live.x, y: live.y } : (rec ? { x: rec.x, y: rec.y } : wp) };
+                }
+                return null;
+              };
+              const polyLen = poly => { let t = 0; for (let i = 1; i < poly.length; i++) t += Math.hypot(poly[i].x - poly[i - 1].x, poly[i].y - poly[i - 1].y); return t; };
+              const arcFracAt = (poly, pt) => {
+                let total = 0; const cum = [0];
+                for (let i = 1; i < poly.length; i++) { total += Math.hypot(poly[i].x - poly[i - 1].x, poly[i].y - poly[i - 1].y); cum.push(total); }
+                let best = 0, bd = Infinity;
+                for (let i = 0; i < poly.length; i++) { const d = Math.hypot(poly[i].x - pt.x, poly[i].y - pt.y); if (d < bd) { bd = d; best = i; } }
+                return total > 0 ? cum[best] / total : 1;
+              };
+              return (
+                <g key={`ghost-${p.id}`} opacity={0.5} pointerEvents="none">
+                  {routes.map((route, k) => {
+                    const segs = route.path;
+                    if (!segs.length) return null;
+                    const det = collisions ? detourOf({ x: p.x, y: p.y }, segs, detourObstaclesFor(p.id), `${p.id}:ghost:${k}`) : null;
+                    const poly = det ? det.pts : pathPolyline({ x: p.x, y: p.y }, segs);
+                    if (poly.length < 2) return null;
+                    const act = carried ? ghostAction(route.ref) : null;
+                    // split the ghost's [0,1] clock into skate + flight, like the real run: the
+                    // player carries to the release point, then the puck flies (fast: shots ×10,
+                    // passes ×7). Without this a shot at the route END would never get airtime.
+                    const rlen = polyLen(poly);
+                    let skateEnd = 1, tRelease = 1, flightSpan = 0;
+                    if (act) {
+                      const relFrac = arcFracAt(poly, act.relPt);
+                      const skateU = relFrac * rlen;
+                      const spd = act.kind === "shot" ? SPEED.shot : act.kind === "pass" ? SPEED.pass : 5;
+                      const flightU = Math.hypot(act.target.x - act.relPt.x, act.target.y - act.relPt.y) / spd;
+                      const totalU = Math.max(rlen, skateU + flightU) || 1;
+                      skateEnd = rlen / totalU; tRelease = skateU / totalU; flightSpan = flightU / totalU;
+                    }
+                    const gp = samplePoly(poly, skateEnd > 0 ? Math.min(animT / skateEnd, 1) : 1);
+                    const fx = iconXf(gp);
+                    const gpiece = { ...p, id: `${p.id}~g${k}`, path: segs, forks: [] };
+                    const els = [<PieceIcon key="pl" p={gpiece} pos={gp} xf={fx.t} thDeg={fx.th} dim onDown={() => {}} />];
+                    if (carried) {
+                      let pp;
+                      if (!act || animT < tRelease) pp = bladeAtWorld(gp.x, gp.y, gp.a || 0, BLADE_FWD, BLADE_LAT, side);
+                      else { const t2 = flightSpan > 0 ? Math.min(1, (animT - tRelease) / flightSpan) : 1; pp = { x: act.relPt.x + (act.target.x - act.relPt.x) * t2, y: act.relPt.y + (act.target.y - act.relPt.y) * t2 }; }
+                      const pfx = iconXf({ x: pp.x, y: pp.y, a: 0 });
+                      els.push(<PieceIcon key="pk" p={{ kind: "puck", color: carried.color }} pos={{ x: pp.x, y: pp.y, a: 0 }} xf={pfx.t} thDeg={pfx.th} dim onDown={() => {}} />);
+                    }
+                    return <g key={k}>{els}</g>;
+                  })}
+                </g>
+              );
+            })}
+
             {/* nets sit on the ice (bottom); players paint above pucks so a
                carried puck can't steal the grab; rotate ring is drawn last. A
                puck IN the net (a goal) sinks below the cage (rank −1). */}
             {!aiPlay && [
-                ...pieces.filter(p => p.kind !== "label" && p.kind !== "mark"),
+                ...pieces.filter(p => p.kind !== "label" && p.kind !== "mark" && !previewHiddenIds.has(p.id)),
                 // goalies ride at rank 0.5 — above their net + drawn crease, below the action
                 ...pieces.filter(q => (q.kind === "net" || q.kind === "tire") && q.goalie).map(n => ({ goalieOf: n })),
               ]
@@ -5719,6 +6241,18 @@ export default function DrillAnimator() {
             <button className={`hd-mini${collisions ? " on" : ""}`}
               onClick={() => setCollisions(v => !v)}>{collisions ? "✓ Route avoidance" : "Route avoidance"}</button>
             <span style={{ fontSize: 11, color: "#8b99a8" }}>curve routes around nets / goalie / players</span>
+          </div>
+          {collisions && (
+            <div className="hd-poprow">
+              <button className={`hd-mini${avoidanceVisuals ? " on" : ""}`}
+                onClick={() => setAvoidanceVisuals(v => !v)}>{avoidanceVisuals ? "✓ Route avoidance visuals" : "Route avoidance visuals"}</button>
+              <span style={{ fontSize: 11, color: "#8b99a8" }}>draw the curved detour + ghost (off = straight lines; the skater still avoids)</span>
+            </div>
+          )}
+          <div className="hd-poprow">
+            <button className={`hd-mini${previewAllBranches ? " on" : ""}`}
+              onClick={() => setPreviewAllBranches(v => !v)}>{previewAllBranches ? "✓ Preview all branches" : "Preview all branches"}</button>
+            <span style={{ fontSize: 11, color: "#8b99a8" }}>on play, ghost the player down every reaction route at once</span>
           </div>
           <div className="hd-mh" style={{ marginTop: 4 }}>Routes on play</div>
           <div className="hd-poprow">
