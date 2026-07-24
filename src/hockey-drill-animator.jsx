@@ -313,6 +313,9 @@ export default function DrillAnimator() {
   });
   useEffect(() => { try { localStorage.setItem(WB_KEY, whiteboard ? "1" : "0"); } catch { /* private mode */ } }, [whiteboard]);
   const effDetail = detailAnim && !whiteboard;
+  // whiteboard also drops the shot theatrics: no random miss/post/air rolls
+  // (shots bury flat) and no GOAL!/SAVE! splashes — a diagram, not a broadcast
+  const effRealistic = realisticShots && !whiteboard;
   const [lineScale, setLineScale] = useState(1);       // route line-thickness multiplier
   const [markOpacity, setMarkOpacity] = useState(1);   // opacity of the drawn drill markings only (routes/forks/stops/ink/aim); players, implements + rink stay opaque
   const [defaultSpeed, setDefaultSpeed] = useState(1.5); // speed given to newly-added players
@@ -932,13 +935,13 @@ export default function DrillAnimator() {
   // → effective piece so position sampling follows the reaction, not the base end
   const effById = new Map(effPieces.map(p => [p.id, p]));
   const effOf = p => p && p.kind === "player" && (p.forks || []).length ? (effById.get(p.id) || p) : p;
-  const { getPlan, pieceTime, displayPosAt, stickSwing, waypointTime, puckInGoal } = createTiming({ pieces: effPieces, pace, segRefs, planCache, seed: playSeed, realisticShots, detail: effDetail, odds: shotOdds });
+  const { getPlan, pieceTime, displayPosAt, stickSwing, waypointTime, puckInGoal } = createTiming({ pieces: effPieces, pace, segRefs, planCache, seed: playSeed, realisticShots: effRealistic, detail: effDetail, odds: shotOdds });
   // intent plan for the route preview (identical to the main plan but with misses
   // off, so shots always route on net). Only built when realistic shots are on and
   // the puck-path overlay is actually shown; otherwise the main plan already IS the
   // intent, so reuse it.
   const wantPuckPaths = !aiPlay && (editing || playRoutes === "all");
-  const getIntentPlan = (!realisticShots || !wantPuckPaths) ? getPlan
+  const getIntentPlan = (!effRealistic || !wantPuckPaths) ? getPlan
     : createTiming({ pieces: effPieces, pace, segRefs, planCache: intentPlanCache, seed: playSeed, realisticShots: false, detail: effDetail, odds: shotOdds }).getPlan;
 
   // a light's cue timeline can outlast every route — keep the drill running long
@@ -2257,7 +2260,11 @@ export default function DrillAnimator() {
         const bladeRaw = bladeAtWorld(raw.x, raw.y, raw.a || 0, BLADE_FWD, BLADE_LAT, side);
         if (Math.hypot(res.x - bladeRaw.x, res.y - bladeRaw.y) < 2.2) {   // this puck is on q's blade
           const qd = displayPos(q);                                       // shielded carrier
-          const tip = bladeAtWorld(qd.x, qd.y, qd.a || 0, TIP_FWD, TIP_LAT, side);
+          // whiteboard: no stick to ride, so tuck the puck right up against the
+          // symbol (just clear of the glyph) instead of out at the blade tip
+          const tip = whiteboard
+            ? bladeAtWorld(qd.x, qd.y, qd.a || 0, 2.4, 0, side)
+            : bladeAtWorld(qd.x, qd.y, qd.a || 0, TIP_FWD, TIP_LAT, side);
           // carry stickhandle: the puck cradles side-to-side on the blade —
           // more at low speed, less (with a forward push) when skating hard
           const e = animT * totalTime;
@@ -4433,7 +4440,7 @@ export default function DrillAnimator() {
   // finished it holds the final result at full strength so a last-instant goal
   // isn't cut off. Stretch-cancelled via the icon frame like a label.
   function renderResultSplash() {
-    if (!showResult || aiPlay || animT <= 0) return null;
+    if (!showResult || whiteboard || aiPlay || animT <= 0) return null;
     if (previewAllBranches) return null;   // no single-run goal call while previewing every branch
     const DUR = 0.9, e = animT * totalTime;
     const { plans } = getPlan();
@@ -6777,7 +6784,7 @@ export default function DrillAnimator() {
           <div className="hd-poprow">
             <button className={`hd-mini${whiteboard ? " on" : ""}`}
               onClick={() => setWhiteboard(v => !v)}>{whiteboard ? "✓ Whiteboard mode" : "Whiteboard mode"}</button>
-            <span style={{ fontSize: 11, color: "#8b99a8" }}>classic X &amp; O player symbols, plain arrowed routes, animations simplify</span>
+            <span style={{ fontSize: 11, color: "#8b99a8" }}>classic X &amp; O player symbols, plain arrowed routes; shots bury flat, no splashes or detail animations</span>
           </div>
           <div className="hd-poprow">
             <button className={`hd-mini${collisions ? " on" : ""}`}
