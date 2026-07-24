@@ -60,14 +60,14 @@ export function extractDrill(text) {
 // Shared by PATH (base routes) and FORK (light-reaction continuations).
 function parseSegments(tok, j, unq) {
   const segs = [];
-  let mode = "carry", dir = "fwd", stop = 0, rate = 1, name = null, waitOn = null, jump = false, join = null, endStop = false;
+  let mode = "carry", dir = "fwd", stop = 0, rate = 1, name = null, waitOn = null, jump = false, join = null, endStop = false, lock = false;
   let dsc = null, dmode = null, dsize = null, dox = null, doy = null;
   const num = () => { const v = parseFloat(tok[j++]); if (isNaN(v)) throw new Error("bad number in PATH"); return v; };
   const push = seg => {
     segs.push({ ...seg, mode, dir, stop, rate, ...(name ? { name } : {}), ...(waitOn ? { waitOn } : {}), ...(jump ? { jump: true } : {}),
-      ...(join ? { join } : {}), ...(endStop ? { endStop: true } : {}), ...(dsc ? { desc: dsc } : {}), ...(dmode ? { dmode } : {}), ...(dsize != null ? { dsize } : {}),
+      ...(join ? { join } : {}), ...(endStop ? { endStop: true } : {}), ...(lock ? { lock: true } : {}), ...(dsc ? { desc: dsc } : {}), ...(dmode ? { dmode } : {}), ...(dsize != null ? { dsize } : {}),
       ...(dox != null ? { dox, doy } : {}) });
-    mode = "carry"; dir = "fwd"; stop = 0; rate = 1; name = null; waitOn = null; jump = false; join = null; endStop = false;
+    mode = "carry"; dir = "fwd"; stop = 0; rate = 1; name = null; waitOn = null; jump = false; join = null; endStop = false; lock = false;
     dsc = null; dmode = null; dsize = null; dox = null; doy = null;
   };
   while (j < tok.length) {
@@ -76,6 +76,7 @@ function parseSegments(tok, j, unq) {
     if (t === "FWD" || t === "BWD") { dir = t.toLowerCase(); continue; }
     if (t === "STOP") { stop = num(); continue; }
     if (t === "JUMP") { jump = true; continue; }
+    if (t === "LOCK") { lock = true; continue; }
     if (t === "JOIN") { const v = (tok[j++] || "").toLowerCase(); join = (v === "smooth" || v === "sym") ? v : null; continue; }
     if (t === "ENDSTOP") { endStop = true; continue; }
     if (t === "WAIT") { const on = tok[j++]; const at = parseInt(tok[j++], 10); waitOn = { on, at: (isNaN(at) ? 1 : at) - 1, mode: "waypoint" }; continue; }
@@ -157,7 +158,7 @@ export function parseDrill(text) {
         let text = "", size = 1;                          // label piece: text + font scale
         let speed = 1, hand = "R", carrier = null, facing = 0, shotAt = null, pickup = null, rimAt = null, chipAt = null, chipAim = null, rimAim = null, chipDist = null, rimDist = null, shotRef = null, rimRef = null, chipRef = null;
         const xterms = [];                                      // overflow same-kind branch terminals
-        let net = null, holdLine = false, goalie = false, defense = false, wait = null, group = null, crease = false;
+        let net = null, holdLine = false, goalie = false, defense = false, wait = null, group = null, crease = false, lock = false;
         let cues = [], rand = true, lmode = null, alwaysColor = null;   // light: cue timeline + route mode
         let lightId = null;                               // player: designated reaction light to read (else nearest)
         const transfers = [];
@@ -258,10 +259,11 @@ export function parseDrill(text) {
           } else if (r === "goalie") goalie = true;
           else if (r === "crease") crease = true;
           else if (r === "defense") defense = true;
+          else if (r === "lock") lock = true;
           else label = r;
         });
         const mode = lmode || (rand === false ? "sequence" : "reactive");   // legacy rand=off → sequence
-        const p = { id, kind, x, y, color, label, text, size, speed, hand, carrier, facing, transfers, shotAt, pickup, rimAt, chipAt, chipAim, rimAim, chipDist, rimDist, ...(shotRef ? { shotRef } : {}), ...(rimRef ? { rimRef } : {}), ...(chipRef ? { chipRef } : {}), ...(xterms.length ? { xterms } : {}), net, holdLine, goalie, defense, wait, group, crease, cues, mode, alwaysColor, lightId, forks: [], path: [] };
+        const p = { id, kind, x, y, color, label, text, size, speed, hand, carrier, facing, transfers, shotAt, pickup, rimAt, chipAt, chipAim, rimAim, chipDist, rimDist, ...(shotRef ? { shotRef } : {}), ...(rimRef ? { rimRef } : {}), ...(chipRef ? { chipRef } : {}), ...(xterms.length ? { xterms } : {}), net, holdLine, goalie, defense, wait, group, crease, lock, cues, mode, alwaysColor, lightId, forks: [], path: [] };
         pieces.push(p); byId[id] = p;
       } else if (cmd === "PATH") {
         const id = tok[1];
@@ -308,11 +310,14 @@ export function parseDrill(text) {
       } else if (cmd === "MARK") {
         // MARK <id> <color> <width> <style> x1,y1 x2,y2 ...  (a freehand ink annotation)
         const mid = tok[1], mcol = tok[2] || "#ffd447", mw = parseFloat(tok[3]) || 1.1, mst = (tok[4] || "solid").toLowerCase();
+        // a bare `lock` flag may sit among the trailing tokens; coords are pure
+        // numbers (the tokenizer splits on commas), so it never collides with them
+        const mlock = tok.slice(5).some(t => t.toLowerCase() === "lock");
         const nums = tok.slice(5).map(Number).filter(n => !isNaN(n));
         const pts = [];
         for (let k = 0; k + 1 < nums.length; k += 2) pts.push({ x: nums[k], y: nums[k + 1] });
         if (mid && pts.length >= 2) {
-          const m = { id: mid, kind: "mark", color: mcol, width: mw, style: ["dashed", "dotted", "wavy"].includes(mst) ? mst : "solid", x: pts[0].x, y: pts[0].y, pts, path: [] };
+          const m = { id: mid, kind: "mark", color: mcol, width: mw, style: ["dashed", "dotted", "wavy"].includes(mst) ? mst : "solid", ...(mlock ? { lock: true } : {}), x: pts[0].x, y: pts[0].y, pts, path: [] };
           pieces.push(m); byId[mid] = m;
         }
       } else if (cmd === "STEP") {
@@ -368,6 +373,7 @@ function segToStr(s) {
   }
   if (s.stop > 0) pre += `STOP ${f1(s.stop)} `;
   if (s.jump) pre += "JUMP ";
+  if (s.lock) pre += "LOCK ";
   if (s.join === "smooth" || s.join === "sym") pre += `JOIN ${s.join} `;
   if (s.endStop) pre += "ENDSTOP ";
   if (s.waitOn && s.waitOn.on) pre += s.waitOn.mode === "action"
@@ -398,11 +404,13 @@ export function serializeDrill(rink, pieces, title = "", desc = "", steps = [], 
   pieces.forEach(p => {
     if (p.kind === "label") {
       const sz = p.size && p.size !== 1 ? ` size=${f2(p.size)}` : "";
-      out.push(`PIECE ${p.id} label ${f1(p.x)} ${f1(p.y)} ${p.color}${sz} ${qesc(p.text || "")}`);
+      const lk = p.lock ? " lock" : "";
+      out.push(`PIECE ${p.id} label ${f1(p.x)} ${f1(p.y)} ${p.color}${sz}${lk} ${qesc(p.text || "")}`);
       return;
     }
     if (p.kind === "mark") {
-      out.push(`MARK ${p.id} ${p.color} ${f2(p.width || 1.1)} ${p.style || "solid"} ${(p.pts || []).map(q => `${f1(q.x)},${f1(q.y)}`).join(" ")}`);
+      const lk = p.lock ? " lock" : "";
+      out.push(`MARK ${p.id} ${p.color} ${f2(p.width || 1.1)} ${p.style || "solid"}${lk} ${(p.pts || []).map(q => `${f1(q.x)},${f1(q.y)}`).join(" ")}`);
       return;
     }
     const lbl = p.label ? " " + String(p.label).replace(/[\s,]+/g, "_") : "";
@@ -443,6 +451,7 @@ export function serializeDrill(rink, pieces, title = "", desc = "", steps = [], 
     const gl = (p.kind === "net" || p.kind === "tire") && p.goalie ? " goalie" : "";
     const crs = p.kind === "net" && p.crease ? " crease" : "";
     const df = p.kind === "player" && p.defense ? " defense" : "";
+    const lck = p.lock ? " lock" : "";
     const siz = (p.kind === "net" || p.kind === "tire") && p.size && p.size !== 1 ? ` size=${f2(p.size)}` : "";
     const grp = p.group ? ` group=${String(p.group).trim().replace(/\s+/g, "_")}` : "";
     // player: the reaction light it's designated to read (else nearest is used)
@@ -457,7 +466,7 @@ export function serializeDrill(rink, pieces, title = "", desc = "", steps = [], 
           ? ` mode=always${p.alwaysColor || (p.cues && p.cues[0] && p.cues[0].color) ? ":" + String(p.alwaysColor || p.cues[0].color).replace("#", "") : ""}`
           : ` mode=${lm}`)
       : "";
-    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${car}${gp}${pas}${sht}${rmT}${chT}${xts}${nt}${hld}${wt}${fac}${gl}${crs}${df}${siz}${grp}${lgt}${cue}${rnd}${spd}`);
+    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${car}${gp}${pas}${sht}${rmT}${chT}${xts}${nt}${hld}${wt}${fac}${gl}${crs}${df}${lck}${siz}${grp}${lgt}${cue}${rnd}${spd}`);
     if (p.path.length) out.push(`PATH ${p.id} ${p.path.map(segToStr).join(" ")}`);
     // route branches (players): one conditional continuation per cue colour, with
     // the action the player performs at its end (skate default → omitted). Branches
