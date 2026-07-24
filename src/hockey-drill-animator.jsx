@@ -312,6 +312,10 @@ export default function DrillAnimator() {
   const [shotOdds, setShotOdds] = useState({ save: SAVE_PROB, post: MISS_POST, wide: MISS_WIDE, over: MISS_OVER, air: SHOT_AIR_PROB, bounce: BOUNCE_REST });
   const [showAdvanced, setShowAdvanced] = useState(false); // reveal the shot-odds sliders
   const [showZones, setShowZones] = useState(false);   // named ice-area overlay
+  // when false (default), locked pieces/waypoints are click-through so taps land
+  // on nearby UNLOCKED items instead of a locked one stealing the grab; turn on
+  // to make locked items tappable again (to select + unlock them)
+  const [lockedSelectable, setLockedSelectable] = useState(false);
   const [playSeed, setPlaySeed] = useState(0);         // bumps each play → new save/goal rolls
   const [loopMode, setLoopMode] = useState(false);     // replay the routine continuously
   const [loopPause, setLoopPause] = useState(1);       // seconds held on the finished drill
@@ -3123,7 +3127,7 @@ export default function DrillAnimator() {
   const moveMembersBy = (has, dx, dy) => {
     const ci = (x, y) => boards.clampInside(x, y);
     update(p => {
-      if (!has(p.id)) return p;
+      if (!has(p.id) || p.lock) return p;   // a locked member never slides with its group
       const np = ci(p.x + dx, p.y + dy);
       const path = (p.path || []).map(s => {
         const q = ci(s.x + dx, s.y + dy), s2 = { ...s, x: q.x, y: q.y };
@@ -3135,6 +3139,15 @@ export default function DrillAnimator() {
     });
   };
   const moveGroupBy = (dx, dy) => moveMembersBy(id => !!multiSel && multiSel.has(id), dx, dy);
+  // whether anything on the board is locked (piece or any of its waypoints) — drives
+  // the menu label + one-tap Lock all / Unlock all
+  const anyLocked = pieces.some(p => p.lock || (p.path || []).some(s => s.lock));
+  const toggleLockAll = () => {
+    const lock = !anyLocked;                    // lock everything, or clear every lock
+    const lockPath = arr => (arr || []).map(s => (lock ? { ...s, lock: true } : (() => { const { lock: _l, ...rest } = s; return rest; })()));
+    const lockForks = fks => (fks || []).map(f => ({ ...f, path: lockPath(f.path), forks: lockForks(f.forks) }));
+    setPieces(ps => ps.map(p => ({ ...p, lock, path: lockPath(p.path), forks: lockForks(p.forks) })));
+  };
   // ----- named groups (persistent, saved as group= on each piece) -----
   const groupMembers = name => new Set(pieces.filter(q => q.group === name).map(q => q.id));
   // the shared group name of the current box-selection, or null if mixed/none
@@ -3258,9 +3271,13 @@ export default function DrillAnimator() {
     if (tool === "draw") { setSelectedId(id); setPopup(null); beginDraw(e, id); return; }
     if (wakeEdit()) return;
     const pt = svgPt(e);
+    // a locked piece is grabbed only to select it (so it can open its popup and
+    // be unlocked) — never moved. onSvgMove bails on d.locked, keeping d.moved
+    // false so the tap still opens the popup.
+    const locked = !!pieces.find(q => q.id === id)?.lock;
     // if this piece is part of a box-selection, drag the whole group together
     if (multiSel && multiSel.has(id)) {
-      drag.current = { kind: "group", start: pt, last: pt, moved: false, touch: e.pointerType !== "mouse" };
+      drag.current = { kind: "group", start: pt, last: pt, moved: false, touch: e.pointerType !== "mouse", locked };
       svgRef.current.setPointerCapture?.(e.pointerId);
       return;
     }
@@ -3270,13 +3287,13 @@ export default function DrillAnimator() {
     if (pc && pc.group) {
       setMultiSel(null);
       setSelectedId(id);
-      drag.current = { kind: "gmove", id, members: groupMembers(pc.group), start: pt, last: pt, moved: false, touch: e.pointerType !== "mouse" };
+      drag.current = { kind: "gmove", id, members: groupMembers(pc.group), start: pt, last: pt, moved: false, touch: e.pointerType !== "mouse", locked };
       svgRef.current.setPointerCapture?.(e.pointerId);
       return;
     }
     setMultiSel(null);
     setSelectedId(id);
-    drag.current = { kind: "piece", id, start: pt, last: pt, moved: false, touch: e.pointerType !== "mouse" };
+    drag.current = { kind: "piece", id, start: pt, last: pt, moved: false, touch: e.pointerType !== "mouse", locked };
     svgRef.current.setPointerCapture?.(e.pointerId);
   }
 
@@ -3289,7 +3306,7 @@ export default function DrillAnimator() {
     const pt = svgPt(e);
     // start/last/moved are required by onSvgMove's tap-threshold guard —
     // without them it dereferences d.start.x and throws, killing the drag
-    drag.current = { kind: "markpt", id, idx, start: pt, last: pt, moved: false, touch: e.pointerType !== "mouse" };
+    drag.current = { kind: "markpt", id, idx, start: pt, last: pt, moved: false, touch: e.pointerType !== "mouse", locked: !!pieces.find(q => q.id === id)?.lock };
     svgRef.current.setPointerCapture?.(e.pointerId);
   }
 
@@ -3317,7 +3334,14 @@ export default function DrillAnimator() {
     setSelectedId(id);
     if (fork) setEditingFork({ id, color: fork });   // tapping a reaction route opens it for editing
     const pt = svgPt(e);
-    drag.current = { kind: "piece", id, line: segIdx, ...(fork ? { fork } : {}), tapPt: pt, start: pt, last: pt, moved: false, touch: e.pointerType !== "mouse" };
+    // grabbing a route leg slides the WHOLE piece + route. Block that if the piece
+    // is locked OR any waypoint on this route is pinned — a pinned point locks the
+    // route down, leaving only individual (unlocked) point drags. The leg still
+    // taps through to its popup (add/edit points) since d.moved stays false.
+    const pc = pieces.find(q => q.id === id);
+    const rseg = (routePiece(pc, fork) || {}).path || [];
+    const locked = !!(pc?.lock || rseg.some(s => s.lock));
+    drag.current = { kind: "piece", id, line: segIdx, ...(fork ? { fork } : {}), tapPt: pt, start: pt, last: pt, moved: false, touch: e.pointerType !== "mouse", locked };
     svgRef.current.setPointerCapture?.(e.pointerId);
   }
 
@@ -3332,7 +3356,10 @@ export default function DrillAnimator() {
     // centre so size scales with how far it's dragged out/in
     const extra = payload.kind === "resize"
       ? { dist0: Math.max(0.5, Math.hypot(pt.x - payload.cx, pt.y - payload.cy)) } : {};
-    drag.current = { ...payload, ...extra, start: pt, last: pt, moved: false, touch: e.pointerType !== "mouse" };
+    // a locked piece locks all its handles; a locked waypoint locks its own
+    const pc = pieces.find(q => q.id === payload.id);
+    const locked = !!(pc?.lock || (payload.seg != null && pc?.path?.[payload.seg]?.lock));
+    drag.current = { ...payload, ...extra, start: pt, last: pt, moved: false, touch: e.pointerType !== "mouse", locked };
     svgRef.current.setPointerCapture?.(e.pointerId);
   }
 
@@ -3348,7 +3375,7 @@ export default function DrillAnimator() {
     const side = p.hand === "L" ? -1 : 1;
     const offset = (Math.atan2(2.55 * side, 4.7) * 180) / Math.PI;
     const pt = svgPt(e);
-    drag.current = { kind: "rotate", id: p.id, offset, start: pt, last: pt, moved: false, touch: e.pointerType !== "mouse" };
+    drag.current = { kind: "rotate", id: p.id, offset, start: pt, last: pt, moved: false, touch: e.pointerType !== "mouse", locked: !!p.lock };
     svgRef.current.setPointerCapture?.(e.pointerId);
   }
 
@@ -3356,6 +3383,9 @@ export default function DrillAnimator() {
     if (pinchRef.current) return;
     const d = drag.current;
     if (!d) return;
+    // a locked entity was grabbed only to select/open its popup — never moved.
+    // Leaving d.moved false lets onSvgUp treat the grab as a tap (opens popup).
+    if (d.locked) return;
     const pt = svgPt(e);
     if (d.kind === "drawing") {
       const last = drawRaw.current[drawRaw.current.length - 1];
@@ -3507,7 +3537,7 @@ export default function DrillAnimator() {
       if (!d.moved) { setSelectedId(null); setMultiSel(null); return; }   // a plain tap deselects
       const x0 = Math.min(d.start.x, d.last.x), x1 = Math.max(d.start.x, d.last.x);
       const y0 = Math.min(d.start.y, d.last.y), y1 = Math.max(d.start.y, d.last.y);
-      const hit = pieces.filter(p => p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1).map(p => p.id);
+      const hit = pieces.filter(p => !p.lock && p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1).map(p => p.id);
       setSelectedId(null); setPopup(null);
       setMultiSel(hit.length ? new Set(hit) : null);
       return;
@@ -3944,21 +3974,27 @@ export default function DrillAnimator() {
     const els = [];
     // a draggable tangent control, with a dashed leash back to its waypoint anchor.
     const ctrlPt = (key, cx, cy, kind, seg, wp, ax, ay) => {
+      const lkOff = (p.lock || route[wp]?.lock) && !lockedSelectable;   // locked point: click-through
       els.push(<line key={key + "l"} x1={ax} y1={ay} x2={cx} y2={cy} stroke="#8fa3b5" strokeWidth={0.25} strokeDasharray="1 1" />);
       els.push(hd(cx, cy, 1.5, { key, fill: "#fff", stroke: "#5b7d9e", strokeWidth: 0.4, pointerEvents: "none" }));
-      els.push(hd(cx, cy, 4, { key: key + "h", fill: "transparent", style: { cursor: "grab" },
+      els.push(hd(cx, cy, 4, { key: key + "h", fill: "transparent", style: { cursor: "grab" }, pointerEvents: lkOff ? "none" : undefined,
         onPointerDown: e => handleDown(e, { kind, id: p.id, seg, wp, ...(fork ? { fork } : {}) }) }));
     };
     route.forEach((s, i) => {
+      // a locked waypoint (or a waypoint of a locked piece) reads in a muted
+      // "locked" colour and — unless locked items are selectable — is click-through
+      const lk = !!(p.lock || s.lock);
+      const wFill = lk ? "#8792a0" : dotFill, wStroke = lk ? "#2b333d" : dotStroke;
+      const lkOff = lk && !lockedSelectable;
       if (i === activeWp) {
         // full anchor grab: a circle for a linked (smooth/sym) point, a square for
         // a corner — the vector-editor convention, so the point type reads on-ice
         if (s.join === "smooth" || s.join === "sym")
-          els.push(hd(s.x, s.y, 1.6, { key: `a${i}`, fill: dotFill, stroke: dotStroke, strokeWidth: 0.35, pointerEvents: "none" }));
+          els.push(hd(s.x, s.y, 1.6, { key: `a${i}`, fill: wFill, stroke: wStroke, strokeWidth: 0.35, pointerEvents: "none" }));
         else
           els.push(<rect key={`a${i}`} x={s.x - 1.4} y={s.y - 1.4 * yf} width={2.8} height={2.8 * yf}
-            fill={dotFill} stroke={dotStroke} strokeWidth={0.35} pointerEvents="none" />);
-        els.push(hd(s.x, s.y, 4, { key: `ah${i}`, fill: "transparent", style: { cursor: "grab" },
+            fill={wFill} stroke={wStroke} strokeWidth={0.35} pointerEvents="none" />);
+        els.push(hd(s.x, s.y, 4, { key: `ah${i}`, fill: "transparent", style: { cursor: "grab" }, pointerEvents: lkOff ? "none" : undefined,
           onPointerDown: e => handleDown(e, { kind: "anchor", id: p.id, seg: i, wp: i, ...(fork ? { fork } : {}) }) }));
         // incoming tangent: this leg's control nearest waypoint i
         if (s.type === "C") ctrlPt(`ic${i}`, s.c2x, s.c2y, "c2", i, i, s.x, s.y);
@@ -3969,8 +4005,8 @@ export default function DrillAnimator() {
         else if (nx && nx.type === "Q") ctrlPt(`oq${i}`, nx.cx, nx.cy, "q", i + 1, i, s.x, s.y);
       } else {
         // every other waypoint is just a small (still grabbable) dot
-        els.push(hd(s.x, s.y, 0.9, { key: `am${i}`, fill: dotFill, stroke: dotStroke, strokeWidth: 0.3, pointerEvents: "none" }));
-        els.push(hd(s.x, s.y, 3.5, { key: `amh${i}`, fill: "transparent", style: { cursor: "grab" },
+        els.push(hd(s.x, s.y, 0.9, { key: `am${i}`, fill: wFill, stroke: wStroke, strokeWidth: 0.3, pointerEvents: "none" }));
+        els.push(hd(s.x, s.y, 3.5, { key: `amh${i}`, fill: "transparent", style: { cursor: "grab" }, pointerEvents: lkOff ? "none" : undefined,
           onPointerDown: e => handleDown(e, { kind: "anchor", id: p.id, seg: i, wp: i, ...(fork ? { fork } : {}) }) }));
       }
     });
@@ -4098,7 +4134,7 @@ export default function DrillAnimator() {
   // a movable/resizable on-ice text label, drawn undistorted (icon frame) and
   // held screen-upright. Used for standalone labels and for waypoint
   // descriptions shown in "label" mode.
-  function labelNode(key, x, y, text, size, color, sel, onDown, resizeDown) {
+  function labelNode(key, x, y, text, size, color, sel, onDown, resizeDown, hitOff = false) {
     const fx = iconXf({ x, y, a: 0 });
     const lines = String(text || " ").split("\n");
     // the icon frame bakes in ICON_SCALE (0.8), so on-ice height ≈ fs·0.8;
@@ -4112,7 +4148,7 @@ export default function DrillAnimator() {
         <g transform={`rotate(${-fx.th})`}>
           <rect x={-w / 2} y={-h / 2} width={w} height={h} rx={fs * 0.28}
             fill="rgba(246,251,253,0.95)" stroke={sel ? "#ffd447" : "rgba(20,32,43,0.35)"}
-            strokeWidth={sel ? 0.7 : 0.4} onPointerDown={onDown}
+            strokeWidth={sel ? 0.7 : 0.4} onPointerDown={onDown} pointerEvents={hitOff ? "none" : undefined}
             style={{ cursor: onDown ? "grab" : "default" }} />
           <text textAnchor="middle" fontSize={fs} fontWeight={800} fill={color || "#14202b"}
             pointerEvents="none" style={{ fontFamily: "system-ui, sans-serif", userSelect: "none",
@@ -4191,7 +4227,8 @@ export default function DrillAnimator() {
         {hit && editing && !markEdit && (
           <polyline points={line} fill="none" stroke="transparent" strokeWidth={Math.max(4, w + 3)}
             strokeLinecap="round" strokeLinejoin="round" style={{ cursor: "grab" }}
-            onPointerDown={e => pieceDown(e, m.id)} />
+            onPointerDown={e => pieceDown(e, m.id)}
+            pointerEvents={m.lock && !lockedSelectable ? "none" : undefined} />
         )}
       </g>
     );
@@ -4221,7 +4258,8 @@ export default function DrillAnimator() {
         const sel = canEdit && p.id === selectedId;
         els.push(labelNode(`lbl-${p.id}`, p.x, p.y, p.text, p.size, p.color, sel,
           e => pieceDown(e, p.id),
-          canEdit ? e => handleDown(e, { kind: "resize", id: p.id, seg: null, cx: p.x, cy: p.y, size0: p.size || 1 }) : null));
+          canEdit && !p.lock ? e => handleDown(e, { kind: "resize", id: p.id, seg: null, cx: p.x, cy: p.y, size0: p.size || 1 }) : null,
+          p.lock && !lockedSelectable));
       } else if (p.label && p.kind !== "player") {
         // a name tag under any named prop/piece (players show their jersey instead)
         const off = p.kind === "net" ? 6.5 : 5;
@@ -4231,9 +4269,11 @@ export default function DrillAnimator() {
         if (s.dmode !== "label" || !s.desc) return;
         const cx = s.x + (s.dox || 0), cy = s.y + (s.doy != null ? s.doy : -5);
         const sel = canEdit && p.id === selectedId;
+        const wlk = !!(p.lock || s.lock);
         els.push(labelNode(`wl-${p.id}-${i}`, cx, cy, s.desc, s.dsize, "#14202b", sel,
           canEdit ? e => handleDown(e, { kind: "wlabel", id: p.id, seg: i }) : undefined,
-          canEdit ? e => handleDown(e, { kind: "resize", id: p.id, seg: i, cx, cy, size0: s.dsize || 1 }) : null));
+          canEdit && !wlk ? e => handleDown(e, { kind: "resize", id: p.id, seg: i, cx, cy, size0: s.dsize || 1 }) : null,
+          wlk && !lockedSelectable));
       });
     });
     return els;
@@ -5378,6 +5418,42 @@ export default function DrillAnimator() {
       );
     }
 
+    // ── Lock overlay ─────────────────────────────────────────────────────
+    // A locked piece / waypoint can't be edited: its popup collapses to an
+    // Unlock panel. An unlocked one gains a Lock toggle at the bottom. (A
+    // waypoint is also locked when its whole piece is.)
+    if (p && (popup.type === "piece" || popup.type === "line" || popup.type === "point")) {
+      const seg = popup.type === "point" ? routePiece(p, popup.fork || null).path[popup.seg] : null;
+      const wpLock = popup.type === "point" && !!seg?.lock;
+      if (p.lock || wpLock) {
+        const pieceOnly = popup.type === "point" && p.lock && !wpLock;   // locked only via its piece
+        body = (
+          <div className="hd-field">
+            <div className="hd-sectitle">🔒 Locked</div>
+            <div className="hd-sechint">
+              {pieceOnly
+                ? "Locked because its piece is locked."
+                : `This ${popup.type === "point" ? "waypoint" : "item"} is pinned — it can't be moved or edited until you unlock it.`}
+            </div>
+            <div className="hd-poprow">
+              {pieceOnly
+                ? <button className="hd-mini" onClick={() => navPopup({ type: "piece", id: p.id })}>Open piece ›</button>
+                : <button className="hd-mini on" onClick={() => {
+                    if (popup.type === "point") updateSeg(p.id, popup.seg, { lock: undefined }, popup.fork || null);
+                    else updateById(p.id, { lock: false });
+                  }}>🔓 Unlock</button>}
+            </div>
+          </div>
+        );
+      } else {
+        const lockRow = popup.type === "point"
+          ? <button className="hd-mini" onClick={() => updateSeg(p.id, popup.seg, { lock: true }, popup.fork || null)}>🔒 Lock point</button>
+          : <button className="hd-mini" onClick={() => updateById(p.id, { lock: true })}>🔒 Lock {p.kind === "player" ? "player" : "item"}</button>;
+        body = <>{body}<div className="hd-field"><div className="hd-poprow">{lockRow}</div>
+          <div className="hd-sechint">Pin in place so it can't be moved or edited by accident.</div></div></>;
+      }
+    }
+
     // a positioned popup keeps its own px spot, so a briefly off-screen anchor
     // (e.g. a far waypoint during Prev/Next) must not blank it out
     const a = popoutAnchor(anchorPt) || (popPos ? { lx: 50, ty: 50 } : null);
@@ -5878,7 +5954,8 @@ export default function DrillAnimator() {
                         )}
                         {showRoutes && (
                           <path d={d} fill="none" stroke="transparent" strokeWidth={4}
-                            onPointerDown={e => lineDown(e, p.id, i)} style={{ cursor: "pointer" }} />
+                            onPointerDown={e => lineDown(e, p.id, i)} style={{ cursor: "pointer" }}
+                            pointerEvents={p.lock && !lockedSelectable ? "none" : undefined} />
                         )}
                       </g>
                     );
@@ -6016,7 +6093,8 @@ export default function DrillAnimator() {
                             )}
                             {editing && !playing && (
                               <path d={d} fill="none" stroke="transparent" strokeWidth={4}
-                                onPointerDown={e => lineDown(e, p.id, i, ref)} style={{ cursor: "pointer" }} />
+                                onPointerDown={e => lineDown(e, p.id, i, ref)} style={{ cursor: "pointer" }}
+                                pointerEvents={p.lock && !lockedSelectable ? "none" : undefined} />
                             )}
                           </g>
                         );
@@ -6240,9 +6318,12 @@ export default function DrillAnimator() {
               ]
               .sort((a, b) => {
                 const goalE = animT <= 0 ? 0 : animT * totalTime;
-                const rank = p => (p.goalieOf ? 0.5
+                const kindRank = p => (p.goalieOf ? 0.5
                   : p.kind === "puck" && puckInGoal(p, goalE) ? -1
                   : p.kind === "net" || p.kind === "bumper" || p.kind === "deker" || p.kind === "passer" || p.kind === "tire" || p.kind === "stick" || p.kind === "light" ? 0 : p.kind === "player" ? 2 : 1);
+                // locked pieces sink beneath every unlocked one, so a contested tap
+                // always lands on the unlocked piece/waypoint stacked over it
+                const rank = p => kindRank(p) - (p.lock ? 10 : 0);
                 return rank(a) - rank(b);
               })
               .map(p => {
@@ -6269,7 +6350,8 @@ export default function DrillAnimator() {
                     </g>
                     <g transform={`translate(${lp.x} ${lp.y}) scale(${k}) translate(${-lp.x} ${-lp.y})`}>
                       <PieceIcon p={p} pos={lp} xf={lfx.t} thDeg={lfx.th} noShadow={isJump}
-                        selected={p.id === selectedId} swing={isJump ? displaySwing(p) : 0} dim={animT > 0} onDown={e => pieceDown(e, p.id)} />
+                        selected={p.id === selectedId} swing={isJump ? displaySwing(p) : 0} dim={animT > 0} onDown={e => pieceDown(e, p.id)}
+                        hitOff={p.lock && !lockedSelectable} />
                     </g>
                   </g>
                 );
@@ -6279,7 +6361,8 @@ export default function DrillAnimator() {
                 <PieceIcon key={p.id} p={p} pos={dp} xf={fx.t} thDeg={fx.th}
                   selected={p.id === selectedId} swing={displaySwing(p)}
                   dim={animT > 0} onDown={e => pieceDown(e, p.id)}
-                  onStickDown={editing && tool !== "draw" && p.kind === "player" && !p.path.length
+                  hitOff={p.lock && !lockedSelectable}
+                  onStickDown={editing && tool !== "draw" && p.kind === "player" && !p.path.length && !(p.lock && !lockedSelectable)
                     ? e => stickDown(e, p) : undefined} />
               );
             })}
@@ -6467,6 +6550,14 @@ export default function DrillAnimator() {
           <button className={`hd-item${showZones ? " on" : ""}`}
             onClick={() => setShowZones(s => !s)}>
             <Icon name="grid" size={16} /> Ice zones {showZones ? "(on)" : ""}
+          </button>
+          <button className={`hd-item${anyLocked ? " on" : ""}`}
+            onClick={() => { toggleLockAll(); setOpenMenu(null); }}>
+            <Icon name={anyLocked ? "unlock" : "lock"} size={16} /> {anyLocked ? "Unlock all" : "Lock board"}
+          </button>
+          <button className={`hd-item${lockedSelectable ? " on" : ""}`}
+            onClick={() => setLockedSelectable(s => !s)}>
+            <Icon name="lock" size={16} /> Locked items selectable {lockedSelectable ? "(on)" : ""}
           </button>
           <button className={`hd-item${showDiag ? " on" : ""}`}
             onClick={() => { setShowDiag(s => !s); setOpenMenu(null); }}>

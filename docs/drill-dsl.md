@@ -129,6 +129,7 @@ Places a piece. `id` is any unique token (e.g. `F1`, `PK1`, `N2`).
 | `hand=L` / `hand=R` | player, stick | Shooting hand — mirrors the player's stick, or flips the on-ice stick prop's blade for a left/right-handed stick |
 | `face=<deg>` | route-less player, net, bumper, deker, passer | Facing angle (0 = +x / toward the right) |
 | `defense` | player | Auto-reacting defenceman (holds the slot, stays goal-side) |
+| `lock` | any | Pin the piece in place — it can't be dragged, rotated, or edited until unlocked. Toggle *🔒 Lock* on the piece popup, or lock/unlock everything via **☰ → Lock board**. (Bare word, parsed before the jersey-label catch-all.) |
 | `hold=line` | player | Wait at the blue line until the puck enters the zone |
 | `wait=<player>[@<pt>]` | player | Hold at the start until `<player>` **reaches** point `<pt>`, then run the route. Chains resolve (A waits for B waits for C). In the app: *Delay trigger → Waypoint* on the player popup. |
 | `act=<player>[@<pt>]` | player | Hold at the start until `<player>` **releases the puck** (pass/chip/rim/shot) at point `<pt>`; omit `@<pt>` to fire at any of their actions. Correct for stationary passers / held passes where arrival time is wrong. In the app: *Delay trigger → Action*. |
@@ -199,6 +200,7 @@ is the piece's starting spot (so `shoot=0` / `chip=0` releases before skating).
 | `JUMP` | The player jumps as they pass this waypoint — a hop (grow then shrink over a sticky ground shadow) in the animation. Toggle *Jump here* on the waypoint popup. |
 | `JOIN smooth\|sym` | Links this waypoint's two bézier handles so re-editing keeps them collinear (**smooth**) or collinear **and** equal length (**sym**). Omitted = a **corner** (independent handles). Purely an editing aid — the rendered curve is unchanged. Set via *Point* on the waypoint popup; on-ice a linked point shows a round node, a corner a square one. |
 | `ENDSTOP` | On a player route's **last** leg: the player stops here, so the route ends in a `‖` **stop mark** instead of a direction arrowhead (skating-diagram convention). Toggle *Stops here* on the last waypoint's popup. |
+| `LOCK` | Pin this waypoint — its handle can't be dragged or edited until unlocked (locking the whole piece locks every waypoint too). Toggle *🔒 Lock point* on the waypoint popup. |
 | `RATE <n>` | Speed multiplier for this leg |
 | `NAME <word>` | Name this waypoint (underscores → spaces) for presentation text |
 | `DESC "<text>"` | A free-text description for this waypoint |
