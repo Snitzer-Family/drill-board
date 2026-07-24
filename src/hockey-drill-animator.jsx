@@ -356,6 +356,10 @@ export default function DrillAnimator() {
   const [isWide, setIsWide] = useState(() =>
     typeof matchMedia === "function" &&
     matchMedia("(pointer: fine) and (min-width: 760px)").matches);
+  // a coarse (touch) primary pointer needs fatter grab targets than a mouse.
+  // Stable for a session, so compute once (no listener like isWide needs).
+  const coarsePtr = useMemo(
+    () => typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches, []);
   const [stageSize, setStageSize] = useState({ w: 800, h: 500 });
 
   const svgRef = useRef(null);
@@ -600,6 +604,42 @@ export default function DrillAnimator() {
     });
     return set;
   }
+  // the drag handles the popup's target currently EXPOSES (waypoint anchor + its
+  // tangent controls, a piece's departure/rotate handles) in client px. A floating
+  // popup must not cover these — they're exactly what the user reaches for next.
+  // These stick out beyond the sampled route, so route samples alone miss them.
+  function targetHandlePoints(pop) {
+    const out = [];
+    if (!pop || pop.type === "add") return out;
+    const p = pieces.find(q => q.id === pop.id);
+    if (!p) return out;
+    const add = (x, y) => { if (x == null || y == null) return; const c = rinkToClient(x, y); if (c) out.push(c); };
+    const fork = pop.fork || null;
+    const rp = routePiece(p, fork);
+    const route = (rp && rp.path) || [];
+    if (pop.type === "point" || pop.type === "line") {
+      // the point popup edits route[seg]; the line popup opens near seg's leg. Cover
+      // the endpoint waypoint plus the tangent controls that fan out from it.
+      const i = pop.seg;
+      const s = route[i];
+      if (s) {
+        add(s.x, s.y);
+        if (s.type === "C") add(s.c2x, s.c2y); else if (s.type === "Q") add(s.cx, s.cy);
+        const nx = route[i + 1];
+        if (nx && nx.type === "C") add(nx.c1x, nx.c1y); else if (nx && nx.type === "Q") add(nx.cx, nx.cy);
+        if (i === 0) { add(rp.x, rp.y); if (s.type === "C") add(s.c1x, s.c1y); }
+      }
+      if (pop.type === "line" && pop.pt) add(pop.pt.x, pop.pt.y);
+    } else if (pop.type === "piece") {
+      add(p.x, p.y);
+      const s0 = route[0];
+      if (s0 && s0.type === "C") add(s0.c1x, s0.c1y); else if (s0 && s0.type === "Q") add(s0.cx, s0.cy);
+      // a stationary player exposes a rotate ring (radius ~7 ft) — keep clear of it
+      if (p.kind === "player" && !(p.path && p.path.length))
+        for (let a = 0; a < 360; a += 45) add(p.x + 7 * Math.cos(a * Math.PI / 180), p.y + 7 * Math.sin(a * Math.PI / 180));
+    }
+    return out;
+  }
   // obstacle points (client px) for placement — route samples + icon centres of
   // every piece, split into the working chain vs everything else
   function obstaclePoints(chain) {
@@ -625,14 +665,30 @@ export default function DrillAnimator() {
     const cr = par.getBoundingClientRect();
     const r0 = el.getBoundingClientRect();               // the popup as rendered at its anchor
     const w = r0.width, h = r0.height, pad = 8;
+    // three obstacle tiers, worst-to-cover first: the SELECTED item itself (its
+    // icon + the drag handles you're about to reach for), then the rest of its
+    // working chain, then every other piece. Covering the item you clicked is the
+    // cardinal sin — rank it strictly worse so the popup never lands on it while a
+    // spot that only clips a distant route leg exists. SELF_M keeps a comfortable
+    // margin around the item (a point sample alone doesn't cover the icon's body).
+    const selfPts = targetHandlePoints(popup);
     const { chainPts, otherPts } = obstaclePoints(workingChainIds(popup.id));
-    const allPts = chainPts.concat(otherPts);
-    const covers = (left, top, pts) => pts.some(c =>
-      c.x >= left - pad && c.x <= left + w + pad && c.y >= top - pad && c.y <= top + h + pad);
-    // if the natural anchor spot is already clear, keep the responsive anchor
-    if (!covers(r0.left, r0.top, allPts)) return null;
-    // otherwise search open space. INSET keeps a placed popup off the boards
-    // (sitting in from the edge) rather than flush against them.
+    const allPts = selfPts.concat(chainPts, otherPts);
+    const SELF_M = 24;
+    const coversPts = (left, top, pts, m) => pts.some(c =>
+      c.x >= left - m && c.x <= left + w + m && c.y >= top - m && c.y <= top + h + m);
+    const rankAt = (left, top) =>
+      coversPts(left, top, selfPts, SELF_M) ? 3
+      : coversPts(left, top, chainPts, pad) ? 2
+      : coversPts(left, top, otherPts, pad) ? 1 : 0;
+    // the responsive edge-anchor already opens on the side OPPOSITE the item, so
+    // it usually clears the item on its own. Keep it unless the search can find a
+    // STRICTLY better tier — that stops the search from dragging the popup back
+    // onto the item just to chase a marginally larger open gap.
+    const anchorRank = rankAt(r0.left, r0.top);
+    if (anchorRank === 0) return null;
+    // search open space. INSET keeps a placed popup off the boards (sitting in
+    // from the edge) rather than flush against them.
     const INSET = 20;
     const TOP = cr.top + 74 + INSET, BOT = cr.bottom - 66 - INSET, LEFT = cr.left + 8 + INSET, RIGHT = cr.right - 8 - INSET;
     const clampL = x => Math.max(LEFT, Math.min(x, RIGHT - w));
@@ -647,11 +703,13 @@ export default function DrillAnimator() {
     for (let k = 0; k < NY; k++) tops.push(clampT(TOP + (BOT - h - TOP) * (NY > 1 ? k / (NY - 1) : 0)));
     let best = null;
     tops.forEach(top => lefts.forEach(left => {
-      const rank = covers(left, top, chainPts) ? 2 : covers(left, top, otherPts) ? 1 : 0;
+      const rank = rankAt(left, top);
       const score = rank * 1e7 - clearance(left, top);   // low rank first, then most open
-      if (!best || score < best.score) best = { left, top, score };
+      if (!best || score < best.score) best = { left, top, rank, score };
     }));
-    if (!best) return null;
+    // only move when we strictly beat the responsive anchor's tier; otherwise keep
+    // the anchor (its opposite-edge spot already clears the clicked item)
+    if (!best || best.rank >= anchorRank) return null;
     return { top: best.top - cr.top, left: best.left - cr.left };
   }
   // Prev/Next through a piece's waypoints: keep the user's size, and keep the
@@ -3293,7 +3351,12 @@ export default function DrillAnimator() {
     }
     setMultiSel(null);
     setSelectedId(id);
-    drag.current = { kind: "piece", id, start: pt, last: pt, moved: false, touch: e.pointerType !== "mouse", locked };
+    // was this piece's editor already open (or a pinned panel) at grab time? A
+    // routed piece reopens its editor after a move so its start-angle handle
+    // reshows — but only if it was ALREADY being edited; a bare reposition of a
+    // piece whose popup was closed should stay closed.
+    const popOpen = pinned || (!!popup && popup.id === id);
+    drag.current = { kind: "piece", id, popOpen, start: pt, last: pt, moved: false, touch: e.pointerType !== "mouse", locked };
     svgRef.current.setPointerCapture?.(e.pointerId);
   }
 
@@ -3317,7 +3380,7 @@ export default function DrillAnimator() {
     const p = pieces.find(q => q.id === id);
     if (!p) return null;
     const route = routeSegs(p, fork);
-    let best = null, bd = 3.6;   // ~ the on-ice waypoint grab radius, in feet
+    let best = null, bd = coarsePtr ? 5 : 3.6;   // ~ the on-ice waypoint grab radius, in feet
     for (const w of [segIdx, segIdx - 1]) {
       if (w < 0 || w >= route.length) continue;
       const dd = Math.hypot(route[w].x - pt.x, route[w].y - pt.y);
@@ -3553,8 +3616,10 @@ export default function DrillAnimator() {
         if (near) updateById(pc.id, near);
       }
       // a routed piece carries a start-point angle handle — reopen its editor so
-      // that handle reshows after the move instead of needing a second click
-      if (pc && pc.path && pc.path.length) { setSelectedId(d.id); setPopup({ type: "piece", id: d.id }); }
+      // that handle reshows after the move instead of needing a second click. Only
+      // when it was already being edited (or a pinned panel): a bare drag of a piece
+      // whose popup was closed shouldn't pop the editor open.
+      if (pc && pc.path && pc.path.length && d.popOpen) { setSelectedId(d.id); setPopup({ type: "piece", id: d.id }); }
       return;
     }
     if (d.moved) return;
@@ -3972,12 +4037,19 @@ export default function DrillAnimator() {
     // open the NEXT waypoint just to adjust the starting point's angle.
     const originActive = popup && popup.type === "piece" && popup.id === p.id && forkEq(popup.fork, fork);
     const els = [];
+    // grab-target sizing (rink feet). Touch pointers get ~1.4× fatter targets so a
+    // fingertip clears Apple's ~44px min; a mouse keeps the tighter targets. The
+    // anchor also gets a small always-on-top CORE so the dead-centre of a waypoint
+    // reliably grabs the POINT, never an overlapping tangent handle or the route
+    // line — the fix for "grabbing off-centre from the waypoint" on desktop.
+    const G = coarsePtr ? 1.4 : 1;
+    const ANCHOR_R = 4 * G, DOT_R = 3.6 * G, CTRL_R = 4 * G, CORE_R = coarsePtr ? 2.6 : 2;
     // a draggable tangent control, with a dashed leash back to its waypoint anchor.
     const ctrlPt = (key, cx, cy, kind, seg, wp, ax, ay) => {
       const lkOff = (p.lock || route[wp]?.lock) && !lockedSelectable;   // locked point: click-through
       els.push(<line key={key + "l"} x1={ax} y1={ay} x2={cx} y2={cy} stroke="#8fa3b5" strokeWidth={0.25} strokeDasharray="1 1" />);
       els.push(hd(cx, cy, 1.5, { key, fill: "#fff", stroke: "#5b7d9e", strokeWidth: 0.4, pointerEvents: "none" }));
-      els.push(hd(cx, cy, 4, { key: key + "h", fill: "transparent", style: { cursor: "grab" }, pointerEvents: lkOff ? "none" : undefined,
+      els.push(hd(cx, cy, CTRL_R, { key: key + "h", fill: "transparent", style: { cursor: "grab" }, pointerEvents: lkOff ? "none" : undefined,
         onPointerDown: e => handleDown(e, { kind, id: p.id, seg, wp, ...(fork ? { fork } : {}) }) }));
     };
     route.forEach((s, i) => {
@@ -3994,7 +4066,7 @@ export default function DrillAnimator() {
         else
           els.push(<rect key={`a${i}`} x={s.x - 1.4} y={s.y - 1.4 * yf} width={2.8} height={2.8 * yf}
             fill={wFill} stroke={wStroke} strokeWidth={0.35} pointerEvents="none" />);
-        els.push(hd(s.x, s.y, 4, { key: `ah${i}`, fill: "transparent", style: { cursor: "grab" }, pointerEvents: lkOff ? "none" : undefined,
+        els.push(hd(s.x, s.y, ANCHOR_R, { key: `ah${i}`, fill: "transparent", style: { cursor: "grab" }, pointerEvents: lkOff ? "none" : undefined,
           onPointerDown: e => handleDown(e, { kind: "anchor", id: p.id, seg: i, wp: i, ...(fork ? { fork } : {}) }) }));
         // incoming tangent: this leg's control nearest waypoint i
         if (s.type === "C") ctrlPt(`ic${i}`, s.c2x, s.c2y, "c2", i, i, s.x, s.y);
@@ -4003,10 +4075,14 @@ export default function DrillAnimator() {
         const nx = route[i + 1];
         if (nx && nx.type === "C") ctrlPt(`oc${i}`, nx.c1x, nx.c1y, "c1", i + 1, i, s.x, s.y);
         else if (nx && nx.type === "Q") ctrlPt(`oq${i}`, nx.cx, nx.cy, "q", i + 1, i, s.x, s.y);
+        // priority core: painted AFTER the tangents so the centre always wins the
+        // grab, even when a short handle's control sits on top of the anchor.
+        if (!lkOff) els.push(hd(s.x, s.y, CORE_R, { key: `ac${i}`, fill: "transparent", style: { cursor: "grab" },
+          onPointerDown: e => handleDown(e, { kind: "anchor", id: p.id, seg: i, wp: i, ...(fork ? { fork } : {}) }) }));
       } else {
         // every other waypoint is just a small (still grabbable) dot
         els.push(hd(s.x, s.y, 0.9, { key: `am${i}`, fill: wFill, stroke: wStroke, strokeWidth: 0.3, pointerEvents: "none" }));
-        els.push(hd(s.x, s.y, 3.5, { key: `amh${i}`, fill: "transparent", style: { cursor: "grab" }, pointerEvents: lkOff ? "none" : undefined,
+        els.push(hd(s.x, s.y, DOT_R, { key: `amh${i}`, fill: "transparent", style: { cursor: "grab" }, pointerEvents: lkOff ? "none" : undefined,
           onPointerDown: e => handleDown(e, { kind: "anchor", id: p.id, seg: i, wp: i, ...(fork ? { fork } : {}) }) }));
       }
     });
