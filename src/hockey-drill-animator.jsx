@@ -301,6 +301,7 @@ export default function DrillAnimator() {
   const [realisticShots, setRealisticShots] = useState(true); // random goal/post/wide/over + air; off = always bury flat
   const [detailAnim, setDetailAnim] = useState(true);  // skater stride sway, stick swing, dribble cradle
   const [lineScale, setLineScale] = useState(1);       // route line-thickness multiplier
+  const [markOpacity, setMarkOpacity] = useState(1);   // opacity of drill marks drawn over the ice (rink stays opaque)
   const [defaultSpeed, setDefaultSpeed] = useState(1.5); // speed given to newly-added players
   // tunable shot odds (0..1): goalie save chance; empty-net miss split into
   // post/wide/over (the remainder is a goal); and how often a shot goes airborne
@@ -5488,6 +5489,10 @@ export default function DrillAnimator() {
             <g ref={sceneRef} transform={sceneTransform}>
             <RinkMarkings yFix={yFix} />
 
+            {/* all drill marks (pieces, routes, ink, labels) share one opacity so
+                the "Mark opacity" setting fades them over the ice while the rink
+                markings above stay fully opaque */}
+            <g opacity={markOpacity < 1 ? markOpacity : undefined}>
             {/* freehand marker annotations sit on the ice, under the drill */}
             {pieces.filter(p => p.kind === "mark").map(m => renderMark(m, true))}
 
@@ -6016,6 +6021,7 @@ export default function DrillAnimator() {
           {pieces.map(p => <g key={`ca-${p.id}`}>{renderAim(p)}</g>)}
             {!aiPlay && renderLabels()}
             {renderResultSplash()}
+            </g>{/* end drill-marks opacity group */}
             </g>
             </g>
           </svg>
@@ -6266,6 +6272,11 @@ export default function DrillAnimator() {
           <div className="hd-poprow" style={{ marginTop: 4 }}>
             <span>Line thickness</span>
             <Stepper value={lineScale} onChange={setLineScale} step={0.25} min={0.5} max={3} suffix="×" />
+          </div>
+          <div className="hd-poprow">
+            <span>Mark opacity <b style={{ color: "#c8d2dc" }}>{Math.round(markOpacity * 100)}%</b></span>
+            <input type="range" min={0.1} max={1} step={0.05} value={markOpacity} style={{ flex: 1, minWidth: 80 }}
+              onChange={e => setMarkOpacity(parseFloat(e.target.value))} />
           </div>
           <div className="hd-poprow">
             <span>New player speed</span>
