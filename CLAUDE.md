@@ -16,6 +16,33 @@ Live: https://snitzer-family.github.io/drill-board/
 4. `vite.config.js` must keep `base: "/drill-board/"` (matches repo name).
 5. No new dependencies without asking — the app is deliberately React-only.
 
+## Live dev server (when the user asks to view a change)
+
+- **Always LAN-addressed on a strict, per-session port** so multiple concurrent
+  Claude sessions/worktrees never collide. Launch with:
+  `npx vite --host --port <PORT> --strictPort` (background it). `--host` binds
+  `0.0.0.0` so the phone can reach it; `--strictPort` fails loudly instead of
+  silently hopping to another port (which would hijack/alias another session).
+- **Pick a fixed unused port per session** (don't reuse the default 5173). Check
+  it's free first (`lsof -iTCP:<PORT> -sTCP:LISTEN`); keep the same port for the
+  life of the session. The LAN URL to hand the user is
+  `http://<lan-ip>:<PORT>/drill-board/` (get the IP via `ipconfig getifaddr en0`).
+- The `base` is `/drill-board/`, so the path segment is required.
+
+## Loading a sample drill via URL (the `#d=` hash)
+
+- The app boots straight into a drill from a URL **hash**: `#d=<enc>` where `<enc>`
+  is the drill DSL, UTF-8 → base64 → **url-safe** (`+`→`-`, `/`→`_`). Parsed in
+  the `linkDrill` IIFE (`hockey-drill-animator.jsx` ~245, regex `/[#&]d=([^&]+)/`
+  on `location.hash`) and produced by `previewLink()` (~3643). It wins over the
+  autosave and doesn't overwrite the saved board until the user edits.
+- So to demo a feature with a sample drill, write the DSL (see `docs/drill-dsl.md`),
+  url-safe-base64-encode it, and give the user
+  `http://<lan-ip>:<PORT>/drill-board/#d=<enc>` (or append `#d=<enc>` to the live
+  Pages URL). Encode in Node exactly as `previewLink()` does:
+  `Buffer.from(dsl,'utf8').toString('base64').replace(/\+/g,'-')
+  .replace(/\//g,'_').replace(/=+$/,'')` (strip trailing `=`).
+
 ## Module map (src/)
 
 - `constants.js` — rink dims, views, colors, speeds, APP_VERSION, ICON_SCALE,
