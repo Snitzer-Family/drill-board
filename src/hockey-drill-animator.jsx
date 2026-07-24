@@ -6488,6 +6488,20 @@ export default function DrillAnimator() {
               );
             })}
 
+            {/* whiteboard: a faded ghost of each routed player's symbol holds the
+               starting spot while the live symbol skates the route */}
+            {!aiPlay && whiteboard && animT > 0 && pieces
+              .filter(p => p.kind === "player" && p.path.length && !previewHiddenIds.has(p.id))
+              .map(p => {
+                const fx = iconXf({ x: p.x, y: p.y, a: p.facing || 0 });
+                return (
+                  <g key={`wbg-${p.id}`} opacity={0.3} pointerEvents="none">
+                    <PieceIcon p={p} pos={{ x: p.x, y: p.y, a: p.facing || 0 }} xf={fx.t} thDeg={fx.th}
+                      wb wbCircle={wbCircle} noShadow hitOff onDown={() => {}} />
+                  </g>
+                );
+              })}
+
             {/* nets sit on the ice (bottom); players paint above pucks so a
                carried puck can't steal the grab; rotate ring is drawn last. A
                puck IN the net (a goal) sinks below the cage (rank −1). */}
@@ -6500,6 +6514,9 @@ export default function DrillAnimator() {
                 const goalE = animT <= 0 ? 0 : animT * totalTime;
                 const kindRank = p => (p.goalieOf ? 0.5
                   : p.kind === "puck" && puckInGoal(p, goalE) ? -1
+                  // whiteboard: the puck rides ABOVE the symbols, so a carried puck
+                  // sits on top of an opaque circled-symbol disc instead of under it
+                  : p.kind === "puck" && whiteboard ? 2.5
                   : p.kind === "net" || p.kind === "bumper" || p.kind === "deker" || p.kind === "passer" || p.kind === "tire" || p.kind === "stick" || p.kind === "light" ? 0 : p.kind === "player" ? 2 : 1);
                 // locked pieces sink beneath every unlocked one, so a contested tap
                 // always lands on the unlocked piece/waypoint stacked over it
