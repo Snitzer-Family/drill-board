@@ -316,6 +316,9 @@ export default function DrillAnimator() {
   // whiteboard also drops the shot theatrics: no random miss/post/air rolls
   // (shots bury flat) and no GOAL!/SAVE! splashes — a diagram, not a broadcast
   const effRealistic = realisticShots && !whiteboard;
+  // whiteboard draws the PLANNER's routes only: authored lines, no animation-time
+  // detour bends/ghosts (the skater still avoids obstacles either way)
+  const effAvoidVis = avoidanceVisuals && !whiteboard;
   const [lineScale, setLineScale] = useState(1);       // route line-thickness multiplier
   const [markOpacity, setMarkOpacity] = useState(1);   // opacity of the drawn drill markings only (routes/forks/stops/ink/aim); players, implements + rink stay opaque
   const [defaultSpeed, setDefaultSpeed] = useState(1.5); // speed given to newly-added players
@@ -940,7 +943,7 @@ export default function DrillAnimator() {
   // off, so shots always route on net). Only built when realistic shots are on and
   // the puck-path overlay is actually shown; otherwise the main plan already IS the
   // intent, so reuse it.
-  const wantPuckPaths = !aiPlay && (editing || playRoutes === "all");
+  const wantPuckPaths = !aiPlay && (editing || whiteboard || playRoutes === "all");
   const getIntentPlan = (!effRealistic || !wantPuckPaths) ? getPlan
     : createTiming({ pieces: effPieces, pace, segRefs, planCache: intentPlanCache, seed: playSeed, realisticShots: false, detail: effDetail, odds: shotOdds }).getPlan;
 
@@ -3894,7 +3897,7 @@ export default function DrillAnimator() {
   const ACT_GAP = 3.4, ACT_R = 3.0;
   // whiteboard mode drops the badge discs, so the line-gap shrinks to a small
   // central gap the arrows point into (nothing to clear but the waypoint itself)
-  const actGap = whiteboard ? 1.4 : ACT_GAP;
+  const actGap = whiteboard ? 0.8 : ACT_GAP;
   // priority for picking the "main" action shown in a badge with several actions
   const ACT_PRI = { shot: 5, pass: 4, rim: 3, chip: 2, receive: 1, collect: 1, pickup: 1 };
   const stepActionType = st => st.role === "pickup" ? "pickup" : st.role === "receive" ? "receive"
@@ -5956,8 +5959,9 @@ export default function DrillAnimator() {
 
   // during playback the "Routes on play" setting controls what stays visible;
   // while editing everything shows regardless
-  const showRoutes = !aiPlay && (editing || playRoutes !== "hide");   // player route lines + stops
-  const showPuckPaths = !aiPlay && (editing || playRoutes === "all"); // planned pass / shot lines
+  // whiteboard keeps the full planner picture on screen through playback
+  const showRoutes = !aiPlay && (editing || whiteboard || playRoutes !== "hide");   // player route lines + stops
+  const showPuckPaths = !aiPlay && (editing || whiteboard || playRoutes === "all"); // planned pass / shot lines
   // while previewing all branches during playback, the branching players (and the pucks
   // they carry) are hidden — only the ghosts play out, one per candidate route
   const previewHiddenIds = new Set();
@@ -6074,7 +6078,7 @@ export default function DrillAnimator() {
             {!aiPlay && pieces.map(p => {
               // DRAW the detour only when avoidance visuals are on; the animation's own
               // routeDetour (displayPos) is separate, so the skater still curves either way
-              const rd = showRoutes && avoidanceVisuals ? routeDetour(p) : null;   // arc detour around a crossed net
+              const rd = showRoutes && effAvoidVis ? routeDetour(p) : null;   // arc detour around a crossed net
               const bent = rd && rd.pts;
               const carry = p.kind === "player" ? carrySegs(p) : null;   // segments skated with the puck
               const acts = showRoutes && p.kind === "player" ? actionWaypoints(p) : new Map();
@@ -6198,7 +6202,7 @@ export default function DrillAnimator() {
               const chosen = chosenForkRefs(p);
               // while previewing all branches, EVERY candidate route reads as solid/active
               const previewAll = previewAllBranches && animT > 0;
-              const obstacles = collisions && avoidanceVisuals ? detourObstaclesFor(p.id) : [];
+              const obstacles = collisions && effAvoidVis ? detourObstaclesFor(p.id) : [];
               // Draw each branch from the waypoint it departs (its `at`, route end by
               // default); recurse into chained branches. Branch routes now render with
               // the SAME machinery as base routes — line-thickness setting, obstacle
