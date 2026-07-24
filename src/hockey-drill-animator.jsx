@@ -6343,7 +6343,19 @@ export default function DrillAnimator() {
     // animation plan's fly legs — those launch/land on warped blade positions
     // along possibly-detoured routes, so they drift off the planner picture.
     // Shots / rims / chips keep their plan legs (intent aim, board-following runs).
-    const passArrows = q => (q.transfers || []).flatMap((t, s) => {
+    const passArrows = q => {
+      // the computed catch point of each pass, in chain order: a pass is a run of
+      // plain fly legs (a give-and-go's two legs share one run, bounded by the
+      // ride/rest legs around it), and the run's last endpoint is where the
+      // receiver actually meets the puck
+      const catches = [];
+      let inRun = false;
+      for (const L of plans[q.id].legs) {
+        const fly = L.type === "fly" && !L.shot && !L.rim && !L.chip;
+        if (fly) { if (!inRun) { catches.push(null); inRun = true; } catches[catches.length - 1] = { x: L.x1, y: L.y1 }; }
+        else inRun = false;
+      }
+      return (q.transfers || []).flatMap((t, s) => {
       if (t.kind !== "pass") return [];
       const actor = t.by || releaserOf(q, s);
       const wp = releasePos(actor, t);
@@ -6386,8 +6398,19 @@ export default function DrillAnimator() {
           </g>
         );
       }
+      // led pass (no authored @recv): the LINE pins to the planner waypoint, but
+      // the receiver actually meets the puck mid-curve — mark that computed catch
+      // spot with a ghost action circle. Purely visual: pointer-transparent, never
+      // a model waypoint, so it can't be grabbed or edited.
+      if (!flat && t.recvAt == null && (rec.path || []).length) {
+        const pi = (q.transfers || []).slice(0, s).filter(x => x.kind === "pass").length;
+        const cp = catches[pi];
+        if (cp && Math.hypot(cp.x - tgt.x, cp.y - tgt.y) > 1.75)
+          out.push(iconBadge(cp, "collect", rec.color || rec0.color || "#14171a", `ppg-${q.id}-${s}`, 0.45));
+      }
       return out;
-    });
+      });
+    };
     return pieces
       .filter(q => q.kind === "puck" && plans[q.id] && !condPuck(q))   // conditional pucks draw via renderBranchGhostArrows (plan geometry)
       .map(q => [passArrows(q), plans[q.id].legs.map((L, k, legs) => {
