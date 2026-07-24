@@ -301,7 +301,7 @@ export default function DrillAnimator() {
   const [realisticShots, setRealisticShots] = useState(true); // random goal/post/wide/over + air; off = always bury flat
   const [detailAnim, setDetailAnim] = useState(true);  // skater stride sway, stick swing, dribble cradle
   const [lineScale, setLineScale] = useState(1);       // route line-thickness multiplier
-  const [markOpacity, setMarkOpacity] = useState(1);   // opacity of drill marks drawn over the ice (rink stays opaque)
+  const [markOpacity, setMarkOpacity] = useState(1);   // opacity of the drawn drill markings only (routes/forks/stops/ink/aim); players, implements + rink stay opaque
   const [defaultSpeed, setDefaultSpeed] = useState(1.5); // speed given to newly-added players
   // tunable shot odds (0..1): goalie save chance; empty-net miss split into
   // post/wide/over (the remainder is a goal); and how often a shot goes airborne
@@ -734,6 +734,9 @@ export default function DrillAnimator() {
     ? { ox: 0, oy: 0, rootW: vhF, rootH: vwF }
     : { ox: mxF, oy: myF, rootW: vwF, rootH: vhF };
   const zoomXf = view.s !== 1 || view.tx || view.ty ? `translate(${view.tx} ${view.ty}) scale(${view.s})` : undefined;
+  // "Mark opacity" fades only the drawn drill markings (routes, forks, stops,
+  // freehand ink, shot-aim). Players/pucks/cones/nets and editing UI stay opaque.
+  const markMO = markOpacity < 1 ? markOpacity : undefined;
   // roundness correction: the fill-mode stretch scales the two rink axes
   // differently; circles are drawn as ellipses with ry scaled by yFix so
   // they render perfectly round on screen after the stretch
@@ -5489,12 +5492,11 @@ export default function DrillAnimator() {
             <g ref={sceneRef} transform={sceneTransform}>
             <RinkMarkings yFix={yFix} />
 
-            {/* all drill marks (pieces, routes, ink, labels) share one opacity so
-                the "Mark opacity" setting fades them over the ice while the rink
-                markings above stay fully opaque */}
-            <g opacity={markOpacity < 1 ? markOpacity : undefined}>
-            {/* freehand marker annotations sit on the ice, under the drill */}
+            {/* freehand marker annotations sit on the ice, under the drill — they
+                are drill markings, so they honour Mark opacity */}
+            <g opacity={markMO}>
             {pieces.filter(p => p.kind === "mark").map(m => renderMark(m, true))}
+            </g>
 
             {showZones && (
               <g pointerEvents="none">
@@ -5560,6 +5562,9 @@ export default function DrillAnimator() {
             )}
 
 
+            {/* route lines, fork/branch visuals + their ref paths — drill markings,
+                dimmed by Mark opacity (players/implements below stay opaque) */}
+            <g opacity={markMO}>
             {!aiPlay && pieces.map(p => {
               // DRAW the detour only when avoidance visuals are on; the animation's own
               // routeDetour (displayPos) is separate, so the skater still curves either way
@@ -5797,6 +5802,7 @@ export default function DrillAnimator() {
             })}
 
             {showRoutes && pieces.map(p => <g key={`s-${p.id}`}>{renderStops(p)}</g>)}
+            </g>{/* end route-markings opacity group */}
 
             {editing && pieces.map(p =>
               p.kind === "puck" && p.carrier && p.path.length > 0
@@ -5805,6 +5811,9 @@ export default function DrillAnimator() {
                 : null
             )}
 
+            {/* puck travel path, branch ghost arrows + the in-progress draw preview
+                are drill markings — dimmed by Mark opacity */}
+            <g opacity={markMO}>
             {puckPathNodes(false)}
             {renderBranchGhostArrows()}
 
@@ -5815,6 +5824,7 @@ export default function DrillAnimator() {
                 : <polyline points={drawPreview.map(q => `${q.x},${q.y}`).join(" ")} vectorEffect="non-scaling-stroke"
                     fill="none" stroke="#ffd447" strokeWidth={sw(0.6)} strokeDasharray={sdash("1.4 1")} opacity={0.9} />
             )}
+            </g>
 
             {/* named-group outline + label: shown for the selected piece's group
                 and the currently multi-selected group */}
@@ -6018,10 +6028,9 @@ export default function DrillAnimator() {
               );
             })}
             {selected && renderRotateHandle(selected)}
-          {pieces.map(p => <g key={`ca-${p.id}`}>{renderAim(p)}</g>)}
+          <g opacity={markMO}>{pieces.map(p => <g key={`ca-${p.id}`}>{renderAim(p)}</g>)}</g>
             {!aiPlay && renderLabels()}
             {renderResultSplash()}
-            </g>{/* end drill-marks opacity group */}
             </g>
             </g>
           </svg>
