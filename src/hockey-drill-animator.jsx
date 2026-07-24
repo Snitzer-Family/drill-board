@@ -4535,6 +4535,30 @@ export default function DrillAnimator() {
     return <g>{els}</g>;
   }
   function renderActionMarks(p, bentPts, acts) { return routeActionMarks(p.path, { x: p.x, y: p.y }, acts, p.color, bentPts, ""); }
+  // the marks of a GHOST catch waypoint (a led pass's computed mid-curve catch):
+  // the same incoming carat + receive badge as a real action circle, slightly
+  // ghosted, with NO hit area — the spot is derived from the pass plan, so it
+  // can't be grabbed, moved, or edited.
+  const GHOST_OP = 0.55;
+  function renderLedCatchMarks(p, ledCs) {
+    if (!ledCs || !ledCs.length) return null;
+    const els = [];
+    ledCs.forEach((e, k) => {
+      const seg = p.path[e.j];
+      if (!seg) return;
+      const prev = e.j >= 1 ? { x: p.path[e.j - 1].x, y: p.path[e.j - 1].y } : { x: p.x, y: p.y };
+      const near = evalSeg(prev, seg, Math.max(0, e.t - 0.06));
+      let tx = e.x - near.x, ty = e.y - near.y;
+      if (Math.hypot(tx, ty) < 1e-4) { tx = seg.x - prev.x; ty = seg.y - prev.y; }
+      const tl = Math.hypot(tx, ty) || 1, ang = (Math.atan2(ty, tx) * 180) / Math.PI;
+      const mp0 = gmMove(e.x, e.y, -tx / tl, -ty / tl, actGap);
+      const back = arrivalBack("main", mp0.x, mp0.y);
+      const mp = back ? gmMove(e.x, e.y, -tx / tl, -ty / tl, actGap + back) : mp0;
+      els.push(routeMark(`lcm-${p.id}-${k}`, mp, ang, false, p.color, GHOST_OP));
+      if (!whiteboard) els.push(iconBadge({ x: e.x, y: e.y }, "collect", p.color, `lcb-${p.id}-${k}`, GHOST_OP));
+    });
+    return els.length ? <g>{els}</g> : null;
+  }
 
   // an action circle at a light-reaction branch point: the same round badge as a
   // puck-action circle, but stamped with a BRAIN glyph, since the waypoint's job is
@@ -6343,19 +6367,7 @@ export default function DrillAnimator() {
     // animation plan's fly legs — those launch/land on warped blade positions
     // along possibly-detoured routes, so they drift off the planner picture.
     // Shots / rims / chips keep their plan legs (intent aim, board-following runs).
-    const passArrows = q => {
-      // the computed catch point of each pass, in chain order: a pass is a run of
-      // plain fly legs (a give-and-go's two legs share one run, bounded by the
-      // ride/rest legs around it), and the run's last endpoint is where the
-      // receiver actually meets the puck
-      const catches = [];
-      let inRun = false;
-      for (const L of plans[q.id].legs) {
-        const fly = L.type === "fly" && !L.shot && !L.rim && !L.chip;
-        if (fly) { if (!inRun) { catches.push(null); inRun = true; } catches[catches.length - 1] = { x: L.x1, y: L.y1 }; }
-        else inRun = false;
-      }
-      return (q.transfers || []).flatMap((t, s) => {
+    const passArrows = q => (q.transfers || []).flatMap((t, s) => {
       if (t.kind !== "pass") return [];
       const actor = t.by || releaserOf(q, s);
       const wp = releasePos(actor, t);
@@ -6363,9 +6375,13 @@ export default function DrillAnimator() {
       const rec0 = pieces.find(x => x.id === t.to);
       const rec = rec0 && t.recvRef ? routePiece(rec0, t.recvRef) : rec0;
       if (!rec) return [];
+      // a led pass lands on its GHOST catch waypoint (the computed mid-curve
+      // catch); an authored @recv — or a led pass that lands on the waypoint
+      // itself — points at the planner waypoint
+      const ghost = t.recvAt == null ? ledCatchByPuck.get(`${q.id}:${s}`) : null;
       const rw = t.recvAt != null ? t.recvAt : closestWp(rec, wp);
-      const tgt = (rw < 0 || !(rec.path || []).length) ? { x: rec.x, y: rec.y }
-        : { x: rec.path[Math.min(rw, rec.path.length - 1)].x, y: rec.path[Math.min(rw, rec.path.length - 1)].y };
+      const tgt = ghost || ((rw < 0 || !(rec.path || []).length) ? { x: rec.x, y: rec.y }
+        : { x: rec.path[Math.min(rw, rec.path.length - 1)].x, y: rec.path[Math.min(rw, rec.path.length - 1)].y });
       // give-and-go: the line elbows off the passer's face, head only on the return
       const via = t.via ? pieces.find(x => x.id === t.via) : null;
       const pts = via ? [wp, { x: via.x, y: via.y }, tgt] : [wp, tgt];
@@ -6398,19 +6414,8 @@ export default function DrillAnimator() {
           </g>
         );
       }
-      // led pass (no authored @recv): the LINE pins to the planner waypoint, but
-      // the receiver actually meets the puck mid-curve — mark that computed catch
-      // spot with a ghost action circle. Purely visual: pointer-transparent, never
-      // a model waypoint, so it can't be grabbed or edited.
-      if (!flat && t.recvAt == null && (rec.path || []).length) {
-        const pi = (q.transfers || []).slice(0, s).filter(x => x.kind === "pass").length;
-        const cp = catches[pi];
-        if (cp && Math.hypot(cp.x - tgt.x, cp.y - tgt.y) > 1.75)
-          out.push(iconBadge(cp, "collect", rec.color || rec0.color || "#14171a", `ppg-${q.id}-${s}`, 0.45));
-      }
       return out;
-      });
-    };
+    });
     return pieces
       .filter(q => q.kind === "puck" && plans[q.id] && !condPuck(q))   // conditional pucks draw via renderBranchGhostArrows (plan geometry)
       .map(q => [passArrows(q), plans[q.id].legs.map((L, k, legs) => {
@@ -6703,6 +6708,58 @@ export default function DrillAnimator() {
   // whiteboard keeps the full planner picture on screen through playback
   const showRoutes = !aiPlay && (editing || whiteboard || playRoutes !== "hide");   // player route lines + stops
   const showPuckPaths = !aiPlay && (editing || whiteboard || playRoutes === "all"); // planned pass / shot lines
+  // led (no-@recv) passes land wherever the receiver meets the puck MID-CURVE.
+  // That computed spot becomes a GHOST action waypoint: it gets the full
+  // action-circle conventions (badge, incoming carat, line gap, possession
+  // wiggle from there on) and the planner pass line lands on it — but it is
+  // derived from the pass plan, never part of the model, so it can't be
+  // grabbed, moved, or edited. Keyed by puck transfer (pass-line target) and
+  // by receiver (route conventions); the spot is snapped onto the curve.
+  const ledCatchByPuck = new Map();   // `${puckId}:${transferIdx}` → {x, y}
+  const ledCatchByRec = new Map();    // receiver id → [{x, y, j, t, rw}] (segment j, param t, ledger waypoint rw)
+  if (!aiPlay) {
+    const { plans } = getIntentPlan();
+    for (const pk of pieces) {
+      if (pk.kind !== "puck" || !plans[pk.id] || condPuck(pk)) continue;
+      // the computed catch of each pass, chain order: a pass is one run of plain
+      // fly legs (a give-and-go's two legs share a run) CLOSED BY the receiver's
+      // ride/catch leg. The gate matters: a realistic plan's missed-shot rolls
+      // are plain fly legs too, but they settle to a rest — never a catch.
+      const catches = [];
+      let run = null;
+      for (const L of plans[pk.id].legs) {
+        if (L.type === "fly" && !L.shot && !L.rim && !L.chip) { run = { x: L.x1, y: L.y1 }; continue; }
+        if (run && L.type === "ride" && L.catch) catches.push(run);
+        run = null;
+      }
+      let pi = 0;
+      (pk.transfers || []).forEach((t, s) => {
+        if (t.kind !== "pass") return;
+        const cp = catches[pi++];
+        if (!cp || t.recvAt != null) return;
+        const rec = pieces.find(x => x.id === t.to && x.kind === "player");
+        if (!rec || !(rec.path || []).length) return;
+        const wp = releasePos(t.by || releaserOf(pk, s), t);
+        const rw = closestWp(rec, wp || cp);
+        const anchor = rw < 0 ? { x: rec.x, y: rec.y } : rec.path[Math.min(rw, rec.path.length - 1)];
+        if (Math.hypot(cp.x - anchor.x, cp.y - anchor.y) <= 1.75) return;   // lands ON the waypoint — its real badge covers it
+        // snap the catch (a blade position, slightly off the line) onto the curve
+        let bj = -1, bt = 0.5, bq = null, bd = Infinity, prevPt = { x: rec.x, y: rec.y };
+        rec.path.forEach((sg, j) => {
+          const tt = nearestT(prevPt, sg, cp);
+          const q = evalSeg(prevPt, sg, tt);
+          const dd = Math.hypot(q.x - cp.x, q.y - cp.y);
+          if (dd < bd) { bd = dd; bj = j; bt = tt; bq = q; }
+          prevPt = { x: sg.x, y: sg.y };
+        });
+        if (bj < 0 || bd > 4) return;   // catch isn't on the curve (receiver already finished, etc.)
+        ledCatchByPuck.set(`${pk.id}:${s}`, { x: bq.x, y: bq.y });
+        const list = ledCatchByRec.get(rec.id) || [];
+        list.push({ x: bq.x, y: bq.y, j: bj, t: bt, rw });
+        ledCatchByRec.set(rec.id, list);
+      });
+    }
+  }
   // while previewing all branches during playback, the branching players (and the pucks
   // they carry) are hidden — only the ghosts play out, one per candidate route
   const previewHiddenIds = new Set();
@@ -6830,6 +6887,18 @@ export default function DrillAnimator() {
               const forkAts = p.kind === "player"
                 ? new Set((p.forks || []).filter(f => f.path && f.path.length).map(f => f.at != null ? f.at : p.path.length - 1))
                 : new Set();
+              // ghost catch waypoints on this route: possession starts AT the
+              // computed catch, so the ledger's receive badge at its waypoint
+              // retires (the ghost replaces it) and any early wiggle between the
+              // credited waypoint and the catch segment un-wiggles
+              const ledCs = p.kind === "player" ? (ledCatchByRec.get(p.id) || []) : [];
+              for (const e of ledCs) {
+                const a = e.rw >= 0 ? acts.get(e.rw) : null;
+                if (a) { if (a.count <= 1 && (a.type === "receive" || a.type === "collect" || a.type === "pickup")) acts.delete(e.rw); else a.count -= 1; }
+                if (carry) for (let k = e.rw + 1; k <= e.j; k++) carry.delete(k);          // credited early → no wiggle before the catch
+                if (carry) for (let k = e.j + 1; k <= e.rw; k++) carry.add(k);             // credited late → wiggle from the catch onward
+              }
+              const ledSegCatch = i => { let best = null; for (const e of ledCs) if (e.j === i && (!best || e.t < best.t)) best = e; return best; };
               let prev = { x: p.x, y: p.y };
               return (
                 <g key={`rt-${p.id}`}>
@@ -6857,11 +6926,32 @@ export default function DrillAnimator() {
                         {/* invisible ref path is always present — timing measures it */}
                         <path d={d} fill="none" stroke="none"
                           ref={el => { if (el) segRefs.current[`${p.id}/${i}`] = el; }} />
-                        {showRoutes && !bent && (bwd
+                        {showRoutes && !bent && (() => {
+                          // a ghost catch mid-segment splits the drawn leg at the
+                          // catch spot with the regular action-circle treatment:
+                          // plain approach, actGap hole, wiggle away with the puck
+                          const lc = !bwd ? ledSegCatch(i) : null;
+                          if (lc) {
+                            const [segA, segB] = splitSeg(from, s, lc.t);
+                            const fromB = { x: segA.x, y: segA.y };
+                            let aFrom = from, aSeg = segA;
+                            if (startGap) { const t2 = trimSegStart(aFrom, aSeg, startGap, strokeAR); if (t2) { aFrom = t2.from; aSeg = t2.seg; } }
+                            const ta = aSeg ? trimSegEnd(aFrom, aSeg, actGap, strokeAR) : null;
+                            let bFrom = fromB, bSeg = segB;
+                            const tb = trimSegStart(bFrom, bSeg, actGap, strokeAR);
+                            if (tb) { bFrom = tb.from; bSeg = tb.seg; } else bSeg = null;
+                            if (bSeg && endGap) { const t2 = trimSegEnd(bFrom, bSeg, actGap, strokeAR); if (t2) bSeg = t2.seg; }
+                            return (<g pointerEvents="none">
+                              {ta && <path d={segD(aFrom, ta.seg)} {...style} pointerEvents="none" />}
+                              {bSeg && <polyline points={wigglePoints(bFrom, bSeg, strokeAR, isLast || acts.has(i))} {...style} strokeLinejoin="round" pointerEvents="none" />}
+                            </g>);
+                          }
+                          return bwd
                           ? <polyline points={zigzagPoints(vFrom, vSeg, strokeAR)} {...style} strokeLinejoin="round" pointerEvents="none" />
                           : wig
                           ? <polyline points={wigglePoints(vFrom, vSeg, strokeAR, isLast || acts.has(i))} {...style} strokeLinejoin="round" pointerEvents="none" />
-                          : <path d={vD} {...style} pointerEvents="none" />)}
+                          : <path d={vD} {...style} pointerEvents="none" />;
+                        })()}
                         {/* detour active → the authored route lingers as a faint,
                             dashed ghost so the user can still see + grab it (add
                             waypoints / edit); the transparent hit path below drives
@@ -6889,7 +6979,8 @@ export default function DrillAnimator() {
                     // authored trims leave, so the bent line stops short of every
                     // action circle instead of running under its carat
                     const centers = [...new Set([...acts.keys(), ...forkAts])]
-                      .filter(i => p.path[i]).map(i => ({ x: p.path[i].x, y: p.path[i].y }));
+                      .filter(i => p.path[i]).map(i => ({ x: p.path[i].x, y: p.path[i].y }))
+                      .concat(ledCs.map(e => ({ x: e.x, y: e.y })));   // ghost catch waypoints cut holes too
                     const subs = gapPolyAt(line, centers, actGap, strokeAR);
                     const allCarry = p.kind === "player" && carry && p.path.length > 0 && p.path.every((_, i) => carry.has(i));
                     const allBwd = p.kind === "player" && p.path.length > 0 && p.path.every(s => s.dir === "bwd");
@@ -6907,6 +6998,7 @@ export default function DrillAnimator() {
                   {/* arrow + action badges last so they sit ON TOP of the line */}
                   {showRoutes && p.path.length > 0 && renderArrow(p, bent, acts)}
                   {showRoutes && renderActionMarks(p, bent, acts)}
+                  {showRoutes && renderLedCatchMarks(p, ledCs)}
                 </g>
               );
             })}
