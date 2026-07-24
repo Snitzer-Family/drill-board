@@ -6338,10 +6338,61 @@ export default function DrillAnimator() {
       }
     }));
     Object.values(byNet).forEach(list => list.sort((a, b) => a.len - b.len).forEach((s, i) => { shotStagger[s.id] = i * 9; }));
+    // a PASS's drawn line comes from the AUTHORED chain (planner geometry:
+    // release waypoint → catch waypoint, like renderBranchGhostArrows), NOT the
+    // animation plan's fly legs — those launch/land on warped blade positions
+    // along possibly-detoured routes, so they drift off the planner picture.
+    // Shots / rims / chips keep their plan legs (intent aim, board-following runs).
+    const passArrows = q => (q.transfers || []).flatMap((t, s) => {
+      if (t.kind !== "pass") return [];
+      const actor = t.by || releaserOf(q, s);
+      const wp = releasePos(actor, t);
+      if (!wp) return [];
+      const rec0 = pieces.find(x => x.id === t.to);
+      const rec = rec0 && t.recvRef ? routePiece(rec0, t.recvRef) : rec0;
+      if (!rec) return [];
+      const rw = t.recvAt != null ? t.recvAt : closestWp(rec, wp);
+      const tgt = (rw < 0 || !(rec.path || []).length) ? { x: rec.x, y: rec.y }
+        : { x: rec.path[Math.min(rw, rec.path.length - 1)].x, y: rec.path[Math.min(rw, rec.path.length - 1)].y };
+      // give-and-go: the line elbows off the passer's face, head only on the return
+      const via = t.via ? pieces.find(x => x.id === t.via) : null;
+      const pts = via ? [wp, { x: via.x, y: via.y }, tgt] : [wp, tgt];
+      const out = [];
+      for (let j = 1; j < pts.length; j++) {
+        const a = pts[j - 1], b = pts[j];
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const len = Math.hypot(dx, dy) || 1, ux = dx / len, uy = dy / len;
+        const head = j === pts.length - 1;
+        // stand the release off its badge / the releaser icon; arrivals register
+        // their natural tip so same-direction heads at one badge queue back
+        const sp = j === 1 ? gmMove(a.x, a.y, ux, uy, Math.min(START_OFF, len / 2)) : a;
+        let eGap = head ? Math.min(START_OFF, Math.max(0, len - 2)) : 0;
+        if (eGap > 0) {
+          const t0 = gmMove(b.x, b.y, -ux, -uy, eGap);
+          const back = arrivalBack(flat ? "flat" : "main", t0.x, t0.y);
+          if (back) eGap = Math.min(eGap + back, Math.max(0, len - 2));
+        }
+        const ep = eGap > 0 ? gmMove(b.x, b.y, -ux, -uy, eGap) : b;
+        out.push(
+          <g key={`pp-${q.id}-${s}-${j}`} pointerEvents="none" opacity={0.62}>
+            <line x1={sp.x} y1={sp.y} x2={ep.x} y2={ep.y} vectorEffect={ve}
+              stroke="#14171a" strokeWidth={W(0.55)} strokeDasharray={D("2.4 1.8")} />
+            {head && (dx || dy) ? (flat
+              ? <circle cx={ep.x} cy={ep.y} r={1.1} fill="none" vectorEffect={ve} stroke="#14171a" strokeWidth={W(0.3)} />
+              : (() => { const fx = iconXf({ x: ep.x, y: ep.y, a: (Math.atan2(dy, dx) * 180) / Math.PI });
+                  return <g transform={fx.t}><g transform={`scale(${z})`}>
+                    <path d="M 0 0 L -3.6 -2.1 L -3.6 2.1 Z" fill="#14171a" stroke="#14171a" strokeWidth={0.5} strokeLinejoin="round" />
+                  </g></g>; })()) : null}
+          </g>
+        );
+      }
+      return out;
+    });
     return pieces
       .filter(q => q.kind === "puck" && plans[q.id] && !condPuck(q))   // conditional pucks draw via renderBranchGhostArrows (plan geometry)
-      .map(q => plans[q.id].legs.map((L, k, legs) => {
+      .map(q => [passArrows(q), plans[q.id].legs.map((L, k, legs) => {
         if (L.type !== "fly") return null;
+        if (!L.shot && !L.rim && !L.chip) return null;   // a plain fly leg is a pass — drawn from the authored chain above
         const nxt = legs[k + 1];
         const runEnd = !nxt || nxt.type !== "fly";   // last fly leg of a pass/shot/rim/chip run
         const runStart = k === 0 || legs[k - 1].type !== "fly";   // first fly leg of the run
@@ -6385,7 +6436,7 @@ export default function DrillAnimator() {
                   </g></g>; })())}
           </g>
         );
-      }));
+      })]);
   }
 
   // Faint R-numbers over a player's branch routes while a ROUTE condition is being
