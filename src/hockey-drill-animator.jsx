@@ -245,6 +245,7 @@ function DelayTrigger({ value, onChange, sub, players, actorIds, nameOf }) {
 
 const SAVE_KEY = "drillboard:autosave";   // the whole board, persisted across refreshes
 const WB_KEY = "drillboard:whiteboard";   // whiteboard-mode view pref, persisted on its own
+const WBC_KEY = "drillboard:whiteboard-circle";   // circled X/O symbols sub-pref
 
 export default function DrillAnimator() {
   // a shared drill link (#d=<url-safe base64 DSL> — the preview-link format from
@@ -312,6 +313,11 @@ export default function DrillAnimator() {
     try { return localStorage.getItem(WB_KEY) === "1"; } catch { return false; }
   });
   useEffect(() => { try { localStorage.setItem(WB_KEY, whiteboard ? "1" : "0"); } catch { /* private mode */ } }, [whiteboard]);
+  // circled symbols: draw each X/O on an opaque white disc, like the action circles
+  const [wbCircle, setWbCircle] = useState(() => {
+    try { return localStorage.getItem(WBC_KEY) === "1"; } catch { return false; }
+  });
+  useEffect(() => { try { localStorage.setItem(WBC_KEY, wbCircle ? "1" : "0"); } catch { /* private mode */ } }, [wbCircle]);
   const effDetail = detailAnim && !whiteboard;
   // whiteboard also drops the shot theatrics: no random miss/post/air rolls
   // (shots bury flat) and no GOAL!/SAVE! splashes — a diagram, not a broadcast
@@ -4413,10 +4419,11 @@ export default function DrillAnimator() {
     const dark = "#1d2126";
     if (whiteboard) return (
       <g key={`goalie-${net.id}`} transform={fx.t} pointerEvents="none">
+        {wbCircle && <circle cx={0} cy={0} r={3.3} fill="#fff" stroke={col} strokeWidth={0.5} />}
         <text transform={`rotate(${-fx.th})`} textAnchor="middle" dominantBaseline="central"
-          fontSize={5} fontWeight={900} fill={col}
+          fontSize={wbCircle ? 4.1 : 5} fontWeight={900} fill={col}
           style={{ userSelect: "none", fontFamily: "system-ui, sans-serif",
-            paintOrder: "stroke", stroke: "rgba(255,255,255,0.9)", strokeWidth: 0.55 }}>
+            ...(wbCircle ? {} : { paintOrder: "stroke", stroke: "rgba(255,255,255,0.9)", strokeWidth: 0.55 }) }}>
           G
         </text>
       </g>
@@ -5906,7 +5913,7 @@ export default function DrillAnimator() {
           {pieces.filter(p => p.kind !== "label" && p.kind !== "mark").map(p => {
             const dp = displayPos(p);
             return (
-              <PieceIcon key={`lp${p.id}`} p={p} pos={dp} thDeg={(dp.a || 0) + screenRot} wb={whiteboard}
+              <PieceIcon key={`lp${p.id}`} p={p} pos={dp} thDeg={(dp.a || 0) + screenRot} wb={whiteboard} wbCircle={wbCircle}
                 selected={p.id === selectedId} dim={animT > 0} onDown={() => {}} swing={displaySwing(p)} />
             );
           })}
@@ -6035,10 +6042,11 @@ export default function DrillAnimator() {
                   const col = "#2f9e57", dark = "#1d2126";
                   if (whiteboard) return (
                     <g key={`aig-${i}`} transform={fx.t}>
+                      {wbCircle && <circle cx={0} cy={0} r={3.3} fill="#fff" stroke={col} strokeWidth={0.5} />}
                       <text transform={`rotate(${-fx.th})`} textAnchor="middle" dominantBaseline="central"
-                        fontSize={5} fontWeight={900} fill={col}
+                        fontSize={wbCircle ? 4.1 : 5} fontWeight={900} fill={col}
                         style={{ userSelect: "none", fontFamily: "system-ui, sans-serif",
-                          paintOrder: "stroke", stroke: "rgba(255,255,255,0.9)", strokeWidth: 0.55 }}>
+                          ...(wbCircle ? {} : { paintOrder: "stroke", stroke: "rgba(255,255,255,0.9)", strokeWidth: 0.55 }) }}>
                         G
                       </text>
                     </g>
@@ -6064,7 +6072,7 @@ export default function DrillAnimator() {
                   return (
                     <g key={`aip-${pl.id}`} opacity={pl.stun > 0 ? 0.4 : 1}>
                       <PieceIcon p={{ kind: "player", color: pl.color, hand: "R", label: "", defense: pl.team === 1 }}
-                        pos={dp} xf={fx.t} thDeg={fx.th} wb={whiteboard} onDown={() => {}} />
+                        pos={dp} xf={fx.t} thDeg={fx.th} wb={whiteboard} wbCircle={wbCircle} onDown={() => {}} />
                     </g>
                   );
                 })}
@@ -6466,7 +6474,7 @@ export default function DrillAnimator() {
                     const gp = samplePoly(poly, skateEnd > 0 ? Math.min(animT / skateEnd, 1) : 1);
                     const fx = iconXf(gp);
                     const gpiece = { ...p, id: `${p.id}~g${k}`, path: segs, forks: [] };
-                    const els = [<PieceIcon key="pl" p={gpiece} pos={gp} xf={fx.t} thDeg={fx.th} wb={whiteboard} dim onDown={() => {}} />];
+                    const els = [<PieceIcon key="pl" p={gpiece} pos={gp} xf={fx.t} thDeg={fx.th} wb={whiteboard} wbCircle={wbCircle} dim onDown={() => {}} />];
                     if (carried) {
                       let pp;
                       if (!act || animT < tRelease) pp = bladeAtWorld(gp.x, gp.y, gp.a || 0, BLADE_FWD, BLADE_LAT, side);
@@ -6521,7 +6529,7 @@ export default function DrillAnimator() {
                         fill="#0a0f14" opacity={shOp} pointerEvents="none" />
                     </g>
                     <g transform={`translate(${lp.x} ${lp.y}) scale(${k}) translate(${-lp.x} ${-lp.y})`}>
-                      <PieceIcon p={p} pos={lp} xf={lfx.t} thDeg={lfx.th} noShadow={isJump} wb={whiteboard}
+                      <PieceIcon p={p} pos={lp} xf={lfx.t} thDeg={lfx.th} noShadow={isJump} wb={whiteboard} wbCircle={wbCircle}
                         selected={p.id === selectedId} swing={isJump ? displaySwing(p) : 0} dim={animT > 0} onDown={e => pieceDown(e, p.id)}
                         hitOff={p.lock && !lockedSelectable} />
                     </g>
@@ -6530,7 +6538,7 @@ export default function DrillAnimator() {
               }
               const fx = iconXf(dp);
               return (
-                <PieceIcon key={p.id} p={p} pos={dp} xf={fx.t} thDeg={fx.th} wb={whiteboard}
+                <PieceIcon key={p.id} p={p} pos={dp} xf={fx.t} thDeg={fx.th} wb={whiteboard} wbCircle={wbCircle}
                   selected={p.id === selectedId} swing={displaySwing(p)}
                   dim={animT > 0} onDown={e => pieceDown(e, p.id)}
                   hitOff={p.lock && !lockedSelectable}
@@ -6790,6 +6798,13 @@ export default function DrillAnimator() {
               onClick={() => setWhiteboard(v => !v)}>{whiteboard ? "✓ Whiteboard mode" : "Whiteboard mode"}</button>
             <span style={{ fontSize: 11, color: "#8b99a8" }}>classic X &amp; O player symbols, plain arrowed routes; shots bury flat, no splashes or detail animations</span>
           </div>
+          {whiteboard && (
+            <div className="hd-poprow">
+              <button className={`hd-mini${wbCircle ? " on" : ""}`}
+                onClick={() => setWbCircle(v => !v)}>{wbCircle ? "✓ Circled symbols" : "Circled symbols"}</button>
+              <span style={{ fontSize: 11, color: "#8b99a8" }}>draw each X / O on an opaque white disc, like the action circles</span>
+            </div>
+          )}
           <div className="hd-poprow">
             <button className={`hd-mini${collisions ? " on" : ""}`}
               onClick={() => setCollisions(v => !v)}>{collisions ? "✓ Route avoidance" : "Route avoidance"}</button>

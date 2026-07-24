@@ -137,7 +137,7 @@ export function DiagPanel({ drillVersion }) {
 
 /* ---------------- piece icon ---------------- */
 
-export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStickDown, swing = 0, noShadow = false, hitOff = false, wb = false }) {
+export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStickDown, swing = 0, noShadow = false, hitOff = false, wb = false, wbCircle = false }) {
   const frame = xf || `translate(${pos.x} ${pos.y}) rotate(${pos.a || 0}) scale(${ICON_SCALE})`;
   let body;
   if (p.kind === "puck")
@@ -290,14 +290,16 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
     // whiteboard mode: the classic coach's symbol (X / O / F / W1…) instead of
     // the skater art — flat (no shadow), upright via the label's counter-rotation
     const sym = (p.sym && p.sym.trim()) || (p.defense ? "X" : "O");
-    const fs = sym.length >= 3 ? 3.4 : sym.length === 2 ? 4.5 : 5.6;
+    // circled variant sizes down a touch so 2-3 char symbols stay inside the disc
+    const fs = (sym.length >= 3 ? 3.4 : sym.length === 2 ? 4.5 : 5.6) * (wbCircle ? 0.82 : 1);
     body = (
       <g pointerEvents="none">
         {selected && <circle cx={0} cy={0} r={4.6} fill="none" stroke="#ffd447" strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
+        {wbCircle && <circle cx={0} cy={0} r={3.3} fill="#fff" stroke={p.color} strokeWidth={0.5} />}
         <text transform={`rotate(${-thDeg})`} textAnchor="middle" dominantBaseline="central"
           fontSize={fs} fontWeight={900} fill={p.color}
           style={{ userSelect: "none", fontFamily: "system-ui, sans-serif",
-            paintOrder: "stroke", stroke: "rgba(255,255,255,0.9)", strokeWidth: 0.55 }}>
+            ...(wbCircle ? {} : { paintOrder: "stroke", stroke: "rgba(255,255,255,0.9)", strokeWidth: 0.55 }) }}>
           {sym}
         </text>
       </g>
