@@ -301,6 +301,40 @@ export function trimPolyStart(pts, gap, ar = 1) {
   return pts;                                // whole polyline within the gap
 }
 
+// Cut radius-`gap` holes (gm metric, like trimPolyStart) around each of
+// `centers` out of a polyline, interpolating the exact entry/exit crossings.
+// Returns an array of sub-polylines (each ≥ 2 pts); [] when everything falls
+// inside the holes. The detour-polyline counterpart of the authored routes'
+// trimSegStart/trimSegEnd action-badge gaps: min-distance over centers makes
+// overlapping holes union for free (a sliver between two close badges vanishes).
+export function gapPolyAt(pts, centers, gap, ar = 1) {
+  if (!pts || pts.length < 2 || !centers || !centers.length) return pts && pts.length >= 2 ? [pts] : [];
+  const sar = Math.sqrt(ar);
+  const gm = (ax, ay, bx, by) => Math.hypot((bx - ax) * sar, (by - ay) / sar);
+  const dist = p => { let m = Infinity; for (const c of centers) { const d = gm(c.x, c.y, p.x, p.y); if (d < m) m = d; } return m; };
+  const subs = [];
+  let run = [];
+  const close = () => { if (run.length >= 2) subs.push(run); run = []; };
+  let dPrev = dist(pts[0]);
+  if (dPrev >= gap) run.push(pts[0]);
+  for (let i = 1; i < pts.length; i++) {
+    const d = dist(pts[i]);
+    const a = pts[i - 1], b = pts[i];
+    if (dPrev >= gap && d < gap) {           // outside → inside: cut at the crossing
+      const f = Math.max(0, Math.min(1, (gap - dPrev) / (d - dPrev || 1)));
+      run.push({ x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f });
+      close();
+    } else if (dPrev < gap && d >= gap) {    // inside → outside: resume at the crossing
+      const f = Math.max(0, Math.min(1, (gap - dPrev) / (d - dPrev || 1)));
+      run.push({ x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f });
+      run.push(b);
+    } else if (d >= gap) run.push(b);
+    dPrev = d;
+  }
+  close();
+  return subs;
+}
+
 /* ---- waypoint "join" (Illustrator-style point types) ----
    A waypoint's two bézier handles are stored on two different segments: the
    INCOMING handle is the control of the leg ENDING at the waypoint (c2 for a
