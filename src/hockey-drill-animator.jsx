@@ -3887,7 +3887,7 @@ export default function DrillAnimator() {
   const ACT_GAP = 3.4, ACT_R = 3.0;
   // whiteboard mode drops the badge discs, so the line-gap shrinks to a small
   // central gap the arrows point into (nothing to clear but the waypoint itself)
-  const actGap = whiteboard ? 2.2 : ACT_GAP;
+  const actGap = whiteboard ? 1.4 : ACT_GAP;
   // priority for picking the "main" action shown in a badge with several actions
   const ACT_PRI = { shot: 5, pass: 4, rim: 3, chip: 2, receive: 1, collect: 1, pickup: 1 };
   const stepActionType = st => st.role === "pickup" ? "pickup" : st.role === "receive" ? "receive"
