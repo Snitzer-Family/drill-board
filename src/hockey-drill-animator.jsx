@@ -2552,7 +2552,22 @@ export default function DrillAnimator() {
     update(p => {
       if (p.id !== id) return p;
       const rp = routePiece(p, fork);
-      const conv = arr => { const path = arr.slice(); path[i] = convertSeg({ ...path[i], type }, segEnd(rp, i - 1)); return path; };
+      const org = fork ? forkOriginPoint(p, fork) : { x: p.x, y: p.y };
+      const conv = arr => {
+        let path = arr.slice();
+        path[i] = convertSeg({ ...path[i], type }, segEnd(rp, i - 1));
+        // re-flow the joins at the leg's two end waypoints: curve meeting curve
+        // links onto a shared tangent so the new shape blends into its neighbours
+        // (instead of kinking off the fresh default handles); a straight side
+        // breaks the pair, so any stale join flag comes off
+        for (const w of [i - 1, i]) {
+          const s = path[w], nx = path[w + 1];
+          if (!s || !nx) continue;
+          if (s.type !== "L" && nx.type !== "L") path = alignJoint(path, w, s.join || "smooth", org);
+          else if (s.join) { const c = { ...s }; delete c.join; path[w] = c; }
+        }
+        return path;
+      };
       if (fork) return { ...p, forks: mapForkAt(p.forks, fork, f => ({ ...f, path: conv(f.path) })) };
       return { ...p, path: conv(p.path) };
     });
@@ -4086,6 +4101,16 @@ export default function DrillAnimator() {
           onPointerDown: e => handleDown(e, { kind: "anchor", id: p.id, seg: i, wp: i, ...(fork ? { fork } : {}) }) }));
       }
     });
+    // while a leg popup is open ("Add point here"), ghost the would-be waypoint —
+    // a dashed anchor at the tap's projection onto the curve, where the split lands
+    if (popup && popup.type === "line" && popup.id === p.id && forkEq(popup.fork, fork) && popup.pt && route[popup.seg]) {
+      const gs = route[popup.seg];
+      const gPrev = segEnd(rp, popup.seg - 1);
+      const g = evalSeg(gPrev, gs, nearestT(gPrev, gs, popup.pt));
+      els.push(hd(g.x, g.y, 1.6, { key: "ghostwp", fill: "none", stroke: dotFill, strokeWidth: 0.5,
+        strokeDasharray: "1 1", opacity: 0.95, pointerEvents: "none" }));
+      els.push(hd(g.x, g.y, 0.45, { key: "ghostwpc", fill: dotFill, opacity: 0.9, pointerEvents: "none" }));
+    }
     // departure-angle handle at the route origin, leashed back to the piece: shown
     // when the piece is selected OR waypoint 0 is active. For a cubic it's the c1
     // control (distinct from waypoint 0's incoming c2); a quad has one shared
@@ -5271,11 +5296,19 @@ export default function DrillAnimator() {
       anchorPt = popup.pt;
       title = fork ? `Reaction · leg ${popup.seg + 1}` : `${p.id} · leg ${popup.seg + 1}`;
       body = (
-        <div className="hd-poprow">
-          <button className="hd-mini" onClick={() => addPointAt(p.id, popup.seg, popup.pt, fork)}>
-            ＋ Add point here
-          </button>
-        </div>
+        <>
+          <div className="hd-field">
+            <div className="hd-sectitle">Leg shape</div>
+            <div className="hd-poprow">
+              {curveButtons(t => changeSegType(p.id, popup.seg, t, fork), () => drawRouteMode(p.id, fork), s.type)}
+            </div>
+          </div>
+          <div className="hd-poprow">
+            <button className="hd-mini" onClick={() => addPointAt(p.id, popup.seg, popup.pt, fork)}>
+              ＋ Add point here
+            </button>
+          </div>
+        </>
       );
     } else {
       const fork = popup.fork || null;
