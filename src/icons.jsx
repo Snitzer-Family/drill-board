@@ -35,6 +35,9 @@ const ICONS = {
   collect: <><path d="M12 3.5v9" /><path d="M8.5 9l3.5 3.5L15.5 9" /><path d="M4.5 15v3a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-3" /></>,
   // reaction-light decision: a flashing burst — read the light, then react
   react: <><circle cx="12" cy="12" r="3" {...F} /><path d="M12 2v3.2M12 18.8v3.2M2 12h3.2M18.8 12h3.2M5.4 5.4l2.2 2.2M16.4 16.4l2.2 2.2M18.6 5.4l-2.2 2.2M7.6 16.4l-2.2 2.2" /></>,
+  // a brain (two hemispheres + a central seam + a brain stem) = a read-and-react
+  // DECISION point. Scaled up ~16% about its centre so it fills the glyph better.
+  brain: <g transform="translate(12 11.5) scale(1.16) translate(-12 -11.5)"><path d="M12 5.2c-1-1-2.9-.9-3.7.4-1.4-.5-2.9.6-2.8 2.1-1.3.5-1.7 2.2-.7 3.2-.6 1.2.2 2.7 1.6 2.9.4 1.3 2 1.9 3.2 1.1.8.6 2 .5 2.4-.4" /><path d="M12 5.2c1-1 2.9-.9 3.7.4 1.4-.5 2.9.6 2.8 2.1 1.3.5 1.7 2.2.7 3.2.6 1.2-.2 2.7-1.6 2.9-.4 1.3-2 1.9-3.2 1.1-.8.6-2 .5-2.4-.4" /><path d="M12 5.2v13.3" /><path d="M10.6 16.3q1.4 1.1 2.8 0" /></g>,
   // a raised arc + landing = sauce pass
   sauce: <><path d="M3.5 17.5C7 6 17 6 20.5 17.5" /><path d="M16.5 14l4 3.5-5 1.2" {...F} /></>,
   // return loop = give-and-go / rebounder pass
@@ -137,7 +140,7 @@ export function DiagPanel({ drillVersion }) {
 
 /* ---------------- piece icon ---------------- */
 
-export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStickDown, swing = 0, noShadow = false, hitOff = false }) {
+export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStickDown, swing = 0, noShadow = false, hitOff = false, wb = false, wbCircle = false }) {
   const frame = xf || `translate(${pos.x} ${pos.y}) rotate(${pos.a || 0}) scale(${ICON_SCALE})`;
   let body;
   if (p.kind === "puck")
@@ -286,6 +289,24 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
         <rect x={0.85} y={-2.6} width={0.75} height={5.2} rx={0.3} fill={col} />
       </g>
     );
+  } else if (wb && p.kind === "player") {
+    // whiteboard mode: the classic coach's symbol (X / O / F / W1…) instead of
+    // the skater art — flat (no shadow), upright via the label's counter-rotation
+    const sym = (p.sym && p.sym.trim()) || (p.defense ? "X" : "O");
+    // circled variant sizes down a touch so 2-3 char symbols stay inside the disc
+    const fs = (sym.length >= 3 ? 3.4 : sym.length === 2 ? 4.5 : 5.6) * (wbCircle ? 0.82 : 1);
+    body = (
+      <g pointerEvents="none">
+        {selected && <circle cx={0} cy={0} r={4.6} fill="none" stroke="#ffd447" strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
+        {wbCircle && <circle cx={0} cy={0} r={3.3} fill="#fff" stroke={p.color} strokeWidth={0.5} />}
+        <text transform={`rotate(${-thDeg})`} textAnchor="middle" dominantBaseline="central"
+          fontSize={fs} fontWeight={900} fill={p.color}
+          style={{ userSelect: "none", fontFamily: "system-ui, sans-serif",
+            ...(wbCircle ? {} : { paintOrder: "stroke", stroke: "rgba(255,255,255,0.9)", strokeWidth: 0.55 }) }}>
+          {sym}
+        </text>
+      </g>
+    );
   } else {
     const dark = "#1d2126";
     body = (
@@ -339,7 +360,7 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
   return (
     <g opacity={dim ? 0.92 : 1} transform={frame}>
       {sz !== 1 ? <g transform={`scale(${sz})`}>{body}{grab}</g> : <>{body}{grab}</>}
-      {onStickDown && p.kind === "player" && (
+      {onStickDown && p.kind === "player" && !wb && (
         <circle cx={4.7} cy={p.hand === "L" ? -2.55 : 2.55} r={3.3} fill="transparent"
           pointerEvents={hPE} style={{ cursor: "grab" }} onPointerDown={onStickDown} />
       )}
