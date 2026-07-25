@@ -3750,11 +3750,54 @@ export default function DrillAnimator() {
     drawTarget.current = null;
     setTool("select");
     if (!id || raw.length < 3) return;
+    /* (route drawing continues below) */
     setPieces(ps => ps.map(p => {
       if (p.id !== id) return p;
       const route = fitRoute({ x: p.x, y: p.y }, raw);
       return route.length ? { ...p, path: route } : p;
     }));
+  }
+
+  // Preset shape markers (square / circle / triangle) — placed parametrically
+  // instead of freehanded, then moved/scaled/stretched from the mark popup.
+  // Straight edges carry dense collinear points so the ink smoothing keeps
+  // them straight (same trick as imported zone overlays).
+  function shapeMarkPts(shape, cx, cy, w, h) {
+    const P = [];
+    if (shape === "circle") {
+      const n = 24;
+      for (let i = 0; i <= n; i++) { const t = (i / n) * 2 * Math.PI; P.push({ x: cx + (Math.cos(t) * w) / 2, y: cy + (Math.sin(t) * h) / 2 }); }
+      return P;
+    }
+    const cs = shape === "triangle"
+      ? [{ x: cx, y: cy - h / 2 }, { x: cx + w / 2, y: cy + h / 2 }, { x: cx - w / 2, y: cy + h / 2 }]
+      : [{ x: cx - w / 2, y: cy - h / 2 }, { x: cx + w / 2, y: cy - h / 2 }, { x: cx + w / 2, y: cy + h / 2 }, { x: cx - w / 2, y: cy + h / 2 }];
+    for (let i = 0; i < cs.length; i++) {
+      const a = cs[i], b = cs[(i + 1) % cs.length];
+      const n = Math.max(1, Math.floor(Math.hypot(b.x - a.x, b.y - a.y) / 3));
+      for (let k = 0; k < n; k++) P.push({ x: a.x + ((b.x - a.x) * k) / n, y: a.y + ((b.y - a.y) * k) / n });
+    }
+    P.push({ ...cs[0] });
+    return P;
+  }
+  function addShapeMark(shape) {
+    const [mx, my, vw, vh] = VIEWS[rink];
+    const pts = shapeMarkPts(shape, mx + vw / 2, my + vh / 2, 20, shape === "triangle" ? 17 : 20);
+    const id = nextId("mark");
+    setPieces(ps => [...ps, { id, kind: "mark", pts, x: pts[0].x, y: pts[0].y,
+      color: markColor, width: markWidth, style: markStyle, path: [] }]);
+    setTool("select"); setOpenMenu(null);
+    setSelectedId(id);
+    setPopup({ type: "piece", id });
+  }
+  // scale a mark's points about its centroid — sx/sy per axis (size & proportion)
+  function scaleMark(id, sx, sy) {
+    const m = pieces.find(q => q.id === id);
+    if (!m || !m.pts || m.pts.length < 2) return;
+    const cx = m.pts.reduce((a, q) => a + q.x, 0) / m.pts.length;
+    const cy = m.pts.reduce((a, q) => a + q.y, 0) / m.pts.length;
+    const pts = m.pts.map(q => ({ x: clampX(cx + (q.x - cx) * sx), y: clampY(cy + (q.y - cy) * sy) }));
+    updateById(id, { pts, x: pts[0].x, y: pts[0].y });
   }
 
   /* ----- pointer handling ----- */
@@ -6015,6 +6058,20 @@ export default function DrillAnimator() {
                 </div>
               </div>
               <div className="hd-field">
+                <div className="hd-sectitle">Size &amp; proportion</div>
+                <div className="hd-poprow">
+                  <span>Size</span>
+                  <button className="hd-mini" onClick={() => scaleMark(p.id, 1 / 1.12, 1 / 1.12)}>−</button>
+                  <button className="hd-mini" onClick={() => scaleMark(p.id, 1.12, 1.12)}>＋</button>
+                  <span style={{ marginLeft: 8 }}>Wide</span>
+                  <button className="hd-mini" onClick={() => scaleMark(p.id, 1 / 1.12, 1)}>−</button>
+                  <button className="hd-mini" onClick={() => scaleMark(p.id, 1.12, 1)}>＋</button>
+                  <span style={{ marginLeft: 8 }}>Tall</span>
+                  <button className="hd-mini" onClick={() => scaleMark(p.id, 1, 1 / 1.12)}>−</button>
+                  <button className="hd-mini" onClick={() => scaleMark(p.id, 1, 1.12)}>＋</button>
+                </div>
+              </div>
+              <div className="hd-field">
                 <div className="hd-poprow">
                   <button className={`hd-mini${markEdit ? " on" : ""}`} onClick={() => setMarkEdit(v => !v)}>
                     {markEdit ? "Done editing" : "Edit points"}
@@ -8228,7 +8285,13 @@ export default function DrillAnimator() {
                 <input type="range" min={0.5} max={3} step={0.1} value={markWidth} style={{ flex: 1, minWidth: 80 }}
                   onChange={e => setMarkWidth(parseFloat(e.target.value))} />
               </div>
-              <span style={{ fontSize: 11, color: "#8b99a8", padding: "0 2px" }}>drag on the ice to draw; tap a mark to restyle or delete</span>
+              <div className="hd-poprow">
+                <span>Shapes</span>
+                <button className="hd-mini" onClick={() => addShapeMark("square")}>□ Square</button>
+                <button className="hd-mini" onClick={() => addShapeMark("circle")}>○ Circle</button>
+                <button className="hd-mini" onClick={() => addShapeMark("triangle")}>△ Triangle</button>
+              </div>
+              <span style={{ fontSize: 11, color: "#8b99a8", padding: "0 2px" }}>drag on the ice to draw — or tap a shape to place it, then size it from its popup; tap a mark to restyle or delete</span>
             </>
           )}
           {tool !== "select" && (
