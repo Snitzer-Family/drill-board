@@ -12,7 +12,7 @@
 
 import DSL_REF from "../docs/drill-dsl.md?raw";
 import { parseDrill, extractDrill } from "./drill-format.js";
-import { fitTransform, transformDsl } from "./drill-fit.js";
+import { fitTransform, sketchTransform, transformDsl } from "./drill-fit.js";
 import { drillSvg } from "./drill-svg.js";
 
 export const ANTHROPIC_KEY_STORE = "drillboard:anthropic-key";
@@ -42,7 +42,7 @@ Output exactly two fenced blocks, nothing else:
   "landmarks": [ { "feature": "...", "x": <px>, "y": <px> }, ... ],
   "counts": { "players": <n>, "passes": <n>, "shots": <n> }  // from the PHOTO. players = marks that become PIECE player lines: skaters, bench players, and the coach — NOT the goalie (a goalie is the "goalie" flag on the net piece, never a player). passes = dashed pass arrows; shots = shot arrows.
 }
-Report every rink marking you can identify. Allowed features: goal_line, blue_line, center_line, center_dot, center_circle, net, crease, endzone_dot, endzone_circle, neutral_dot, end_boards (the wall behind the net — midpoint of its straight section), side_boards (midpoint of a side wall). For lines, give the midpoint of the visible painted segment; for circles, the center. Landmark accuracy matters more than quantity — only report marks you can actually see. ALWAYS report end_boards when any drill content (a puck, a route, a collect) sits between the goal line and the wall — without it that strip cannot be scaled.
+Report every rink marking you can identify. Allowed features: goal_line, blue_line, center_line, center_dot, center_circle, net, crease, endzone_dot, endzone_circle, neutral_dot, end_boards (the wall behind the net — midpoint of its straight section), side_boards (midpoint of a side wall). For lines, give the midpoint of the visible painted segment; for circles, the center. Landmark accuracy matters more than quantity — only report marks you can actually see. ALWAYS report end_boards when any drill content (a puck, a route, a collect) sits between the goal line and the wall — without it that strip cannot be scaled. HAND SKETCHES on blank paper (no rink markings at all) still import: report the landmarks that DO exist — usually just the drawn net (a dome/box, often with a G goalie beside it) — and set "attack" from the net's MOUTH: the open/flat side faces the play. The app anchors the sketch's net on the regulation crease and scales the drawing to about one zone, so keep every position in honest pixel proportions exactly as drawn.
 
 2. A \`\`\`drill fence with the complete drill, all coordinates in image pixels.
 
@@ -178,13 +178,33 @@ async function renderDsl(dsl, width = 1200) {
   }
 }
 
+// every pixel coordinate the transcription drew — the ink extent a rinkless
+// sketch is scaled by (pieces, route endpoints + curve controls, mark traces)
+function inkPoints(px) {
+  const out = [];
+  const add = (x, y) => { if (isFinite(x) && isFinite(y)) out.push({ x, y }); };
+  for (const p of px?.pieces || []) {
+    add(p.x, p.y);
+    for (const s of p.path || []) { add(s.x, s.y); add(s.cx, s.cy); add(s.c1x, s.c1y); add(s.c2x, s.c2y); }
+    for (const q of p.pts || []) add(q.x, q.y);
+  }
+  return out;
+}
+
 // fit + transform one model response; returns {dsl, drill, errors, meta}
 // where dsl is rink-feet text (best effort even when parse errors remain) —
-// or throws when the landmarks can't orient the diagram at all.
+// or throws when the landmarks can't orient the diagram at all. When the
+// landmark fit fails (a hand sketch on blank paper), fall back to the sketch
+// fit: net anchored on the crease, ink scaled to about a zone.
 function toRinkDsl(raw) {
   const meta = extractMeta(raw) || {};
-  const fit = fitTransform(meta.landmarks, { attack: meta.attack, rink: meta.rink });
-  if (fit.error) throw new Error(`Couldn't orient the diagram — ${fit.error}.`);
+  let fit = fitTransform(meta.landmarks, { attack: meta.attack, rink: meta.rink });
+  if (fit.error) {
+    const sk = sketchTransform(meta.landmarks, inkPoints(parseDrill(extractDrill(raw))),
+      { attack: meta.attack, rink: meta.rink });
+    if (sk.error) throw new Error(`Couldn't orient the diagram — ${fit.error}.`);
+    fit = sk;
+  }
   const dsl = transformDsl(extractDrill(raw), fit.map);
   const r = parseDrill(dsl);
   return { dsl, drill: r.errors.length ? null : r, errors: r.errors, meta };

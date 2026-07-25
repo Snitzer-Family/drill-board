@@ -178,6 +178,44 @@ export function fitTransform(landmarks, { attack = "right", rink = "half" } = {}
   return best;
 }
 
+// Fallback fit for RINKLESS HAND SKETCHES (a net doodle, players, arrows on a
+// blank page — no lines/dots/circles to fit against). The landmark fit needs
+// two distinct x-references; a sketch usually has at most a net. Instead:
+// trust the model's stated attack (read from the net's mouth — there is
+// nothing to search against), anchor the drawn net onto the regulation crease
+// (or the ink centroid onto the mid-zone when no net exists), and scale
+// UNIFORMLY so the ink spread fills about one zone. content: [{x,y}] pixel
+// points harvested from the transcribed drill (pieces, route points, marks).
+// Returns { map, attack, residual, sketch: true } or { error }.
+export function sketchTransform(landmarks, content, { attack = "up", rink = "half" } = {}) {
+  const rot = ROTS[attack] || ROTS.up;
+  const pts = (content || []).filter(p => p && isFinite(p.x) && isFinite(p.y)).map(p => rot(p));
+  if (pts.length < 2) return { error: "not enough drawn content to place a rinkless sketch" };
+  const us = pts.map(p => p.u), vs = pts.map(p => p.v);
+  const Ru = Math.max(...us) - Math.min(...us), Rv = Math.max(...vs) - Math.min(...vs);
+  // ~one zone of ice: 55ft deep from the net, 65ft across. Uniform scale —
+  // paper sketches keep an honest aspect even without rink markings.
+  let s = Math.min(55 / Math.max(Ru, 1), 65 / Math.max(Rv, 1));
+  if (!isFinite(s) || s <= 0) s = 0.09;
+  const nets = (landmarks || []).filter(l => l && /^(net|crease)/.test(String(l.feature || "").toLowerCase()))
+    .filter(l => isFinite(l.x) && isFinite(l.y)).map(l => rot(l));
+  let uA, vA, XA, YA;
+  if (nets.length) {
+    uA = nets.reduce((a, p) => a + p.u, 0) / nets.length;
+    vA = nets.reduce((a, p) => a + p.v, 0) / nets.length;
+    XA = GOAL_X[1]; YA = MID_Y;                       // net onto the crease
+  } else {
+    uA = us.reduce((a, b) => a + b, 0) / us.length;
+    vA = vs.reduce((a, b) => a + b, 0) / vs.length;
+    XA = 155; YA = MID_Y;                             // ink centroid mid-zone
+  }
+  const map = (x, y) => {
+    const { u, v } = rot({ x, y });
+    return clampIce(XA + (u - uA) * s, YA + (v - vA) * s);
+  };
+  return { map, attack, residual: 99, sketch: true };
+}
+
 // NOTE: pieces are NOT snapped to dots/landmarks — the mapped pixel position
 // is kept verbatim so the import reproduces the diagram exactly as drawn.
 // (Nets are the one exception: they snap onto the goal line below.)

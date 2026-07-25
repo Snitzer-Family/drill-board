@@ -1,7 +1,7 @@
 // node tests/drill-fit.mjs — exercises the pixel→rink landmark fit and the
 // DSL coordinate rewrite (drill-fit.js is pure, so it imports straight in).
 import assert from "node:assert/strict";
-import { fitTransform, transformDsl } from "../src/drill-fit.js";
+import { fitTransform, sketchTransform, transformDsl } from "../src/drill-fit.js";
 
 let passed = 0;
 const near = (a, b, tol, msg) => { assert.ok(Math.abs(a - b) <= tol, `${msg}: ${a} vs ${b}`); };
@@ -224,6 +224,45 @@ check("MARK square keeps corners (not circle-snapped)", () => {
   const map = (x, y) => ({ x: x / 10, y: y / 10 });
   const out = transformDsl("MARK Z1 #e8c547 0.6 dashed 100,100 400,100 400,400 100,400 100,100", map);
   assert.ok(out.includes("corners="), "square corners flagged sharp");
+});
+
+// --- rinkless hand sketch: net anchors the crease, ink scales to a zone -----
+// the one-timer index card: net doodle at top (attack up), G goalie, X passer
+// left, O curling from bottom-right, receive spot mid-slot.
+check("sketch fallback anchors net + scales ink", () => {
+  const lm = [{ feature: "net", x: 1005, y: 545 }];
+  const ink = [
+    { x: 1005, y: 545 },  // net piece
+    { x: 570, y: 930 },   // X
+    { x: 1440, y: 1200 }, // O
+    { x: 1210, y: 880 },  // receive spot
+  ];
+  const { map, error, sketch } = sketchTransform(lm, ink, { attack: "up", rink: "half" });
+  assert.equal(error, undefined);
+  assert.ok(sketch, "flagged as sketch fit");
+  const net = map(1005, 545);
+  near(net.x, 189, 0.5, "net on the goal line"); near(net.y, 42.5, 0.5, "net centered");
+  const X = map(570, 930), O = map(1440, 1200), rec = map(1210, 880);
+  assert.ok(X.x > 140 && X.x < 185 && X.y < 30, `X up the zone off-center (${X.x.toFixed(0)},${X.y.toFixed(0)})`);
+  assert.ok(O.y > 55, `O on the far side (${O.y.toFixed(0)})`);
+  assert.ok(rec.x < 189 && rec.y > 42.5 && rec.y < O.y, "receive spot between net and O");
+  // uniform scale: pixel distances keep their ratio
+  const dXr = Math.hypot(X.x - rec.x, X.y - rec.y) / Math.hypot(570 - 1210, 930 - 880);
+  const dOr = Math.hypot(O.x - rec.x, O.y - rec.y) / Math.hypot(1440 - 1210, 1200 - 880);
+  near(dXr, dOr, 0.01, "aspect preserved");
+});
+
+// --- sketch with no landmarks at all: centroid anchors mid-zone -------------
+check("sketch fallback without any landmark", () => {
+  const ink = [{ x: 100, y: 100 }, { x: 500, y: 100 }, { x: 300, y: 400 }];
+  const { map, error } = sketchTransform([], ink, { attack: "up", rink: "half" });
+  assert.equal(error, undefined);
+  for (const p of ink) {
+    const m = map(p.x, p.y);
+    assert.ok(m.x >= 1 && m.x <= 199 && m.y >= 1 && m.y <= 84, "inside the ice");
+  }
+  // too little ink → explicit error, not a guess
+  assert.ok(sketchTransform([], [{ x: 1, y: 1 }], {}).error, "single point errors");
 });
 
 console.log(`\n${passed} checks passed`);
