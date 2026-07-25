@@ -123,4 +123,17 @@ check("transformDsl rewrite", () => {
   assert.equal(out[5], "PIECE N2 net 11 42.5", "left net: default facing (mouth toward center), face= stripped");
 });
 
+// --- MARK overlays densify so smoothed rendering keeps sides straight -------
+check("MARK densified for straight sides", () => {
+  const map = (x, y) => ({ x: x / 10, y: y / 10 });
+  const out = transformDsl("MARK Z1 #e8c547 0.6 dashed 100,100 400,100 400,300 100,300 100,100", map).split(/\s+/);
+  const coords = out.filter(t => /^-?[\d.]+,-?[\d.]+$/.test(t));
+  assert.ok(coords.length >= 20, `expected ≥20 dense points, got ${coords.length}`);
+  assert.equal(coords[0], "10,10", "first corner exact");
+  assert.equal(coords[coords.length - 1], "10,10", "closes the loop");
+  // interpolated points along the top edge stay collinear (y = 10)
+  const topEdge = coords.slice(0, 8).every(c => c.split(",")[1] === "10");
+  assert.ok(topEdge, "top edge points collinear");
+});
+
 console.log(`\n${passed} checks passed`);

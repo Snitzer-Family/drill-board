@@ -430,6 +430,9 @@ export function drillSvg(dsl, opts = {}) {
       <marker id="arrowRB" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="${REBOUND_COLOR}"/></marker>
       <marker id="arrowRX" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="${BLOCKED_COLOR}"/></marker>
     </defs>`;
+  // freehand ink (MARK) sits at the very bottom — directly on the ice, under
+  // routes, puck lines, and every piece/tool
+  const inks = pieces.filter(p => p.kind === "mark").map(p => piece(p)).join("");
   const routes = pieces.map(p => routePath(p, pieces)).join("");
   const chains = pieces.filter(p => p.kind === "puck").map(pk => chain(pk, byId, pieces)).join("");
   // a carried puck draws close to its player, not at its loose stored spot
@@ -439,7 +442,7 @@ export function drillSvg(dsl, opts = {}) {
     const dx = p.x - c.x, dy = p.y - c.y, dd = Math.hypot(dx, dy) || 1, off = 4.2;
     return { ...p, x: c.x + dx / dd * off, y: c.y + dy / dd * off };
   };
-  const icons = [...pieces].sort((a, b) => rank(a.kind) - rank(b.kind)).map(p => piece(drawPos(p))).join("");
+  const icons = [...pieces].filter(p => p.kind !== "mark").sort((a, b) => rank(a.kind) - rank(b.kind)).map(p => piece(drawPos(p))).join("");
   // text labels paint on top: standalone label pieces + "label"-mode waypoints
   const labels = pieces.filter(p => p.kind === "label").map(p => labelSvg(p.x, p.y, p.text, p.size, p.color)).join("")
     + pieces.flatMap(p => (p.path || []).filter(s => s.dmode === "label" && s.desc)
@@ -453,5 +456,5 @@ export function drillSvg(dsl, opts = {}) {
   const viewBox = `${vx - px} ${vy - py} ${vw + 2 * px} ${vh + 2 * py}`;
   // icons paint over the chain lines; arrowheads are trimmed back so they point
   // at their target instead of vanishing under a circle. Labels stay on top.
-  return `<svg class="rink" viewBox="${viewBox}"${wattr} xmlns="http://www.w3.org/2000/svg" role="img">${defs}${rink()}${routes}${chains}${icons}${labels}</svg>`;
+  return `<svg class="rink" viewBox="${viewBox}"${wattr} xmlns="http://www.w3.org/2000/svg" role="img">${defs}${rink()}${inks}${routes}${chains}${icons}${labels}</svg>`;
 }

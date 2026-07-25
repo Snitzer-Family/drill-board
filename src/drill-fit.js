@@ -162,7 +162,31 @@ export function transformDsl(text, map) {
       if (kind === "net" && p.x > 100) out.push("face=180");
       return out.join(" ");
     }
-    if (kw === "PATH" || kw === "BRANCH" || kw === "MARK") {
+    if (kw === "MARK") {
+      // transform the ink points, then DENSIFY: the app renders marks as a
+      // Catmull-Rom curve through the points, so sparse corner points balloon
+      // a straight-sided zone into a blob. Interpolated points every ~3.5ft
+      // keep straight sides straight (curved traces are dense already).
+      const tok = tokenize(line.trim());
+      const head = [], pts = [];
+      for (const t of tok) {
+        if (COORD_RE.test(t)) {
+          const [x, y] = t.split(",").map(parseFloat);
+          pts.push(map(x, y));
+        } else head.push(t);
+      }
+      const dense = [];
+      for (let i = 0; i < pts.length; i++) {
+        if (i > 0) {
+          const a = pts[i - 1], b = pts[i];
+          const n = Math.floor(Math.hypot(b.x - a.x, b.y - a.y) / 3.5);
+          for (let k = 1; k <= n; k++) dense.push({ x: a.x + ((b.x - a.x) * k) / (n + 1), y: a.y + ((b.y - a.y) * k) / (n + 1) });
+        }
+        dense.push(pts[i]);
+      }
+      return [...head, ...dense.map(p => `${round1(p.x)},${round1(p.y)}`)].join(" ");
+    }
+    if (kw === "PATH" || kw === "BRANCH") {
       const tok = tokenize(line.trim());
       const out = [];
       for (let i = 0; i < tok.length; i++) {
