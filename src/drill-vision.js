@@ -40,7 +40,7 @@ Output exactly two fenced blocks, nothing else:
   "rink": "half" | "full",            // what the diagram shows (zone/half-ice → "half")
   "attack": "up" | "down" | "left" | "right",  // direction TOWARD the attacking net IN THE PHOTO
   "landmarks": [ { "feature": "...", "x": <px>, "y": <px> }, ... ],
-  "counts": { "players": <n>, "passes": <n>, "shots": <n> }  // from the PHOTO: all player marks incl. bench + coach; dashed pass arrows; shot arrows
+  "counts": { "players": <n>, "passes": <n>, "shots": <n> }  // from the PHOTO. players = marks that become PIECE player lines: skaters, bench players, and the coach — NOT the goalie (a goalie is the "goalie" flag on the net piece, never a player). passes = dashed pass arrows; shots = shot arrows.
 }
 Report every rink marking you can identify. Allowed features: goal_line, blue_line, center_line, center_dot, center_circle, net, crease, endzone_dot, endzone_circle, neutral_dot. For lines, give the midpoint of the visible painted segment; for circles, the center. Landmark accuracy matters more than quantity — only report marks you can actually see.
 
@@ -192,11 +192,16 @@ function countMismatches(drill, meta) {
   const c = meta?.counts;
   if (!drill || !c) return [];
   const players = drill.pieces.filter(p => p.kind === "player").length;
+  // the model often counts the goalie among "players", but a goalie is the
+  // goalie flag on a net piece — accept either tally so that difference can
+  // never trigger a bounce (which is how a phantom 7th skater got invented)
+  const goalies = drill.pieces.filter(p => p.kind === "net" && p.goalie).length;
   const pucks = drill.pieces.filter(p => p.kind === "puck");
   const passes = pucks.reduce((a, p) => a + (p.transfers || []).filter(t => t.kind === "pass").length, 0);
   const shots = pucks.reduce((a, p) => a + (p.terminals || []).filter(t => t.kind === "shot").length, 0);
   const out = [];
-  if (Number.isFinite(c.players) && players !== c.players) out.push(`you counted ${c.players} players in the photo but the drill has ${players} player pieces`);
+  if (Number.isFinite(c.players) && players !== c.players && players + goalies !== c.players)
+    out.push(`you counted ${c.players} players in the photo but the drill has ${players} player pieces (note: the goalie is the goalie flag on the net piece, not a player piece — do not count or add it as a player)`);
   if (Number.isFinite(c.passes) && passes !== c.passes) out.push(`you counted ${c.passes} pass arrows but the drill has ${passes} pass= entries`);
   if (Number.isFinite(c.shots) && shots !== c.shots) out.push(`you counted ${c.shots} shot arrows but the drill has ${shots} shots`);
   return out;
@@ -260,7 +265,7 @@ export async function drillFromImage({ apiKey, data, mediaType, onStatus, signal
       role: "user",
       content: [
         { type: "image", source: { type: "base64", media_type: "image/jpeg", data: render } },
-        { type: "text", text: "This is your transcription rendered on the DrillBoard rink (your pixel coordinates were converted programmatically from your landmark report). Compare it with the original photo and check specifically: (1) every pass/shot connects the SAME two pieces as the photo, in the same order; (2) no route or pass runs off the ice or crosses the rink where the photo shows no such line; (3) each piece sits on/off the same landmark (dot, circle edge, crease) as in the photo; (4) piece counts, kinds, and colours match; (5) exactly ONE puck is in play (on the first passer) and there is no MARK ink other than shaded-zone outlines — any arrow drawn as ink must be rewritten as pass=/shoot=/PATH; (6) COUNT the players in the photo and in the rendering — the numbers must match, and every hop of the passing chain must have its receiver present on the ice. If anything is misplaced, missing, or wrong, output corrected ```json and ```drill blocks in full — still in ORIGINAL PHOTO pixel coordinates. If it is faithful, reply with exactly OK." },
+        { type: "text", text: "This is your transcription rendered on the DrillBoard rink (your pixel coordinates were converted programmatically from your landmark report). Compare it with the original photo and check specifically: (1) every pass/shot connects the SAME two pieces as the photo, in the same order; (2) no route or pass runs off the ice or crosses the rink where the photo shows no such line; (3) each piece sits on/off the same landmark (dot, circle edge, crease) as in the photo; (4) piece counts, kinds, and colours match; (5) exactly ONE puck is in play (on the first passer) and there is no MARK ink other than shaded-zone outlines — any arrow drawn as ink must be rewritten as pass=/shoot=/PATH; (6) COUNT the players in the photo and in the rendering — the numbers must match (the goalie is part of the net, not a player), and every hop of the passing chain must have its receiver present on the ice. If anything is misplaced, missing, or wrong, output corrected ```json and ```drill blocks in full — still in ORIGINAL PHOTO pixel coordinates. If it is faithful, reply with exactly OK." },
       ],
     });
     const check = await callClaude(apiKey, messages, signal);
