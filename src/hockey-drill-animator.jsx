@@ -3790,6 +3790,20 @@ export default function DrillAnimator() {
     setSelectedId(id);
     setPopup({ type: "piece", id });
   }
+  // rotate a mark's points about its centroid (degrees; rink feet are square
+  // units, so data-space rotation is geometrically true)
+  function rotateMark(id, deg) {
+    const m = pieces.find(q => q.id === id);
+    if (!m || !m.pts || m.pts.length < 2) return;
+    const cx = m.pts.reduce((a, q) => a + q.x, 0) / m.pts.length;
+    const cy = m.pts.reduce((a, q) => a + q.y, 0) / m.pts.length;
+    const r = (deg * Math.PI) / 180, c = Math.cos(r), s = Math.sin(r);
+    const pts = m.pts.map(q => ({
+      x: clampX(cx + (q.x - cx) * c - (q.y - cy) * s),
+      y: clampY(cy + (q.x - cx) * s + (q.y - cy) * c),
+    }));
+    updateById(id, { pts, x: pts[0].x, y: pts[0].y });
+  }
   // scale a mark's points about its centroid — sx/sy per axis (size & proportion)
   function scaleMark(id, sx, sy) {
     const m = pieces.find(q => q.id === id);
@@ -4226,6 +4240,18 @@ export default function DrillAnimator() {
       else updateSeg(d.id, d.seg, { dsize: size });
       return;
     }
+    if (d.kind === "markrotate") {
+      // rotate handle: spin the mark about its centroid, following the pointer
+      d.moved = true;
+      const ang = Math.atan2(pt.y - d.cy, pt.x - d.cx) - d.a0;
+      const c = Math.cos(ang), s = Math.sin(ang);
+      const pts = d.pts0.map(q => ({
+        x: clampX(d.cx + (q.x - d.cx) * c - (q.y - d.cy) * s),
+        y: clampY(d.cy + (q.x - d.cx) * s + (q.y - d.cy) * c),
+      }));
+      updateById(d.id, { pts, x: pts[0].x, y: pts[0].y });
+      return;
+    }
     if (d.kind === "markscale") {
       // corner drag scales the mark about the OPPOSITE corner, each axis free
       // (the popup's Size/Wide/Tall buttons cover constrained adjustments)
@@ -4350,7 +4376,7 @@ export default function DrillAnimator() {
     }
     if (d.moved) return;
     if (d.kind === "wlabel") { setSelectedId(d.id); setPopup({ type: "point", id: d.id, seg: d.seg }); return; }
-    if (d.kind === "resize" || d.kind === "markscale") return;
+    if (d.kind === "resize" || d.kind === "markscale" || d.kind === "markrotate") return;
     if (d.kind === "aim") { setAim(d.pkId, d.target, null); return; }  // tap to clear the aim
     if (d.kind === "release") { setAim(d.pkId, { term: d.term }, null); return; }  // tap clears direction back to auto
     if (d.kind === "rotate") { setPopup({ type: "piece", id: d.id }); return; }
@@ -5329,6 +5355,23 @@ export default function DrillAnimator() {
             style: { cursor: "grab" },
             onPointerDown: e => handleDown(e, { kind: "markscale", id: m.id, x0: cx, y0: cy, ax, ay,
               pts0: m.pts.map(q => ({ x: q.x, y: q.y })) }) }, yf))}
+        {(() => {
+          // rotate handle: a lollipop above the box's top edge, spins about the centroid
+          const mx = (x1 + x2) / 2;
+          const cx = m.pts.reduce((a, q) => a + q.x, 0) / m.pts.length;
+          const cy = m.pts.reduce((a, q) => a + q.y, 0) / m.pts.length;
+          const hy = y1 - 4.5 * yf;
+          return <g key="rot">
+            <line x1={mx} y1={y1} x2={mx} y2={hy} stroke="#ffd447" strokeWidth={sw(0.35)}
+              vectorEffect="non-scaling-stroke" opacity={0.8} pointerEvents="none" />
+            {hdot(mx, hy, 1.3, { fill: "#14202b", stroke: "#ffd447", strokeWidth: 0.35,
+              style: { cursor: "grab" },
+              onPointerDown: e => { const pt0 = svgPt(e);
+                handleDown(e, { kind: "markrotate", id: m.id, cx, cy,
+                  a0: Math.atan2(pt0.y - cy, pt0.x - cx),
+                  pts0: m.pts.map(q => ({ x: q.x, y: q.y })) }); } }, yf)}
+          </g>;
+        })()}
       </g>
     );
   }
@@ -6125,6 +6168,11 @@ export default function DrillAnimator() {
                   <span style={{ marginLeft: 8 }}>Tall</span>
                   <button className="hd-mini" onClick={() => scaleMark(p.id, 1, 1 / 1.12)}>−</button>
                   <button className="hd-mini" onClick={() => scaleMark(p.id, 1, 1.12)}>＋</button>
+                </div>
+                <div className="hd-poprow">
+                  <span>Rotate</span>
+                  <button className="hd-mini" onClick={() => rotateMark(p.id, -15)}>↺ 15°</button>
+                  <button className="hd-mini" onClick={() => rotateMark(p.id, 15)}>↻ 15°</button>
                 </div>
               </div>
               <div className="hd-field">
