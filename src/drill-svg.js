@@ -174,6 +174,8 @@ function rink() {
   const mk = V("mark", "#cf3346"), mkb = V("mark-blue", "#2f5fb0");
   const dot = (x, y, r = 1, c = mk) => `<circle cx="${x}" cy="${y}" r="${r}" fill="${c}"/>`;
   const fo = (x, y, c) => `<circle cx="${x}" cy="${y}" r="15" fill="none" stroke="${c}" stroke-width="0.45" opacity="0.9"/>`;
+  // end-zone circle hash marks: 2' long, ~5'7" apart, outside the circle edge
+  const hash = (x, y) => `<path d="M ${x - 2.8} ${y - 17} V ${y - 15} M ${x + 2.8} ${y - 17} V ${y - 15} M ${x - 2.8} ${y + 15} V ${y + 17} M ${x + 2.8} ${y + 15} V ${y + 17}" stroke="${mk}" stroke-width="0.45" opacity="0.9" fill="none"/>`;
   return `
     <rect x="0.6" y="0.6" width="198.8" height="83.8" rx="28" fill="${V("surface", "#f6fafd")}" stroke="${V("ink", "#14202b")}" stroke-width="1.1"/>
     <g clip-path="url(#ice)">
@@ -183,11 +185,13 @@ function rink() {
         <line x1="75" y1="0" x2="75" y2="85" stroke="${mkb}" stroke-width="1.1"/>
         <line x1="125" y1="0" x2="125" y2="85" stroke="${mkb}" stroke-width="1.1"/>
         <line x1="100" y1="0" x2="100" y2="85" stroke="${mk}" stroke-width="1.1"/>
-        <path d="M 11 36.5 A 6 6 0 0 1 11 48.5" fill="${mkb}" stroke="${mk}" stroke-width="0.35" opacity="0.9"/>
-        <path d="M 189 36.5 A 6 6 0 0 0 189 48.5" fill="${mkb}" stroke="${mk}" stroke-width="0.35" opacity="0.9"/>
+        <path d="M 11 38.5 L 15.5 38.5 A 6 6 0 0 1 15.5 46.5 L 11 46.5 Z" fill="${mkb}" stroke="${mk}" stroke-width="0.35" opacity="0.9"/>
+        <path d="M 189 38.5 L 184.5 38.5 A 6 6 0 0 0 184.5 46.5 L 189 46.5 Z" fill="${mkb}" stroke="${mk}" stroke-width="0.35" opacity="0.9"/>
+        <path d="M 90 85 A 10 10 0 0 1 110 85" fill="none" stroke="${mk}" stroke-width="0.3" opacity="0.8"/>
       </g>
-      ${fo(100, 42.5, mkb)}${fo(45, 20.5, mk)}${fo(45, 64.5, mk)}${fo(155, 20.5, mk)}${fo(155, 64.5, mk)}
-      ${dot(100, 42.5, 0.9, mkb)}${dot(45, 20.5)}${dot(45, 64.5)}${dot(155, 20.5)}${dot(155, 64.5)}
+      ${fo(100, 42.5, mkb)}${fo(31, 20.5, mk)}${fo(31, 64.5, mk)}${fo(169, 20.5, mk)}${fo(169, 64.5, mk)}
+      ${hash(31, 20.5)}${hash(31, 64.5)}${hash(169, 20.5)}${hash(169, 64.5)}
+      ${dot(100, 42.5, 0.5, mkb)}${dot(31, 20.5)}${dot(31, 64.5)}${dot(169, 20.5)}${dot(169, 64.5)}
       ${dot(80, 20.5)}${dot(80, 64.5)}${dot(120, 20.5)}${dot(120, 64.5)}
     </g>`;
 }

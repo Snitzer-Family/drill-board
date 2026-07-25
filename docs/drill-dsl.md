@@ -60,7 +60,7 @@ One statement per line. Order is mostly free, but a `PATH` must come after the
 | Left blue line | 75 | End-zone dots | 20.5 / 64.5 |
 | Centre line | 100 | | |
 | Right blue line | 125 | Nets default to (11, 42.5) and (189, 42.5) |
-| Right goal line | 189 | End-zone faceoff dots at x = 45 / 155 |
+| Right goal line | 189 | End-zone faceoff dots at x = 31 / 169 |
 
 ---
 

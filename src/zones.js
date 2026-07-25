@@ -1,7 +1,7 @@
 // Named ice areas — used for the toggleable overlay and to auto-name waypoints
 // in presentation text. Rink coords: x 0..200, y 0..85 (goal lines x=11/189,
-// blue lines x=75/125, end-zone dots x=45/155). This rink is intentionally not
-// regulation, so zones are eyeballed to match the markings in rink.jsx.
+// blue lines x=75/125, end-zone dots x=31/169 — regulation NA markings).
+// Zones are eyeballed coaching areas anchored to the markings in rink.jsx.
 
 function endZones(flip) {
   // mirror a left-end x-range to the right end when flip is true

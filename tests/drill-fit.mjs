@@ -16,8 +16,8 @@ check("portrait half-ice (attack=down)", () => {
     { feature: "goal_line", ...toPx(189, 42.5) },
     { feature: "blue_line", ...toPx(125, 42.5) },
     { feature: "net", ...toPx(189, 42.5) },
-    { feature: "endzone_dot", ...toPx(155, 20.5) },
-    { feature: "endzone_dot", ...toPx(155, 64.5) },
+    { feature: "endzone_dot", ...toPx(169, 20.5) },
+    { feature: "endzone_dot", ...toPx(169, 64.5) },
   ];
   const { map, residual, error } = fitTransform(lm, { attack: "down", rink: "half" });
   assert.equal(error, undefined);
@@ -37,8 +37,8 @@ check("full ice paired goal/blue lines", () => {
     { feature: "blue_line", ...px(75, 42.5) },
     { feature: "blue_line", ...px(125, 42.5) },
     { feature: "center_dot", ...px(100, 42.5) },
-    { feature: "endzone_dot", ...px(45, 20.5) },
-    { feature: "endzone_dot", ...px(155, 64.5) },
+    { feature: "endzone_dot", ...px(31, 20.5) },
+    { feature: "endzone_dot", ...px(169, 64.5) },
   ];
   const { map, residual, error } = fitTransform(lm, { attack: "right", rink: "full" });
   assert.equal(error, undefined);
@@ -66,8 +66,8 @@ check("orientation search overrides a wrong attack call", () => {
     { feature: "goal_line", ...toPx(189, 42.5) },
     { feature: "blue_line", ...toPx(125, 42.5) },
     { feature: "net", ...toPx(189, 42.5) },
-    { feature: "endzone_dot", ...toPx(155, 20.5) },
-    { feature: "endzone_dot", ...toPx(155, 64.5) },
+    { feature: "endzone_dot", ...toPx(169, 20.5) },
+    { feature: "endzone_dot", ...toPx(169, 64.5) },
   ];
   // truth is attack=down (portrait); the model claims "right"
   const { map, attack, error } = fitTransform(lm, { attack: "right", rink: "half" });
@@ -81,14 +81,14 @@ check("orientation search overrides a wrong attack call", () => {
 check("landmark snapping", () => {
   const map = (x, y) => ({ x: x / 10, y: y / 10 });
   const src = [
-    "PIECE F1 player 1540 195 F1",     // → (154, 19.5): 1.4ft from dot (155, 20.5)
+    "PIECE F1 player 1680 195 F1",     // → (168, 19.5): 1.4ft from dot (169, 20.5)
     "PIECE C1 cone 1300 300",          // → (130, 30): no landmark near
-    "PIECE L1 label 1545 200 \"hi\"",  // labels never snap
+    "PIECE L1 label 1685 200 \"hi\"",  // labels never snap
   ].join("\n");
   const out = transformDsl(src, map).split("\n");
-  assert.equal(out[0], "PIECE F1 player 155 20.5 F1", "snapped to the dot");
+  assert.equal(out[0], "PIECE F1 player 169 20.5 F1", "snapped to the dot");
   assert.equal(out[1], "PIECE C1 cone 130 30", "left alone");
-  assert.ok(out[2].includes("154.5 20"), "label not snapped");
+  assert.ok(out[2].includes("168.5 20"), "label not snapped");
 });
 
 // --- too little evidence errors instead of guessing ------------------------

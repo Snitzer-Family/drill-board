@@ -8,7 +8,7 @@
 // with proper faceoffs. This is the layer we'll keep teaching.
 //
 // Rink feet: x 0..200, y 0..85. Goal lines 11/189, blue lines 75/125,
-// center 100. End-zone dots (45/155, 20.5/64.5), neutral dots (80/120, …).
+// center 100. End-zone dots (31/169, 20.5/64.5), neutral dots (80/120, …).
 import * as boards from "./boards.js";
 import { netShapes, avoidNets, bounceOffNets } from "./net-collide.js";
 
@@ -408,7 +408,7 @@ export function stepGame(g, dt) {
   if (puck.flying && !puck.shot && puck.releaseFeet < CENTER_F) {
     const lt = puck.lastTeam;
     if (feetOf(lt, puck.x) >= ATT_GOAL) {
-      const dotX = lt === 0 ? 45 : 155, dotY = puck.y < 42.5 ? 20.5 : 64.5;
+      const dotX = lt === 0 ? 31 : 169, dotY = puck.y < 42.5 ? 20.5 : 64.5;
       faceoff(g, dotX, dotY, "Icing"); updateGoalies(g); return g;
     }
   }
