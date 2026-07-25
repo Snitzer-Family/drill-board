@@ -75,8 +75,12 @@ function fitOne(landmarks, attack, rink) {
 
   // y correspondences — mid-ice anchors are exact; dots resolve top/bottom
   // against the anchor (or their own pair mean when no anchor is visible).
-  const midV = pts.filter(p => /^(net|crease|center_dot|center_circle)/.test(p.f)).map(p => p.v);
+  // Nets are NOT assumed mid-ice: drills park nets anywhere (e.g. on the goal
+  // line over each faceoff circle), so they anchor y only as a last resort.
+  const trueMidV = pts.filter(p => /^(crease|center_dot|center_circle)/.test(p.f)).map(p => p.v);
+  const netV = pts.filter(p => p.f.startsWith("net")).map(p => p.v);
   const dotV = pts.filter(p => /^(endzone|neutral)/.test(p.f)).map(p => p.v);
+  const midV = trueMidV.length || dotV.length ? trueMidV : netV;
   const anchorV = midV.length ? midV.reduce((a, b) => a + b, 0) / midV.length
     : dotV.length ? dotV.reduce((a, b) => a + b, 0) / dotV.length
     : pts.reduce((a, p) => a + p.v, 0) / pts.length;
@@ -152,7 +156,12 @@ export function transformDsl(text, map) {
       const kind = (tok[2] || "").toLowerCase();
       if (kind === "net") {
         const gx = Math.abs(p.x - GOAL_X[1]) <= Math.abs(p.x - GOAL_X[0]) ? GOAL_X[1] : GOAL_X[0];
-        if (Math.abs(p.x - gx) < 14) p = { x: gx, y: Math.abs(p.y - MID_Y) < 10 ? MID_Y : p.y };
+        if (Math.abs(p.x - gx) < 14) {
+          // y snaps to the crease, or — for nets parked over a faceoff circle —
+          // to that circle's dot lane; anywhere else the drawn y is kept.
+          const lane = [[MID_Y, 10], [DOT_Y[0], 6], [DOT_Y[1], 6]].find(([Y, tol]) => Math.abs(p.y - Y) <= tol);
+          p = { x: gx, y: lane ? lane[0] : p.y };
+        }
       }
       tok[3] = String(round1(p.x)); tok[4] = String(round1(p.y));
       const out = tok.filter(t => !/^face=/i.test(t));

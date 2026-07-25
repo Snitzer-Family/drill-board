@@ -93,6 +93,28 @@ check("no piece snapping — faithful positions", () => {
   assert.equal(out[3], "PIECE K1 puck 170 21", "puck verbatim");
 });
 
+// --- off-center nets must not corrupt the y-fit ------------------------------
+// Two nets parked on the goal line above each faceoff circle (nets are NOT
+// mid-ice): only the crease/dots may anchor y, or the whole drill squashes
+// toward the centerline.
+check("off-center nets don't anchor y", () => {
+  const lm = [
+    { feature: "goal_line", ...toPx(189, 42.5) },
+    { feature: "crease", ...toPx(186, 42.5) },
+    { feature: "net", ...toPx(191, 20.5) },
+    { feature: "net", ...toPx(191, 64.5) },
+    { feature: "endzone_dot", ...toPx(169, 20.5) },
+    { feature: "endzone_dot", ...toPx(169, 64.5) },
+  ];
+  const { map, residual, error } = fitTransform(lm, { attack: "down", rink: "half" });
+  assert.equal(error, undefined);
+  near(residual, 0, 1, "residual");
+  const n = toPx(191, 20.5), mn = map(n.x, n.y);
+  near(mn.y, 20.5, 0.6, "net keeps its off-center y");
+  const d = toPx(169, 64.5), md = map(d.x, d.y);
+  near(md.y, 64.5, 0.6, "dot y");
+});
+
 // --- too little evidence errors instead of guessing ------------------------
 check("single landmark → error", () => {
   const { error } = fitTransform([{ feature: "net", x: 10, y: 10 }], { attack: "right", rink: "half" });
@@ -109,6 +131,7 @@ check("transformDsl rewrite", () => {
     'PATH F1 L 1600,400 Q 1700,450 1800,420 DESC "cut 1,2 hard" OFF 3,-5 SHOT L 1826,425 ~45',
     "STEP at=2 pos=1500:300 \"go\"",
     "PIECE N2 net 108 424 face=90",    // left end: snaps to 11, face= stripped, no 180
+    "PIECE N3 net 1888 660",           // net over the bottom circle: y snaps to the dot lane
   ].join("\n");
   const out = transformDsl(src, map).split("\n");
   assert.equal(out[0], "TITLE Corner 2,2 game", "TITLE untouched");
@@ -121,6 +144,7 @@ check("transformDsl rewrite", () => {
   assert.ok(out[3].includes("Q 170,45 180,42"), "Q points transformed");
   assert.ok(out[4].includes("pos=150:30"), "STEP pos transformed");
   assert.equal(out[5], "PIECE N2 net 11 42.5", "left net: default facing (mouth toward center), face= stripped");
+  assert.equal(out[6], "PIECE N3 net 189 64.5 face=180", "off-crease net snaps to the dot lane");
 });
 
 // --- MARK overlays densify so smoothed rendering keeps sides straight -------
