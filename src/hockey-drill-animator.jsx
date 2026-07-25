@@ -259,6 +259,7 @@ function DelayTrigger({ value, onChange, sub, players, actorIds, nameOf }) {
 const SAVE_KEY = "drillboard:autosave";   // the whole board, persisted across refreshes
 const WB_KEY = "drillboard:whiteboard";   // whiteboard-mode view pref, persisted on its own
 const WBC_KEY = "drillboard:whiteboard-circle";   // circled X/O symbols sub-pref
+const HALFNS_KEY = "drillboard:half-ns";  // half-ice shown north-south (net at bottom)
 
 export default function DrillAnimator() {
   // a shared drill link (#d=<url-safe base64 DSL> — the preview-link format from
@@ -332,6 +333,12 @@ export default function DrillAnimator() {
     try { return localStorage.getItem(WBC_KEY) === "1"; } catch { return false; }
   });
   useEffect(() => { try { localStorage.setItem(WBC_KEY, wbCircle ? "1" : "0"); } catch { /* private mode */ } }, [wbCircle]);
+  // half-ice screen orientation: east-west (net right, default) or north-south
+  // (net at the bottom, drill-book portrait style). A device view pref.
+  const [halfNS, setHalfNS] = useState(() => {
+    try { return localStorage.getItem(HALFNS_KEY) === "1"; } catch { return false; }
+  });
+  useEffect(() => { try { localStorage.setItem(HALFNS_KEY, halfNS ? "1" : "0"); } catch { /* private mode */ } }, [halfNS]);
   const effDetail = detailAnim && !whiteboard;
   // whiteboard also drops the shot theatrics: no random miss/post/air rolls
   // (shots bury flat) and no GOAL!/SAVE! splashes — a diagram, not a broadcast
@@ -859,16 +866,20 @@ export default function DrillAnimator() {
   // comparing the stage aspect to the rink's aspect both ways (log scale
   // so "2x too wide" and "2x too tall" weigh equally).
   const sa = stageSize.w / Math.max(1, stageSize.h);
-  const rotated =
+  const autoRotated =
     Math.abs(Math.log(sa / (vhF / vwF))) < Math.abs(Math.log(sa / (vwF / vhF)));
+  // half ice: orientation is the user's choice (rink menu) — N-S rotates the
+  // view so the net reads at the bottom; full/quarter keep the fill-mode
+  // auto orientation
+  const rotated = rink === "half" ? halfNS : autoRotated;
   let canvasW = Math.max(50, stageSize.w);
   let canvasH = Math.max(20, stageSize.h);
-  // Full ice fills the stage (fill mode). Half / quarter keep their true
-  // proportions: fit the width, then cap the height (and vice-versa) to at most
-  // a small over-stretch, letterboxing the surplus instead of stretching tall.
+  // Full ice fills the stage (fill mode). Half ice is constrained to its true
+  // 100'×85' proportions in either orientation (no stretch — letterbox the
+  // surplus). Quarter keeps its true proportions up to a small over-stretch.
   if (rink !== "full") {
     const vbW = rotated ? vhF : vwF, vbH = rotated ? vwF : vhF;   // effective viewBox dims
-    const CAP = 1.12;                                             // max stretch past true aspect
+    const CAP = rink === "half" ? 1 : 1.12;                       // max stretch past true aspect
     canvasH = Math.min(canvasH, Math.round((canvasW * vbH) / vbW * CAP));
     canvasW = Math.min(canvasW, Math.round((canvasH * vbW) / vbH * CAP));
   }
@@ -8062,12 +8073,14 @@ export default function DrillAnimator() {
       {openMenu === "rinkmenu" && (
         <div className="hd-menu bl">
           <div className="hd-mh">Ice surface</div>
-          {["full", "half", "quarter"].map(m => (
-            <button key={m} className={`hd-item${rink === m ? " on" : ""}`}
-              onClick={() => { setRink(m); setOpenMenu(null); }}>
-              {m === "full" ? "Full ice" : m === "half" ? "Half ice" : "Quarter sheet"}
-            </button>
-          ))}
+          <button className={`hd-item${rink === "full" ? " on" : ""}`}
+            onClick={() => { setRink("full"); setOpenMenu(null); }}>Full ice</button>
+          <button className={`hd-item${rink === "half" && !halfNS ? " on" : ""}`}
+            onClick={() => { setRink("half"); setHalfNS(false); setOpenMenu(null); }}>Half ice · E–W ↔</button>
+          <button className={`hd-item${rink === "half" && halfNS ? " on" : ""}`}
+            onClick={() => { setRink("half"); setHalfNS(true); setOpenMenu(null); }}>Half ice · N–S ↕</button>
+          <button className={`hd-item${rink === "quarter" ? " on" : ""}`}
+            onClick={() => { setRink("quarter"); setOpenMenu(null); }}>Quarter sheet</button>
         </div>
       )}
 
