@@ -116,27 +116,36 @@ export function wigglePoints(prev, s, ar = 1, taperEnd = false) {
   return pts.map(q => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" ");
 }
 
+// Backward skating draws the traditional alternating-arc symbol: a chain of
+// half-arc humps offsetting above/below the line (see hockey drill books).
+// Arcs are a FIXED size — the chain adds/removes arcs as the leg length
+// changes (count = round(length / pitch)) instead of stretching the shape.
+const BWD_PITCH = 3.2, BWD_A = 1.15;               // arc length + height, screen units
 export function zigzagPoints(prev, s, ar = 1) {
-  // arc length measured in aspect-weighted space (x scaled by ar) so bump
-  // spacing stays uniform on screen regardless of the segment's direction
+  // arc length measured in aspect-weighted space (x scaled by ar) so the
+  // pattern stays uniform on screen regardless of the segment's direction
   const wlen = (ax, ay, bx, by) => Math.hypot((bx - ax) * ar, by - ay);
   const approx =
     s.type === "L" ? wlen(prev.x, prev.y, s.x, s.y)
     : s.type === "Q" ? wlen(prev.x, prev.y, s.cx, s.cy) + wlen(s.cx, s.cy, s.x, s.y)
     : wlen(prev.x, prev.y, s.c1x, s.c1y) + wlen(s.c1x, s.c1y, s.c2x, s.c2y) + wlen(s.c2x, s.c2y, s.x, s.y);
-  const n = Math.max(6, Math.round(approx / 2.4));
-  const A = 0.9;                                   // bump amplitude, in screen units
+  const n = Math.max(16, Math.round(approx / 0.4));  // dense samples → smooth arcs
+  const samp = [evalSeg(prev, s, 0)];
+  let total = 0;
+  const cum = [0];
+  for (let i = 1; i <= n; i++) { const q = evalSeg(prev, s, i / n); total += wlen(samp[i - 1].x, samp[i - 1].y, q.x, q.y); cum.push(total); samp.push(q); }
+  const arcs = Math.max(1, Math.round(total / BWD_PITCH));
+  const pitch = (total || 1) / arcs;                 // ≈ BWD_PITCH; whole arcs only
   const pts = [];
   for (let i = 0; i <= n; i++) {
-    const t = i / n;
-    const pt = evalSeg(prev, s, t);
+    const pt = samp[i];
     if (i === 0 || i === n) { pts.push(pt); continue; }
-    const ahead = evalSeg(prev, s, Math.min(1, t + 0.01));
-    // perpendicular to the on-SCREEN tangent, then mapped back to rink coords
+    const ahead = samp[i + 1];
     const tx = (ahead.x - pt.x) * ar, ty = ahead.y - pt.y;   // screen-space tangent
     const px = -ty, py = tx;                                 // screen-space normal
     const l = Math.hypot(px, py) || 1;
-    const a = (i % 2 ? 1 : -1) * A;
+    const k = Math.min(arcs - 1, Math.floor(cum[i] / pitch));
+    const a = (k % 2 ? -1 : 1) * BWD_A * Math.sin(((cum[i] - k * pitch) / pitch) * Math.PI);
     pts.push({ x: pt.x + (px / l) * a / ar, y: pt.y + (py / l) * a });
   }
   return pts.map(q => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" ");
@@ -195,16 +204,17 @@ export function wigglePoly(pts, ar = 1, taperEnd = false) {
   return out;
 }
 
-// Backward-skating zigzag along an already-sampled polyline (detour counterpart
-// of zigzagPoints). Alternating perpendicular bumps at a fixed screen spacing.
+// Backward-skating arcs along an already-sampled polyline (detour counterpart
+// of zigzagPoints). Same alternating fixed-size half-arc chain.
 export function zigzagPoly(pts, ar = 1) {
   if (!pts || pts.length < 3) return pts;
-  const res = resamplePoly(pts, ar, 0.6);                // even samples so the bumps are uniform
+  const res = resamplePoly(pts, ar, 0.35);               // fine samples → smooth arcs
   const cum = [0];
   for (let i = 1; i < res.length; i++) cum.push(cum[i - 1] + Math.hypot((res[i].x - res[i - 1].x) * ar, res[i].y - res[i - 1].y));
   const total = cum[cum.length - 1];
   if (total < 1e-3) return pts;
-  const A = 0.9, STEP = 2.4;                              // bump amplitude + spacing (screen units)
+  const arcs = Math.max(1, Math.round(total / BWD_PITCH));
+  const pitch = total / arcs;                            // ≈ BWD_PITCH; whole arcs only
   const out = [];
   for (let i = 0; i < res.length; i++) {
     const pt = res[i];
@@ -212,7 +222,8 @@ export function zigzagPoly(pts, ar = 1) {
     const ahead = res[i + 1];
     const tx = (ahead.x - pt.x) * ar, ty = ahead.y - pt.y;
     const px = -ty, py = tx, l = Math.hypot(px, py) || 1;
-    const a = (Math.round(cum[i] / STEP) % 2 ? 1 : -1) * A;
+    const k = Math.min(arcs - 1, Math.floor(cum[i] / pitch));
+    const a = (k % 2 ? -1 : 1) * BWD_A * Math.sin(((cum[i] - k * pitch) / pitch) * Math.PI);
     out.push({ x: pt.x + (px / l) * a / ar, y: pt.y + (py / l) * a });
   }
   return out;
