@@ -4284,7 +4284,8 @@ export default function DrillAnimator() {
       update(p => {
         if (p.id !== d.id) return p;
         if (p.kind === "mark") {   // a marker annotation moves all its points together
-          const pts = p.pts.map(q => ci(q.x + dx, q.y + dy));
+          // spread q first so per-point flags (sharp corners) survive the move
+          const pts = p.pts.map(q => ({ ...q, ...ci(q.x + dx, q.y + dy) }));
           return { ...p, pts, x: pts[0].x, y: pts[0].y };
         }
         if (d.line == null) {
