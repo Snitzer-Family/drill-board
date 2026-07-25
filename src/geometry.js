@@ -123,11 +123,34 @@ export function wigglePoints(prev, s, ar = 1, taperEnd = false) {
 // The profile is a SEMICIRCLE with a small baseline gap between arcs (cusps,
 // not smooth zero-crossings) so it reads as distinct arcs — a smooth sine
 // here would be indistinguishable from the puck-carry wiggle.
-const BWD_PITCH = 3.4, BWD_A = 1.25, BWD_GAP = 0.6;  // arc pitch/height/gap, screen units
+const BWD_PITCH = 3.8, BWD_A = 1.25, BWD_GAP = 1.4;  // arc pitch/height/gap, screen units
 const bwdProfile = (u, pitch) => {                    // u = distance into this arc's cell
   const r = (pitch - BWD_GAP) / 2, c = pitch / 2, d = (u - c) / (r || 1);
   return Math.abs(d) >= 1 ? 0 : Math.sqrt(1 - d * d) * BWD_A;
 };
+// SVG path data for the arc chain over dense samples: the pen LIFTS between
+// arcs (M jumps) so each arc is a separate stroke — the traditional symbol's
+// arcs are visibly disconnected, not linked by baseline runs
+function bwdPathD(samples, cum, total, ar) {
+  const arcs = Math.max(1, Math.round(total / BWD_PITCH));
+  const pitch = (total || 1) / arcs;
+  let d = "", down = false;
+  for (let i = 0; i < samples.length; i++) {
+    const pt = samples[i];
+    let a = 0;
+    if (i > 0 && i < samples.length - 1) {
+      const k = Math.min(arcs - 1, Math.floor(cum[i] / pitch));
+      a = (k % 2 ? -1 : 1) * bwdProfile(cum[i] - k * pitch, pitch);
+    }
+    if (a === 0) { down = false; continue; }
+    const ahead = samples[Math.min(i + 1, samples.length - 1)];
+    const tx = (ahead.x - pt.x) * ar, ty = ahead.y - pt.y;   // screen-space tangent
+    const px = -ty, py = tx, l = Math.hypot(px, py) || 1;    // screen-space normal
+    d += `${down ? "L" : "M"} ${(pt.x + (px / l) * a / ar).toFixed(2)} ${(pt.y + (py / l) * a).toFixed(2)} `;
+    down = true;
+  }
+  return d.trim();
+}
 export function zigzagPoints(prev, s, ar = 1) {
   // arc length measured in aspect-weighted space (x scaled by ar) so the
   // pattern stays uniform on screen regardless of the segment's direction
@@ -141,21 +164,7 @@ export function zigzagPoints(prev, s, ar = 1) {
   let total = 0;
   const cum = [0];
   for (let i = 1; i <= n; i++) { const q = evalSeg(prev, s, i / n); total += wlen(samp[i - 1].x, samp[i - 1].y, q.x, q.y); cum.push(total); samp.push(q); }
-  const arcs = Math.max(1, Math.round(total / BWD_PITCH));
-  const pitch = (total || 1) / arcs;                 // ≈ BWD_PITCH; whole arcs only
-  const pts = [];
-  for (let i = 0; i <= n; i++) {
-    const pt = samp[i];
-    if (i === 0 || i === n) { pts.push(pt); continue; }
-    const ahead = samp[i + 1];
-    const tx = (ahead.x - pt.x) * ar, ty = ahead.y - pt.y;   // screen-space tangent
-    const px = -ty, py = tx;                                 // screen-space normal
-    const l = Math.hypot(px, py) || 1;
-    const k = Math.min(arcs - 1, Math.floor(cum[i] / pitch));
-    const a = (k % 2 ? -1 : 1) * bwdProfile(cum[i] - k * pitch, pitch);
-    pts.push({ x: pt.x + (px / l) * a / ar, y: pt.y + (py / l) * a });
-  }
-  return pts.map(q => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" ");
+  return bwdPathD(samp, cum, total, ar);             // SVG path data (draw with <path d>)
 }
 
 // Resample a polyline to a uniform `step` spacing (measured in screen-weighted
@@ -212,28 +221,16 @@ export function wigglePoly(pts, ar = 1, taperEnd = false) {
 }
 
 // Backward-skating arcs along an already-sampled polyline (detour counterpart
-// of zigzagPoints). Same alternating fixed-size half-arc chain.
+// of zigzagPoints). Same disconnected fixed-size half-arc chain; returns SVG
+// path data (draw with <path d>).
 export function zigzagPoly(pts, ar = 1) {
-  if (!pts || pts.length < 3) return pts;
+  if (!pts || pts.length < 3) return "";
   const res = resamplePoly(pts, ar, 0.35);               // fine samples → smooth arcs
   const cum = [0];
   for (let i = 1; i < res.length; i++) cum.push(cum[i - 1] + Math.hypot((res[i].x - res[i - 1].x) * ar, res[i].y - res[i - 1].y));
   const total = cum[cum.length - 1];
-  if (total < 1e-3) return pts;
-  const arcs = Math.max(1, Math.round(total / BWD_PITCH));
-  const pitch = total / arcs;                            // ≈ BWD_PITCH; whole arcs only
-  const out = [];
-  for (let i = 0; i < res.length; i++) {
-    const pt = res[i];
-    if (i === 0 || i === res.length - 1) { out.push({ x: pt.x, y: pt.y }); continue; }
-    const ahead = res[i + 1];
-    const tx = (ahead.x - pt.x) * ar, ty = ahead.y - pt.y;
-    const px = -ty, py = tx, l = Math.hypot(px, py) || 1;
-    const k = Math.min(arcs - 1, Math.floor(cum[i] / pitch));
-    const a = (k % 2 ? -1 : 1) * bwdProfile(cum[i] - k * pitch, pitch);
-    out.push({ x: pt.x + (px / l) * a / ar, y: pt.y + (py / l) * a });
-  }
-  return out;
+  if (total < 1e-3) return "";
+  return bwdPathD(res, cum, total, ar);
 }
 
 export function convertSeg(seg, prev) {
