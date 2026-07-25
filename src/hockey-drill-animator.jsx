@@ -4226,6 +4226,16 @@ export default function DrillAnimator() {
       else updateSeg(d.id, d.seg, { dsize: size });
       return;
     }
+    if (d.kind === "markscale") {
+      // corner drag scales the mark about the OPPOSITE corner, each axis free
+      // (the popup's Size/Wide/Tall buttons cover constrained adjustments)
+      d.moved = true;
+      const sx = Math.max(0.12, Math.min(8, (pt.x - d.ax) / ((d.x0 - d.ax) || 1e-6)));
+      const sy = Math.max(0.12, Math.min(8, (pt.y - d.ay) / ((d.y0 - d.ay) || 1e-6)));
+      const pts = d.pts0.map(q => ({ x: clampX(d.ax + (q.x - d.ax) * sx), y: clampY(d.ay + (q.y - d.ay) * sy) }));
+      updateById(d.id, { pts, x: pts[0].x, y: pts[0].y });
+      return;
+    }
     if (d.kind === "wlabel") {
       const dx = pt.x - d.last.x, dy = pt.y - d.last.y;
       d.last = pt;
@@ -4340,7 +4350,7 @@ export default function DrillAnimator() {
     }
     if (d.moved) return;
     if (d.kind === "wlabel") { setSelectedId(d.id); setPopup({ type: "point", id: d.id, seg: d.seg }); return; }
-    if (d.kind === "resize") return;
+    if (d.kind === "resize" || d.kind === "markscale") return;
     if (d.kind === "aim") { setAim(d.pkId, d.target, null); return; }  // tap to clear the aim
     if (d.kind === "release") { setAim(d.pkId, { term: d.term }, null); return; }  // tap clears direction back to auto
     if (d.kind === "rotate") { setPopup({ type: "piece", id: d.id }); return; }
@@ -5297,6 +5307,30 @@ export default function DrillAnimator() {
           onPointerDown: e => markPtDown(e, m.id, i) }, yf)}
       </g>
     ));
+  }
+  // Bounding-box resize handles for a selected mark (shape overlays included):
+  // drag a corner to scale about the opposite corner, editor-style. Per-point
+  // reshaping stays behind the popup's "Edit points" toggle.
+  function renderMarkResize(yf = yFix) {
+    if (!editing || markEdit || tool !== "select") return null;
+    const m = pieces.find(q => q.id === selectedId && q.kind === "mark");
+    if (!m || !m.pts || m.pts.length < 2 || (m.lock && !lockedSelectable)) return null;
+    const xs = m.pts.map(q => q.x), ys = m.pts.map(q => q.y);
+    const x1 = Math.min(...xs), x2 = Math.max(...xs), y1 = Math.min(...ys), y2 = Math.max(...ys);
+    if (x2 - x1 < 1.5 && y2 - y1 < 1.5) return null;
+    const corners = [[x1, y1, x2, y2], [x2, y1, x1, y2], [x2, y2, x1, y1], [x1, y2, x2, y1]];
+    return (
+      <g key={`mkrs-${m.id}`}>
+        <rect x={x1} y={y1} width={Math.max(0.1, x2 - x1)} height={Math.max(0.1, y2 - y1)}
+          fill="none" stroke="#ffd447" strokeWidth={sw(0.35)} strokeDasharray={sdash("1.6 1.2")}
+          vectorEffect="non-scaling-stroke" opacity={0.8} pointerEvents="none" />
+        {corners.map(([cx, cy, ax, ay], i) =>
+          hdot(cx, cy, 1.3, { key: `c${i}`, fill: "#ffd447", stroke: "#14202b", strokeWidth: 0.28,
+            style: { cursor: "grab" },
+            onPointerDown: e => handleDown(e, { kind: "markscale", id: m.id, x0: cx, y0: cy, ax, ay,
+              pts0: m.pts.map(q => ({ x: q.x, y: q.y })) }) }, yf))}
+      </g>
+    );
   }
   function renderLabels() {
     const canEdit = editing && tool !== "draw";
@@ -7890,6 +7924,7 @@ export default function DrillAnimator() {
               </g>
             ))}
             {renderMarkHandles()}
+            {renderMarkResize()}
             {selected && renderRotateHandle(selected)}
           <g opacity={markMO}>{pieces.map(p => <g key={`ca-${p.id}`}>{renderAim(p)}</g>)}</g>
             {!aiPlay && renderLabels()}
@@ -8269,12 +8304,32 @@ export default function DrillAnimator() {
 
       {openMenu === "tools" && (
         <div className="hd-menu br">
-          <div className="hd-mh">Add to the ice</div>
+          <div className="hd-mh">Main items</div>
           <div className="hd-toolgrid">
-            {[["player", "Player"], ["playerpuck", "+ Puck"], ["puck", "Puck"], ["cone", "Cone"],
-              ["net", "Net"], ["bumper", "Bumper"], ["deker", "Deker"], ["passer", "Passer"], ["tire", "Tire"], ["stick", "Stick"], ["light", "Light"]].map(([k, lbl]) => (
+            {[["player", "Player"], ["playerpuck", "+ Puck"], ["puck", "Puck"], ["net", "Net"]].map(([k, lbl]) => (
               <button key={k} className={`hd-tool${tool === k ? " on" : ""}`} onClick={() => { setTool(k); setOpenMenu(null); }}>
                 {toolImg(k)}<span>{lbl}</span>
+              </button>
+            ))}
+          </div>
+          <div className="hd-mh" style={{ marginTop: 4 }}>Tools</div>
+          <div className="hd-toolgrid">
+            {[["cone", "Cone"], ["tire", "Tire"], ["bumper", "Bumper"], ["deker", "Deker"],
+              ["passer", "Passer"], ["stick", "Stick"], ["light", "Light"]].map(([k, lbl]) => (
+              <button key={k} className={`hd-tool${tool === k ? " on" : ""}`} onClick={() => { setTool(k); setOpenMenu(null); }}>
+                {toolImg(k)}<span>{lbl}</span>
+              </button>
+            ))}
+          </div>
+          <div className="hd-mh" style={{ marginTop: 4 }}>Ice markers &amp; overlays</div>
+          <div className="hd-toolgrid">
+            <button className={`hd-tool${tool === "marker" ? " on" : ""}`}
+              onClick={() => { resetAnim(); setPlaying(false); setPopup(null); setTool("marker"); }}>
+              <span className="hd-toolglyph"><Icon name="marker" size={22} /></span><span>Marker</span>
+            </button>
+            {[["square", "□", "Square"], ["circle", "○", "Circle"], ["triangle", "△", "Triangle"]].map(([k, glyph, lbl]) => (
+              <button key={k} className="hd-tool" onClick={() => addShapeMark(k)}>
+                <span className="hd-toolglyph">{glyph}</span><span>{lbl}</span>
               </button>
             ))}
             <button className={`hd-tool${tool === "label" ? " on" : ""}`} onClick={() => { setTool("label"); setOpenMenu(null); }}>
@@ -8283,9 +8338,6 @@ export default function DrillAnimator() {
           </div>
           <button className="hd-item" onClick={() => { resetAnim(); setPlaying(false); setPopup(null); setTool("draw"); setOpenMenu(null); }}>
             <Icon name="pencil" size={16} /> Draw a route
-          </button>
-          <button className={`hd-item${tool === "marker" ? " on" : ""}`} onClick={() => { resetAnim(); setPlaying(false); setPopup(null); setTool("marker"); }}>
-            <Icon name="marker" size={16} /> Marker — draw on the ice
           </button>
           {/* marker style/colour/thickness, shown once the marker is picked */}
           {tool === "marker" && (
@@ -8307,13 +8359,7 @@ export default function DrillAnimator() {
                 <input type="range" min={0.5} max={3} step={0.1} value={markWidth} style={{ flex: 1, minWidth: 80 }}
                   onChange={e => setMarkWidth(parseFloat(e.target.value))} />
               </div>
-              <div className="hd-poprow">
-                <span>Shapes</span>
-                <button className="hd-mini" onClick={() => addShapeMark("square")}>□ Square</button>
-                <button className="hd-mini" onClick={() => addShapeMark("circle")}>○ Circle</button>
-                <button className="hd-mini" onClick={() => addShapeMark("triangle")}>△ Triangle</button>
-              </div>
-              <span style={{ fontSize: 11, color: "#8b99a8", padding: "0 2px" }}>drag on the ice to draw — or tap a shape to place it, then size it from its popup; tap a mark to restyle or delete</span>
+              <span style={{ fontSize: 11, color: "#8b99a8", padding: "0 2px" }}>drag on the ice to draw; tap a mark to restyle, resize by its corners, or delete</span>
             </>
           )}
           {tool !== "select" && (
