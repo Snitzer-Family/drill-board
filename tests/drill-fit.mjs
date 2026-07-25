@@ -252,6 +252,31 @@ check("sketch fallback anchors net + scales ink", () => {
   near(dXr, dOr, 0.01, "aspect preserved");
 });
 
+// --- two opposed nets on a sketch = the rink's two ends ---------------------
+// portrait index card: net near the top (mouth down), net at the bottom
+// (mouth up), X beside the top net, O mid-right — attack down.
+check("sketch with two opposed nets spans the rink", () => {
+  const lm = [{ feature: "net", x: 785, y: 292 }, { feature: "net", x: 745, y: 1590 }];
+  const ink = [
+    { x: 760, y: 155 },  // X beside the top net
+    { x: 400, y: 530 },  // X's carry arrowhead (left edge of the ink)
+    { x: 1090, y: 815 }, // O (right edge)
+    { x: 830, y: 1440 }, // O's drive at the bottom net
+    { x: 785, y: 292 }, { x: 745, y: 1590 },
+  ];
+  const { map, error, sketch } = sketchTransform(lm, ink, { attack: "down", rink: "full" });
+  assert.equal(error, undefined);
+  assert.ok(sketch, "sketch fit");
+  const n1 = map(785, 292), n2 = map(745, 1590);
+  near(n1.x, 11, 0.5, "top net on the left goal line"); near(n2.x, 189, 0.5, "bottom net on the right goal line");
+  near(n1.y, 42.5, 3, "net near mid"); near(n2.y, 42.5, 3, "net near mid");
+  const X = map(760, 155), O = map(1090, 815);
+  assert.ok(X.x < 11 + 8, `X starts beside the top net (${X.x.toFixed(0)})`);
+  assert.ok(O.y > 5 && O.y < 80, `O on the ice, not clamped to the boards (${O.y.toFixed(0)})`);
+  const tip = map(400, 530);
+  assert.ok(tip.y > 42.5 && tip.y < 84, `carry tip off-center inside the ice (${tip.y.toFixed(0)})`);
+});
+
 // --- sketch with no landmarks at all: centroid anchors mid-zone -------------
 check("sketch fallback without any landmark", () => {
   const ink = [{ x: 100, y: 100 }, { x: 500, y: 100 }, { x: 300, y: 400 }];

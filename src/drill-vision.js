@@ -42,7 +42,7 @@ Output exactly two fenced blocks, nothing else:
   "landmarks": [ { "feature": "...", "x": <px>, "y": <px> }, ... ],
   "counts": { "players": <n>, "passes": <n>, "shots": <n> }  // from the PHOTO. players = marks that become PIECE player lines: skaters, bench players, and the coach — NOT the goalie (a goalie is the "goalie" flag on the net piece, never a player). passes = dashed pass arrows; shots = shot arrows.
 }
-Report every rink marking you can identify. Allowed features: goal_line, blue_line, center_line, center_dot, center_circle, net, crease, endzone_dot, endzone_circle, neutral_dot, end_boards (the wall behind the net — midpoint of its straight section), side_boards (midpoint of a side wall). For lines, give the midpoint of the visible painted segment; for circles, the center. Landmark accuracy matters more than quantity — only report marks you can actually see. ALWAYS report end_boards when any drill content (a puck, a route, a collect) sits between the goal line and the wall — without it that strip cannot be scaled. HAND SKETCHES on blank paper (no rink markings at all) still import: report the landmarks that DO exist — usually just the drawn net (a dome/box, often with a G goalie beside it) — and set "attack" from the net's MOUTH: the open/flat side faces the play. The app anchors the sketch's net on the regulation crease and scales the drawing to about one zone, so keep every position in honest pixel proportions exactly as drawn.
+Report every rink marking you can identify. Allowed features: goal_line, blue_line, center_line, center_dot, center_circle, net, crease, endzone_dot, endzone_circle, neutral_dot, end_boards (the wall behind the net — midpoint of its straight section), side_boards (midpoint of a side wall). For lines, give the midpoint of the visible painted segment; for circles, the center. Landmark accuracy matters more than quantity — only report marks you can actually see. ALWAYS report end_boards when any drill content (a puck, a route, a collect) sits between the goal line and the wall — without it that strip cannot be scaled. HAND SKETCHES on blank paper (no rink markings at all) still import: report the landmarks that DO exist — usually just the drawn net (a dome/box, often with a G goalie beside it) — and set "attack" from the net's MOUTH: the open/flat side faces the play. The app anchors the sketch's net on the regulation crease and scales the drawing to about one zone, so keep every position in honest pixel proportions exactly as drawn. TWO nets facing each other across the drawing are the rink's TWO ENDS: set "rink" to "full", report both nets, and set "attack" toward the net the play finishes on — the app stretches the sketch net-to-net.
 
 2. A \`\`\`drill fence with the complete drill, all coordinates in image pixels.
 
@@ -198,12 +198,19 @@ function inkPoints(px) {
 // fit: net anchored on the crease, ink scaled to about a zone.
 function toRinkDsl(raw) {
   const meta = extractMeta(raw) || {};
-  let fit = fitTransform(meta.landmarks, { attack: meta.attack, rink: meta.rink });
+  // nets/creases as the ONLY landmarks is the rinkless-sketch signature: the
+  // landmark fit either errors (one net) or "succeeds" with a degenerate,
+  // aspect-blind y (two bare nets) — the sketch fit handles both properly.
+  const feats = (meta.landmarks || []).map(l => String(l?.feature || "").toLowerCase());
+  const netsOnly = feats.length > 0 && feats.every(f => /^(net|crease)/.test(f));
+  let fit = netsOnly ? { error: "sketch (nets-only landmarks)" }
+    : fitTransform(meta.landmarks, { attack: meta.attack, rink: meta.rink });
   if (fit.error) {
     const sk = sketchTransform(meta.landmarks, inkPoints(parseDrill(extractDrill(raw))),
       { attack: meta.attack, rink: meta.rink });
-    if (sk.error) throw new Error(`Couldn't orient the diagram — ${fit.error}.`);
-    fit = sk;
+    if (!sk.error) fit = sk;
+    else if (netsOnly) fit = fitTransform(meta.landmarks, { attack: meta.attack, rink: meta.rink });
+    if (fit.error) throw new Error(`Couldn't orient the diagram — ${fit.error}.`);
   }
   const dsl = transformDsl(extractDrill(raw), fit.map);
   const r = parseDrill(dsl);

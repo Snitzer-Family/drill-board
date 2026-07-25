@@ -199,6 +199,27 @@ export function sketchTransform(landmarks, content, { attack = "up", rink = "hal
   if (!isFinite(s) || s <= 0) s = 0.09;
   const nets = (landmarks || []).filter(l => l && /^(net|crease)/.test(String(l.feature || "").toLowerCase()))
     .filter(l => isFinite(l.x) && isFinite(l.y)).map(l => rot(l));
+
+  // TWO OPPOSED NETS are the two ends of the rink — the strongest anchor a
+  // sketch can offer: they fix the x-axis and its scale exactly (net-to-net
+  // is 178ft). Detected geometrically: the nets' u-spread dominates the ink.
+  const netUs = nets.map(p => p.u);
+  const netSpread = nets.length >= 2 ? Math.max(...netUs) - Math.min(...netUs) : 0;
+  if (netSpread > 0.4 * Math.max(Ru, 1)) {
+    const uNear = Math.min(...netUs), uFar = Math.max(...netUs);   // attack is +u
+    const sx = (GOAL_X[1] - GOAL_X[0]) / (uFar - uNear);
+    // y: centered on the nets' column; uniform with x when the ink's honest
+    // aspect fits the sheet, compressed to ~cross-ice when it doesn't (paper
+    // cards are much squarer than a 200x85 rink)
+    const vA = nets.reduce((a, p) => a + p.v, 0) / nets.length;
+    const sy = Math.min(sx, 65 / Math.max(Rv, 1));
+    const map = (x, y) => {
+      const { u, v } = rot({ x, y });
+      return clampIce(GOAL_X[0] + (u - uNear) * sx, MID_Y + (v - vA) * sy);
+    };
+    return { map, attack, residual: 99, sketch: true };
+  }
+
   let uA, vA, XA, YA;
   if (nets.length) {
     uA = nets.reduce((a, p) => a + p.u, 0) / nets.length;
