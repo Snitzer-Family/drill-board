@@ -6969,7 +6969,7 @@ export default function DrillAnimator() {
               prev = { x: s.x, y: s.y };
               const style = segStroke(p, s, i === p.path.length - 1, true);
               return p.kind === "player" && s.dir === "bwd"
-                ? <path key={`${p.id}${i}`} d={zigzagPoints(from, s)} {...style} strokeLinejoin="round" />
+                ? <path key={`${p.id}${i}`} d={zigzagPoints(from, s, 1, i === p.path.length - 1)} {...style} strokeLinejoin="round" />
                 : <path key={`${p.id}${i}`} d={d} {...style} />;
             });
           })}
@@ -7294,7 +7294,7 @@ export default function DrillAnimator() {
                             </g>);
                           }
                           return bwd
-                          ? <path d={zigzagPoints(vFrom, vSeg, strokeAR)} {...style} strokeLinejoin="round" pointerEvents="none" />
+                          ? <path d={zigzagPoints(vFrom, vSeg, strokeAR, isLast || acts.has(i))} {...style} strokeLinejoin="round" pointerEvents="none" />
                           : wig
                           ? <polyline points={wigglePoints(vFrom, vSeg, strokeAR, isLast || acts.has(i))} {...style} strokeLinejoin="round" pointerEvents="none" />
                           : <path d={vD} {...style} pointerEvents="none" />;
@@ -7334,7 +7334,7 @@ export default function DrillAnimator() {
                     const allBwd = p.kind === "player" && p.path.length > 0 && p.path.every(s => s.dir === "bwd");
                     const style = segStroke(p, p.path[p.path.length - 1] || {}, false);
                     return subs.map((sub, k) => {
-                      if (allBwd) return <path key={k} d={zigzagPoly(sub, strokeAR)} {...style} strokeLinejoin="round" pointerEvents="none" />;
+                      if (allBwd) return <path key={k} d={zigzagPoly(sub, strokeAR, k === subs.length - 1)} {...style} strokeLinejoin="round" pointerEvents="none" />;
                       const shaped = allCarry ? wigglePoly(sub, strokeAR, true) : sub;
                       return (
                         <polyline key={k} points={shaped.map(q => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" ")}
@@ -7495,7 +7495,7 @@ export default function DrillAnimator() {
                         return (
                           <g key={i}>
                             {!bent && (bwd
-                              ? <path d={zigzagPoints(vFrom, vSeg, strokeAR)} {...line} strokeLinejoin="round" />
+                              ? <path d={zigzagPoints(vFrom, vSeg, strokeAR, isLast || acts.has(i))} {...line} strokeLinejoin="round" />
                               : wig
                               ? <polyline points={wigglePoints(vFrom, vSeg, strokeAR, isLast || acts.has(i))} {...line} strokeLinejoin="round" />
                               : <path d={vD} {...line} strokeDasharray={solid ? undefined : sdash("1.6 1.1")} />)}
@@ -7527,7 +7527,7 @@ export default function DrillAnimator() {
                           ...[...subForkAts].filter(i => f.path[i]).map(i => ({ x: f.path[i].x, y: f.path[i].y }))];
                         const subs = gapPolyAt(bLine, centers, actGap, strokeAR);
                         return subs.map((sub, k) => {
-                          if (allBwd) return <path key={k} d={zigzagPoly(sub, strokeAR)}
+                          if (allBwd) return <path key={k} d={zigzagPoly(sub, strokeAR, k === subs.length - 1)}
                             {...line} strokeDasharray={solid ? undefined : sdash("1.6 1.1")} strokeLinejoin="round" />;
                           const shaped = allCarry ? wigglePoly(sub, strokeAR, true) : sub;
                           return <polyline key={k} points={shaped.map(q => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" ")}

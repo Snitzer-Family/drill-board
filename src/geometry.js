@@ -131,16 +131,19 @@ const bwdProfile = (u, pitch) => {                    // u = distance into this 
 // SVG path data for the arc chain over dense samples: the pen LIFTS between
 // arcs (M jumps) so each arc is a separate stroke — the traditional symbol's
 // arcs are visibly disconnected, not linked by baseline runs
-function bwdPathD(samples, cum, total, ar) {
+function bwdPathD(samples, cum, total, ar, trimEnd = false) {
   const arcs = Math.max(1, Math.round(total / BWD_PITCH));
   const pitch = (total || 1) / arcs;
+  // trimEnd drops the FINAL arc so the route's end mark (arrowhead / ‖) gets
+  // a clean run-in instead of an arc crowding it
+  const lastDrawn = trimEnd ? arcs - 1 : arcs;
   let d = "", down = false;
   for (let i = 0; i < samples.length; i++) {
     const pt = samples[i];
     let a = 0;
     if (i > 0 && i < samples.length - 1) {
       const k = Math.min(arcs - 1, Math.floor(cum[i] / pitch));
-      a = (k % 2 ? -1 : 1) * bwdProfile(cum[i] - k * pitch, pitch);
+      if (k < lastDrawn) a = (k % 2 ? -1 : 1) * bwdProfile(cum[i] - k * pitch, pitch);
     }
     if (a === 0) { down = false; continue; }
     const ahead = samples[Math.min(i + 1, samples.length - 1)];
@@ -151,7 +154,7 @@ function bwdPathD(samples, cum, total, ar) {
   }
   return d.trim();
 }
-export function zigzagPoints(prev, s, ar = 1) {
+export function zigzagPoints(prev, s, ar = 1, trimEnd = false) {
   // arc length measured in aspect-weighted space (x scaled by ar) so the
   // pattern stays uniform on screen regardless of the segment's direction
   const wlen = (ax, ay, bx, by) => Math.hypot((bx - ax) * ar, by - ay);
@@ -164,7 +167,7 @@ export function zigzagPoints(prev, s, ar = 1) {
   let total = 0;
   const cum = [0];
   for (let i = 1; i <= n; i++) { const q = evalSeg(prev, s, i / n); total += wlen(samp[i - 1].x, samp[i - 1].y, q.x, q.y); cum.push(total); samp.push(q); }
-  return bwdPathD(samp, cum, total, ar);             // SVG path data (draw with <path d>)
+  return bwdPathD(samp, cum, total, ar, trimEnd);    // SVG path data (draw with <path d>)
 }
 
 // Resample a polyline to a uniform `step` spacing (measured in screen-weighted
@@ -223,14 +226,14 @@ export function wigglePoly(pts, ar = 1, taperEnd = false) {
 // Backward-skating arcs along an already-sampled polyline (detour counterpart
 // of zigzagPoints). Same disconnected fixed-size half-arc chain; returns SVG
 // path data (draw with <path d>).
-export function zigzagPoly(pts, ar = 1) {
+export function zigzagPoly(pts, ar = 1, trimEnd = false) {
   if (!pts || pts.length < 3) return "";
   const res = resamplePoly(pts, ar, 0.35);               // fine samples → smooth arcs
   const cum = [0];
   for (let i = 1; i < res.length; i++) cum.push(cum[i - 1] + Math.hypot((res[i].x - res[i - 1].x) * ar, res[i].y - res[i - 1].y));
   const total = cum[cum.length - 1];
   if (total < 1e-3) return "";
-  return bwdPathD(res, cum, total, ar);
+  return bwdPathD(res, cum, total, ar, trimEnd);
 }
 
 export function convertSeg(seg, prev) {
