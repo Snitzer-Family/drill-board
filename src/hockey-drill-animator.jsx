@@ -6751,7 +6751,7 @@ export default function DrillAnimator() {
         // a pass/rim/chip into a receiver's badge stops just off its edge. Clamp the
         // offset so a SHORT leg's arrow never overshoots its own start and reverses.
         const eb = runEnd && !L.shot ? nearBadge(L.x1, L.y1) : null;
-        let eGap = L.shot && runEnd ? 4.5 + (shotStagger[`${q.id}/${k}`] || 0) : eb ? START_OFF : 0;
+        let eGap = L.shot && runEnd ? 6 + (shotStagger[`${q.id}/${k}`] || 0) : eb ? START_OFF : 0;
         const eCap = Math.max(0, Math.hypot((L.x1 - sx) * gmSar, (L.y1 - sy) / gmSar) - 2);
         if (eGap > 0) eGap = Math.min(eGap, eCap);
         // pass/rim/chip arrivals register their natural TIP so same-direction heads at
@@ -6767,10 +6767,13 @@ export default function DrillAnimator() {
         return (
           <g key={`pf-${q.id}-${k}`} pointerEvents="none" opacity={0.62}>
             {L.shot
-              // standard shot notation: two parallel lines with an open caret
+              // standard shot notation: two parallel lines with an open caret.
+              // The lines stop at the caret's mouth (backed off by its zoom-
+              // scaled depth) so they never protrude past the head.
               ? (() => {
-                  const a1 = gmMove(sx, sy, -uy, ux, 0.65), a2 = gmMove(ex, ey, -uy, ux, 0.65);
-                  const b1 = gmMove(sx, sy, uy, -ux, 0.65), b2 = gmMove(ex, ey, uy, -ux, 0.65);
+                  const le = runEnd ? gmMove(ex, ey, -ux, -uy, 2.9 * z) : { x: ex, y: ey };
+                  const a1 = gmMove(sx, sy, -uy, ux, 0.65), a2 = gmMove(le.x, le.y, -uy, ux, 0.65);
+                  const b1 = gmMove(sx, sy, uy, -ux, 0.65), b2 = gmMove(le.x, le.y, uy, -ux, 0.65);
                   return <>
                     <line x1={a1.x} y1={a1.y} x2={a2.x} y2={a2.y} vectorEffect={ve} stroke="#14171a" strokeWidth={W(0.55)} />
                     <line x1={b1.x} y1={b1.y} x2={b2.x} y2={b2.y} vectorEffect={ve} stroke="#14171a" strokeWidth={W(0.55)} />
@@ -6784,7 +6787,7 @@ export default function DrillAnimator() {
                   return <g transform={fx.t}><g transform={`scale(${z})`}>
                     {L.shot
                       // open caret ">" for a shot
-                      ? <path d="M -4.4 -2.8 L 0 0 L -4.4 2.8" fill="none" stroke="#14171a" strokeWidth={1.1} strokeLinecap="round" strokeLinejoin="round" />
+                      ? <path d="M -3.3 -2.2 L 0 0 L -3.3 2.2" fill="none" stroke="#14171a" strokeWidth={0.95} strokeLinecap="round" strokeLinejoin="round" />
                       : <path d="M 0 0 L -3.6 -2.1 L -3.6 2.1 Z" fill="#14171a" stroke="#14171a" strokeWidth={0.5} strokeLinejoin="round" />}
                   </g></g>; })())}
           </g>
@@ -6852,7 +6855,7 @@ export default function DrillAnimator() {
     const arrow = (a, b, shot, key, op = OP_GHOST) => {
       const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1, ux = dx / len, uy = dy / len;
       const sp = gmMove(a.x, a.y, ux, uy, Math.min(START_OFF, len / 2));
-      const base = Math.min(shot ? 4.5 : START_OFF, Math.max(0, len - 2));
+      const base = Math.min(shot ? 6 : START_OFF, Math.max(0, len - 2));
       const ep0 = gmMove(b.x, b.y, -ux, -uy, base);
       const back = arrivalBack("main", ep0.x, ep0.y);
       const ep = back ? gmMove(b.x, b.y, -ux, -uy, Math.min(base + back, Math.max(0, len - 2))) : ep0;
@@ -6861,9 +6864,11 @@ export default function DrillAnimator() {
         <g key={key} pointerEvents="none" opacity={op}>
           {shot
             // standard shot notation: two parallel lines with an open caret
+            // that the lines stop at (never protrude past)
             ? (() => {
-                const a1 = gmMove(sp.x, sp.y, -uy, ux, 0.65), a2 = gmMove(ep.x, ep.y, -uy, ux, 0.65);
-                const b1 = gmMove(sp.x, sp.y, uy, -ux, 0.65), b2 = gmMove(ep.x, ep.y, uy, -ux, 0.65);
+                const le = gmMove(ep.x, ep.y, -ux, -uy, 2.9 * z);
+                const a1 = gmMove(sp.x, sp.y, -uy, ux, 0.65), a2 = gmMove(le.x, le.y, -uy, ux, 0.65);
+                const b1 = gmMove(sp.x, sp.y, uy, -ux, 0.65), b2 = gmMove(le.x, le.y, uy, -ux, 0.65);
                 return <>
                   <line x1={a1.x} y1={a1.y} x2={a2.x} y2={a2.y} vectorEffect="non-scaling-stroke" stroke="#14171a" strokeWidth={sw(0.55)} />
                   <line x1={b1.x} y1={b1.y} x2={b2.x} y2={b2.y} vectorEffect="non-scaling-stroke" stroke="#14171a" strokeWidth={sw(0.55)} />
@@ -6873,7 +6878,7 @@ export default function DrillAnimator() {
                 stroke="#14171a" strokeWidth={sw(0.55)} strokeDasharray={sdash("2.4 1.8")} />}
           <g transform={fx.t}><g transform={`scale(${z})`}>
             {shot
-              ? <path d="M -4.4 -2.8 L 0 0 L -4.4 2.8" fill="none" stroke="#14171a" strokeWidth={1.1} strokeLinecap="round" strokeLinejoin="round" />
+              ? <path d="M -3.3 -2.2 L 0 0 L -3.3 2.2" fill="none" stroke="#14171a" strokeWidth={0.95} strokeLinecap="round" strokeLinejoin="round" />
               : <path d="M 0 0 L -3.6 -2.1 L -3.6 2.1 Z" fill="#14171a" stroke="#14171a" strokeWidth={0.5} strokeLinejoin="round" />}
           </g></g>
         </g>

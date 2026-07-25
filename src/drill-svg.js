@@ -332,10 +332,12 @@ const chainLine = (pts, mode) => {
   const line = trimLine(pts, CHAIN_START[mode] != null ? CHAIN_START[mode] : 3.5, CHAIN_TRIM[mode] != null ? CHAIN_TRIM[mode] : 3.5);
   if (shot) {
     // standard shot notation: two parallel lines + an open caret at the end
-    // (the caret rides an invisible center line so it stays on-axis)
+    // (the caret rides an invisible center line so it stays on-axis; the
+    // visible lines stop at the caret's mouth so they never poke past it)
+    const body = trimLine(line, 0, 2.2);
     const s = `fill="none" stroke="${color}" stroke-width="0.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"`;
-    return `<polyline points="${polyPts(offsetPoly(line, 0.65))}" ${s}/>`
-      + `<polyline points="${polyPts(offsetPoly(line, -0.65))}" ${s}/>`
+    return `<polyline points="${polyPts(offsetPoly(body, 0.65))}" ${s}/>`
+      + `<polyline points="${polyPts(offsetPoly(body, -0.65))}" ${s}/>`
       + `<polyline points="${polyPts(line)}" fill="none" stroke="${color}" stroke-opacity="0" stroke-width="0.72" marker-end="url(#arrowS)"/>`;
   }
   const dash = dotted ? ' stroke-dasharray="0.1 1.9"' : ' stroke-dasharray="2.4 2"';
@@ -424,7 +426,7 @@ export function drillSvg(dsl, opts = {}) {
       <clipPath id="ice"><rect x="0.6" y="0.6" width="198.8" height="83.8" rx="28"/></clipPath>
       <marker id="arrowR" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4" fill="none" stroke="${V("mark", "#cf3346")}" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></marker>
       <marker id="arrowP" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="${V("puck", "#14171a")}"/></marker>
-      <marker id="arrowS" markerWidth="9" markerHeight="9" refX="6.6" refY="4.5" orient="auto"><path d="M1 1.4 L7.4 4.5 L1 7.6" fill="none" stroke="${V("puck", "#14171a")}" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></marker>
+      <marker id="arrowS" markerWidth="8" markerHeight="8" refX="5.6" refY="4" orient="auto"><path d="M1.4 1.9 L5.9 4 L1.4 6.1" fill="none" stroke="${V("puck", "#14171a")}" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/></marker>
       <marker id="arrowRB" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="${REBOUND_COLOR}"/></marker>
       <marker id="arrowRX" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="${BLOCKED_COLOR}"/></marker>
     </defs>`;
