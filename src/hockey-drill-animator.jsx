@@ -890,14 +890,25 @@ export default function DrillAnimator() {
   const swapAxes = screenRot === 90 || screenRot === 270; // view turned vertical
   let canvasW = Math.max(50, stageSize.w);
   let canvasH = Math.max(20, stageSize.h);
-  // Full ice fills the stage (fill mode). Half ice is constrained to its true
-  // 100'×85' proportions in every orientation (no stretch — letterbox the
-  // surplus). Quarter keeps its true proportions up to a small over-stretch.
-  if (rink !== "full" || !stretchFill) {
+  // Full ice fills the stage. Half ice is constrained to its true 100'×85'
+  // proportions in every orientation (no stretch — the canvas letterboxes).
+  // Quarter keeps its true proportions up to a small over-stretch.
+  if (rink !== "full") {
     const vbW = swapAxes ? vhF : vwF, vbH = swapAxes ? vwF : vhF; // effective viewBox dims
     const CAP = rink === "quarter" ? 1.12 : 1;                    // max stretch past true aspect
     canvasH = Math.min(canvasH, Math.round((canvasW * vbH) / vbW * CAP));
     canvasW = Math.min(canvasW, Math.round((canvasH * vbW) / vbH * CAP));
+  }
+  // Full ice with "Stretch to fill" OFF letterboxes inside the viewBox instead
+  // of shrinking the canvas: the rink keeps true proportions with padded
+  // off-ice space around it, so pinch-zoom can expand the rink to fill the
+  // whole stage rather than staying boxed between letterbox bands.
+  let padX = 0, padY = 0;
+  if (rink === "full" && !stretchFill) {
+    const baseW = swapAxes ? vhF : vwF, baseH = swapAxes ? vwF : vhF;
+    const want = canvasW / Math.max(1, canvasH);                  // stage aspect
+    if (want > baseW / baseH) padX = (baseH * want - baseW) / 2;
+    else padY = (baseW / want - baseH) / 2;
   }
   // maps rink coords into the rotated viewBox: 90° -> (my+vh-y, x-mx),
   // 180° -> (mx+vw-x, my+vh-y), 270° -> (y-my, mx+vw-x)
@@ -906,23 +917,26 @@ export default function DrillAnimator() {
     : screenRot === 180 ? `rotate(180) translate(${-(mxF + vwF)} ${-(myF + vhF)})`
     : screenRot === 270 ? `rotate(-90) translate(${-(mxF + vwF)} ${-myF})`
     : undefined;
-  // the root viewBox the pinch-zoom transform operates in (vertical swaps axes;
-  // any rotation re-origins the root at 0,0 via the scene transform)
+  // the root viewBox the pinch-zoom transform operates in (vertical swaps
+  // axes; any rotation re-origins the root at 0,0 via the scene transform;
+  // letterbox padding widens it symmetrically)
   geomRef.current = swapAxes
-    ? { ox: 0, oy: 0, rootW: vhF, rootH: vwF }
+    ? { ox: -padX, oy: -padY, rootW: vhF + 2 * padX, rootH: vwF + 2 * padY }
     : screenRot === 180
-      ? { ox: 0, oy: 0, rootW: vwF, rootH: vhF }
-      : { ox: mxF, oy: myF, rootW: vwF, rootH: vhF };
+      ? { ox: -padX, oy: -padY, rootW: vwF + 2 * padX, rootH: vhF + 2 * padY }
+      : { ox: mxF - padX, oy: myF - padY, rootW: vwF + 2 * padX, rootH: vhF + 2 * padY };
+  const rootGeom = geomRef.current;
   const zoomXf = view.s !== 1 || view.tx || view.ty ? `translate(${view.tx} ${view.ty}) scale(${view.s})` : undefined;
   // "Mark opacity" fades only the drawn drill markings (routes, forks, stops,
   // freehand ink, shot-aim). Players/pucks/cones/nets and editing UI stay opaque.
   const markMO = markOpacity < 1 ? markOpacity : undefined;
   // roundness correction: the fill-mode stretch scales the two rink axes
   // differently; circles are drawn as ellipses with ry scaled by yFix so
-  // they render perfectly round on screen after the stretch
+  // they render perfectly round on screen after the stretch. Expressed in
+  // root-viewBox scales so viewBox letterbox padding is accounted for.
   const yFix = (() => {
-    const sx = swapAxes ? canvasH / vwF : canvasW / vwF;
-    const sy = swapAxes ? canvasW / vhF : canvasH / vhF;
+    const sx = swapAxes ? canvasH / rootGeom.rootH : canvasW / rootGeom.rootW;
+    const sy = swapAxes ? canvasW / rootGeom.rootW : canvasH / rootGeom.rootH;
     return sy > 0 ? Math.max(0.2, Math.min(5, sx / sy)) : 1;
   })();
   // a handle dot that stays a true circle on screen despite the fill-mode
@@ -936,8 +950,8 @@ export default function DrillAnimator() {
   // heading as a pure screen rotation at a uniform scale (geometric mean
   // of the two axis scales, so sizes stay consistent in any orientation).
   const iconGeom = (() => {
-    const Sx = Math.max(1e-6, swapAxes ? canvasH / vwF : canvasW / vwF);
-    const Sy = Math.max(1e-6, swapAxes ? canvasW / vhF : canvasH / vhF);
+    const Sx = Math.max(1e-6, swapAxes ? canvasH / rootGeom.rootH : canvasW / rootGeom.rootW);
+    const Sy = Math.max(1e-6, swapAxes ? canvasW / rootGeom.rootW : canvasH / rootGeom.rootH);
     return { Sx, Sy, k: ICON_SCALE * Math.sqrt(Sx * Sy) };
   })();
   // exact rotation terms for screenRot ∈ {0, 90, 180, 270} (avoids fp drift)
@@ -5408,14 +5422,19 @@ export default function DrillAnimator() {
   /* ----- popout ----- */
   function popoutAnchor(pt) {
     const [mx, my, vw, vh] = VIEWS[rink];
-    const lx = screenRot === 90 ? ((my + vh - pt.y) / vh) * 100
-      : screenRot === 180 ? ((mx + vw - pt.x) / vw) * 100
-      : screenRot === 270 ? ((pt.y - my) / vh) * 100
-      : ((pt.x - mx) / vw) * 100;
-    const ty = screenRot === 90 ? ((pt.x - mx) / vw) * 100
-      : screenRot === 180 ? ((my + vh - pt.y) / vh) * 100
-      : screenRot === 270 ? ((mx + vw - pt.x) / vw) * 100
-      : ((pt.y - my) / vh) * 100;
+    // rink point → root-viewBox coords, then fractions of the (possibly
+    // letterbox-padded) root the canvas actually shows
+    const g = geomRef.current;
+    const rx = screenRot === 90 ? my + vh - pt.y
+      : screenRot === 180 ? mx + vw - pt.x
+      : screenRot === 270 ? pt.y - my
+      : pt.x;
+    const ry = screenRot === 90 ? pt.x - mx
+      : screenRot === 180 ? my + vh - pt.y
+      : screenRot === 270 ? mx + vw - pt.x
+      : pt.y;
+    const lx = ((rx - g.ox) / g.rootW) * 100;
+    const ty = ((ry - g.oy) / g.rootH) * 100;
     if (lx < -2 || lx > 102 || ty < -2 || ty > 102) return null;
     return { lx: Math.max(0, Math.min(100, lx)), ty: Math.max(0, Math.min(100, ty)) };
   }
@@ -7068,7 +7087,7 @@ export default function DrillAnimator() {
       <div className="hd-stage" ref={stageRef}>
         <div className="hd-canvas" style={{ width: canvasW, height: canvasH }}>
           <svg ref={svgRef} className="hd-ice"
-            viewBox={swapAxes ? `0 0 ${vhF} ${vwF}` : screenRot === 180 ? `0 0 ${vwF} ${vhF}` : vb(rink)}
+            viewBox={`${rootGeom.ox} ${rootGeom.oy} ${rootGeom.rootW} ${rootGeom.rootH}`}
             preserveAspectRatio="none"
             onPointerDown={onSvgDown} onPointerMove={onSvgMove}
             onPointerUp={onSvgUp} onPointerCancel={onSvgUp}>
