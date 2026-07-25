@@ -45,7 +45,11 @@ Report every rink marking you can identify. Allowed features: goal_line, blue_li
 Transcription rules:
 - Use PIECE and PATH statements. Prefer simple L and Q segments — capture the drill's shape and flow, not every wiggle.
 - Solid lines with arrowheads are skating routes (CARRY when the player has the puck). Dashed lines are passes (pass= on the puck, or a PASS leg). Heavy/zigzag lines ending at the net are shots (shoot= or a SHOT leg).
-- Give players short jersey labels matching the diagram (F1, D2, X, O...). Add cones, nets, and pucks where drawn; a drawn goalie is "goalie" on the net piece.
+- Give players short jersey labels matching the diagram (F1, D2, X, O...).
+- Player colors: if the diagram is drawn in color, give each player its drawn color as a hex modifier — use the app palette: red #d7263d, blue #1f4fa3, green #1f8a4c, orange #e0731d, black #22262b, purple #7a3fa8. With X-and-O (or F-and-D) conventions and no color, make one group red and the other blue #1f4fa3.
+- A coach mark (CO, C, or a coach symbol) is a PLAYER in black: PIECE <id> player <x> <y> #22262b CO.
+- A pile of pucks (a scattering of small filled dots next to each other) → place 2–4 puck pieces clustered at that spot, one per visible dot up to 4.
+- Use the right on-ice tool for what's drawn: small open triangles/wedges = cone; black circles WITH a hole (rings) = tire; a long low pad/barrier = bumper; a dummy/cutout defender = deker; a rebounder/passing board = passer; a lone stick on the ice = stick; free-floating text = a label piece. A drawn goalie is "goalie" on the net piece.
 - Do NOT use face= or ~deg aim modifiers (they are angles in the photo's frame and cannot be converted).
 - Use TITLE (and DESC if the page shows text describing the drill).`;
 

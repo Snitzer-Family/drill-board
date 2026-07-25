@@ -132,9 +132,16 @@ const SNAP_PTS = [
 ];
 const SNAP_R = 3;
 const SNAP_KINDS = /^(player|puck|cone|tire)$/;
-function snapPoint(p) {
-  for (const [x, y] of SNAP_PTS) {
-    if (Math.hypot(p.x - x, p.y - y) <= SNAP_R) return { x, y };
+// each snap point is claimed once per drill — a pile of pucks near a dot keeps
+// its scatter instead of collapsing onto the same spot
+function snapPoint(p, used) {
+  for (let i = 0; i < SNAP_PTS.length; i++) {
+    const [x, y] = SNAP_PTS[i];
+    if (Math.hypot(p.x - x, p.y - y) <= SNAP_R) {
+      if (used.has(i)) return p;
+      used.add(i);
+      return { x, y };
+    }
   }
   return p;
 }
@@ -153,6 +160,7 @@ function tokenize(line) {
 // (~deg) modifiers are dropped: they're image-frame angles the fit can't fix,
 // and auto-facing covers them. Net pieces snap to the goal lines.
 export function transformDsl(text, map) {
+  const usedSnaps = new Set();
   return text.split(/\r?\n/).map(line => {
     const kw = (line.trim().split(/\s+/)[0] || "").toUpperCase();
     if (kw === "PIECE") {
@@ -165,7 +173,7 @@ export function transformDsl(text, map) {
         const gx = Math.abs(p.x - GOAL_X[1]) <= Math.abs(p.x - GOAL_X[0]) ? GOAL_X[1] : GOAL_X[0];
         if (Math.abs(p.x - gx) < 14) p = { x: gx, y: Math.abs(p.y - MID_Y) < 10 ? MID_Y : p.y };
       } else if (SNAP_KINDS.test(kind)) {
-        p = snapPoint(p);
+        p = snapPoint(p, usedSnaps);
       }
       tok[3] = String(round1(p.x)); tok[4] = String(round1(p.y));
       return tok.filter(t => !/^face=/i.test(t)).join(" ");

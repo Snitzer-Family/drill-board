@@ -84,11 +84,13 @@ check("landmark snapping", () => {
     "PIECE F1 player 1680 195 F1",     // → (168, 19.5): 1.4ft from dot (169, 20.5)
     "PIECE C1 cone 1300 300",          // → (130, 30): no landmark near
     "PIECE L1 label 1685 200 \"hi\"",  // labels never snap
+    "PIECE K1 puck 1700 210",          // → (170, 21): dot already claimed by F1
   ].join("\n");
   const out = transformDsl(src, map).split("\n");
   assert.equal(out[0], "PIECE F1 player 169 20.5 F1", "snapped to the dot");
   assert.equal(out[1], "PIECE C1 cone 130 30", "left alone");
   assert.ok(out[2].includes("168.5 20"), "label not snapped");
+  assert.equal(out[3], "PIECE K1 puck 170 21", "snap point claimed once — pile keeps its scatter");
 });
 
 // --- too little evidence errors instead of guessing ------------------------
