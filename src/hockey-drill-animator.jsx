@@ -31,6 +31,9 @@ const TOOL_GLYPH = {
   stick: { vb: "-6.4 -2.4 13.4 4.8", color: "#8a929c" },
   light: { vb: "-3.7 -3.7 7.4 7.4", color: "#2ea043" },
 };
+// the interchangeable on-ice training tools: any one can be swapped for
+// another from its popup ("Change to" row) without re-placing it
+const TOOL_KINDS = ["cone", "tire", "bumper", "deker", "passer", "stick", "light"];
 const toolImg = kind => {
   const k = kind === "playerpuck" ? "player" : kind;
   const g = TOOL_GLYPH[k];
@@ -6251,6 +6254,17 @@ export default function DrillAnimator() {
           {/* Actions panel at the player's standing/start spot — just above the
               bottom row of buttons */}
           {p.kind === "player" && ActionSteps(p, -1)}
+          {TOOL_KINDS.includes(p.kind) && (
+            <div className="hd-field">
+              <div className="hd-sectitle">Change to</div>
+              <div className="hd-poprow" style={{ flexWrap: "wrap" }}>
+                {TOOL_KINDS.filter(k => k !== p.kind).map(k => (
+                  <button key={k} className="hd-mini hd-swapbtn" title={`Change to ${k}`}
+                    onClick={() => updateById(p.id, { kind: k })}>{toolImg(k)}</button>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="hd-poprow" style={{ marginTop: 2 }}>
             {p.path.length > 0 && (
               <button className="hd-mini" onClick={() => { updateById(p.id, { path: [] }); setPopup(null); }}>Clear route</button>
