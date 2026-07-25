@@ -290,21 +290,35 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
       </g>
     );
   } else if (wb && p.kind === "player") {
-    // whiteboard mode: the classic coach's symbol (X / O / F / W1…) instead of
+    // whiteboard mode: the classic coach's symbol (X / O / LW / △…) instead of
     // the skater art — flat (no shadow), upright via the label's counter-rotation
     const sym = (p.sym && p.sym.trim()) || (p.defense ? "X" : "O");
+    // △ ○ □ draw as real strokes — font glyphs for these are hairline-thin and
+    // vary by OS, so they can't match the 900-weight letters
+    const shapePath = sym === "△" ? "M 0 -2.9 L 2.75 2.05 L -2.75 2.05 Z"
+      : sym === "□" ? "M -2.5 -2.5 L 2.5 -2.5 L 2.5 2.5 L -2.5 2.5 Z"
+      : sym === "○" ? "M 0 -2.7 A 2.7 2.7 0 1 0 0 2.7 A 2.7 2.7 0 1 0 0 -2.7 Z" : null;
     // circled variant sizes down a touch so 2-3 char symbols stay inside the disc
     const fs = (sym.length >= 3 ? 3.4 : sym.length === 2 ? 4.5 : 5.6) * (wbCircle ? 0.82 : 1);
     body = (
       <g pointerEvents="none">
         {selected && <circle cx={0} cy={0} r={4.6} fill="none" stroke="#ffd447" strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
-        {wbCircle && <circle cx={0} cy={0} r={3.3} fill="#fff" stroke={p.color} strokeWidth={0.5} />}
-        <text transform={`rotate(${-thDeg})`} textAnchor="middle" dominantBaseline="central"
-          fontSize={fs} fontWeight={900} fill={p.color}
-          style={{ userSelect: "none", fontFamily: "system-ui, sans-serif",
-            ...(wbCircle ? {} : { paintOrder: "stroke", stroke: "rgba(255,255,255,0.9)", strokeWidth: 0.55 }) }}>
-          {sym}
-        </text>
+        {shapePath ? (
+          // shapes are their own enclosure, so the wbCircle disc is skipped;
+          // white under-stroke plays the halo role paintOrder gives the text
+          <g transform={`rotate(${-thDeg})`} fill="none" strokeLinejoin="round">
+            <path d={shapePath} stroke="rgba(255,255,255,0.9)" strokeWidth={1.9} />
+            <path d={shapePath} stroke={p.color} strokeWidth={0.9} />
+          </g>
+        ) : (<>
+          {wbCircle && <circle cx={0} cy={0} r={3.3} fill="#fff" stroke={p.color} strokeWidth={0.5} />}
+          <text transform={`rotate(${-thDeg})`} textAnchor="middle" dominantBaseline="central"
+            fontSize={fs} fontWeight={900} fill={p.color}
+            style={{ userSelect: "none", fontFamily: "system-ui, sans-serif",
+              ...(wbCircle ? {} : { paintOrder: "stroke", stroke: "rgba(255,255,255,0.9)", strokeWidth: 0.55 }) }}>
+            {sym}
+          </text>
+        </>)}
       </g>
     );
   } else {
