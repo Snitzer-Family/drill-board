@@ -5350,26 +5350,32 @@ export default function DrillAnimator() {
         <rect x={x1} y={y1} width={Math.max(0.1, x2 - x1)} height={Math.max(0.1, y2 - y1)}
           fill="none" stroke="#ffd447" strokeWidth={sw(0.35)} strokeDasharray={sdash("1.6 1.2")}
           vectorEffect="non-scaling-stroke" opacity={0.8} pointerEvents="none" />
-        {corners.map(([cx, cy, ax, ay], i) =>
-          hdot(cx, cy, 1.3, { key: `c${i}`, fill: "#ffd447", stroke: "#14202b", strokeWidth: 0.28,
-            style: { cursor: "grab" },
-            onPointerDown: e => handleDown(e, { kind: "markscale", id: m.id, x0: cx, y0: cy, ax, ay,
-              pts0: m.pts.map(q => ({ x: q.x, y: q.y })) }) }, yf))}
+        {corners.map(([cx, cy, ax, ay], i) => {
+          const down = e => handleDown(e, { kind: "markscale", id: m.id, x0: cx, y0: cy, ax, ay,
+            pts0: m.pts.map(q => ({ x: q.x, y: q.y })) });
+          return <g key={`c${i}`}>
+            {hdot(cx, cy, 1.3, { fill: "#ffd447", stroke: "#14202b", strokeWidth: 0.28, pointerEvents: "none" }, yf)}
+            {/* generous invisible touch target over the visible dot */}
+            {hdot(cx, cy, 3.4, { fill: "transparent", style: { cursor: "grab" }, onPointerDown: down }, yf)}
+          </g>;
+        })}
         {(() => {
-          // rotate handle: a lollipop above the box's top edge, spins about the centroid
+          // rotate handle: a lollipop above the box's top edge, spins about the
+          // centroid. Stem is long enough to clear the corner touch targets,
+          // and the grab area is a big invisible disc for fingertips.
           const mx = (x1 + x2) / 2;
           const cx = m.pts.reduce((a, q) => a + q.x, 0) / m.pts.length;
           const cy = m.pts.reduce((a, q) => a + q.y, 0) / m.pts.length;
-          const hy = y1 - 4.5 * yf;
+          const hy = y1 - 7 * yf;
+          const down = e => { const pt0 = svgPt(e);
+            handleDown(e, { kind: "markrotate", id: m.id, cx, cy,
+              a0: Math.atan2(pt0.y - cy, pt0.x - cx),
+              pts0: m.pts.map(q => ({ x: q.x, y: q.y })) }); };
           return <g key="rot">
             <line x1={mx} y1={y1} x2={mx} y2={hy} stroke="#ffd447" strokeWidth={sw(0.35)}
               vectorEffect="non-scaling-stroke" opacity={0.8} pointerEvents="none" />
-            {hdot(mx, hy, 1.3, { fill: "#14202b", stroke: "#ffd447", strokeWidth: 0.35,
-              style: { cursor: "grab" },
-              onPointerDown: e => { const pt0 = svgPt(e);
-                handleDown(e, { kind: "markrotate", id: m.id, cx, cy,
-                  a0: Math.atan2(pt0.y - cy, pt0.x - cx),
-                  pts0: m.pts.map(q => ({ x: q.x, y: q.y })) }); } }, yf)}
+            {hdot(mx, hy, 1.5, { fill: "#14202b", stroke: "#ffd447", strokeWidth: 0.35, pointerEvents: "none" }, yf)}
+            {hdot(mx, hy, 4.2, { fill: "transparent", style: { cursor: "grab" }, onPointerDown: down }, yf)}
           </g>;
         })()}
       </g>
