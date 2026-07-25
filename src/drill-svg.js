@@ -224,7 +224,9 @@ function markMarkup(m) {
     let acc = 0; const amp = Math.max(0.5, w * 0.9); pts = d.map((pt, i) => { const p0 = d[Math.max(0, i - 1)], p1 = d[Math.min(d.length - 1, i + 1)]; const dx = p1.x - p0.x, dy = p1.y - p0.y, mm = Math.hypot(dx, dy) || 1; if (i > 0) acc += Math.hypot(d[i].x - d[i - 1].x, d[i].y - d[i - 1].y); const edge = Math.min(1, i / 3, (d.length - 1 - i) / 3); const off = Math.sin((acc / 2.8) * Math.PI * 2) * amp * edge; return { x: pt.x + (-dy / mm) * off, y: pt.y + (dx / mm) * off }; });
   }
   const dash = m.style === "dashed" ? ` stroke-dasharray="${f(w * 2.6)} ${f(w * 1.9)}"` : m.style === "dotted" ? ` stroke-dasharray="0.02 ${f(w * 2)}"` : "";
-  return `<polyline points="${pts.map(q => `${f(q.x)},${f(q.y)}`).join(" ")}" fill="none" stroke="${m.color}" stroke-width="${f(w)}"${dash} stroke-linecap="round" stroke-linejoin="round" opacity="0.94"/>`;
+  const ptStr = pts.map(q => `${f(q.x)},${f(q.y)}`).join(" ");
+  const fillEl = m.fill ? `<polygon points="${ptStr}" fill="${m.fill}" fill-opacity="${f(m.fillOp != null ? m.fillOp : 0.25)}" stroke="none"/>` : "";
+  return `${fillEl}<polyline points="${ptStr}" fill="none" stroke="${m.color}" stroke-width="${f(w)}"${dash} stroke-linecap="round" stroke-linejoin="round" opacity="0.94"/>`;
 }
 /* piece icons                                                         */
 function piece(p) {

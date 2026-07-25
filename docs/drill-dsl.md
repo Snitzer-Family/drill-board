@@ -441,7 +441,10 @@ ITEM whistle count=1 "Whistle"
 
 ## Marker annotations
 
-`MARK <id> <color> <width> <style> x1,y1 x2,y2 …` draws a freehand ink line on
-the ice (not part of the drill logic). `style` is `solid` · `dashed` · `dotted`
-· `wavy`; `width` is in feet. In the app: **☰ tools → Marker**, pick a colour /
+`MARK <id> <color> <width> <style> [fill=<hex>[:<opacity>]] x1,y1 x2,y2 …`
+draws a freehand ink line on the ice (not part of the drill logic). `style` is
+`solid` · `dashed` · `dotted` · `wavy`; `width` is in feet. The optional
+**`fill=`** gives the enclosed area an independent translucent fill (hex colour
+without the `#`, opacity 0..1, default 0.25) — used for shaded coaching zones
+and the preset square/circle/triangle shape markers. In the app: **☰ tools → Marker**, pick a colour /
 style / thickness, then drag on the ice. Tap a mark to restyle or delete it.

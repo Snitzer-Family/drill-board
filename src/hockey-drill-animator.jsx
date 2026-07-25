@@ -5261,6 +5261,10 @@ export default function DrillAnimator() {
     const line = pts.map(q => `${clampX(q.x)},${clampY(q.y)}`).join(" ");
     return (
       <g key={`mk-${m.id}`}>
+        {m.fill && (
+          <polygon points={line} fill={m.fill} fillOpacity={m.fillOp != null ? m.fillOp : 0.25}
+            stroke="none" pointerEvents="none" />
+        )}
         <polyline points={line} fill="none" stroke={m.color} strokeWidth={w} strokeDasharray={dash}
           strokeLinecap="round" strokeLinejoin="round" opacity={0.94}
           pointerEvents={hit ? "none" : undefined} />
@@ -6056,6 +6060,24 @@ export default function DrillAnimator() {
                   <input type="range" min={0.5} max={3} step={0.1} value={p.width || 1.1} style={{ flex: 1, minWidth: 80 }}
                     onChange={e => updateById(p.id, { width: parseFloat(e.target.value) })} />
                 </div>
+              </div>
+              <div className="hd-field">
+                <div className="hd-sectitle">Fill</div>
+                <div className="hd-poprow">
+                  <button className={`hd-mini${!p.fill ? " on" : ""}`} onClick={() => updateById(p.id, { fill: null })}>None</button>
+                  {["#ffd447", "#d7263d", "#1f8a4c", "#3a8dff", "#e0731d", "#ffffff", "#14202b"].map(c => (
+                    <div key={c} className={`hd-swatch${p.fill === c ? " on" : ""}`} style={{ background: c }}
+                      onClick={() => updateById(p.id, { fill: c, fillOp: p.fillOp != null ? p.fillOp : 0.25 })} />
+                  ))}
+                </div>
+                {p.fill && (
+                  <div className="hd-poprow">
+                    <span>Opacity</span>
+                    <input type="range" min={0.05} max={0.9} step={0.05} value={p.fillOp != null ? p.fillOp : 0.25}
+                      style={{ flex: 1, minWidth: 80 }}
+                      onChange={e => updateById(p.id, { fillOp: parseFloat(e.target.value) })} />
+                  </div>
+                )}
               </div>
               <div className="hd-field">
                 <div className="hd-sectitle">Size &amp; proportion</div>

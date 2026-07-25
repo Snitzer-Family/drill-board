@@ -329,11 +329,22 @@ export function parseDrill(text) {
         // a bare `lock` flag may sit among the trailing tokens; coords are pure
         // numbers (the tokenizer splits on commas), so it never collides with them
         const mlock = tok.slice(5).some(t => t.toLowerCase() === "lock");
+        // optional independent area fill: fill=<hex>[:<opacity 0..1>] — non-
+        // numeric, so older readers drop it harmlessly via the isNaN filter
+        const mfTok = tok.slice(5).find(t => /^fill=/i.test(t));
+        let mfill = null, mfillOp = 0.25;
+        if (mfTok) {
+          const [fc, fo] = mfTok.slice(5).split(":");
+          if (fc) mfill = fc.startsWith("#") ? fc : "#" + fc;
+          const op = parseFloat(fo);
+          if (!isNaN(op)) mfillOp = Math.max(0.05, Math.min(1, op));
+        }
         const nums = tok.slice(5).map(Number).filter(n => !isNaN(n));
         const pts = [];
         for (let k = 0; k + 1 < nums.length; k += 2) pts.push({ x: nums[k], y: nums[k + 1] });
         if (mid && pts.length >= 2) {
-          const m = { id: mid, kind: "mark", color: mcol, width: mw, style: ["dashed", "dotted", "wavy"].includes(mst) ? mst : "solid", ...(mlock ? { lock: true } : {}), x: pts[0].x, y: pts[0].y, pts, path: [] };
+          const m = { id: mid, kind: "mark", color: mcol, width: mw, style: ["dashed", "dotted", "wavy"].includes(mst) ? mst : "solid",
+            ...(mlock ? { lock: true } : {}), ...(mfill ? { fill: mfill, fillOp: mfillOp } : {}), x: pts[0].x, y: pts[0].y, pts, path: [] };
           pieces.push(m); byId[mid] = m;
         }
       } else if (cmd === "STEP") {
@@ -426,7 +437,8 @@ export function serializeDrill(rink, pieces, title = "", desc = "", steps = [], 
     }
     if (p.kind === "mark") {
       const lk = p.lock ? " lock" : "";
-      out.push(`MARK ${p.id} ${p.color} ${f2(p.width || 1.1)} ${p.style || "solid"}${lk} ${(p.pts || []).map(q => `${f1(q.x)},${f1(q.y)}`).join(" ")}`);
+      const fl = p.fill ? ` fill=${String(p.fill).replace("#", "")}:${f2(p.fillOp != null ? p.fillOp : 0.25)}` : "";
+      out.push(`MARK ${p.id} ${p.color} ${f2(p.width || 1.1)} ${p.style || "solid"}${lk}${fl} ${(p.pts || []).map(q => `${f1(q.x)},${f1(q.y)}`).join(" ")}`);
       return;
     }
     const lbl = p.label ? " " + String(p.label).replace(/[\s,]+/g, "_") : "";
