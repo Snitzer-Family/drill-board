@@ -122,29 +122,9 @@ export function fitTransform(landmarks, { attack = "right", rink = "half" } = {}
   return best;
 }
 
-// Landmark snap points (dots + center): a piece the model placed within
-// `SNAP_R` feet of one was almost certainly drawn ON it — use the landmark as
-// the accurate position rather than the eyeballed pixel.
-const SNAP_PTS = [
-  [EZ_DOT_X[0], DOT_Y[0]], [EZ_DOT_X[0], DOT_Y[1]], [EZ_DOT_X[1], DOT_Y[0]], [EZ_DOT_X[1], DOT_Y[1]],
-  [NZ_DOT_X[0], DOT_Y[0]], [NZ_DOT_X[0], DOT_Y[1]], [NZ_DOT_X[1], DOT_Y[0]], [NZ_DOT_X[1], DOT_Y[1]],
-  [CENTER_X, MID_Y],
-];
-const SNAP_R = 3;
-const SNAP_KINDS = /^(player|puck|cone|tire)$/;
-// each snap point is claimed once per drill — a pile of pucks near a dot keeps
-// its scatter instead of collapsing onto the same spot
-function snapPoint(p, used) {
-  for (let i = 0; i < SNAP_PTS.length; i++) {
-    const [x, y] = SNAP_PTS[i];
-    if (Math.hypot(p.x - x, p.y - y) <= SNAP_R) {
-      if (used.has(i)) return p;
-      used.add(i);
-      return { x, y };
-    }
-  }
-  return p;
-}
+// NOTE: pieces are NOT snapped to dots/landmarks — the mapped pixel position
+// is kept verbatim so the import reproduces the diagram exactly as drawn.
+// (Nets are the one exception: they snap onto the goal line below.)
 
 const round1 = n => Math.round(n * 10) / 10;
 const COORD_RE = /^-?\d*\.?\d+,-?\d*\.?\d+$/;
@@ -160,7 +140,6 @@ function tokenize(line) {
 // (~deg) modifiers are dropped: they're image-frame angles the fit can't fix,
 // and auto-facing covers them. Net pieces snap to the goal lines.
 export function transformDsl(text, map) {
-  const usedSnaps = new Set();
   return text.split(/\r?\n/).map(line => {
     const kw = (line.trim().split(/\s+/)[0] || "").toUpperCase();
     if (kw === "PIECE") {
@@ -172,8 +151,6 @@ export function transformDsl(text, map) {
       if (kind === "net") {
         const gx = Math.abs(p.x - GOAL_X[1]) <= Math.abs(p.x - GOAL_X[0]) ? GOAL_X[1] : GOAL_X[0];
         if (Math.abs(p.x - gx) < 14) p = { x: gx, y: Math.abs(p.y - MID_Y) < 10 ? MID_Y : p.y };
-      } else if (SNAP_KINDS.test(kind)) {
-        p = snapPoint(p, usedSnaps);
       }
       tok[3] = String(round1(p.x)); tok[4] = String(round1(p.y));
       const out = tok.filter(t => !/^face=/i.test(t));

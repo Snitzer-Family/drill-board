@@ -29,7 +29,9 @@ CRITICAL — coordinates: diagrams are photographed in arbitrary orientations, s
 Work in this order:
 1. ORIENT FIRST. Before transcribing anything, identify the rink markings in the photo and establish the orientation: which line is the goal line, which is the blue line, where the faceoff dots and circles are, and which way the play attacks. This becomes the json block.
 2. COUNT EVERYTHING. Count the players of each colour (bench rows and the coach included), the dashed pass arrows, and the shot arrows. Record the totals in the json block's "counts" — the app rejects a drill whose piece and arrow totals disagree with your own counts, so count from the photo, not from what you've written.
-3. PLACE BY LANDMARK. Then transcribe pieces and routes, anchoring every position to the nearest major landmarks: a player drawn on a faceoff dot gets that dot's exact pixel position; a route that ends at the net ends at the net's pixels; a piece "at the top of the circle" sits on that circle's edge. Prefer landmark-anchored positions over eyeballed offsets — the landmarks are your measuring sticks, and the app snaps trusted landmark positions exactly. Every counted player must appear as a PIECE — a passing chain with three players has three player pieces even if two overlap visually.
+3. PLACE EACH PIECE BY LOOKING AT IT. Read every piece's pixel position individually from the photo — its own center, one at a time. Use the landmarks as measuring sticks to cross-check (a player drawn ON a dot gets that dot's pixels; one drawn beside a circle stays beside it), but never round a position toward a landmark, a row, or a grid the photo doesn't show. Positions are used verbatim. Every counted player must appear as a PIECE — a passing chain with three players has three player pieces even if two overlap visually.
+
+FAITHFUL RECREATION is the goal — an exact copy of the diagram. The same pieces, in the same places, with the same colours and the same labels. Never add a piece the photo doesn't show. Never drop one it does show. Never substitute colours (use a colour only where the diagram shows it). Never invent labels. Never tidy the layout. When fidelity and tidiness conflict, choose fidelity.
 
 Output exactly two fenced blocks, nothing else:
 
@@ -239,7 +241,7 @@ export async function drillFromImage({ apiKey, data, mediaType, onStatus, signal
     messages.push({
       role: "user",
       content: "Your drill disagrees with your own photo counts: " + mism.join("; ") +
-        ". Re-check the photo and output corrected ```json and ```drill blocks in full (image-pixel coordinates) with every counted player, pass, and shot present.",
+        ". Recount from the PHOTO. If the drill is missing a piece that is visible in the photo, add it exactly where the photo shows it. If your earlier count was wrong, correct the counts instead — NEVER invent a piece, colour, or label that is not visible in the photo just to satisfy a number. Output corrected ```json and ```drill blocks in full (image-pixel coordinates).",
     });
     const raw2 = await callClaude(apiKey, messages, signal);
     messages.push({ role: "assistant", content: raw2 });

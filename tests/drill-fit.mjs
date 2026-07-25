@@ -77,20 +77,20 @@ check("orientation search overrides a wrong attack call", () => {
   near(m.x, 150, 0.5, "player x"); near(m.y, 30, 0.5, "player y");
 });
 
-// --- pieces near a dot snap exactly onto it ---------------------------------
-check("landmark snapping", () => {
+// --- pieces keep their mapped positions verbatim (no snapping) --------------
+check("no piece snapping — faithful positions", () => {
   const map = (x, y) => ({ x: x / 10, y: y / 10 });
   const src = [
-    "PIECE F1 player 1680 195 F1",     // → (168, 19.5): 1.4ft from dot (169, 20.5)
-    "PIECE C1 cone 1300 300",          // → (130, 30): no landmark near
-    "PIECE L1 label 1685 200 \"hi\"",  // labels never snap
-    "PIECE K1 puck 1700 210",          // → (170, 21): dot already claimed by F1
+    "PIECE F1 player 1680 195 F1",     // → (168, 19.5): near dot (169, 20.5) — stays put
+    "PIECE C1 cone 1300 300",          // → (130, 30)
+    "PIECE L1 label 1685 200 \"hi\"",
+    "PIECE K1 puck 1700 210",          // → (170, 21)
   ].join("\n");
   const out = transformDsl(src, map).split("\n");
-  assert.equal(out[0], "PIECE F1 player 169 20.5 F1", "snapped to the dot");
-  assert.equal(out[1], "PIECE C1 cone 130 30", "left alone");
-  assert.ok(out[2].includes("168.5 20"), "label not snapped");
-  assert.equal(out[3], "PIECE K1 puck 170 21", "snap point claimed once — pile keeps its scatter");
+  assert.equal(out[0], "PIECE F1 player 168 19.5 F1", "player position verbatim");
+  assert.equal(out[1], "PIECE C1 cone 130 30", "cone verbatim");
+  assert.ok(out[2].includes("168.5 20"), "label verbatim");
+  assert.equal(out[3], "PIECE K1 puck 170 21", "puck verbatim");
 });
 
 // --- too little evidence errors instead of guessing ------------------------
