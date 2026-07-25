@@ -7066,7 +7066,7 @@ export default function DrillAnimator() {
             onPointerDown={onSvgDown} onPointerMove={onSvgMove}
             onPointerUp={onSvgUp} onPointerCancel={onSvgUp}>
             <defs>
-              <clipPath id="boards"><rect x={0.5} y={0.5} width={199} height={84} rx={27.5} ry={27.5 * yFix} /></clipPath>
+              <clipPath id="boards"><rect x={0.5} y={0.5} width={199} height={84} rx={28} ry={28 * yFix} /></clipPath>
             </defs>
 
             <g transform={zoomXf}>

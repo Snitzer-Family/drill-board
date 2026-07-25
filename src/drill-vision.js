@@ -26,6 +26,10 @@ ${DSL_REF}
 
 CRITICAL — coordinates: diagrams are photographed in arbitrary orientations, so do NOT attempt to convert positions into rink feet. Every coordinate you write (PIECE positions, PATH/BRANCH points, MARK points, STEP pos=) must be an IMAGE PIXEL coordinate of the supplied photo: origin at the top-left, x right, y down. The app converts pixels to rink feet from your landmark report.
 
+Work in this order:
+1. ORIENT FIRST. Before transcribing anything, identify the rink markings in the photo and establish the orientation: which line is the goal line, which is the blue line, where the faceoff dots and circles are, and which way the play attacks. This becomes the json block.
+2. PLACE BY LANDMARK. Then transcribe pieces and routes, anchoring every position to the nearest major landmarks: a player drawn on a faceoff dot gets that dot's exact pixel position; a route that ends at the net ends at the net's pixels; a piece "at the top of the circle" sits on that circle's edge. Prefer landmark-anchored positions over eyeballed offsets — the landmarks are your measuring sticks, and the app snaps trusted landmark positions exactly.
+
 Output exactly two fenced blocks, nothing else:
 
 1. A \`\`\`json fence:

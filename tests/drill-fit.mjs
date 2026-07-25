@@ -60,6 +60,37 @@ check("y fallback: lines only", () => {
   near(m.x, 183, 2, "net x"); near(m.y, 42.5, 2, "net y (anchored)");
 });
 
+// --- wrong stated attack: the landmark fit overrides it ---------------------
+check("orientation search overrides a wrong attack call", () => {
+  const lm = [
+    { feature: "goal_line", ...toPx(183, 42.5) },
+    { feature: "blue_line", ...toPx(125, 42.5) },
+    { feature: "net", ...toPx(183, 42.5) },
+    { feature: "endzone_dot", ...toPx(155, 20.5) },
+    { feature: "endzone_dot", ...toPx(155, 64.5) },
+  ];
+  // truth is attack=down (portrait); the model claims "right"
+  const { map, attack, error } = fitTransform(lm, { attack: "right", rink: "half" });
+  assert.equal(error, undefined);
+  assert.equal(attack, "down", "search picked the true orientation");
+  const p = toPx(150, 30), m = map(p.x, p.y);
+  near(m.x, 150, 0.5, "player x"); near(m.y, 30, 0.5, "player y");
+});
+
+// --- pieces near a dot snap exactly onto it ---------------------------------
+check("landmark snapping", () => {
+  const map = (x, y) => ({ x: x / 10, y: y / 10 });
+  const src = [
+    "PIECE F1 player 1540 195 F1",     // → (154, 19.5): 1.4ft from dot (155, 20.5)
+    "PIECE C1 cone 1300 300",          // → (130, 30): no landmark near
+    "PIECE L1 label 1545 200 \"hi\"",  // labels never snap
+  ].join("\n");
+  const out = transformDsl(src, map).split("\n");
+  assert.equal(out[0], "PIECE F1 player 155 20.5 F1", "snapped to the dot");
+  assert.equal(out[1], "PIECE C1 cone 130 30", "left alone");
+  assert.ok(out[2].includes("154.5 20"), "label not snapped");
+});
+
 // --- too little evidence errors instead of guessing ------------------------
 check("single landmark → error", () => {
   const { error } = fitTransform([{ feature: "net", x: 10, y: 10 }], { attack: "right", rink: "half" });

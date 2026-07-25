@@ -40,13 +40,8 @@ function pickX(u, candidates, siblings, refU) {
   return u >= refU ? candidates[1] : candidates[0];
 }
 
-// Fit the pixel→rink transform from model-reported landmarks.
-// landmarks: [{feature, x, y}] in pixels; feature ∈ goal_line | blue_line |
-// center_line | center_dot | center_circle | net | crease | endzone_dot |
-// endzone_circle | neutral_dot. Line features use the midpoint of the drawn
-// line. attack: which way the play attacks in the IMAGE. rink: half | full.
-// Returns { map(x, y) → {x, y}, residual } or { error }.
-export function fitTransform(landmarks, { attack = "right", rink = "half" } = {}) {
+// Fit the pixel→rink transform for ONE candidate attack direction.
+function fitOne(landmarks, attack, rink) {
   const rot = ROTS[attack] || ROTS.right;
   const half = rink !== "full";
   const pts = (landmarks || [])
@@ -105,6 +100,45 @@ export function fitTransform(landmarks, { attack = "right", rink = "half" } = {}
   return { map, residual };
 }
 
+// Fit the pixel→rink transform from model-reported landmarks.
+// landmarks: [{feature, x, y}] in pixels; feature ∈ goal_line | blue_line |
+// center_line | center_dot | center_circle | net | crease | endzone_dot |
+// endzone_circle | neutral_dot. Line features use the midpoint of the drawn
+// line. attack: which way the model says the play attacks in the IMAGE —
+// treated as a prior, not gospel: every orientation is fitted and the one the
+// landmarks actually agree with wins; the stated attack only breaks near-ties.
+// rink: half | full. Returns { map, residual, attack } or { error }.
+export function fitTransform(landmarks, { attack = "right", rink = "half" } = {}) {
+  const cands = [];
+  for (const dir of Object.keys(ROTS)) {
+    const f = fitOne(landmarks, dir, rink);
+    if (!f.error) cands.push({ attack: dir, ...f });
+  }
+  if (!cands.length) return fitOne(landmarks, attack, rink); // surface its error
+  cands.sort((a, b) => a.residual - b.residual);
+  let best = cands[0];
+  const stated = cands.find(c => c.attack === attack);
+  if (stated && stated.residual <= best.residual * 1.5 + 0.5) best = stated;
+  return best;
+}
+
+// Landmark snap points (dots + center): a piece the model placed within
+// `SNAP_R` feet of one was almost certainly drawn ON it — use the landmark as
+// the accurate position rather than the eyeballed pixel.
+const SNAP_PTS = [
+  [EZ_DOT_X[0], DOT_Y[0]], [EZ_DOT_X[0], DOT_Y[1]], [EZ_DOT_X[1], DOT_Y[0]], [EZ_DOT_X[1], DOT_Y[1]],
+  [NZ_DOT_X[0], DOT_Y[0]], [NZ_DOT_X[0], DOT_Y[1]], [NZ_DOT_X[1], DOT_Y[0]], [NZ_DOT_X[1], DOT_Y[1]],
+  [CENTER_X, MID_Y],
+];
+const SNAP_R = 3;
+const SNAP_KINDS = /^(player|puck|cone|tire)$/;
+function snapPoint(p) {
+  for (const [x, y] of SNAP_PTS) {
+    if (Math.hypot(p.x - x, p.y - y) <= SNAP_R) return { x, y };
+  }
+  return p;
+}
+
 const round1 = n => Math.round(n * 10) / 10;
 const COORD_RE = /^-?\d*\.?\d+,-?\d*\.?\d+$/;
 
@@ -130,6 +164,8 @@ export function transformDsl(text, map) {
       if (kind === "net") {
         const gx = Math.abs(p.x - GOAL_X[1]) <= Math.abs(p.x - GOAL_X[0]) ? GOAL_X[1] : GOAL_X[0];
         if (Math.abs(p.x - gx) < 14) p = { x: gx, y: Math.abs(p.y - MID_Y) < 10 ? MID_Y : p.y };
+      } else if (SNAP_KINDS.test(kind)) {
+        p = snapPoint(p);
       }
       tok[3] = String(round1(p.x)); tok[4] = String(round1(p.y));
       return tok.filter(t => !/^face=/i.test(t)).join(" ");

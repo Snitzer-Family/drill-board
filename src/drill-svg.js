@@ -175,7 +175,7 @@ function rink() {
   const dot = (x, y, r = 1, c = mk) => `<circle cx="${x}" cy="${y}" r="${r}" fill="${c}"/>`;
   const fo = (x, y, c) => `<circle cx="${x}" cy="${y}" r="15" fill="none" stroke="${c}" stroke-width="0.45" opacity="0.9"/>`;
   return `
-    <rect x="0.6" y="0.6" width="198.8" height="83.8" rx="26" fill="${V("surface", "#f6fafd")}" stroke="${V("ink", "#14202b")}" stroke-width="1.1"/>
+    <rect x="0.6" y="0.6" width="198.8" height="83.8" rx="28" fill="${V("surface", "#f6fafd")}" stroke="${V("ink", "#14202b")}" stroke-width="1.1"/>
     <g clip-path="url(#ice)">
       <g stroke-linecap="round">
         <line x1="17" y1="0" x2="17" y2="85" stroke="${mk}" stroke-width="0.45"/>
@@ -392,7 +392,7 @@ export function drillSvg(dsl, opts = {}) {
   const byId = id => pieces.find(p => p.id === id);
   const rank = k => (k === "net" || k === "bumper" || k === "deker" || k === "passer" || k === "tire" || k === "stick" || k === "mark" ? 0 : k === "player" ? 2 : 1);
   const defs = `<defs>
-      <clipPath id="ice"><rect x="0.6" y="0.6" width="198.8" height="83.8" rx="26"/></clipPath>
+      <clipPath id="ice"><rect x="0.6" y="0.6" width="198.8" height="83.8" rx="28"/></clipPath>
       <marker id="arrowR" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4" fill="none" stroke="${V("mark", "#cf3346")}" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></marker>
       <marker id="arrowP" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="${V("puck", "#14171a")}"/></marker>
       <marker id="arrowRB" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="${REBOUND_COLOR}"/></marker>
