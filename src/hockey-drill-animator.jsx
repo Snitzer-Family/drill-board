@@ -7800,9 +7800,14 @@ export default function DrillAnimator() {
           <button className="hd-item" onClick={() => fileRef.current?.click()}><Icon name="upload" size={16} /> Load .txt / .md</button>
           <button className="hd-item danger"
             onClick={() => {
-              if (!pieces.length || window.confirm("Clear all pieces from the board?")) {
+              const hasContent = pieces.length || drillSteps.length || drillItems.length ||
+                drillTitle.trim() || drillDesc.trim() || drillNotes.trim();
+              if (!hasContent || window.confirm("Clear everything — pieces, steps, items, and drill info?")) {
                 setPlaying(false); resetAnim();
-                setPieces([]); setSelectedId(null); setPopup(null); setOpenMenu(null);
+                setPieces([]); setDrillSteps([]); setDrillItems([]);
+                setDrillTitle(""); setDrillDesc(""); setDrillNotes(""); setDrillVersion(undefined);
+                setPlacingStep(null); setEditAnchor(null);
+                setSelectedId(null); setPopup(null); setOpenMenu(null);
               }
             }}><Icon name="trash" size={16} /> Clear all</button>
           <button className={`hd-item${showZones ? " on" : ""}`}
