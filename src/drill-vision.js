@@ -28,7 +28,8 @@ CRITICAL — coordinates: diagrams are photographed in arbitrary orientations, s
 
 Work in this order:
 1. ORIENT FIRST. Before transcribing anything, identify the rink markings in the photo and establish the orientation: which line is the goal line, which is the blue line, where the faceoff dots and circles are, and which way the play attacks. This becomes the json block.
-2. PLACE BY LANDMARK. Then transcribe pieces and routes, anchoring every position to the nearest major landmarks: a player drawn on a faceoff dot gets that dot's exact pixel position; a route that ends at the net ends at the net's pixels; a piece "at the top of the circle" sits on that circle's edge. Prefer landmark-anchored positions over eyeballed offsets — the landmarks are your measuring sticks, and the app snaps trusted landmark positions exactly.
+2. COUNT EVERYTHING. Count the players of each colour (bench rows and the coach included), the dashed pass arrows, and the shot arrows. Record the totals in the json block's "counts" — the app rejects a drill whose piece and arrow totals disagree with your own counts, so count from the photo, not from what you've written.
+3. PLACE BY LANDMARK. Then transcribe pieces and routes, anchoring every position to the nearest major landmarks: a player drawn on a faceoff dot gets that dot's exact pixel position; a route that ends at the net ends at the net's pixels; a piece "at the top of the circle" sits on that circle's edge. Prefer landmark-anchored positions over eyeballed offsets — the landmarks are your measuring sticks, and the app snaps trusted landmark positions exactly. Every counted player must appear as a PIECE — a passing chain with three players has three player pieces even if two overlap visually.
 
 Output exactly two fenced blocks, nothing else:
 
@@ -36,7 +37,8 @@ Output exactly two fenced blocks, nothing else:
 {
   "rink": "half" | "full",            // what the diagram shows (zone/half-ice → "half")
   "attack": "up" | "down" | "left" | "right",  // direction TOWARD the attacking net IN THE PHOTO
-  "landmarks": [ { "feature": "...", "x": <px>, "y": <px> }, ... ]
+  "landmarks": [ { "feature": "...", "x": <px>, "y": <px> }, ... ],
+  "counts": { "players": <n>, "passes": <n>, "shots": <n> }  // from the PHOTO: all player marks incl. bench + coach; dashed pass arrows; shot arrows
 }
 Report every rink marking you can identify. Allowed features: goal_line, blue_line, center_line, center_dot, center_circle, net, crease, endzone_dot, endzone_circle, neutral_dot. For lines, give the midpoint of the visible painted segment; for circles, the center. Landmark accuracy matters more than quantity — only report marks you can actually see.
 
@@ -170,16 +172,32 @@ async function renderDsl(dsl, width = 1200) {
   }
 }
 
-// fit + transform one model response; returns {dsl, drill, errors} where dsl
-// is rink-feet text (best effort even when parse errors remain) — or throws
-// when the landmarks can't orient the diagram at all.
+// fit + transform one model response; returns {dsl, drill, errors, meta}
+// where dsl is rink-feet text (best effort even when parse errors remain) —
+// or throws when the landmarks can't orient the diagram at all.
 function toRinkDsl(raw) {
   const meta = extractMeta(raw) || {};
   const fit = fitTransform(meta.landmarks, { attack: meta.attack, rink: meta.rink });
   if (fit.error) throw new Error(`Couldn't orient the diagram — ${fit.error}.`);
   const dsl = transformDsl(extractDrill(raw), fit.map);
   const r = parseDrill(dsl);
-  return { dsl, drill: r.errors.length ? null : r, errors: r.errors };
+  return { dsl, drill: r.errors.length ? null : r, errors: r.errors, meta };
+}
+
+// hold the drill to the model's own photo counts (players / passes / shots) —
+// a dropped chain receiver shows up here as a hard mismatch we can bounce back
+function countMismatches(drill, meta) {
+  const c = meta?.counts;
+  if (!drill || !c) return [];
+  const players = drill.pieces.filter(p => p.kind === "player").length;
+  const pucks = drill.pieces.filter(p => p.kind === "puck");
+  const passes = pucks.reduce((a, p) => a + (p.transfers || []).filter(t => t.kind === "pass").length, 0);
+  const shots = pucks.reduce((a, p) => a + (p.terminals || []).filter(t => t.kind === "shot").length, 0);
+  const out = [];
+  if (Number.isFinite(c.players) && players !== c.players) out.push(`you counted ${c.players} players in the photo but the drill has ${players} player pieces`);
+  if (Number.isFinite(c.passes) && passes !== c.passes) out.push(`you counted ${c.passes} pass arrows but the drill has ${passes} pass= entries`);
+  if (Number.isFinite(c.shots) && shots !== c.shots) out.push(`you counted ${c.shots} shot arrows but the drill has ${shots} shots`);
+  return out;
 }
 
 // Transcribe an image into the DSL: pixel-space extraction → deterministic
@@ -213,6 +231,24 @@ export async function drillFromImage({ apiKey, data, mediaType, onStatus, signal
   let best = toRinkDsl(raw);
   if (!best.drill) return { text: best.dsl, drill: null, errors: best.errors };
 
+  // hold the drill to the model's own counts — a dropped player or pass hop
+  // is a deterministic mismatch, worth one corrective round-trip
+  const mism = countMismatches(best.drill, best.meta);
+  if (mism.length) {
+    onStatus?.("Reconciling the piece count…");
+    messages.push({
+      role: "user",
+      content: "Your drill disagrees with your own photo counts: " + mism.join("; ") +
+        ". Re-check the photo and output corrected ```json and ```drill blocks in full (image-pixel coordinates) with every counted player, pass, and shot present.",
+    });
+    const raw2 = await callClaude(apiKey, messages, signal);
+    messages.push({ role: "assistant", content: raw2 });
+    try {
+      const fixed = toRinkDsl(raw2);
+      if (fixed.drill) best = fixed;
+    } catch { /* keep the pre-reconcile result */ }
+  }
+
   // visual verify: show the model our rendering next to its memory of the
   // photo; side-by-side comparison catches what absolute mapping missed
   try {
@@ -222,7 +258,7 @@ export async function drillFromImage({ apiKey, data, mediaType, onStatus, signal
       role: "user",
       content: [
         { type: "image", source: { type: "base64", media_type: "image/jpeg", data: render } },
-        { type: "text", text: "This is your transcription rendered on the DrillBoard rink (your pixel coordinates were converted programmatically from your landmark report). Compare it with the original photo and check specifically: (1) every pass/shot connects the SAME two pieces as the photo, in the same order; (2) no route or pass runs off the ice or crosses the rink where the photo shows no such line; (3) each piece sits on/off the same landmark (dot, circle edge, crease) as in the photo; (4) piece counts, kinds, and colours match; (5) exactly ONE puck is in play (on the first passer) and there is no MARK ink other than shaded-zone outlines — any arrow drawn as ink must be rewritten as pass=/shoot=/PATH. If anything is misplaced, missing, or wrong, output corrected ```json and ```drill blocks in full — still in ORIGINAL PHOTO pixel coordinates. If it is faithful, reply with exactly OK." },
+        { type: "text", text: "This is your transcription rendered on the DrillBoard rink (your pixel coordinates were converted programmatically from your landmark report). Compare it with the original photo and check specifically: (1) every pass/shot connects the SAME two pieces as the photo, in the same order; (2) no route or pass runs off the ice or crosses the rink where the photo shows no such line; (3) each piece sits on/off the same landmark (dot, circle edge, crease) as in the photo; (4) piece counts, kinds, and colours match; (5) exactly ONE puck is in play (on the first passer) and there is no MARK ink other than shaded-zone outlines — any arrow drawn as ink must be rewritten as pass=/shoot=/PATH; (6) COUNT the players in the photo and in the rendering — the numbers must match, and every hop of the passing chain must have its receiver present on the ice. If anything is misplaced, missing, or wrong, output corrected ```json and ```drill blocks in full — still in ORIGINAL PHOTO pixel coordinates. If it is faithful, reply with exactly OK." },
       ],
     });
     const check = await callClaude(apiKey, messages, signal);
