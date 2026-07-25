@@ -6,6 +6,24 @@
 // Known rink geometry (matches rink.jsx / docs/drill-dsl.md landmark table).
 const GOAL_X = [11, 189], BLUE_X = [75, 125], CENTER_X = 100;
 const EZ_DOT_X = [31, 169], NZ_DOT_X = [80, 120], DOT_Y = [20.5, 64.5], MID_Y = 42.5;
+const RINK_W = 200, RINK_H = 85, CORNER_R = 28, EDGE_IN = 1; // boards rect rx=28 in rink.jsx
+
+// Clamp a mapped point INTO the rounded-rink ice, inset EDGE_IN from the
+// boards. The old box clamp pinned out-of-range points exactly onto the
+// boards line — and near the corners that is outside the ice entirely, so a
+// slightly-misjudged wall point rendered as skating out of the rink. Points
+// that land in a corner's dead zone project back onto the corner arc.
+function clampIce(x, y) {
+  x = Math.min(RINK_W - EDGE_IN, Math.max(EDGE_IN, x));
+  y = Math.min(RINK_H - EDGE_IN, Math.max(EDGE_IN, y));
+  const cx = x < CORNER_R ? CORNER_R : x > RINK_W - CORNER_R ? RINK_W - CORNER_R : null;
+  const cy = y < CORNER_R ? CORNER_R : y > RINK_H - CORNER_R ? RINK_H - CORNER_R : null;
+  if (cx !== null && cy !== null) {
+    const dx = x - cx, dy = y - cy, d = Math.hypot(dx, dy), max = CORNER_R - EDGE_IN;
+    if (d > max) { x = cx + (dx / d) * max; y = cy + (dy / d) * max; }
+  }
+  return { x, y };
+}
 
 // Rotate pixel coords (y-down) so the reported attack direction points +x.
 // Both pixel and rink spaces are y-down, so a photographed overhead diagram
@@ -97,7 +115,7 @@ function fitOne(landmarks, attack, rink) {
 
   const map = (x, y) => {
     const { u, v } = rot({ x, y });
-    return { x: Math.min(200, Math.max(0, fx.s * u + fx.t)), y: Math.min(85, Math.max(0, fy.s * v + fy.t)) };
+    return clampIce(fx.s * u + fx.t, fy.s * v + fy.t);
   };
   let residual = 0;
   for (const [u, X] of xPairs) residual += Math.abs(fx.s * u + fx.t - X);

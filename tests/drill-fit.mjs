@@ -115,6 +115,23 @@ check("off-center nets don't anchor y", () => {
   near(md.y, 64.5, 0.6, "dot y");
 });
 
+// --- out-of-range points clamp into the ROUNDED ice, not onto the boards ----
+check("clamp projects into the rounded corners", () => {
+  const lm = [
+    { feature: "goal_line", ...toPx(189, 42.5) },
+    { feature: "crease", ...toPx(186, 42.5) },
+    { feature: "endzone_dot", ...toPx(169, 20.5) },
+    { feature: "endzone_dot", ...toPx(169, 64.5) },
+  ];
+  const { map, error } = fitTransform(lm, { attack: "down", rink: "half" });
+  assert.equal(error, undefined);
+  // a wall point misjudged past the boards, up in the corner region
+  const p = toPx(203, 12), m = map(p.x, p.y);
+  assert.ok(m.x <= 199 && m.y >= 1, "inside the inset box");
+  const d = Math.hypot(m.x - 172, m.y - 28); // top-right corner arc center
+  assert.ok(d <= 27.01, `on/inside the corner arc (d=${d.toFixed(1)})`);
+});
+
 // --- too little evidence errors instead of guessing ------------------------
 check("single landmark → error", () => {
   const { error } = fitTransform([{ feature: "net", x: 10, y: 10 }], { attack: "right", rink: "half" });

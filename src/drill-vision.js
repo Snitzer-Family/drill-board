@@ -49,9 +49,11 @@ Report every rink marking you can identify. Allowed features: goal_line, blue_li
 Transcription rules:
 - Use PIECE and PATH statements. Prefer simple L and Q segments — capture the drill's shape and flow, not every wiggle.
 - Solid lines with arrowheads are skating routes (CARRY when the player has the puck). Dashed lines are passes (pass= on the puck, or a PASS leg). Heavy/zigzag lines ending at the net are shots (shoot= or a SHOT leg).
-- Wire every line to its pieces. A line belongs to a specific piece: it starts AT that piece's position and ends exactly AT the receiving piece, the net, or its visible arrowhead — reuse those pieces' own pixel coordinates as the endpoints. No line may run off the ice or dangle in space. If you cannot tell what a line connects, omit it rather than guess.
+- Wire every line to its pieces. A line belongs to a specific piece: it starts AT that piece's position and ends exactly AT the receiving piece, the net, or its visible arrowhead — reuse those pieces' own pixel coordinates as the endpoints. No line may run off the ice or dangle in space, and no route waypoint may sit on or outside the boards — a route touches the boards only where the play actually meets the wall (collecting a chipped puck, a rim). If your traced curve would cross the rink outline, you have misread an arrowhead or endpoint: re-trace it. If you cannot tell what a line connects, omit it rather than guess.
 - Coaches never skate. A coach (CO) with a puck pile is a stationary feeder, and drills often draw a player starting right next to the coach: a route that starts at or beside a coach belongs to that nearby PLAYER — typically the player skates TO the coach as their first leg, receives a puck there (a pass= from the coach on the puck), and continues. Attribute each route by who moves (follow the arrowheads and the leg sequence from the player's dot), never by whichever piece happens to sit closest to where the ink begins.
-- A wavy/snaking route segment is a SKATING STYLE, not a shape to trace: on a player without the puck it is BACKWARD skating — put BWD before that leg's segments, and FWD where they pivot forward again (forward → backward → forward transitions at a coach, dot, or line are common). A wavy segment on a puck carrier is stickhandling — an ordinary carry leg. Only a heavy/zigzag line ending at the net is a shot.
+- A wavy/snaking route segment is a SKATING STYLE, not a shape to trace: on a player without the puck it is BACKWARD skating — put BWD before that leg's segments, and FWD where they pivot forward again (forward → backward → forward transitions at a coach, dot, or line are common). A wavy segment on a puck carrier is stickhandling — an ordinary carry leg. Only a heavy/zigzag line ending at the net is a shot. Backward spans are usually SHORT — a transition of a few feet at a pivot: put BWD on the wavy span only, and return to FWD exactly where the wave ends; a long sweeping curve onward to a destination is ordinary forward skating even right after a backward transition.
+- A dashed or hooked line that ends at a FREE-STANDING puck (often at the boards) rather than at a player is a CHIP into space: the drawn free puck marks where the chip LANDS — do not transcribe that puck as a piece. Write the chipper's puck with the chip handoff (chip=<pt>:<collector>@<recv>) and route the collector THROUGH the drawn puck spot, so their collect waypoint sits exactly on it. Never rewrite a chip as a plain pass, and never have the collector receive at the chipper's feet — they collect where the free puck is drawn.
+- A free-standing puck that nobody chips or shoots there is a loose puck PIECE: the player whose route runs through it collects it — write pickup=<player>@<pt> on that puck at the waypoint that touches it.
 - A chain of dashed arrows is ONE puck moving — exactly one puck in play, owned by the first passer; every other player in the chain has NO puck. The app draws pass and shot lines itself from the puck chain: you never draw them. Worked example — X1 passes to X2, X2 passes to X3, X3 shoots, all standing still (pixel coords as usual):
   PIECE X1 player 400 900 X
   PIECE X2 player 520 1100 X
@@ -199,12 +201,18 @@ function countMismatches(drill, meta) {
   // never trigger a bounce (which is how a phantom 7th skater got invented)
   const goalies = drill.pieces.filter(p => p.kind === "net" && p.goalie).length;
   const pucks = drill.pieces.filter(p => p.kind === "puck");
-  const passes = pucks.reduce((a, p) => a + (p.transfers || []).filter(t => t.kind === "pass").length, 0);
+  const xfer = k => pucks.reduce((a, p) => a + (p.transfers || []).filter(t => t.kind === k).length, 0);
+  const passes = xfer("pass");
+  // chips/rims are drawn as dashed arrows too, so the model may count them
+  // among "passes" — accept either tally, like the goalie-as-player tolerance,
+  // so the bounce never pressures a chip into becoming a plain pass
+  const chips = xfer("chip") + xfer("rim");
   const shots = pucks.reduce((a, p) => a + (p.terminals || []).filter(t => t.kind === "shot").length, 0);
   const out = [];
   if (Number.isFinite(c.players) && players !== c.players && players + goalies !== c.players)
     out.push(`you counted ${c.players} players in the photo but the drill has ${players} player pieces (note: the goalie is the goalie flag on the net piece, not a player piece — do not count or add it as a player)`);
-  if (Number.isFinite(c.passes) && passes !== c.passes) out.push(`you counted ${c.passes} pass arrows but the drill has ${passes} pass= entries`);
+  if (Number.isFinite(c.passes) && passes !== c.passes && passes + chips !== c.passes)
+    out.push(`you counted ${c.passes} pass arrows but the drill has ${passes} pass= entries (a chip/rim keeps its chip=/rim= form — never rewrite one as a plain pass to make counts agree)`);
   if (Number.isFinite(c.shots) && shots !== c.shots) out.push(`you counted ${c.shots} shot arrows but the drill has ${shots} shots`);
   return out;
 }
