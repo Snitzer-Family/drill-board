@@ -4495,13 +4495,17 @@ export default function DrillAnimator() {
   // identical — same shape, weight, and scaling.
   function routeMark(key, endPt, ang, stop, color, opacity = 1) {
     const fx = iconXf({ x: endPt.x, y: endPt.y, a: ang });
+    // the whole mark scales with the line-thickness setting (like SVG's native
+    // stroke-width marker units), anchored on the tip so it stays at the line's end
     return (
       <g key={key} transform={fx.t} pointerEvents="none" opacity={opacity}>
-        {stop
-          // ‖ stop mark: the incoming line ends at the FIRST bar (the line's end);
-          // the second bar sits just PAST it, so the line doesn't run through both
-          ? <path d="M 0 -2.4 L 0 2.4 M 1.5 -2.4 L 1.5 2.4" fill="none" stroke={color} strokeWidth={1.1} strokeLinecap="round" />
-          : <path d="M -3.0 -1.85 L 0 0 L -3.0 1.85" fill="none" stroke={color} strokeWidth={1.0} strokeLinecap="round" strokeLinejoin="round" />}
+        <g transform={lineScale !== 1 ? `scale(${lineScale})` : undefined}>
+          {stop
+            // ‖ stop mark: the incoming line ends at the FIRST bar (the line's end);
+            // the second bar sits just PAST it, so the line doesn't run through both
+            ? <path d="M 0 -2.4 L 0 2.4 M 1.5 -2.4 L 1.5 2.4" fill="none" stroke={color} strokeWidth={1.1} strokeLinecap="round" />
+            : <path d="M -3.0 -1.85 L 0 0 L -3.0 1.85" fill="none" stroke={color} strokeWidth={1.0} strokeLinecap="round" strokeLinejoin="round" />}
+        </g>
       </g>
     );
   }
@@ -7211,11 +7215,13 @@ export default function DrillAnimator() {
               const plannerEdit = !presentation && animT <= 0;
               const obstacles = collisions && effAvoidVis ? detourObstaclesFor(p.id) : [];
               // Draw each branch from the waypoint it departs (its `at`, route end by
-              // default); recurse into chained branches. Branch routes now render with
-              // the SAME machinery as base routes — line-thickness setting, obstacle
-              // detour (bent line + faint ghost), and wiggle/zigzag shaping — so a
-              // reaction line looks identical to a base line. Each distinct branch
-              // origin gets a reaction-light action circle, drawn last (on top).
+              // default); recurse into chained branches. Branch routes render with the
+              // SAME machinery and style as base routes — segStroke thickness/opacity,
+              // line-thickness setting, tidy-arrowhead end trims, obstacle detour (bent
+              // line + faint ghost), and wiggle/zigzag shaping — so a reaction line
+              // looks identical to a base line; only the dash marks a non-chosen
+              // alternative. Each distinct branch origin gets a reaction-light action
+              // circle, drawn last (on top).
               const renderLevel = (branches, parentSegs, parentOrigin, prefix) => {
                 const items = [], badges = new Map();
                 // the parent route's own action waypoints — a branch departing from one
@@ -7229,7 +7235,10 @@ export default function DrillAnimator() {
                   const editThis = editingFork && editingFork.id === p.id && forkEq(editingFork.color, ref);
                   const active = previewAll || plannerEdit || chosen.has(String(ref).toLowerCase());
                   const end = f.path[f.path.length - 1];
-                  const op = editThis ? 1 : active ? 0.95 : 0.5, solid = editThis || active;
+                  const solid = editThis || active;
+                  // marks only: chosen/active branch marks read full like base-route marks;
+                  // non-chosen alternatives keep a dim so they don't compete during playback
+                  const markOp = solid ? 1 : 0.5;
                   const det = collisions ? detourOf(origin, f.path, obstacles, `${p.id}:fork:${ref}`) : null;
                   const bent = det && det.pts;
                   // a branch is a normal route: action circles at its OWN action waypoints
@@ -7243,11 +7252,39 @@ export default function DrillAnimator() {
                   // colour — it's a decision, not a colour-coded read.
                   const cd = condOf(f);
                   const routeCol = cd.type === "light" ? (cd.color || f.color) : p.color;
-                  // stroke honours the global line-thickness setting (× lineScale); forks
-                  // stay a touch thinner than base routes, solid chosen / faint alternatives
-                  const line = { stroke: routeCol, fill: "none", strokeWidth: sw(solid ? 0.55 : 0.42) * lineScale,
-                    vectorEffect: "non-scaling-stroke", strokeLinecap: "round", strokeLinejoin: "round",
-                    opacity: op, pointerEvents: "none" };
+                  // same stroke as a base route (segStroke: thickness setting × lineScale,
+                  // 0.78 opacity, non-scaling) with the cue colour swapped in; non-chosen
+                  // alternatives dim to half the base opacity and keep their dash
+                  const baseLine = segStroke(p, f.path[f.path.length - 1] || {}, false, false);
+                  const line = { ...baseLine, stroke: routeCol, strokeLinejoin: "round", pointerEvents: "none",
+                    ...(solid ? {} : { opacity: baseLine.opacity * 0.5 }) };
+                  // chained-fork departures on THIS branch get the same line hole as a
+                  // base route's branch points (forkAts)
+                  const subForkAts = new Set((f.forks || []).filter(g => g.path && g.path.length)
+                    .map(g => g.at != null ? g.at : f.path.length - 1));
+                  // hoisted so the end carat's queue-back can trim the drawn line, just
+                  // like a base route's endStagger trim. arrivalBack is call-order
+                  // sensitive: keep today's order — this branch's action-mark carats,
+                  // then its end mark, then (via JSX) chained children.
+                  const actMarksEl = routeActionMarks(f.path, origin, acts, routeCol, bent, `${ref}:`);
+                  const endMark = (() => {
+                    // chains onward (drawn child branches) → the reaction badge marks it
+                    if ((f.forks || []).some(g => g.path && g.path.length)) return null;
+                    // an action authored on the last waypoint is already an action circle
+                    if (acts.has(f.path.length - 1)) return null;
+                    let ea;
+                    if (bent && bent.length >= 2) {
+                      const eP = bent[bent.length - 1], b = bent[Math.max(0, bent.length - 4)];
+                      ea = { endPt: eP, ang: Math.atan2(eP.y - b.y, eP.x - b.x) * 180 / Math.PI };
+                    } else ea = pathEndArrow(f.path, origin);
+                    if (!ea) return null;
+                    // legacy branch `action` → its circle, else a plain skate carat / ‖ stop
+                    const legacy = f.action && f.action !== "skate" ? forkActionIcon(f.action) : null;
+                    if (legacy && !whiteboard) return { ea, legacy };
+                    // several branches can END at the same spot — queue the carats
+                    return { ea, bk: arrivalBack("main", ea.endPt.x, ea.endPt.y) };
+                  })();
+                  const endBk = endMark && !endMark.legacy ? (endMark.bk || 0) : 0;
                   let prev = origin;
                   items.push(
                     <g key={ref}>
@@ -7259,8 +7296,8 @@ export default function DrillAnimator() {
                         const wig = solid && carry.has(i) && !bwd;     // carrying the puck → wiggle
                         // leave a gap at the branch origin (its reaction badge) and around any
                         // action circle, just like a base route
-                        const startGap = i === 0 ? actGap : acts.has(i - 1) ? actGap : 0;
-                        const endGap = acts.has(i) ? actGap : 0;
+                        const startGap = i === 0 ? actGap : (acts.has(i - 1) || subForkAts.has(i - 1)) ? actGap : 0;
+                        const endGap = (acts.has(i) || subForkAts.has(i)) ? actGap : isLast ? endBk : 0;
                         let vFrom = from, vSeg = s;
                         if (!bent && startGap) { const t = trimSegStart(vFrom, vSeg, startGap, strokeAR); if (t) { vFrom = t.from; vSeg = t.seg; } }
                         if (!bent && endGap) { const t = trimSegEnd(vFrom, vSeg, endGap, strokeAR); if (t) vSeg = t.seg; }
@@ -7277,7 +7314,7 @@ export default function DrillAnimator() {
                             {bent && (
                               <path d={d} fill="none" stroke={routeCol} strokeWidth={sw(0.5)}
                                 strokeDasharray={sdash("1.4 1.6")} strokeLinecap="round"
-                                vectorEffect="non-scaling-stroke" opacity={0.22 * op} pointerEvents="none" />
+                                vectorEffect="non-scaling-stroke" opacity={0.22 * (solid ? 1 : 0.5)} pointerEvents="none" />
                             )}
                             {editing && !playing && (
                               <path d={d} fill="none" stroke="transparent" strokeWidth={4}
@@ -7294,9 +7331,11 @@ export default function DrillAnimator() {
                       {bent && (() => {
                         const allBwd = solid && f.path.length > 0 && f.path.every(s => s.dir === "bwd");
                         const allCarry = solid && f.path.length > 0 && f.path.every((_, i) => carry.has(i));
+                        const bLine = endBk ? trimPolyEnd(bent, endBk, strokeAR) : bent;
                         const centers = [{ x: origin.x, y: origin.y },
-                          ...[...acts.keys()].filter(i => f.path[i]).map(i => ({ x: f.path[i].x, y: f.path[i].y }))];
-                        const subs = gapPolyAt(bent, centers, actGap, strokeAR);
+                          ...[...acts.keys()].filter(i => f.path[i]).map(i => ({ x: f.path[i].x, y: f.path[i].y })),
+                          ...[...subForkAts].filter(i => f.path[i]).map(i => ({ x: f.path[i].x, y: f.path[i].y }))];
+                        const subs = gapPolyAt(bLine, centers, actGap, strokeAR);
                         return subs.map((sub, k) => {
                           const shaped = allCarry ? wigglePoly(sub, strokeAR, true) : allBwd ? zigzagPoly(sub, strokeAR) : sub;
                           return <polyline key={k} points={shaped.map(q => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" ")}
@@ -7305,26 +7344,13 @@ export default function DrillAnimator() {
                       })()}
                       {/* action circles at every action waypoint on this branch (all branches,
                           dimmed to the branch's own opacity for the non-chosen ones) */}
-                      <g opacity={op}>{routeActionMarks(f.path, origin, acts, routeCol, bent, `${ref}:`)}</g>
-                      {(() => {                             // the branch's END mark
-                        // chains onward (drawn child branches) → the reaction badge marks it
-                        if ((f.forks || []).some(g => g.path && g.path.length)) return null;
-                        // an action authored on the last waypoint is already an action circle
-                        if (acts.has(f.path.length - 1)) return null;
-                        let ea;
-                        if (bent && bent.length >= 2) {
-                          const eP = bent[bent.length - 1], b = bent[Math.max(0, bent.length - 4)];
-                          ea = { endPt: eP, ang: Math.atan2(eP.y - b.y, eP.x - b.x) * 180 / Math.PI };
-                        } else ea = pathEndArrow(f.path, origin);
-                        if (!ea) return null;
-                        // legacy branch `action` → its circle, else a plain skate carat / ‖ stop
-                        const legacy = f.action && f.action !== "skate" ? forkActionIcon(f.action) : null;
-                        if (legacy && !whiteboard) return iconBadge(ea.endPt, legacy, routeCol, ref + "/act", op);
-                        // several branches can END at the same spot — queue the carats
-                        const bk = arrivalBack("main", ea.endPt.x, ea.endPt.y);
+                      <g opacity={markOp}>{actMarksEl}</g>
+                      {endMark && (() => {                  // the branch's END mark (hoisted above)
+                        const { ea, legacy, bk } = endMark;
+                        if (legacy) return iconBadge(ea.endPt, legacy, routeCol, ref + "/act", markOp);
                         const ar = ea.ang * Math.PI / 180;
                         const ept = bk ? gmMove(ea.endPt.x, ea.endPt.y, -Math.cos(ar), -Math.sin(ar), bk) : ea.endPt;
-                        return routeMark(ref + "/end", ept, ea.ang, !!end.endStop, routeCol, op);
+                        return routeMark(ref + "/end", ept, ea.ang, !!end.endStop, routeCol, markOp);
                       })()}
                       {renderLevel(f.forks, f.path, origin, ref)}
                     </g>
