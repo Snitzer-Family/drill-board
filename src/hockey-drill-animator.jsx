@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useLayoutEffect, useMemo } from "react";
 import { VIEWS, COLORS, vb, APP_VERSION, ICON_SCALE, ROUTE_START_GAP, BUILD_STAMP, DEFAULT_TEXT, SPEED,
   SAVE_PROB, MISS_POST, MISS_WIDE, MISS_OVER, SHOT_AIR_PROB, BOUNCE_REST } from "./constants.js";
 import { parseDrill, serializeDrill, extractDrill, deriveInventory } from "./drill-format.js";
+import { prepareImage, drillFromImage, ANTHROPIC_KEY_STORE } from "./drill-vision.js";
 import { drillSvg } from "./drill-svg.js";
 import { mdEscape, mdInline, mdBlock } from "./md.js";
 import { clampX, clampY, segEnd, segD, nearestT, splitSeg, zigzagPoints, wigglePoints, wigglePoly, zigzagPoly, convertSeg, fitRoute, evalSeg, rdp, catmullToBezier, alignJoint, mirrorJoint, translateJointHandles, trimSegStart, trimSegEnd, trimPolyStart, trimPolyEnd, gapPolyAt } from "./geometry.js";
@@ -427,6 +428,12 @@ export default function DrillAnimator() {
   // leave fork-edit mode when another piece is selected
   useEffect(() => { if (editingFork && selectedId !== editingFork.id) setEditingFork(null); }, [selectedId, editingFork]);
   const fileRef = useRef(null);
+  // photo → DSL import (Claude vision): hidden image input, busy status text,
+  // pre-import board snapshot (non-null = Keep/Discard bar showing), abort
+  const photoRef = useRef(null);
+  const photoAbort = useRef(null);
+  const [photoBusy, setPhotoBusy] = useState(null);
+  const [photoUndo, setPhotoUndo] = useState(null);
   const animRef = useRef(0);
   const totalRef = useRef(1);
   const holdRef = useRef(0);        // seconds remaining in the current step hold
@@ -4453,6 +4460,68 @@ export default function DrillAnimator() {
     reader.readAsText(f);
     e.target.value = "";
   }
+  // apply a parsed drill to the board without committing it to the autosave —
+  // same preview contract as a #d= link: the saved board survives until the
+  // user edits (or taps Keep on the import bar)
+  function applyDrillPreview(r) {
+    skipFirstSave.current = true;
+    setRink(r.rink); setPieces(r.pieces); setDrillTitle(r.title); setDrillDesc(r.desc);
+    setDrillSteps(r.steps || []); setDrillNotes(r.notes || ""); setDrillItems(r.items || []);
+    setDrillVersion(r.dslVersion); setSelectedId(null); setPopup(null);
+    resetAnim();
+  }
+  // Anthropic API key for photo import — kept in localStorage on this device
+  function getApiKey() {
+    let key = localStorage.getItem(ANTHROPIC_KEY_STORE);
+    if (!key) {
+      key = (window.prompt("Anthropic API key for photo import (sk-ant-…)\nStored only on this device — use a spend-capped key.") || "").trim();
+      if (!key) return null;
+      localStorage.setItem(ANTHROPIC_KEY_STORE, key);
+    }
+    return key;
+  }
+  async function importPhoto(e) {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f || photoBusy) return;
+    const apiKey = getApiKey();
+    if (!apiKey) return;
+    photoAbort.current = new AbortController();
+    try {
+      setPhotoBusy("Reading photo…");
+      const img = await prepareImage(f);
+      setPhotoBusy("Transcribing with Claude… can take a minute — keep the app open");
+      const result = await drillFromImage({
+        apiKey, ...img, onStatus: setPhotoBusy, signal: photoAbort.current.signal,
+      });
+      if (result.drill) {
+        const prior = serializeDrill(rink, pieces, drillTitle, drillDesc, drillSteps, drillNotes, drillItems);
+        applyDrillPreview(result.drill);
+        setTextError(""); setOpenMenu(null);
+        setPhotoUndo(prior);
+      } else {
+        // repair pass didn't converge — hand the raw text to the editor to fix
+        setTextDraft(result.text); setTextError(result.errors.join("\n")); setOpenMenu("text");
+      }
+    } catch (err) {
+      if (err?.name === "AbortError") return;
+      if (err?.status === 401) localStorage.removeItem(ANTHROPIC_KEY_STORE);
+      flash(err?.message || "Photo import failed");
+    } finally {
+      setPhotoBusy(null);
+      photoAbort.current = null;
+    }
+  }
+  function keepImport() {
+    try { localStorage.setItem(SAVE_KEY, serializeDrill(rink, pieces, drillTitle, drillDesc, drillSteps, drillNotes, drillItems)); }
+    catch { /* storage full / disabled */ }
+    setPhotoUndo(null);
+  }
+  function discardImport() {
+    const r = parseDrill(photoUndo);
+    if (!r.errors.length) applyDrillPreview(r);
+    setPhotoUndo(null);
+  }
 
   /* ----- render helpers ----- */
   // `flat` = draw with plain rink-unit widths (used by the loupe, which has its
@@ -7798,6 +7867,7 @@ export default function DrillAnimator() {
           <button className="hd-item" onClick={() => { copyMd(); setOpenMenu(null); }}><Icon name="duplicate" size={16} /> Copy markdown</button>
           <button className="hd-item" onClick={() => { previewLink(); setOpenMenu(null); }}><Icon name="share" size={16} /> Share preview link</button>
           <button className="hd-item" onClick={() => fileRef.current?.click()}><Icon name="upload" size={16} /> Load .txt / .md</button>
+          <button className="hd-item" disabled={!!photoBusy} onClick={() => { setOpenMenu(null); photoRef.current?.click(); }}><Icon name="image" size={16} /> Import from photo…</button>
           <button className="hd-item danger"
             onClick={() => {
               const hasContent = pieces.length || drillSteps.length || drillItems.length ||
@@ -7888,6 +7958,16 @@ export default function DrillAnimator() {
               <span style={{ fontSize: 11, color: "#8b99a8" }}>draw each X / O on an opaque white disc, like the action circles</span>
             </div>
           )}
+          <div className="hd-poprow">
+            <button className="hd-mini" onClick={() => {
+              const cur = localStorage.getItem(ANTHROPIC_KEY_STORE) || "";
+              const next = window.prompt("Anthropic API key for photo import (empty to clear)", cur);
+              if (next == null) return;
+              if (next.trim()) { localStorage.setItem(ANTHROPIC_KEY_STORE, next.trim()); flash("API key saved"); }
+              else { localStorage.removeItem(ANTHROPIC_KEY_STORE); flash("API key cleared"); }
+            }}>Claude API key…</button>
+            <span style={{ fontSize: 11, color: "#8b99a8" }}>{localStorage.getItem(ANTHROPIC_KEY_STORE) ? "set — used by Import from photo" : "needed for Import from photo"}</span>
+          </div>
           <div className="hd-poprow">
             <button className={`hd-mini${collisions ? " on" : ""}`}
               onClick={() => setCollisions(v => !v)}>{collisions ? "✓ Route avoidance" : "Route avoidance"}</button>
@@ -8248,6 +8328,24 @@ export default function DrillAnimator() {
       )}
 
       <input ref={fileRef} type="file" accept=".txt,.md,.markdown,text/plain,text/markdown" style={{ display: "none" }} onChange={importTxt} />
+      <input ref={photoRef} type="file" accept="image/*" style={{ display: "none" }} onChange={importPhoto} />
+      {photoBusy && (
+        <div className="hd-sheet" style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16 }}>
+          <div className="hd-spinner" />
+          <div style={{ color: "#eaf2f8", fontSize: 14, textAlign: "center", padding: "0 24px" }}>{photoBusy}</div>
+          <button className="hd-mini" onClick={() => photoAbort.current?.abort()}>Cancel</button>
+        </div>
+      )}
+      {photoUndo != null && !photoBusy && (
+        <div style={{ position: "fixed", left: "50%", bottom: "calc(64px + env(safe-area-inset-bottom))",
+          transform: "translateX(-50%)", background: "rgba(20,26,32,0.94)", color: "#eaf2f8",
+          padding: "8px 14px", borderRadius: 10, fontSize: 13, zIndex: 9998,
+          display: "flex", alignItems: "center", gap: 10 }}>
+          <span>Imported drill</span>
+          <button className="hd-mini on" onClick={keepImport}>Keep</button>
+          <button className="hd-mini" onClick={discardImport}>Discard</button>
+        </div>
+      )}
       {toast && (
         <div style={{ position: "fixed", left: "50%", bottom: "calc(64px + env(safe-area-inset-bottom))",
           transform: "translateX(-50%)", background: "rgba(20,26,32,0.92)", color: "#eaf2f8",
