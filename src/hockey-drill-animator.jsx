@@ -1460,6 +1460,12 @@ export default function DrillAnimator() {
   const GLIDE_AT = 1.0;     // ×base pace: at/below this the skater just glides
   const HARD_AT = 2.0;      // ×base pace: full-out aggressive stride
   const PLANT_DEG = 55;     // deg the body pivots sideways in a hockey stop
+  // idle fidget: a standing skater shifts weight instead of freezing solid.
+  // Same display-only rule as the stride — never fed back into timing.
+  const FIDGET_AMP = 0.18;  // ft of lateral weight-shift while standing
+  const FIDGET_BOB = 0.07;  // ft of fore-aft drift while standing
+  const FIDGET_LEAN = 2.2;  // deg of body wobble while standing
+  const FIDGET_FADE = 0.35; // ×base pace at which the fidget has fully faded out
   function displaySwing(p) {
     return p.kind === "player" && animT > 0 ? stickSwing(p.id, animT * totalTime) : 0;
   }
@@ -2779,21 +2785,39 @@ export default function DrillAnimator() {
     p = effOf(p);
     if (p.kind === "player" && p.defense) return animT > 0 ? dmanPos(p) : { x: p.x, y: p.y, a: p.facing || 0 };
     const dp = displayPosAt(p, animT <= 0 ? 0 : animT * totalTime);
-    if (!effDetail || p.kind !== "player" || !(dp.smul > 0.02)) return dp;  // no stride sway/lean when detail off
-    const r = dp.smul;                                    // effective speed multiple
-    const g = Math.max(0, Math.min(1, (r - GLIDE_AT) / (HARD_AT - GLIDE_AT)));
-    const strength = g * g * (3 - 2 * g);                 // 0 glide → 1 aggressive
-    const phase = (2 * Math.PI * (dp.dist || 0)) / STRIDE_LAMBDA;
-    const sway = Math.sin(phase) * STRIDE_AMP * strength;
-    const perp = (((dp.a || 0) + 90) * Math.PI) / 180;
-    // hockey stop: as speed bleeds off, plant the body sideways so the finish
-    // reads like a bite, not a coast
-    const plant = dp.braking ? PLANT_DEG * (1 - dp.v) * (Math.sin(phase) >= 0 ? 1 : -1) : 0;
+    if (!effDetail || p.kind !== "player" || animT <= 0) return dp; // detail off / editing board: still frame
+    const r = dp.smul || 0;                               // effective speed multiple
+    let lat = 0, fore = 0, lean = 0;                      // lateral / fore-aft ft, deg — vs facing
+    const kIdle = 1 - Math.min(1, r / FIDGET_FADE);       // fades out as a route spools up
+    if (kIdle > 0) {
+      // standing (or near enough): shift weight instead of freezing solid.
+      // Two incommensurate slow sines per axis so the motion never loops
+      // visibly; phase hashed from the id so players fidget out of sync.
+      const e = animT * totalTime;
+      let ph = 0;
+      for (let i = 0; i < String(p.id).length; i++) ph += String(p.id).charCodeAt(i) * 0.618;
+      ph = (ph % 1) * 2 * Math.PI;
+      lat += ((Math.sin(e * 1.7 + ph) + 0.5 * Math.sin(e * 2.9 + ph * 2)) / 1.5) * FIDGET_AMP * kIdle;
+      fore += Math.sin(e * 1.1 + ph * 3) * FIDGET_BOB * kIdle;
+      lean += FIDGET_LEAN * Math.sin(e * 2.3 + ph) * kIdle;
+    }
+    if (r > 0.02) {
+      const g = Math.max(0, Math.min(1, (r - GLIDE_AT) / (HARD_AT - GLIDE_AT)));
+      const strength = g * g * (3 - 2 * g);               // 0 glide → 1 aggressive
+      const phase = (2 * Math.PI * (dp.dist || 0)) / STRIDE_LAMBDA;
+      lat += Math.sin(phase) * STRIDE_AMP * strength;
+      // hockey stop: as speed bleeds off, plant the body sideways so the finish
+      // reads like a bite, not a coast
+      const plant = dp.braking ? PLANT_DEG * (1 - dp.v) * (Math.sin(phase) >= 0 ? 1 : -1) : 0;
+      lean += STRIDE_LEAN * strength * Math.cos(phase) + plant;
+    }
+    if (!lat && !fore && !lean) return dp;
+    const hd = ((dp.a || 0) * Math.PI) / 180;             // lateral = facing+90
     return {
       ...dp,
-      x: clampX(dp.x + Math.cos(perp) * sway),
-      y: clampY(dp.y + Math.sin(perp) * sway),
-      a: (dp.a || 0) + STRIDE_LEAN * strength * Math.cos(phase) + plant,
+      x: clampX(dp.x - Math.sin(hd) * lat + Math.cos(hd) * fore),
+      y: clampY(dp.y + Math.cos(hd) * lat + Math.sin(hd) * fore),
+      a: (dp.a || 0) + lean,
     };
   }
 
