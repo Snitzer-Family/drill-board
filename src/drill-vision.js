@@ -45,7 +45,12 @@ Report every rink marking you can identify. Allowed features: goal_line, blue_li
 Transcription rules:
 - Use PIECE and PATH statements. Prefer simple L and Q segments — capture the drill's shape and flow, not every wiggle.
 - Solid lines with arrowheads are skating routes (CARRY when the player has the puck). Dashed lines are passes (pass= on the puck, or a PASS leg). Heavy/zigzag lines ending at the net are shots (shoot= or a SHOT leg).
-- Give players short jersey labels matching the diagram (F1, D2, X, O...).
+- Wire every line to its pieces. A line belongs to a specific piece: it starts AT that piece's position and ends exactly AT the receiving piece, the net, or its visible arrowhead — reuse those pieces' own pixel coordinates as the endpoints. No line may run off the ice or dangle in space. If you cannot tell what a line connects, omit it rather than guess.
+- A chain of dashed arrows is ONE puck moving: put a puck on the first passer (on=<id>), add pass=<pt>:<to> for each dashed arrow IN ORDER, and shoot= for the final arrow into the net. Players in a passing chain mostly stand still — do not convert pass arrows into skating routes.
+- Never transcribe watermarks, logos, page borders, bench areas outside the boards, or the rink outline itself as drill content.
+- A shaded/highlighted area is a coaching zone: outline it with a MARK statement in a matching colour (e.g. MARK Z1 #e8c547 0.6 dashed x1,y1 x2,y1 x2,y2 x1,y2 x1,y1 — pixel coords like everything else). Small black rings at a zone's corners are tires, NOT cones — cones are only open triangles/wedges.
+- Faceoff circles are your rulers for placement: a piece on a dot gets the dot's exact pixels; on a circle's edge sits ON the drawn circle; a piece outside or below a circle must land clearly outside it. Re-check each piece against the nearest circle or dot before writing its position.
+- Give players short jersey labels matching the diagram (F1, D2, X, O...). Plain filled circles in a team colour with no letter are still players of that team.
 - Player colors: if the diagram is drawn in color, give each player its drawn color as a hex modifier — use the app palette: red #d7263d, blue #1f4fa3, green #1f8a4c, orange #e0731d, black #22262b, purple #7a3fa8. With X-and-O (or F-and-D) conventions and no color, make one group red and the other blue #1f4fa3.
 - A coach mark (CO, C, or a coach symbol) is a PLAYER in black: PIECE <id> player <x> <y> #22262b CO.
 - A pile of pucks (a scattering of small filled dots next to each other) → place 2–4 puck pieces clustered at that spot, one per visible dot up to 4.
@@ -210,7 +215,7 @@ export async function drillFromImage({ apiKey, data, mediaType, onStatus, signal
       role: "user",
       content: [
         { type: "image", source: { type: "base64", media_type: "image/jpeg", data: render } },
-        { type: "text", text: "This is your transcription rendered on the DrillBoard rink (your pixel coordinates were converted programmatically from your landmark report). Compare it with the original photo. If pieces or routes are misplaced, missing, or wrong, output corrected ```json and ```drill blocks in full — still in ORIGINAL PHOTO pixel coordinates. If it is faithful, reply with exactly OK." },
+        { type: "text", text: "This is your transcription rendered on the DrillBoard rink (your pixel coordinates were converted programmatically from your landmark report). Compare it with the original photo and check specifically: (1) every pass/shot connects the SAME two pieces as the photo, in the same order; (2) no route or pass runs off the ice or crosses the rink where the photo shows no such line; (3) each piece sits on/off the same landmark (dot, circle edge, crease) as in the photo; (4) piece counts, kinds, and colours match. If anything is misplaced, missing, or wrong, output corrected ```json and ```drill blocks in full — still in ORIGINAL PHOTO pixel coordinates. If it is faithful, reply with exactly OK." },
       ],
     });
     const check = await callClaude(apiKey, messages, signal);
