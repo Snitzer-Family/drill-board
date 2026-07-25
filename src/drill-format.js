@@ -325,13 +325,18 @@ export function parseDrill(text) {
           ...(cond ? { cond } : {}), forks: [], path: parseSegments(tok, j, unq) });
       } else if (cmd === "MARK") {
         // MARK <id> <color> <width> <style> x1,y1 x2,y2 ...  (a freehand ink annotation)
-        const mid = tok[1], mcol = tok[2] || "#ffd447", mw = parseFloat(tok[3]) || 1.1, mst = (tok[4] || "solid").toLowerCase();
+        // the style token is optional (imports often omit it): when tok[4]
+        // isn't a style word, everything from index 4 on is flags + coords
+        const styleWords = ["solid", "dashed", "dotted", "wavy"];
+        const hasStyle = styleWords.includes((tok[4] || "").toLowerCase());
+        const mid = tok[1], mcol = tok[2] || "#ffd447", mw = parseFloat(tok[3]) || 1.1, mst = hasStyle ? tok[4].toLowerCase() : "solid";
+        const rest = tok.slice(hasStyle ? 5 : 4);
         // a bare `lock` flag may sit among the trailing tokens; coords are pure
         // numbers (the tokenizer splits on commas), so it never collides with them
-        const mlock = tok.slice(5).some(t => t.toLowerCase() === "lock");
+        const mlock = rest.some(t => t.toLowerCase() === "lock");
         // optional independent area fill: fill=<hex>[:<opacity 0..1>] — non-
         // numeric, so older readers drop it harmlessly via the isNaN filter
-        const mfTok = tok.slice(5).find(t => /^fill=/i.test(t));
+        const mfTok = rest.find(t => /^fill=/i.test(t));
         let mfill = null, mfillOp = 0.25;
         if (mfTok) {
           const [fc, fo] = mfTok.slice(5).split(":");
@@ -339,13 +344,13 @@ export function parseDrill(text) {
           const op = parseFloat(fo);
           if (!isNaN(op)) mfillOp = Math.max(0.05, Math.min(1, op));
         }
-        const nums = tok.slice(5).map(Number).filter(n => !isNaN(n));
+        const nums = rest.map(Number).filter(n => !isNaN(n));
         const pts = [];
         for (let k = 0; k + 1 < nums.length; k += 2) pts.push({ x: nums[k], y: nums[k + 1] });
         // optional sharp-corner point indices: corners=i;j;k — the curve
         // BREAKS at these points instead of smoothing through them (older
         // readers drop the token harmlessly via the isNaN filter)
-        const mcTok = tok.slice(5).find(t => /^corners=/i.test(t));
+        const mcTok = rest.find(t => /^corners=/i.test(t));
         if (mcTok) mcTok.slice(8).split(";").forEach(s => { const i = parseInt(s, 10); if (pts[i]) pts[i].c = true; });
         if (mid && pts.length >= 2) {
           const m = { id: mid, kind: "mark", color: mcol, width: mw, style: ["dashed", "dotted", "wavy"].includes(mst) ? mst : "solid",

@@ -160,4 +160,31 @@ check("MARK densified for straight sides", () => {
   assert.ok(topEdge, "top edge points collinear");
 });
 
+// --- a round MARK trace snaps to the parametric preset circle ---------------
+check("MARK circle trace snaps to a clean ellipse", () => {
+  const map = (x, y) => ({ x: x / 10, y: y / 10 });
+  // 14 hand-wobbly points around (1690, 425) r≈140 px → (169, 42.5) r≈14 ft
+  const trace = Array.from({ length: 15 }, (_, i) => {
+    const t = (i / 14) * 2 * Math.PI, r = 140 + (i % 3 === 0 ? 8 : -6);
+    return `${Math.round(1690 + r * Math.cos(t))},${Math.round(425 + r * Math.sin(t))}`;
+  }).join(" ");
+  const out = transformDsl(`MARK Z1 #e8c547 0.6 fill=e8c547:0.25 ${trace}`, map);
+  assert.ok(!out.includes("corners="), "no spurious corners on a circle");
+  const coords = out.split(/\s+/).filter(t => /^-?[\d.]+,-?[\d.]+$/.test(t)).map(t => t.split(",").map(Number));
+  assert.equal(coords.length, 25, "parametric 24-segment circle");
+  const cx = 169, cy = 42.5;
+  for (const [x, y] of coords) {
+    const r = Math.hypot(x - cx, y - cy);
+    near(r, 14, 1.5, "point on one clean radius");
+  }
+  assert.ok(out.includes("fill=e8c547:0.25"), "fill preserved");
+});
+
+// --- a straight-sided MARK is NOT mistaken for a circle ----------------------
+check("MARK square keeps corners (not circle-snapped)", () => {
+  const map = (x, y) => ({ x: x / 10, y: y / 10 });
+  const out = transformDsl("MARK Z1 #e8c547 0.6 dashed 100,100 400,100 400,400 100,400 100,100", map);
+  assert.ok(out.includes("corners="), "square corners flagged sharp");
+});
+
 console.log(`\n${passed} checks passed`);

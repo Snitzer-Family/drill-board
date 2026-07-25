@@ -443,7 +443,8 @@ ITEM whistle count=1 "Whistle"
 
 `MARK <id> <color> <width> <style> [fill=<hex>[:<opacity>]] x1,y1 x2,y2 …`
 draws a freehand ink line on the ice (not part of the drill logic). `style` is
-`solid` · `dashed` · `dotted` · `wavy`; `width` is in feet. The optional
+`solid` · `dashed` · `dotted` · `wavy` (may be omitted — defaults to `solid`;
+the app always writes it back); `width` is in feet. The optional
 **`fill=`** gives the enclosed area an independent translucent fill (hex colour
 without the `#`, opacity 0..1, default 0.25) — used for shaded coaching zones
 and the preset square/circle/triangle shape markers. The optional

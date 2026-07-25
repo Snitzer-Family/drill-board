@@ -184,6 +184,28 @@ export function transformDsl(text, map) {
           pts.push(map(x, y));
         } else head.push(t);
       }
+      // PRESET-SHAPE RECOGNITION: a closed trace whose points sit evenly on
+      // one ellipse is a shaded circle overlay (a highlighted faceoff circle,
+      // a drawn ring). Replace the wobbly hand trace with the same parametric
+      // circle the app's preset circle-shape tool draws, so imports get clean
+      // geometry instead of a squiggle. Straight-sided presets (square/
+      // triangle) already come out crisp below via densify + corners=.
+      if (pts.length >= 9 && Math.hypot(pts[0].x - pts[pts.length - 1].x, pts[0].y - pts[pts.length - 1].y) < 3) {
+        const core = pts.slice(0, -1);
+        const xs = core.map(p => p.x), ys = core.map(p => p.y);
+        const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+        const rx = (Math.max(...xs) - Math.min(...xs)) / 2, ry = (Math.max(...ys) - Math.min(...ys)) / 2;
+        const round = rx > 2 && ry > 2 &&
+          core.every(p => Math.abs(Math.hypot((p.x - cx) / rx, (p.y - cy) / ry) - 1) <= 0.15);
+        if (round) {
+          const N = 24, ell = [];
+          for (let i = 0; i <= N; i++) {
+            const t = (i / N) * 2 * Math.PI;
+            ell.push(`${round1(cx + Math.cos(t) * rx)},${round1(cy + Math.sin(t) * ry)}`);
+          }
+          return [...head, ...ell].join(" ");
+        }
+      }
       // sharp bends (≥30° turn) in the traced overlay become CORNER points so
       // the renderer breaks the curve there instead of rounding the corner
       const sharp = pts.map((p, i) => {
