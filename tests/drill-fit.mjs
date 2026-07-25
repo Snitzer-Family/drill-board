@@ -108,17 +108,19 @@ check("transformDsl rewrite", () => {
     "PIECE N1 net 1886 421 goalie",
     'PATH F1 L 1600,400 Q 1700,450 1800,420 DESC "cut 1,2 hard" OFF 3,-5 SHOT L 1826,425 ~45',
     "STEP at=2 pos=1500:300 \"go\"",
+    "PIECE N2 net 108 424 face=90",    // left end: snaps to 11, face= stripped, no 180
   ].join("\n");
   const out = transformDsl(src, map).split("\n");
   assert.equal(out[0], "TITLE Corner 2,2 game", "TITLE untouched");
   assert.equal(out[1], "PIECE F1 player 150 30 F1");
-  assert.equal(out[2], "PIECE N1 net 189 42.5 goalie", "net snapped to goal line");
+  assert.equal(out[2], "PIECE N1 net 189 42.5 goalie face=180", "net snapped + faces center ice");
   assert.ok(out[3].includes('DESC "cut 1,2 hard"'), "quoted text untouched");
   assert.ok(out[3].includes("OFF 3,-5"), "OFF offset untouched");
   assert.ok(!out[3].includes("~45"), "aim angle dropped");
   assert.ok(out[3].includes("L 160,40"), "L point transformed");
   assert.ok(out[3].includes("Q 170,45 180,42"), "Q points transformed");
   assert.ok(out[4].includes("pos=150:30"), "STEP pos transformed");
+  assert.equal(out[5], "PIECE N2 net 11 42.5", "left net: default facing (mouth toward center), face= stripped");
 });
 
 console.log(`\n${passed} checks passed`);

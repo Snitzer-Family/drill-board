@@ -176,7 +176,12 @@ export function transformDsl(text, map) {
         p = snapPoint(p, usedSnaps);
       }
       tok[3] = String(round1(p.x)); tok[4] = String(round1(p.y));
-      return tok.filter(t => !/^face=/i.test(t)).join(" ");
+      const out = tok.filter(t => !/^face=/i.test(t));
+      // nets always open toward center ice: default facing (mouth +x) is right
+      // for the left half; a net in the right half needs face=180 or its mouth
+      // points at the backboard
+      if (kind === "net" && p.x > 100) out.push("face=180");
+      return out.join(" ");
     }
     if (kw === "PATH" || kw === "BRANCH" || kw === "MARK") {
       const tok = tokenize(line.trim());
