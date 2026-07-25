@@ -305,10 +305,11 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
         {selected && <circle cx={0} cy={0} r={4.6} fill="none" stroke="#ffd447" strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
         {shapePath ? (
           // shapes are their own enclosure, so the wbCircle disc is skipped;
-          // white under-stroke plays the halo role paintOrder gives the text
-          <g transform={`rotate(${-thDeg})`} fill="none" strokeLinejoin="round">
-            <path d={shapePath} stroke="rgba(255,255,255,0.9)" strokeWidth={1.9} />
-            <path d={shapePath} stroke={p.color} strokeWidth={0.9} />
+          // white under-stroke plays the halo role paintOrder gives the text,
+          // and its fill blanks the interior so rink markings don't show through
+          <g transform={`rotate(${-thDeg})`} strokeLinejoin="round">
+            <path d={shapePath} fill="#fff" stroke="rgba(255,255,255,0.9)" strokeWidth={1.9} />
+            <path d={shapePath} fill="none" stroke={p.color} strokeWidth={0.9} />
           </g>
         ) : (<>
           {wbCircle && <circle cx={0} cy={0} r={3.3} fill="#fff" stroke={p.color} strokeWidth={0.5} />}
