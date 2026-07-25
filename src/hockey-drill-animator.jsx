@@ -1513,7 +1513,7 @@ export default function DrillAnimator() {
     const home = { x: p.x, y: p.y };
     // net this D defends: nearest net piece, else the goal line on its side
     const nets = pieces.filter(q => q.kind === "net");
-    let net = home.x < 100 ? { x: 17, y: 42.5 } : { x: 183, y: 42.5 };
+    let net = home.x < 100 ? { x: 11, y: 42.5 } : { x: 189, y: 42.5 };
     if (nets.length) {
       const n = nets.reduce((a, b) => (Math.hypot(b.x - home.x, b.y - home.y) < Math.hypot(a.x - home.x, a.y - home.y) ? b : a));
       net = { x: n.x, y: n.y };
@@ -3395,7 +3395,7 @@ export default function DrillAnimator() {
         const launch = t.at < 0 || !carrier.path.length ? { x: carrier.x, y: carrier.y } : segEnd(carrier, Math.min(t.at, carrier.path.length - 1));
         const shotNetId = t.net != null ? t.net : null;   // this rebound's own target
         const net = shotNetId ? (nets.find(x => x.id === shotNetId) || null) : (nets.length ? nets.reduce((a, b) => Math.hypot(b.x - launch.x, b.y - launch.y) < Math.hypot(a.x - launch.x, a.y - launch.y) ? b : a) : null);
-        const nPt = net ? { x: net.x, y: net.y } : (launch.x < 100 ? { x: 17, y: 42.5 } : { x: 183, y: 42.5 });
+        const nPt = net ? { x: net.x, y: net.y } : (launch.x < 100 ? { x: 11, y: 42.5 } : { x: 189, y: 42.5 });
         const anchor = t.recvAt != null && rec.path.length ? segEnd(rec, Math.min(t.recvAt, rec.path.length - 1)) : { x: rec.x, y: rec.y };
         if (segCrossesNet(nPt, anchor, shapes)) blockStage = Math.min(blockStage, s);
       });
@@ -4260,7 +4260,7 @@ export default function DrillAnimator() {
     if (d.kind === "piece" && d.moved && d.line == null) {
       const pc = pieces.find(q => q.id === d.id);
       if (pc && pc.kind === "net") {
-        const spots = [{ x: 17, y: 42.5, facing: 0 }, { x: 183, y: 42.5, facing: 180 }];
+        const spots = [{ x: 11, y: 42.5, facing: 0 }, { x: 189, y: 42.5, facing: 180 }];
         const near = spots.find(s => Math.hypot(s.x - pc.x, s.y - pc.y) < 12);
         if (near) updateById(pc.id, near);
       }
@@ -7106,7 +7106,7 @@ export default function DrillAnimator() {
             {/* ---- "Let AI play" 5v5 overlay (replaces the scripted content) ---- */}
             {aiPlay && aiRef.current && (
               <g pointerEvents="none">
-                {[{ x: 17, y: 42.5, a: 0 }, { x: 183, y: 42.5, a: 180 }].map((n, i) => {
+                {[{ x: 11, y: 42.5, a: 0 }, { x: 189, y: 42.5, a: 180 }].map((n, i) => {
                   const fx = iconXf(n);
                   return <PieceIcon key={`ainet-${i}`} p={{ kind: "net", color: "#c81e33" }}
                     pos={n} xf={fx.t} thDeg={fx.th} onDown={() => {}} />;

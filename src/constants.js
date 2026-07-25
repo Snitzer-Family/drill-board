@@ -6,7 +6,7 @@ export const COLORS = ["#d7263d", "#1f4fa3", "#1f8a4c", "#e0731d", "#22262b", "#
 export const SPEED = { carry: 1, pass: 7, shot: 10 };
 export const vb = m => VIEWS[m].join(" ");
 
-export const APP_VERSION = "5.39";
+export const APP_VERSION = "5.40";
 // DSL schema version, stamped into every serialized drill (`DSL <n>` header) so
 // production builds can eventually render a drill per the version that wrote it.
 // Bump ONLY on a breaking DSL change (new kinds/modifiers that older builds would
@@ -36,7 +36,7 @@ export const SHOT_AIR_PROB = 0.4;
 export const BOUNCE_REST = 0.6;
 
 export const DEFAULT_TEXT = `RINK full
-PIECE N1 net 17 42.5
-PIECE N2 net 183 42.5 face=180
+PIECE N1 net 11 42.5
+PIECE N2 net 189 42.5 face=180
 `;
 

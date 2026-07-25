@@ -130,7 +130,7 @@ function trimSegStart(prev, s, d) {
   return subSegFrom(prev, s, t);
 }
 
-const NET_L = { x: 17, y: 42.5 }, NET_R = { x: 183, y: 42.5 };
+const NET_L = { x: 11, y: 42.5 }, NET_R = { x: 189, y: 42.5 };
 const f = n => Math.round(n * 100) / 100;
 const V = (name, fb) => `var(--${name},${fb})`;
 const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -178,13 +178,13 @@ function rink() {
     <rect x="0.6" y="0.6" width="198.8" height="83.8" rx="28" fill="${V("surface", "#f6fafd")}" stroke="${V("ink", "#14202b")}" stroke-width="1.1"/>
     <g clip-path="url(#ice)">
       <g stroke-linecap="round">
-        <line x1="17" y1="0" x2="17" y2="85" stroke="${mk}" stroke-width="0.45"/>
-        <line x1="183" y1="0" x2="183" y2="85" stroke="${mk}" stroke-width="0.45"/>
+        <line x1="11" y1="0" x2="11" y2="85" stroke="${mk}" stroke-width="0.45"/>
+        <line x1="189" y1="0" x2="189" y2="85" stroke="${mk}" stroke-width="0.45"/>
         <line x1="75" y1="0" x2="75" y2="85" stroke="${mkb}" stroke-width="1.1"/>
         <line x1="125" y1="0" x2="125" y2="85" stroke="${mkb}" stroke-width="1.1"/>
         <line x1="100" y1="0" x2="100" y2="85" stroke="${mk}" stroke-width="1.1"/>
-        <path d="M 17 36.5 A 6 6 0 0 1 17 48.5" fill="${mkb}" stroke="${mk}" stroke-width="0.35" opacity="0.9"/>
-        <path d="M 183 36.5 A 6 6 0 0 0 183 48.5" fill="${mkb}" stroke="${mk}" stroke-width="0.35" opacity="0.9"/>
+        <path d="M 11 36.5 A 6 6 0 0 1 11 48.5" fill="${mkb}" stroke="${mk}" stroke-width="0.35" opacity="0.9"/>
+        <path d="M 189 36.5 A 6 6 0 0 0 189 48.5" fill="${mkb}" stroke="${mk}" stroke-width="0.35" opacity="0.9"/>
       </g>
       ${fo(100, 42.5, mkb)}${fo(45, 20.5, mk)}${fo(45, 64.5, mk)}${fo(155, 20.5, mk)}${fo(155, 64.5, mk)}
       ${dot(100, 42.5, 0.9, mkb)}${dot(45, 20.5)}${dot(45, 64.5)}${dot(155, 20.5)}${dot(155, 64.5)}

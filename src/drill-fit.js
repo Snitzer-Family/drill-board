@@ -4,7 +4,7 @@
 // (no DOM, no fetch) so it's node-testable like possession.js.
 
 // Known rink geometry (matches rink.jsx / docs/drill-dsl.md landmark table).
-const GOAL_X = [17, 183], BLUE_X = [75, 125], CENTER_X = 100;
+const GOAL_X = [11, 189], BLUE_X = [75, 125], CENTER_X = 100;
 const EZ_DOT_X = [45, 155], NZ_DOT_X = [80, 120], DOT_Y = [20.5, 64.5], MID_Y = 42.5;
 
 // Rotate pixel coords (y-down) so the reported attack direction points +x.

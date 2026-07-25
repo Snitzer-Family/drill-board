@@ -24,7 +24,7 @@ Two forwards, delayed entry off the wall.
 RINK full
 TITLE Neutral-Zone Regroup
 DESC Two forwards, delayed entry off the wall.
-PIECE N2 net 183 42.5 face=180 goalie
+PIECE N2 net 189 42.5 face=180 goalie
 PIECE F1 player 60 20 F1
 PATH F1 L 110,20 L 150,35
 ```
@@ -56,11 +56,11 @@ One statement per line. Order is mostly free, but a `PATH` must come after the
 
 | Landmark | x | Landmark | y |
 |---|---|---|---|
-| Left goal line | 17 | Centre | 42.5 |
+| Left goal line | 11 | Centre | 42.5 |
 | Left blue line | 75 | End-zone dots | 20.5 / 64.5 |
 | Centre line | 100 | | |
-| Right blue line | 125 | Nets default to (17, 42.5) and (183, 42.5) |
-| Right goal line | 183 | End-zone faceoff dots at x = 45 / 155 |
+| Right blue line | 125 | Nets default to (11, 42.5) and (189, 42.5) |
+| Right goal line | 189 | End-zone faceoff dots at x = 45 / 155 |
 
 ---
 
@@ -408,7 +408,7 @@ NOTES
 | 2. **Chip** off the glass past the D (aim `~-60`).
 | 3. Slip inside and re-gather behind him — still onside.
 END NOTES
-PIECE N2 net 183 42.5 face=180 goalie
+PIECE N2 net 189 42.5 face=180 goalie
 PIECE D1 player 110 20 #1f4fa3 D1 defense
 PIECE F1 player 46 26 F1
 PATH F1 L 80,14 L 100,12 L 120,26

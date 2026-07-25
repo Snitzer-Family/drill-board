@@ -1,5 +1,5 @@
 // Named ice areas — used for the toggleable overlay and to auto-name waypoints
-// in presentation text. Rink coords: x 0..200, y 0..85 (goal lines x=17/183,
+// in presentation text. Rink coords: x 0..200, y 0..85 (goal lines x=11/189,
 // blue lines x=75/125, end-zone dots x=45/155). This rink is intentionally not
 // regulation, so zones are eyeballed to match the markings in rink.jsx.
 
@@ -15,16 +15,16 @@ function endZones(flip) {
     };
   };
   return [
-    Z("Crease", 17, 23.5, 36.5, 48.5, 10, null),
-    Z("Slot", 23.5, 50, 33, 52, 8, [37, 42.5]),
-    Z("The house", 17, 55, 24, 61, 5, [50, 28]),
-    Z("Behind the net", 3, 17, 27, 58, 7, [10, 42.5]),
+    Z("Crease", 11, 17.5, 36.5, 48.5, 10, null),
+    Z("Slot", 17.5, 44, 33, 52, 8, [31, 42.5]),
+    Z("The house", 11, 49, 24, 61, 5, [44, 28]),
+    Z("Behind the net", 2, 11, 27, 58, 7, [6.5, 42.5]),
     Z("Corner", 3, 29, 3, 14, 7, [15, 8]),
     Z("Corner", 3, 29, 71, 82, 7, [15, 77]),
     Z("Half wall", 26, 66, 3, 14, 4, [46, 8.5]),
     Z("Half wall", 26, 66, 71, 82, 4, [46, 76.5]),
-    Z("Dot lane", 17, 72, 14.5, 26.5, 3, [63, 20.5]),
-    Z("Dot lane", 17, 72, 58.5, 70.5, 3, [63, 64.5]),
+    Z("Dot lane", 11, 72, 14.5, 26.5, 3, [63, 20.5]),
+    Z("Dot lane", 11, 72, 58.5, 70.5, 3, [63, 64.5]),
     Z("The point", 66, 75, 16, 69, 4, [70.5, 42.5]),
   ];
 }
