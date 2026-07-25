@@ -84,8 +84,10 @@ function fitOne(landmarks, attack, rink) {
   for (const v of dotV) yPairs.push([v, v < anchorV ? DOT_Y[0] : DOT_Y[1]]);
   let fy = fit1d(yPairs);
   // degenerate / implausible y-fit (all anchors mid-ice, single dot, wild
-  // stretch from a misassigned dot) → assume the photo's aspect is honest
-  if (!fy || fy.s <= 0 || fy.s / fx.s < 0.4 || fy.s / fx.s > 2.5) {
+  // stretch from a misassigned dot) → assume the photo's aspect is honest.
+  // Bounds are wide: stylized drill-book graphics legitimately compress one
+  // axis ~3× (a squished half-ice PNG is sy/sx ≈ 0.35).
+  if (!fy || fy.s <= 0 || fy.s / fx.s < 0.15 || fy.s / fx.s > 7) {
     fy = { s: fx.s, t: MID_Y - fx.s * anchorV };
   }
 
