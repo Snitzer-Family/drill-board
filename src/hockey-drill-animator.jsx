@@ -259,7 +259,8 @@ function DelayTrigger({ value, onChange, sub, players, actorIds, nameOf }) {
 const SAVE_KEY = "drillboard:autosave";   // the whole board, persisted across refreshes
 const WB_KEY = "drillboard:whiteboard";   // whiteboard-mode view pref, persisted on its own
 const WBC_KEY = "drillboard:whiteboard-circle";   // circled X/O symbols sub-pref
-const HALFNS_KEY = "drillboard:half-ns";  // half-ice shown north-south (net at bottom)
+const HALFNS_KEY = "drillboard:half-ns";  // half-ice shown north-south (vertical)
+const HALFFLIP_KEY = "drillboard:half-flip";  // half-ice net at the far end (left / top)
 
 export default function DrillAnimator() {
   // a shared drill link (#d=<url-safe base64 DSL> — the preview-link format from
@@ -339,6 +340,11 @@ export default function DrillAnimator() {
     try { return localStorage.getItem(HALFNS_KEY) === "1"; } catch { return false; }
   });
   useEffect(() => { try { localStorage.setItem(HALFNS_KEY, halfNS ? "1" : "0"); } catch { /* private mode */ } }, [halfNS]);
+  // flipped ends: E-W with the net at the LEFT, or N-S with the net at the TOP
+  const [halfFlip, setHalfFlip] = useState(() => {
+    try { return localStorage.getItem(HALFFLIP_KEY) === "1"; } catch { return false; }
+  });
+  useEffect(() => { try { localStorage.setItem(HALFFLIP_KEY, halfFlip ? "1" : "0"); } catch { /* private mode */ } }, [halfFlip]);
   const effDetail = detailAnim && !whiteboard;
   // whiteboard also drops the shot theatrics: no random miss/post/air rolls
   // (shots bury flat) and no GOAL!/SAVE! splashes — a diagram, not a broadcast
@@ -868,28 +874,38 @@ export default function DrillAnimator() {
   const sa = stageSize.w / Math.max(1, stageSize.h);
   const autoRotated =
     Math.abs(Math.log(sa / (vhF / vwF))) < Math.abs(Math.log(sa / (vwF / vhF)));
-  // half ice: orientation is the user's choice (rink menu) — N-S rotates the
-  // view so the net reads at the bottom; full/quarter keep the fill-mode
-  // auto orientation
-  const rotated = rink === "half" ? halfNS : autoRotated;
+  // half ice: orientation is the user's choice (rink menu) — four compass
+  // orientations: 0 = net right, 180 = net left, 90 = net bottom, 270 = net
+  // top; full/quarter keep the fill-mode auto orientation (0 or 90).
+  const screenRot = rink === "half"
+    ? (halfNS ? (halfFlip ? 270 : 90) : (halfFlip ? 180 : 0))
+    : (autoRotated ? 90 : 0);
+  const swapAxes = screenRot === 90 || screenRot === 270; // view turned vertical
   let canvasW = Math.max(50, stageSize.w);
   let canvasH = Math.max(20, stageSize.h);
   // Full ice fills the stage (fill mode). Half ice is constrained to its true
-  // 100'×85' proportions in either orientation (no stretch — letterbox the
+  // 100'×85' proportions in every orientation (no stretch — letterbox the
   // surplus). Quarter keeps its true proportions up to a small over-stretch.
   if (rink !== "full") {
-    const vbW = rotated ? vhF : vwF, vbH = rotated ? vwF : vhF;   // effective viewBox dims
+    const vbW = swapAxes ? vhF : vwF, vbH = swapAxes ? vwF : vhF; // effective viewBox dims
     const CAP = rink === "half" ? 1 : 1.12;                       // max stretch past true aspect
     canvasH = Math.min(canvasH, Math.round((canvasW * vbH) / vbW * CAP));
     canvasW = Math.min(canvasW, Math.round((canvasH * vbW) / vbH * CAP));
   }
-  // maps rink coords into the rotated viewBox: (x,y) -> (my+vh-y, x-mx)
-  const sceneTransform = rotated ? `rotate(90) translate(${-mxF} ${-(myF + vhF)})` : undefined;
-  const screenRot = rotated ? 90 : 0;
-  // the root viewBox the pinch-zoom transform operates in (rotated swaps axes)
-  geomRef.current = rotated
+  // maps rink coords into the rotated viewBox: 90° -> (my+vh-y, x-mx),
+  // 180° -> (mx+vw-x, my+vh-y), 270° -> (y-my, mx+vw-x)
+  const sceneTransform =
+    screenRot === 90 ? `rotate(90) translate(${-mxF} ${-(myF + vhF)})`
+    : screenRot === 180 ? `rotate(180) translate(${-(mxF + vwF)} ${-(myF + vhF)})`
+    : screenRot === 270 ? `rotate(-90) translate(${-(mxF + vwF)} ${-myF})`
+    : undefined;
+  // the root viewBox the pinch-zoom transform operates in (vertical swaps axes;
+  // any rotation re-origins the root at 0,0 via the scene transform)
+  geomRef.current = swapAxes
     ? { ox: 0, oy: 0, rootW: vhF, rootH: vwF }
-    : { ox: mxF, oy: myF, rootW: vwF, rootH: vhF };
+    : screenRot === 180
+      ? { ox: 0, oy: 0, rootW: vwF, rootH: vhF }
+      : { ox: mxF, oy: myF, rootW: vwF, rootH: vhF };
   const zoomXf = view.s !== 1 || view.tx || view.ty ? `translate(${view.tx} ${view.ty}) scale(${view.s})` : undefined;
   // "Mark opacity" fades only the drawn drill markings (routes, forks, stops,
   // freehand ink, shot-aim). Players/pucks/cones/nets and editing UI stay opaque.
@@ -898,8 +914,8 @@ export default function DrillAnimator() {
   // differently; circles are drawn as ellipses with ry scaled by yFix so
   // they render perfectly round on screen after the stretch
   const yFix = (() => {
-    const sx = rotated ? canvasH / vwF : canvasW / vwF;
-    const sy = rotated ? canvasW / vhF : canvasH / vhF;
+    const sx = swapAxes ? canvasH / vwF : canvasW / vwF;
+    const sy = swapAxes ? canvasW / vhF : canvasH / vhF;
     return sy > 0 ? Math.max(0.2, Math.min(5, sx / sy)) : 1;
   })();
   // a handle dot that stays a true circle on screen despite the fill-mode
@@ -913,24 +929,28 @@ export default function DrillAnimator() {
   // heading as a pure screen rotation at a uniform scale (geometric mean
   // of the two axis scales, so sizes stay consistent in any orientation).
   const iconGeom = (() => {
-    const Sx = Math.max(1e-6, rotated ? canvasH / vwF : canvasW / vwF);
-    const Sy = Math.max(1e-6, rotated ? canvasW / vhF : canvasH / vhF);
+    const Sx = Math.max(1e-6, swapAxes ? canvasH / vwF : canvasW / vwF);
+    const Sy = Math.max(1e-6, swapAxes ? canvasW / vhF : canvasH / vhF);
     return { Sx, Sy, k: ICON_SCALE * Math.sqrt(Sx * Sy) };
   })();
+  // exact rotation terms for screenRot ∈ {0, 90, 180, 270} (avoids fp drift)
+  const rotCf = screenRot === 0 ? 1 : screenRot === 180 ? -1 : 0;
+  const rotSf = screenRot === 90 ? 1 : screenRot === 270 ? -1 : 0;
   function iconXf(pos) {
     const { Sx, Sy, k } = iconGeom;
     const a = ((pos.a || 0) * Math.PI) / 180;
     const c = Math.cos(a), s = Math.sin(a);
-    const th = rotated ? Math.atan2(Sx * c, -Sy * s) : Math.atan2(Sy * s, Sx * c);
+    // root-axis scales: the rink-axis scales re-labelled when the view is vertical
+    const sW = swapAxes ? Sy : Sx, sH = swapAxes ? Sx : Sy;
+    // on-screen direction of the piece's rink heading: rotate, then stretch
+    const th = Math.atan2(sH * (rotSf * c + rotCf * s), sW * (rotCf * c - rotSf * s));
     const ct = Math.cos(th), st = Math.sin(th);
-    let m00, m01, m10, m11;
-    if (rotated) {
-      m00 = (k * st) / Sx; m01 = (k * ct) / Sx;
-      m10 = (-k * ct) / Sy; m11 = (k * st) / Sy;
-    } else {
-      m00 = (k * ct) / Sx; m01 = (-k * st) / Sx;
-      m10 = (k * st) / Sy; m11 = (k * ct) / Sy;
-    }
+    // M = R(-rot)·diag(1/sW,1/sH)·k·R(th): cancels the scene rotation and the
+    // stretch, re-applies the heading as a pure screen rotation at uniform k
+    const m00 = (rotCf * (k * ct)) / sW + (rotSf * (k * st)) / sH;
+    const m01 = (rotCf * (-k * st)) / sW + (rotSf * (k * ct)) / sH;
+    const m10 = (-rotSf * (k * ct)) / sW + (rotCf * (k * st)) / sH;
+    const m11 = (rotSf * (k * st)) / sW + (rotCf * (k * ct)) / sH;
     return {
       t: `translate(${pos.x} ${pos.y}) matrix(${m00} ${m10} ${m01} ${m11} 0 0)`,
       th: (th * 180) / Math.PI,
@@ -5381,8 +5401,14 @@ export default function DrillAnimator() {
   /* ----- popout ----- */
   function popoutAnchor(pt) {
     const [mx, my, vw, vh] = VIEWS[rink];
-    const lx = rotated ? ((my + vh - pt.y) / vh) * 100 : ((pt.x - mx) / vw) * 100;
-    const ty = rotated ? ((pt.x - mx) / vw) * 100 : ((pt.y - my) / vh) * 100;
+    const lx = screenRot === 90 ? ((my + vh - pt.y) / vh) * 100
+      : screenRot === 180 ? ((mx + vw - pt.x) / vw) * 100
+      : screenRot === 270 ? ((pt.y - my) / vh) * 100
+      : ((pt.x - mx) / vw) * 100;
+    const ty = screenRot === 90 ? ((pt.x - mx) / vw) * 100
+      : screenRot === 180 ? ((my + vh - pt.y) / vh) * 100
+      : screenRot === 270 ? ((mx + vw - pt.x) / vw) * 100
+      : ((pt.y - my) / vh) * 100;
     if (lx < -2 || lx > 102 || ty < -2 || ty > 102) return null;
     return { lx: Math.max(0, Math.min(100, lx)), ty: Math.max(0, Math.min(100, ty)) };
   }
@@ -6856,8 +6882,12 @@ export default function DrillAnimator() {
     const xShift = fx < LOUPE / 2 + 8 ? "0%" : canvasW - fx < LOUPE / 2 + 8 ? "-100%" : "-50%";
     // the loupe's scene rotates the same way as the main ice, so the
     // magnified view matches what's under the finger
-    const loupeXf = rotated
+    const loupeXf = screenRot === 90
       ? `rotate(90) translate(${R - loupe.x} ${-loupe.y - R})`
+      : screenRot === 180
+      ? `rotate(180) translate(${-loupe.x - R} ${-loupe.y - R})`
+      : screenRot === 270
+      ? `rotate(-90) translate(${-loupe.x - R} ${R - loupe.y})`
       : `translate(${R - loupe.x} ${R - loupe.y})`;
     return (
       <div className="hd-loupe" style={{
@@ -7031,7 +7061,7 @@ export default function DrillAnimator() {
       <div className="hd-stage" ref={stageRef}>
         <div className="hd-canvas" style={{ width: canvasW, height: canvasH }}>
           <svg ref={svgRef} className="hd-ice"
-            viewBox={rotated ? `0 0 ${vhF} ${vwF}` : vb(rink)}
+            viewBox={swapAxes ? `0 0 ${vhF} ${vwF}` : screenRot === 180 ? `0 0 ${vwF} ${vhF}` : vb(rink)}
             preserveAspectRatio="none"
             onPointerDown={onSvgDown} onPointerMove={onSvgMove}
             onPointerUp={onSvgUp} onPointerCancel={onSvgUp}>
@@ -8075,10 +8105,14 @@ export default function DrillAnimator() {
           <div className="hd-mh">Ice surface</div>
           <button className={`hd-item${rink === "full" ? " on" : ""}`}
             onClick={() => { setRink("full"); setOpenMenu(null); }}>Full ice</button>
-          <button className={`hd-item${rink === "half" && !halfNS ? " on" : ""}`}
-            onClick={() => { setRink("half"); setHalfNS(false); setOpenMenu(null); }}>Half ice · E–W ↔</button>
-          <button className={`hd-item${rink === "half" && halfNS ? " on" : ""}`}
-            onClick={() => { setRink("half"); setHalfNS(true); setOpenMenu(null); }}>Half ice · N–S ↕</button>
+          <button className={`hd-item${rink === "half" && !halfNS && !halfFlip ? " on" : ""}`}
+            onClick={() => { setRink("half"); setHalfNS(false); setHalfFlip(false); setOpenMenu(null); }}>Half ice · net →</button>
+          <button className={`hd-item${rink === "half" && !halfNS && halfFlip ? " on" : ""}`}
+            onClick={() => { setRink("half"); setHalfNS(false); setHalfFlip(true); setOpenMenu(null); }}>Half ice · net ←</button>
+          <button className={`hd-item${rink === "half" && halfNS && !halfFlip ? " on" : ""}`}
+            onClick={() => { setRink("half"); setHalfNS(true); setHalfFlip(false); setOpenMenu(null); }}>Half ice · net ↓</button>
+          <button className={`hd-item${rink === "half" && halfNS && halfFlip ? " on" : ""}`}
+            onClick={() => { setRink("half"); setHalfNS(true); setHalfFlip(true); setOpenMenu(null); }}>Half ice · net ↑</button>
           <button className={`hd-item${rink === "quarter" ? " on" : ""}`}
             onClick={() => { setRink("quarter"); setOpenMenu(null); }}>Quarter sheet</button>
         </div>
