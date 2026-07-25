@@ -120,7 +120,14 @@ export function wigglePoints(prev, s, ar = 1, taperEnd = false) {
 // half-arc humps offsetting above/below the line (see hockey drill books).
 // Arcs are a FIXED size — the chain adds/removes arcs as the leg length
 // changes (count = round(length / pitch)) instead of stretching the shape.
-const BWD_PITCH = 3.2, BWD_A = 1.15;               // arc length + height, screen units
+// The profile is a SEMICIRCLE with a small baseline gap between arcs (cusps,
+// not smooth zero-crossings) so it reads as distinct arcs — a smooth sine
+// here would be indistinguishable from the puck-carry wiggle.
+const BWD_PITCH = 3.4, BWD_A = 1.25, BWD_GAP = 0.6;  // arc pitch/height/gap, screen units
+const bwdProfile = (u, pitch) => {                    // u = distance into this arc's cell
+  const r = (pitch - BWD_GAP) / 2, c = pitch / 2, d = (u - c) / (r || 1);
+  return Math.abs(d) >= 1 ? 0 : Math.sqrt(1 - d * d) * BWD_A;
+};
 export function zigzagPoints(prev, s, ar = 1) {
   // arc length measured in aspect-weighted space (x scaled by ar) so the
   // pattern stays uniform on screen regardless of the segment's direction
@@ -145,7 +152,7 @@ export function zigzagPoints(prev, s, ar = 1) {
     const px = -ty, py = tx;                                 // screen-space normal
     const l = Math.hypot(px, py) || 1;
     const k = Math.min(arcs - 1, Math.floor(cum[i] / pitch));
-    const a = (k % 2 ? -1 : 1) * BWD_A * Math.sin(((cum[i] - k * pitch) / pitch) * Math.PI);
+    const a = (k % 2 ? -1 : 1) * bwdProfile(cum[i] - k * pitch, pitch);
     pts.push({ x: pt.x + (px / l) * a / ar, y: pt.y + (py / l) * a });
   }
   return pts.map(q => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" ");
@@ -223,7 +230,7 @@ export function zigzagPoly(pts, ar = 1) {
     const tx = (ahead.x - pt.x) * ar, ty = ahead.y - pt.y;
     const px = -ty, py = tx, l = Math.hypot(px, py) || 1;
     const k = Math.min(arcs - 1, Math.floor(cum[i] / pitch));
-    const a = (k % 2 ? -1 : 1) * BWD_A * Math.sin(((cum[i] - k * pitch) / pitch) * Math.PI);
+    const a = (k % 2 ? -1 : 1) * bwdProfile(cum[i] - k * pitch, pitch);
     out.push({ x: pt.x + (px / l) * a / ar, y: pt.y + (py / l) * a });
   }
   return out;
