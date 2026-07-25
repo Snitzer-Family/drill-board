@@ -115,6 +115,28 @@ check("off-center nets don't anchor y", () => {
   near(md.y, 64.5, 0.6, "dot y");
 });
 
+// --- end_boards anchors the strip behind the goal line -----------------------
+// Stylized pages draw the behind-goal strip oversized (here 54px for 11ft vs
+// 3.3px/ft elsewhere). Without end_boards every point back there extrapolates
+// past the rink and flattens onto the clamp; with it the strip scales inside.
+check("end_boards un-flattens the behind-goal strip", () => {
+  const lm = [
+    { feature: "goal_line", x: 240, y: 62 },
+    { feature: "crease", x: 240, y: 68 },
+    { feature: "endzone_dot", x: 160, y: 128 },
+    { feature: "endzone_dot", x: 320, y: 128 },
+    { feature: "end_boards", x: 240, y: 8 },
+  ];
+  const { map, error } = fitTransform(lm, { attack: "up", rink: "half" });
+  assert.equal(error, undefined);
+  const wall = map(150, 17);           // a chip-landing puck ~2ft off the wall
+  assert.ok(wall.x > 194 && wall.x < 199.4, `wall puck inside the strip, off the clamp (${wall.x.toFixed(1)})`);
+  const deep = map(150, 40);           // deeper point stays ordered below it
+  assert.ok(deep.x < wall.x - 1, `strip keeps depth ordering (${deep.x.toFixed(1)} < ${wall.x.toFixed(1)})`);
+  const dot = map(160, 128);
+  near(dot.x, 169, 1.6, "dots stay accurate despite the compromise");
+});
+
 // --- out-of-range points clamp into the ROUNDED ice, not onto the boards ----
 check("clamp projects into the rounded corners", () => {
   const lm = [

@@ -74,10 +74,12 @@ function fitOne(landmarks, attack, rink) {
 
   // x correspondences — attack points +x, so single attack-end features map to
   // the right end; on full ice paired lines resolve by u-order vs the center.
-  const xPairs = [];
+  const xPairs = [], goalU = { L: [], R: [] }, boardU = { L: [], R: [] };
   for (const p of pts) {
     if (/^(goal_line|net|crease)/.test(p.f)) {
-      xPairs.push([p.u, half ? GOAL_X[1] : pickX(p.u, GOAL_X, us("goal_line"), refU)]);
+      const X = half ? GOAL_X[1] : pickX(p.u, GOAL_X, us("goal_line"), refU);
+      xPairs.push([p.u, X]);
+      if (p.f.startsWith("goal_line")) (X === GOAL_X[1] ? goalU.R : goalU.L).push(p.u);
     } else if (p.f.startsWith("blue_line")) {
       xPairs.push([p.u, half ? BLUE_X[1] : pickX(p.u, BLUE_X, us("blue_line"), refU)]);
     } else if (/^center_(line|dot|circle)/.test(p.f)) {
@@ -86,10 +88,38 @@ function fitOne(landmarks, attack, rink) {
       xPairs.push([p.u, half ? EZ_DOT_X[1] : pickX(p.u, EZ_DOT_X, us("endzone"), refU)]);
     } else if (p.f.startsWith("neutral")) {
       xPairs.push([p.u, half ? NZ_DOT_X[1] : pickX(p.u, NZ_DOT_X, us("neutral"), refU)]);
+    } else if (p.f.startsWith("end_boards")) {
+      // the wall behind the net. NOT fed to the global least squares: stylized
+      // pages draw the goal-line→boards strip oversized, and one boards pair
+      // can't outvote the goal/dot cluster — the strip is handled piecewise
+      // below instead (only a fallback pair when no goal line was reported).
+      const X = half ? RINK_W : pickX(p.u, [0, RINK_W], us("end_boards"), refU);
+      (X === RINK_W ? boardU.R : boardU.L).push(p.u);
+      if (!pts.some(q => q.f.startsWith("goal_line"))) xPairs.push([p.u, X]);
     }
   }
   const fx = fit1d(xPairs);
   if (!fx || fx.s <= 0) return { error: "need two or more distinct rink landmarks (goal line, blue line, dots…) to orient the diagram" };
+
+  // PIECEWISE STRIP behind each goal line: pixels between the drawn goal line
+  // and the drawn wall map proportionally onto the real 11ft strip — anchored
+  // at the fitted goal line (continuity) and exactly at the boards. Stylized
+  // pages draw this strip far off scale, and linear extrapolation flattened
+  // every wall puck/route onto the clamp.
+  const avg = a => a.reduce((s, n) => s + n, 0) / a.length;
+  const mkStrip = (gs, bs, XB) => {
+    if (!gs.length || !bs.length) return null;
+    const uG = avg(gs), uB = avg(bs);
+    return Math.abs(uB - uG) < 1e-6 ? null : { uG, uB, XB };
+  };
+  const strips = [mkStrip(goalU.R, boardU.R, RINK_W), mkStrip(goalU.L, boardU.L, 0)].filter(Boolean);
+  const mapX = u => {
+    for (const st of strips) {
+      const t = (u - st.uG) / (st.uB - st.uG);
+      if (t > 0) { const xG = fx.s * st.uG + fx.t; return xG + t * (st.XB - xG); }
+    }
+    return fx.s * u + fx.t;
+  };
 
   // y correspondences — mid-ice anchors are exact; dots resolve top/bottom
   // against the anchor (or their own pair mean when no anchor is visible).
@@ -104,6 +134,8 @@ function fitOne(landmarks, attack, rink) {
     : pts.reduce((a, p) => a + p.v, 0) / pts.length;
   const yPairs = midV.map(v => [v, MID_Y]);
   for (const v of dotV) yPairs.push([v, v < anchorV ? DOT_Y[0] : DOT_Y[1]]);
+  // side walls anchor y the way end_boards anchors x
+  for (const p of pts) if (p.f.startsWith("side_boards")) yPairs.push([p.v, p.v < anchorV ? 0 : RINK_H]);
   let fy = fit1d(yPairs);
   // degenerate / implausible y-fit (all anchors mid-ice, single dot, wild
   // stretch from a misassigned dot) → assume the photo's aspect is honest.
@@ -115,7 +147,7 @@ function fitOne(landmarks, attack, rink) {
 
   const map = (x, y) => {
     const { u, v } = rot({ x, y });
-    return clampIce(fx.s * u + fx.t, fy.s * v + fy.t);
+    return clampIce(mapX(u), fy.s * v + fy.t);
   };
   let residual = 0;
   for (const [u, X] of xPairs) residual += Math.abs(fx.s * u + fx.t - X);
@@ -127,8 +159,8 @@ function fitOne(landmarks, attack, rink) {
 // Fit the pixel→rink transform from model-reported landmarks.
 // landmarks: [{feature, x, y}] in pixels; feature ∈ goal_line | blue_line |
 // center_line | center_dot | center_circle | net | crease | endzone_dot |
-// endzone_circle | neutral_dot. Line features use the midpoint of the drawn
-// line. attack: which way the model says the play attacks in the IMAGE —
+// endzone_circle | neutral_dot | end_boards | side_boards. Line features use
+// the midpoint of the drawn line (for boards: of the straight wall section). attack: which way the model says the play attacks in the IMAGE —
 // treated as a prior, not gospel: every orientation is fitted and the one the
 // landmarks actually agree with wins; the stated attack only breaks near-ties.
 // rink: half | full. Returns { map, residual, attack } or { error }.
