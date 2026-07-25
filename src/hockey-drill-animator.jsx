@@ -948,6 +948,9 @@ export default function DrillAnimator() {
   // render and commits it here, so the other resolveRoute callers (lightReactionEvents,
   // chosenForkRefs) read the same answers a possession/link/event branch was chosen by.
   const solvedRef = useRef({ routes: {}, reach: {}, reachT: {}, poss: {}, released: {} });
+  // fork-free drills still lower puck terminals; the result depends only on rpieces,
+  // so cache by identity to keep timing's identity-keyed plan cache warm
+  const lowerCacheRef = useRef({ key: null, out: null });
   // timing runs on the nearest-resolved model: any "Collect nearest puck" intent
   // re-binds to whichever loose puck is actually closest right now. Rendering &
   // editing stay on raw `pieces` (displayPosAt keys plans by id, so it lines up).
@@ -2155,7 +2158,13 @@ export default function DrillAnimator() {
   }
   function resolveForks(ps) {
     const branching = ps.filter(p => p.kind === "player" && (p.forks || []).length);
-    if (!branching.length) { solvedRef.current = EMPTY_SOLVED; return ps; }
+    // terminals are ALWAYS stored as an authoring list, so even a fork-free drill
+    // needs the lowering pass when a puck carries one (or a stale branch ref)
+    const puckNeedsLower = q => q.kind === "puck" && (
+      (q.terminals || []).length ||
+      (q.transfers || []).some(t => t.atRef || t.recvRef) ||
+      (q.pickup && q.pickup.atRef));
+    if (!branching.length && !ps.some(puckNeedsLower)) { solvedRef.current = EMPTY_SOLVED; return ps; }
     // resolve every branching player's route under the current solved trigger state
     const buildR = solved => {
       const R = new Map();                                   // playerId → resolved { effPath, chain, terminal, idxMap }
@@ -2166,8 +2175,7 @@ export default function DrillAnimator() {
     const lowerForks = R => {
     // even if no branch fired, pucks carrying branch-tagged actions must have those
     // dropped (they belong to a branch this run didn't take)
-    const anyRefs = ps.some(q => q.kind === "puck" && ((q.transfers || []).some(t => t.atRef || t.recvRef) || (q.terminals || []).some(t => t.ref) || (q.pickup && q.pickup.atRef)));
-    if (!R.size && !anyRefs) return ps;
+    if (!R.size && !ps.some(puckNeedsLower)) return ps;
     let out = ps.slice();
     for (const [id, r] of R) { const i = out.findIndex(q => q.id === id); out[i] = { ...out[i], path: r.effPath }; }
     // (playerId, route ref, local index) → resolved flat index, or null when that branch
@@ -2360,6 +2368,15 @@ export default function DrillAnimator() {
     const solvedSig = s => JSON.stringify([
       Object.fromEntries(Object.entries(s.routes).map(([k, v]) => [k, [...v].sort()])), s.reach, s.reachT, s.poss, s.released, s.releasedT,
       Object.fromEntries(Object.entries(s.heldWin || {}).map(([k, v]) => [k, v.map(w => [w.g, w.l === Infinity ? "inf" : w.l])]))]);
+    // no player branches at all: R is empty and lowering is PURE over ps (no seed,
+    // no solved input) → cache on ps identity so timing's plan cache (keyed on
+    // array identity) still hits frame to frame instead of replanning
+    if (!branching.length) {
+      solvedRef.current = EMPTY_SOLVED;
+      if (lowerCacheRef.current.key !== ps)
+        lowerCacheRef.current = { key: ps, out: lowerForks(buildR(EMPTY_SOLVED)) };
+      return lowerCacheRef.current.out;
+    }
     // no resolved-state condition anywhere → selection is pure geometry+seed, so one pass
     // reproduces the historical behaviour exactly (and can't loop).
     if (!branching.some(p => forksNeedSolve(p.forks))) { solvedRef.current = EMPTY_SOLVED; return lowerForks(buildR(EMPTY_SOLVED)); }
