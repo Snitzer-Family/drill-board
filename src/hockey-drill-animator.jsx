@@ -7226,9 +7226,10 @@ export default function DrillAnimator() {
                   const routeCol = cd.type === "light" ? (cd.color || f.color) : p.color;
                   // same stroke as a base route (segStroke: thickness setting × lineScale,
                   // 0.78 opacity, non-scaling) with the cue colour swapped in; non-chosen
-                  // alternatives keep their dash as the differentiator
-                  const line = { ...segStroke(p, f.path[f.path.length - 1] || {}, false, false),
-                    stroke: routeCol, strokeLinejoin: "round", pointerEvents: "none" };
+                  // alternatives dim to half the base opacity and keep their dash
+                  const baseLine = segStroke(p, f.path[f.path.length - 1] || {}, false, false);
+                  const line = { ...baseLine, stroke: routeCol, strokeLinejoin: "round", pointerEvents: "none",
+                    ...(solid ? {} : { opacity: baseLine.opacity * 0.5 }) };
                   // chained-fork departures on THIS branch get the same line hole as a
                   // base route's branch points (forkAts)
                   const subForkAts = new Set((f.forks || []).filter(g => g.path && g.path.length)
@@ -7285,7 +7286,7 @@ export default function DrillAnimator() {
                             {bent && (
                               <path d={d} fill="none" stroke={routeCol} strokeWidth={sw(0.5)}
                                 strokeDasharray={sdash("1.4 1.6")} strokeLinecap="round"
-                                vectorEffect="non-scaling-stroke" opacity={0.22} pointerEvents="none" />
+                                vectorEffect="non-scaling-stroke" opacity={0.22 * (solid ? 1 : 0.5)} pointerEvents="none" />
                             )}
                             {editing && !playing && (
                               <path d={d} fill="none" stroke="transparent" strokeWidth={4}
