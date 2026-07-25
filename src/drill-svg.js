@@ -319,14 +319,28 @@ const BLOCKED_COLOR = "#e01f2b";      // a rebound that can't reach its collecto
 // how far to hold each END (arrowhead) and START off its icon (net/player/point)
 const CHAIN_TRIM = { shot: 4.6, rebound: 3, "rebound-x": 3, pass: 4 };
 const CHAIN_START = { shot: 4, rebound: 3, "rebound-x": 3, pass: 4 };
+// offset a polyline sideways by `o` feet (perpendicular to the local direction)
+const offsetPoly = (pts, o) => pts.map((p, i) => {
+  const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)];
+  const dx = b.x - a.x, dy = b.y - a.y, l = Math.hypot(dx, dy) || 1;
+  return { x: p.x - (dy / l) * o, y: p.y + (dx / l) * o };
+});
 const chainLine = (pts, mode) => {
   const rebound = mode === "rebound", blocked = mode === "rebound-x", shot = mode === "shot";
   const dotted = rebound || blocked;
   const color = blocked ? BLOCKED_COLOR : rebound ? REBOUND_COLOR : V("puck", "#14171a");
-  const dash = shot ? "" : dotted ? ' stroke-dasharray="0.1 1.9"' : ' stroke-dasharray="2.4 2"';
-  const marker = blocked ? "arrowRX" : rebound ? "arrowRB" : "arrowP";
   const line = trimLine(pts, CHAIN_START[mode] != null ? CHAIN_START[mode] : 3.5, CHAIN_TRIM[mode] != null ? CHAIN_TRIM[mode] : 3.5);
-  return `<polyline points="${polyPts(line)}" fill="none" stroke="${color}" stroke-width="${shot ? 0.72 : blocked ? 0.72 : 0.6}"`
+  if (shot) {
+    // standard shot notation: two parallel lines + an open caret at the end
+    // (the caret rides an invisible center line so it stays on-axis)
+    const s = `fill="none" stroke="${color}" stroke-width="0.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"`;
+    return `<polyline points="${polyPts(offsetPoly(line, 0.65))}" ${s}/>`
+      + `<polyline points="${polyPts(offsetPoly(line, -0.65))}" ${s}/>`
+      + `<polyline points="${polyPts(line)}" fill="none" stroke="${color}" stroke-opacity="0" stroke-width="0.72" marker-end="url(#arrowS)"/>`;
+  }
+  const dash = dotted ? ' stroke-dasharray="0.1 1.9"' : ' stroke-dasharray="2.4 2"';
+  const marker = blocked ? "arrowRX" : rebound ? "arrowRB" : "arrowP";
+  return `<polyline points="${polyPts(line)}" fill="none" stroke="${color}" stroke-width="${blocked ? 0.72 : 0.6}"`
     + `${dash} stroke-linecap="round" stroke-linejoin="round" opacity="0.9" marker-end="url(#${marker})"/>`;
 };
 
@@ -344,7 +358,12 @@ function chain(pk, byId, pieces) {
   const out = [];
   const rimPoly = (launch, aim, anchor) => (aim != null ? boards.rimTo(launch, aim, anchor) : boards.rimPath(launch, anchor));
   const transfers = pk.transfers || [];
-  const termAt = pk.shotAt != null ? pk.shotAt : pk.rimAt != null ? pk.rimAt : pk.chipAt != null ? pk.chipAt : null;
+  // the chain's unconditional END lives in terminals[] (ref="" = base chain;
+  // ref'd terminals belong to branch conditions and aren't part of the base
+  // plan). Legacy shotAt/rimAt/chipAt fields still win if present.
+  const baseTerm = (pk.terminals || []).find(t => !t.ref) || null;
+  const termAt = pk.shotAt != null ? pk.shotAt : pk.rimAt != null ? pk.rimAt : pk.chipAt != null ? pk.chipAt
+    : baseTerm ? baseTerm.at : null;
   const lastAt = {};                                  // player id → route index where they last released
   // a give-and-go return: the receiver already carried the puck, so they catch
   // it a bit up their route from where they gave it (not at their final waypoint,
@@ -383,6 +402,12 @@ function chain(pk, byId, pieces) {
   if (pk.shotAt != null) { const l = routePoint(cur, pk.shotAt); out.push(chainLine([l, shotNet(l)], "shot")); }
   else if (pk.rimAt != null) { const l = routePoint(cur, pk.rimAt); out.push(chainLine(boards.rimAround(l, pk.rimDist != null ? pk.rimDist : 65, pk.rimAim), "pass")); }
   else if (pk.chipAt != null) { const l = routePoint(cur, pk.chipAt); const h = pk.chipAim != null ? aimVec(pk.chipAim) : heading(cur, pk.chipAt); out.push(chainLine(boards.slide(l.x, l.y, h.x, h.y, pk.chipDist != null ? pk.chipDist : 26), "pass")); }
+  else if (baseTerm) {
+    const l = routePoint(cur, baseTerm.at);
+    if (baseTerm.kind === "shot") out.push(chainLine([l, shotNet(l, baseTerm.net != null ? baseTerm.net : null)], "shot"));
+    else if (baseTerm.kind === "rim") out.push(chainLine(boards.rimAround(l, baseTerm.dist != null ? baseTerm.dist : 65, baseTerm.aim), "pass"));
+    else if (baseTerm.kind === "chip") { const h = baseTerm.aim != null ? aimVec(baseTerm.aim) : heading(cur, baseTerm.at); out.push(chainLine(boards.slide(l.x, l.y, h.x, h.y, baseTerm.dist != null ? baseTerm.dist : 26), "pass")); }
+  }
   return out.join("");
 }
 
@@ -399,6 +424,7 @@ export function drillSvg(dsl, opts = {}) {
       <clipPath id="ice"><rect x="0.6" y="0.6" width="198.8" height="83.8" rx="28"/></clipPath>
       <marker id="arrowR" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4" fill="none" stroke="${V("mark", "#cf3346")}" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></marker>
       <marker id="arrowP" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="${V("puck", "#14171a")}"/></marker>
+      <marker id="arrowS" markerWidth="9" markerHeight="9" refX="6.6" refY="4.5" orient="auto"><path d="M1 1.4 L7.4 4.5 L1 7.6" fill="none" stroke="${V("puck", "#14171a")}" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></marker>
       <marker id="arrowRB" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="${REBOUND_COLOR}"/></marker>
       <marker id="arrowRX" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="${BLOCKED_COLOR}"/></marker>
     </defs>`;

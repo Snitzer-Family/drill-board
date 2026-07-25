@@ -6766,16 +6766,25 @@ export default function DrillAnimator() {
         const ex = ep.x, ey = ep.y;
         return (
           <g key={`pf-${q.id}-${k}`} pointerEvents="none" opacity={0.62}>
-            <line x1={sx} y1={sy} x2={ex} y2={ey} vectorEffect={ve}
-              stroke="#14171a" strokeWidth={W(L.shot ? 1.1 : 0.55)}
-              strokeDasharray={L.shot ? undefined : D("2.4 1.8")} />
+            {L.shot
+              // standard shot notation: two parallel lines with an open caret
+              ? (() => {
+                  const a1 = gmMove(sx, sy, -uy, ux, 0.65), a2 = gmMove(ex, ey, -uy, ux, 0.65);
+                  const b1 = gmMove(sx, sy, uy, -ux, 0.65), b2 = gmMove(ex, ey, uy, -ux, 0.65);
+                  return <>
+                    <line x1={a1.x} y1={a1.y} x2={a2.x} y2={a2.y} vectorEffect={ve} stroke="#14171a" strokeWidth={W(0.55)} />
+                    <line x1={b1.x} y1={b1.y} x2={b2.x} y2={b2.y} vectorEffect={ve} stroke="#14171a" strokeWidth={W(0.55)} />
+                  </>;
+                })()
+              : <line x1={sx} y1={sy} x2={ex} y2={ey} vectorEffect={ve}
+                  stroke="#14171a" strokeWidth={W(0.55)} strokeDasharray={D("2.4 1.8")} />}
             {runEnd && (dx || dy) && (flat
               ? <circle cx={ex} cy={ey} r={1.1} fill="none" vectorEffect={ve} stroke="#14171a" strokeWidth={W(0.3)} />
               : (() => { const fx = iconXf({ x: ex, y: ey, a: (Math.atan2(dy, dx) * 180) / Math.PI });
                   return <g transform={fx.t}><g transform={`scale(${z})`}>
                     {L.shot
-                      // double chevron ">>" for a shot
-                      ? <path d="M -3.4 -2.2 L 0 0 L -3.4 2.2 M -6.8 -2.2 L -3.4 0 L -6.8 2.2" fill="none" stroke="#14171a" strokeWidth={1} strokeLinecap="round" strokeLinejoin="round" />
+                      // open caret ">" for a shot
+                      ? <path d="M -4.4 -2.8 L 0 0 L -4.4 2.8" fill="none" stroke="#14171a" strokeWidth={1.1} strokeLinecap="round" strokeLinejoin="round" />
                       : <path d="M 0 0 L -3.6 -2.1 L -3.6 2.1 Z" fill="#14171a" stroke="#14171a" strokeWidth={0.5} strokeLinejoin="round" />}
                   </g></g>; })())}
           </g>
@@ -6850,11 +6859,21 @@ export default function DrillAnimator() {
       const fx = iconXf({ x: ep.x, y: ep.y, a: (Math.atan2(dy, dx) * 180) / Math.PI });
       return (
         <g key={key} pointerEvents="none" opacity={op}>
-          <line x1={sp.x} y1={sp.y} x2={ep.x} y2={ep.y} vectorEffect="non-scaling-stroke"
-            stroke="#14171a" strokeWidth={sw(shot ? 1.1 : 0.55)} strokeDasharray={shot ? undefined : sdash("2.4 1.8")} />
+          {shot
+            // standard shot notation: two parallel lines with an open caret
+            ? (() => {
+                const a1 = gmMove(sp.x, sp.y, -uy, ux, 0.65), a2 = gmMove(ep.x, ep.y, -uy, ux, 0.65);
+                const b1 = gmMove(sp.x, sp.y, uy, -ux, 0.65), b2 = gmMove(ep.x, ep.y, uy, -ux, 0.65);
+                return <>
+                  <line x1={a1.x} y1={a1.y} x2={a2.x} y2={a2.y} vectorEffect="non-scaling-stroke" stroke="#14171a" strokeWidth={sw(0.55)} />
+                  <line x1={b1.x} y1={b1.y} x2={b2.x} y2={b2.y} vectorEffect="non-scaling-stroke" stroke="#14171a" strokeWidth={sw(0.55)} />
+                </>;
+              })()
+            : <line x1={sp.x} y1={sp.y} x2={ep.x} y2={ep.y} vectorEffect="non-scaling-stroke"
+                stroke="#14171a" strokeWidth={sw(0.55)} strokeDasharray={sdash("2.4 1.8")} />}
           <g transform={fx.t}><g transform={`scale(${z})`}>
             {shot
-              ? <path d="M -3.4 -2.2 L 0 0 L -3.4 2.2 M -6.8 -2.2 L -3.4 0 L -6.8 2.2" fill="none" stroke="#14171a" strokeWidth={1} strokeLinecap="round" strokeLinejoin="round" />
+              ? <path d="M -4.4 -2.8 L 0 0 L -4.4 2.8" fill="none" stroke="#14171a" strokeWidth={1.1} strokeLinecap="round" strokeLinejoin="round" />
               : <path d="M 0 0 L -3.6 -2.1 L -3.6 2.1 Z" fill="#14171a" stroke="#14171a" strokeWidth={0.5} strokeLinejoin="round" />}
           </g></g>
         </g>
