@@ -61,6 +61,8 @@ const ICONS = {
   keyboard: <><rect x="2.5" y="6" width="19" height="12" rx="2" /><path d="M6 9.5h.01M9.5 9.5h.01M13 9.5h.01M16.5 9.5h.01M7.5 14h9" /></>,
   // presentation board on a stand with a rising line = presentation mode
   presentation: <><rect x="3.5" y="3.5" width="17" height="12" rx="1.5" /><path d="M7 12l3-3.5 2.5 2L16.5 6" /><path d="M12 15.5v3" /><path d="M8.5 21l3.5-2.5 3.5 2.5" /></>,
+  // a caption card with text lines + a plus = add a step note
+  note: <><rect x="3" y="5.5" width="13.5" height="13" rx="2" /><path d="M6.5 10h6.5M6.5 13.5h4" /><path d="M18.5 13.5v6M15.5 16.5h6" /></>,
   grid: <><rect x="3.5" y="3.5" width="7" height="7" rx="1" /><rect x="13.5" y="3.5" width="7" height="7" rx="1" /><rect x="3.5" y="13.5" width="7" height="7" rx="1" /><rect x="13.5" y="13.5" width="7" height="7" rx="1" /></>,
   // a closed padlock (lock board) and an open shackle (unlock)
   lock: <><rect x="4.5" y="10.5" width="15" height="10" rx="2" /><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" /></>,
