@@ -261,6 +261,7 @@ const WB_KEY = "drillboard:whiteboard";   // whiteboard-mode view pref, persiste
 const WBC_KEY = "drillboard:whiteboard-circle";   // circled X/O symbols sub-pref
 const HALFNS_KEY = "drillboard:half-ns";  // half-ice shown north-south (vertical)
 const HALFFLIP_KEY = "drillboard:half-flip";  // half-ice net at the far end (left / top)
+const STRETCH_KEY = "drillboard:stretch-fill";  // full ice stretches to fill the screen
 
 export default function DrillAnimator() {
   // a shared drill link (#d=<url-safe base64 DSL> — the preview-link format from
@@ -345,6 +346,12 @@ export default function DrillAnimator() {
     try { return localStorage.getItem(HALFFLIP_KEY) === "1"; } catch { return false; }
   });
   useEffect(() => { try { localStorage.setItem(HALFFLIP_KEY, halfFlip ? "1" : "0"); } catch { /* private mode */ } }, [halfFlip]);
+  // full ice: stretch to fill the screen (default, the app's signature look) or
+  // letterbox to true 200'×85' proportions so every marking is geometrically exact
+  const [stretchFill, setStretchFill] = useState(() => {
+    try { return localStorage.getItem(STRETCH_KEY) !== "0"; } catch { return true; }
+  });
+  useEffect(() => { try { localStorage.setItem(STRETCH_KEY, stretchFill ? "1" : "0"); } catch { /* private mode */ } }, [stretchFill]);
   const effDetail = detailAnim && !whiteboard;
   // whiteboard also drops the shot theatrics: no random miss/post/air rolls
   // (shots bury flat) and no GOAL!/SAVE! splashes — a diagram, not a broadcast
@@ -886,9 +893,9 @@ export default function DrillAnimator() {
   // Full ice fills the stage (fill mode). Half ice is constrained to its true
   // 100'×85' proportions in every orientation (no stretch — letterbox the
   // surplus). Quarter keeps its true proportions up to a small over-stretch.
-  if (rink !== "full") {
+  if (rink !== "full" || !stretchFill) {
     const vbW = swapAxes ? vhF : vwF, vbH = swapAxes ? vwF : vhF; // effective viewBox dims
-    const CAP = rink === "half" ? 1 : 1.12;                       // max stretch past true aspect
+    const CAP = rink === "quarter" ? 1.12 : 1;                    // max stretch past true aspect
     canvasH = Math.min(canvasH, Math.round((canvasW * vbH) / vbW * CAP));
     canvasW = Math.min(canvasW, Math.round((canvasH * vbW) / vbH * CAP));
   }
@@ -7986,6 +7993,11 @@ export default function DrillAnimator() {
             <button className={`hd-mini${detailAnim ? " on" : ""}`}
               onClick={() => setDetailAnim(v => !v)}>{detailAnim ? "✓ Detailed animations" : "Detailed animations"}</button>
             <span style={{ fontSize: 11, color: "#8b99a8" }}>skater stride, stick swing, puck cradle, airborne shots</span>
+          </div>
+          <div className="hd-poprow">
+            <button className={`hd-mini${stretchFill ? " on" : ""}`}
+              onClick={() => setStretchFill(v => !v)}>{stretchFill ? "✓ Stretch to fill" : "Stretch to fill"}</button>
+            <span style={{ fontSize: 11, color: "#8b99a8" }}>full ice fills the screen — off letterboxes it to true 200′×85′ proportions</span>
           </div>
           <div className="hd-poprow">
             <button className={`hd-mini${whiteboard ? " on" : ""}`}
