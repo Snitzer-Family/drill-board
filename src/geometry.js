@@ -123,7 +123,7 @@ export function wigglePoints(prev, s, ar = 1, taperEnd = false) {
 // The profile is a SEMICIRCLE with a small baseline gap between arcs (cusps,
 // not smooth zero-crossings) so it reads as distinct arcs — a smooth sine
 // here would be indistinguishable from the puck-carry wiggle.
-const BWD_PITCH = 3.8, BWD_A = 1.25, BWD_GAP = 1.4;  // arc pitch/height/gap, screen units
+const BWD_PITCH = 3.4, BWD_A = 1.25, BWD_GAP = 0.9;  // arc pitch/height/gap, screen units
 const bwdProfile = (u, pitch) => {                    // u = distance into this arc's cell
   const r = (pitch - BWD_GAP) / 2, c = pitch / 2, d = (u - c) / (r || 1);
   return Math.abs(d) >= 1 ? 0 : Math.sqrt(1 - d * d) * BWD_A;
