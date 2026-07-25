@@ -4471,13 +4471,17 @@ export default function DrillAnimator() {
   // identical — same shape, weight, and scaling.
   function routeMark(key, endPt, ang, stop, color, opacity = 1) {
     const fx = iconXf({ x: endPt.x, y: endPt.y, a: ang });
+    // the whole mark scales with the line-thickness setting (like SVG's native
+    // stroke-width marker units), anchored on the tip so it stays at the line's end
     return (
       <g key={key} transform={fx.t} pointerEvents="none" opacity={opacity}>
-        {stop
-          // ‖ stop mark: the incoming line ends at the FIRST bar (the line's end);
-          // the second bar sits just PAST it, so the line doesn't run through both
-          ? <path d="M 0 -2.4 L 0 2.4 M 1.5 -2.4 L 1.5 2.4" fill="none" stroke={color} strokeWidth={1.1} strokeLinecap="round" />
-          : <path d="M -3.0 -1.85 L 0 0 L -3.0 1.85" fill="none" stroke={color} strokeWidth={1.0} strokeLinecap="round" strokeLinejoin="round" />}
+        <g transform={lineScale !== 1 ? `scale(${lineScale})` : undefined}>
+          {stop
+            // ‖ stop mark: the incoming line ends at the FIRST bar (the line's end);
+            // the second bar sits just PAST it, so the line doesn't run through both
+            ? <path d="M 0 -2.4 L 0 2.4 M 1.5 -2.4 L 1.5 2.4" fill="none" stroke={color} strokeWidth={1.1} strokeLinecap="round" />
+            : <path d="M -3.0 -1.85 L 0 0 L -3.0 1.85" fill="none" stroke={color} strokeWidth={1.0} strokeLinecap="round" strokeLinejoin="round" />}
+        </g>
       </g>
     );
   }
