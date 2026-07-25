@@ -342,6 +342,11 @@ export function parseDrill(text) {
         const nums = tok.slice(5).map(Number).filter(n => !isNaN(n));
         const pts = [];
         for (let k = 0; k + 1 < nums.length; k += 2) pts.push({ x: nums[k], y: nums[k + 1] });
+        // optional sharp-corner point indices: corners=i;j;k — the curve
+        // BREAKS at these points instead of smoothing through them (older
+        // readers drop the token harmlessly via the isNaN filter)
+        const mcTok = tok.slice(5).find(t => /^corners=/i.test(t));
+        if (mcTok) mcTok.slice(8).split(";").forEach(s => { const i = parseInt(s, 10); if (pts[i]) pts[i].c = true; });
         if (mid && pts.length >= 2) {
           const m = { id: mid, kind: "mark", color: mcol, width: mw, style: ["dashed", "dotted", "wavy"].includes(mst) ? mst : "solid",
             ...(mlock ? { lock: true } : {}), ...(mfill ? { fill: mfill, fillOp: mfillOp } : {}), x: pts[0].x, y: pts[0].y, pts, path: [] };
@@ -438,7 +443,9 @@ export function serializeDrill(rink, pieces, title = "", desc = "", steps = [], 
     if (p.kind === "mark") {
       const lk = p.lock ? " lock" : "";
       const fl = p.fill ? ` fill=${String(p.fill).replace("#", "")}:${f2(p.fillOp != null ? p.fillOp : 0.25)}` : "";
-      out.push(`MARK ${p.id} ${p.color} ${f2(p.width || 1.1)} ${p.style || "solid"}${lk}${fl} ${(p.pts || []).map(q => `${f1(q.x)},${f1(q.y)}`).join(" ")}`);
+      const cIdx = (p.pts || []).map((q, i) => (q.c ? i : -1)).filter(i => i >= 0);
+      const cr = cIdx.length ? ` corners=${cIdx.join(";")}` : "";
+      out.push(`MARK ${p.id} ${p.color} ${f2(p.width || 1.1)} ${p.style || "solid"}${lk}${fl}${cr} ${(p.pts || []).map(q => `${f1(q.x)},${f1(q.y)}`).join(" ")}`);
       return;
     }
     const lbl = p.label ? " " + String(p.label).replace(/[\s,]+/g, "_") : "";

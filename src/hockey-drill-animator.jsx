@@ -3775,9 +3775,10 @@ export default function DrillAnimator() {
     for (let i = 0; i < cs.length; i++) {
       const a = cs[i], b = cs[(i + 1) % cs.length];
       const n = Math.max(1, Math.floor(Math.hypot(b.x - a.x, b.y - a.y) / 3));
-      for (let k = 0; k < n; k++) P.push({ x: a.x + ((b.x - a.x) * k) / n, y: a.y + ((b.y - a.y) * k) / n });
+      // the vertex itself is a sharp corner (break handle); interior points smooth
+      for (let k = 0; k < n; k++) P.push({ x: a.x + ((b.x - a.x) * k) / n, y: a.y + ((b.y - a.y) * k) / n, ...(k === 0 ? { c: true } : {}) });
     }
-    P.push({ ...cs[0] });
+    P.push({ ...cs[0], c: true });
     return P;
   }
   function addShapeMark(shape) {
@@ -3799,6 +3800,7 @@ export default function DrillAnimator() {
     const cy = m.pts.reduce((a, q) => a + q.y, 0) / m.pts.length;
     const r = (deg * Math.PI) / 180, c = Math.cos(r), s = Math.sin(r);
     const pts = m.pts.map(q => ({
+      ...q,
       x: clampX(cx + (q.x - cx) * c - (q.y - cy) * s),
       y: clampY(cy + (q.x - cx) * s + (q.y - cy) * c),
     }));
@@ -3810,7 +3812,7 @@ export default function DrillAnimator() {
     if (!m || !m.pts || m.pts.length < 2) return;
     const cx = m.pts.reduce((a, q) => a + q.x, 0) / m.pts.length;
     const cy = m.pts.reduce((a, q) => a + q.y, 0) / m.pts.length;
-    const pts = m.pts.map(q => ({ x: clampX(cx + (q.x - cx) * sx), y: clampY(cy + (q.y - cy) * sy) }));
+    const pts = m.pts.map(q => ({ ...q, x: clampX(cx + (q.x - cx) * sx), y: clampY(cy + (q.y - cy) * sy) }));
     updateById(id, { pts, x: pts[0].x, y: pts[0].y });
   }
 
@@ -4219,7 +4221,7 @@ export default function DrillAnimator() {
       const cp = boards.clampInside(pt.x, pt.y);
       update(p => {
         if (p.id !== d.id || p.kind !== "mark") return p;
-        const pts = p.pts.map((q, i) => (i === d.idx ? { x: cp.x, y: cp.y } : q));
+        const pts = p.pts.map((q, i) => (i === d.idx ? { ...q, x: cp.x, y: cp.y } : q));
         return { ...p, pts, x: pts[0].x, y: pts[0].y };
       });
       return;
@@ -4246,6 +4248,7 @@ export default function DrillAnimator() {
       const ang = Math.atan2(pt.y - d.cy, pt.x - d.cx) - d.a0;
       const c = Math.cos(ang), s = Math.sin(ang);
       const pts = d.pts0.map(q => ({
+        ...q,
         x: clampX(d.cx + (q.x - d.cx) * c - (q.y - d.cy) * s),
         y: clampY(d.cy + (q.x - d.cx) * s + (q.y - d.cy) * c),
       }));
@@ -4258,7 +4261,7 @@ export default function DrillAnimator() {
       d.moved = true;
       const sx = Math.max(0.12, Math.min(8, (pt.x - d.ax) / ((d.x0 - d.ax) || 1e-6)));
       const sy = Math.max(0.12, Math.min(8, (pt.y - d.ay) / ((d.y0 - d.ay) || 1e-6)));
-      const pts = d.pts0.map(q => ({ x: clampX(d.ax + (q.x - d.ax) * sx), y: clampY(d.ay + (q.y - d.ay) * sy) }));
+      const pts = d.pts0.map(q => ({ ...q, x: clampX(d.ax + (q.x - d.ax) * sx), y: clampY(d.ay + (q.y - d.ay) * sy) }));
       updateById(d.id, { pts, x: pts[0].x, y: pts[0].y });
       return;
     }
@@ -4377,6 +4380,17 @@ export default function DrillAnimator() {
     if (d.moved) return;
     if (d.kind === "wlabel") { setSelectedId(d.id); setPopup({ type: "point", id: d.id, seg: d.seg }); return; }
     if (d.kind === "resize" || d.kind === "markscale" || d.kind === "markrotate") return;
+    if (d.kind === "markpt") {
+      // tap (no drag) on a mark control point toggles its kind: sharp corner
+      // (break handle) ↔ smooth curve point — like route waypoint kinds
+      const mk = pieces.find(q => q.id === d.id && q.kind === "mark");
+      if (mk?.pts?.[d.idx]) {
+        const c = !mk.pts[d.idx].c;
+        updateById(d.id, { pts: mk.pts.map((q, i) => (i === d.idx ? { ...q, c: c || undefined } : q)) });
+        flash(c ? "Sharp corner" : "Smooth point");
+      }
+      return;
+    }
     if (d.kind === "aim") { setAim(d.pkId, d.target, null); return; }  // tap to clear the aim
     if (d.kind === "release") { setAim(d.pkId, { term: d.term }, null); return; }  // tap clears direction back to auto
     if (d.kind === "rotate") { setPopup({ type: "piece", id: d.id }); return; }
@@ -5274,10 +5288,9 @@ export default function DrillAnimator() {
     }
     return out;
   };
-  // sample a smooth Catmull-Rom curve through the mark's control points so a
-  // stroke reads as a curve (and stays smooth when its points are re-shaped)
-  const markCurve = cp => {
-    if (!cp || cp.length < 3) return cp || [];
+  // sample a smooth Catmull-Rom curve through a run of control points
+  const smoothRun = cp => {
+    if (cp.length < 3) return cp.map(q => ({ x: q.x, y: q.y }));
     const segs = catmullToBezier(cp);
     let prev = cp[0]; const out = [{ x: cp[0].x, y: cp[0].y }];
     segs.forEach(s => {
@@ -5285,6 +5298,22 @@ export default function DrillAnimator() {
       for (let k = 1; k <= n; k++) out.push(evalSeg(prev, s, k / n));
       prev = { x: s.x, y: s.y };
     });
+    return out;
+  };
+  // the mark's control points → drawn curve. A point flagged `c` is a sharp
+  // CORNER (a break handle, like a route corner waypoint): the smoothing
+  // splits there and each side curves independently, meeting in a hard join
+  const markCurve = cp => {
+    if (!cp || cp.length < 3) return cp || [];
+    const runs = []; let cur = [cp[0]];
+    for (let i = 1; i < cp.length; i++) {
+      cur.push(cp[i]);
+      if (cp[i].c && i < cp.length - 1) { runs.push(cur); cur = [cp[i]]; }
+    }
+    runs.push(cur);
+    if (runs.length === 1) return smoothRun(cp);
+    const out = [];
+    runs.forEach((run, ri) => { const sm = smoothRun(run); out.push(...(ri ? sm.slice(1) : sm)); });
     return out;
   };
   function renderMark(m, hit) {
@@ -5325,8 +5354,13 @@ export default function DrillAnimator() {
     if (!m || !m.pts) return null;
     return m.pts.map((q, i) => (
       <g key={`mp-${m.id}-${i}`}>
-        {hdot(clampX(q.x), clampY(q.y), 1.7, {
-          fill: "#ffd447", stroke: "#14171a", strokeWidth: 0.35, pointerEvents: "none" }, yf)}
+        {/* route convention: a round node is a smooth point, a square one a
+            sharp corner (break handle). Tap to toggle, drag to re-shape. */}
+        {q.c
+          ? <rect x={clampX(q.x) - 1.5} y={clampY(q.y) - 1.5 * yf} width={3} height={3 * yf}
+              fill="#ffd447" stroke="#14171a" strokeWidth={0.35} pointerEvents="none" />
+          : hdot(clampX(q.x), clampY(q.y), 1.7, {
+              fill: "#ffd447", stroke: "#14171a", strokeWidth: 0.35, pointerEvents: "none" }, yf)}
         {/* a larger transparent target so a fingertip can grab the point */}
         {hdot(clampX(q.x), clampY(q.y), 4.5, {
           fill: "transparent", style: { cursor: "grab" },
@@ -5352,7 +5386,7 @@ export default function DrillAnimator() {
           vectorEffect="non-scaling-stroke" opacity={0.8} pointerEvents="none" />
         {corners.map(([cx, cy, ax, ay], i) => {
           const down = e => handleDown(e, { kind: "markscale", id: m.id, x0: cx, y0: cy, ax, ay,
-            pts0: m.pts.map(q => ({ x: q.x, y: q.y })) });
+            pts0: m.pts.map(q => ({ ...q })) });
           return <g key={`c${i}`}>
             {hdot(cx, cy, 1.3, { fill: "#ffd447", stroke: "#14202b", strokeWidth: 0.28, pointerEvents: "none" }, yf)}
             {/* generous invisible touch target over the visible dot */}
@@ -5370,7 +5404,7 @@ export default function DrillAnimator() {
           const down = e => { const pt0 = svgPt(e);
             handleDown(e, { kind: "markrotate", id: m.id, cx, cy,
               a0: Math.atan2(pt0.y - cy, pt0.x - cx),
-              pts0: m.pts.map(q => ({ x: q.x, y: q.y })) }); };
+              pts0: m.pts.map(q => ({ ...q })) }); };
           return <g key="rot">
             <line x1={mx} y1={y1} x2={mx} y2={hy} stroke="#ffd447" strokeWidth={sw(0.35)}
               vectorEffect="non-scaling-stroke" opacity={0.8} pointerEvents="none" />
@@ -6187,7 +6221,7 @@ export default function DrillAnimator() {
                     {markEdit ? "Done editing" : "Edit points"}
                   </button>
                 </div>
-                {markEdit && <div className="hd-sechint">Drag a dot to re-shape.</div>}
+                {markEdit && <div className="hd-sechint">Drag a dot to re-shape; tap one to toggle sharp corner (square) ↔ smooth (round).</div>}
               </div>
             </>
           )}

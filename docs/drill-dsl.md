@@ -446,5 +446,9 @@ draws a freehand ink line on the ice (not part of the drill logic). `style` is
 `solid` · `dashed` · `dotted` · `wavy`; `width` is in feet. The optional
 **`fill=`** gives the enclosed area an independent translucent fill (hex colour
 without the `#`, opacity 0..1, default 0.25) — used for shaded coaching zones
-and the preset square/circle/triangle shape markers. In the app: **☰ tools → Marker**, pick a colour /
+and the preset square/circle/triangle shape markers. The optional
+**`corners=<i>;<j>;…`** flags points (0-based) as **sharp corners**: the
+smoothing breaks there instead of rounding through, so straight-sided shapes
+keep crisp vertices. In the app: *Edit points* → tap a point to toggle sharp
+(square node) ↔ smooth (round node), matching route waypoint kinds. In the app: **☰ tools → Marker**, pick a colour /
 style / thickness, then drag on the ice. Tap a mark to restyle or delete it.

@@ -201,8 +201,10 @@ function rink() {
 function markMarkup(m) {
   if (!m.pts || m.pts.length < 2) return "";
   const w = m.width || 1.1;
-  // smooth the control points into a Catmull-Rom curve (matches the app)
-  const smooth = cp => {
+  // smooth the control points into a Catmull-Rom curve (matches the app);
+  // points flagged `c` are sharp CORNERS — the smoothing splits there and each
+  // side curves independently, meeting in a hard join
+  const smoothRun = cp => {
     if (cp.length < 3) return cp;
     const out = [{ x: cp[0].x, y: cp[0].y }];
     for (let i = 0; i < cp.length - 1; i++) {
@@ -216,6 +218,19 @@ function markMarkup(m) {
         });
       }
     }
+    return out;
+  };
+  const smooth = cp => {
+    if (cp.length < 3) return cp;
+    const runs = []; let cur = [cp[0]];
+    for (let i = 1; i < cp.length; i++) {
+      cur.push(cp[i]);
+      if (cp[i].c && i < cp.length - 1) { runs.push(cur); cur = [cp[i]]; }
+    }
+    runs.push(cur);
+    if (runs.length === 1) return smoothRun(cp);
+    const out = [];
+    runs.forEach((run, ri) => { const sm = smoothRun(run); out.push(...(ri ? sm.slice(1) : sm)); });
     return out;
   };
   let pts = smooth(m.pts);

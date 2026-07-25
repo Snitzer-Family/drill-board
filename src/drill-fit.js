@@ -175,15 +175,26 @@ export function transformDsl(text, map) {
           pts.push(map(x, y));
         } else head.push(t);
       }
-      const dense = [];
+      // sharp bends (≥30° turn) in the traced overlay become CORNER points so
+      // the renderer breaks the curve there instead of rounding the corner
+      const sharp = pts.map((p, i) => {
+        if (i === 0 || i === pts.length - 1) return false;
+        const a = pts[i - 1], b = pts[i + 1];
+        const v1x = p.x - a.x, v1y = p.y - a.y, v2x = b.x - p.x, v2y = b.y - p.y;
+        const l1 = Math.hypot(v1x, v1y) || 1, l2 = Math.hypot(v2x, v2y) || 1;
+        return (v1x * v2x + v1y * v2y) / (l1 * l2) < Math.cos((30 * Math.PI) / 180);
+      });
+      const dense = [], cornerIdx = [];
       for (let i = 0; i < pts.length; i++) {
         if (i > 0) {
           const a = pts[i - 1], b = pts[i];
           const n = Math.floor(Math.hypot(b.x - a.x, b.y - a.y) / 3.5);
           for (let k = 1; k <= n; k++) dense.push({ x: a.x + ((b.x - a.x) * k) / (n + 1), y: a.y + ((b.y - a.y) * k) / (n + 1) });
         }
+        if (sharp[i]) cornerIdx.push(dense.length);
         dense.push(pts[i]);
       }
+      if (cornerIdx.length) head.push(`corners=${cornerIdx.join(";")}`);
       return [...head, ...dense.map(p => `${round1(p.x)},${round1(p.y)}`)].join(" ");
     }
     if (kw === "PATH" || kw === "BRANCH") {
