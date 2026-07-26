@@ -8361,56 +8361,57 @@ export default function DrillAnimator() {
           bottom: "auto", right: "auto", maxHeight: "62vh",
         } : undefined}>
           <div className="hd-mh">Visibility</div>
-          <div className="hd-note">View-only, for this session — hiding never changes playback timing or the saved drill.</div>
-          <div className="hd-mh" style={{ marginTop: 4 }}>Items</div>
-          {VIS_KINDS.map(c => {
-            const n = pieces.filter(c.match).length;
-            const hidden = hiddenKinds.has(c.key);
-            return (
-              <div className="hd-poprow" key={c.key}>
-                <span style={{ flex: 1, fontSize: 12, opacity: hidden ? 0.55 : 1 }}>
-                  {c.label} <span style={{ opacity: 0.6 }}>({n})</span>
-                </span>
-                <button className={`hd-mini${hidden ? "" : " on"}`} disabled={!n && !hidden}
-                  title={hidden ? `Show ${c.label.toLowerCase()}` : `Hide ${c.label.toLowerCase()}`}
-                  onClick={() => toggleKindHidden(c.key)}>{hidden ? "Hidden" : "Shown"}</button>
+          <div className="hd-vischips">
+            {VIS_KINDS.map(c => {
+              const n = pieces.filter(c.match).length;
+              const hidden = hiddenKinds.has(c.key);
+              if (!n && !hidden) return null;   // only what's on the board — glanceable
+              return (
+                <button key={c.key} className={`hd-vischip${hidden ? " off" : ""}`}
+                  title={`${hidden ? "Show" : "Hide"} ${c.label.toLowerCase()}`}
+                  onClick={() => toggleKindHidden(c.key)}>
+                  {c.label} <span className="ct">{n}</span>
+                </button>
+              );
+            })}
+            {[["routes", "Routes"], ["pucklines", "Puck lines"]].map(([key, lbl]) => {
+              const hidden = hiddenKinds.has(key);
+              return (
+                <button key={key} className={`hd-vischip${hidden ? " off" : ""}`}
+                  title={`${hidden ? "Show" : "Hide"} ${lbl.toLowerCase()}`}
+                  onClick={() => toggleKindHidden(key)}>{lbl}</button>
+              );
+            })}
+          </div>
+          {groupNames.length > 0 && (
+            <>
+              <div className="hd-mh" style={{ marginTop: 2 }}>Groups</div>
+              <div className="hd-vischips">
+                {groupNames.map(name => {
+                  const n = pieces.filter(p => p.group === name).length;
+                  const hidden = hiddenGroups.has(name);
+                  return (
+                    <span key={name} style={{ display: "inline-flex", gap: 3 }}>
+                      <button className={`hd-vischip${hidden ? " off" : ""}`}
+                        title={hidden ? "Show this group" : "Hide this group"}
+                        onClick={() => toggleGroupHidden(name)}>◇ {name} <span className="ct">{n}</span></button>
+                      <button className="hd-vischip sel" title="Select every piece in this group"
+                        onClick={() => selectGroupFromMenu(name)}><Icon name="target" size={13} /></button>
+                    </span>
+                  );
+                })}
               </div>
-            );
-          })}
-          <div className="hd-mh" style={{ marginTop: 4 }}>Lines</div>
-          {[["routes", "Skating routes & stops"], ["pucklines", "Pass & shot lines"]].map(([key, lbl]) => {
-            const hidden = hiddenKinds.has(key);
-            return (
-              <div className="hd-poprow" key={key}>
-                <span style={{ flex: 1, fontSize: 12, opacity: hidden ? 0.55 : 1 }}>{lbl}</span>
-                <button className={`hd-mini${hidden ? "" : " on"}`}
-                  onClick={() => toggleKindHidden(key)}>{hidden ? "Hidden" : "Shown"}</button>
-              </div>
-            );
-          })}
-          <div className="hd-mh" style={{ marginTop: 4 }}>Groups</div>
-          {groupNames.length === 0 ? (
-            <div className="hd-note">Box-select pieces and tap ◇ Group, or use a piece's Group field.</div>
-          ) : groupNames.map(name => {
-            const n = pieces.filter(p => p.group === name).length;
-            const hidden = hiddenGroups.has(name);
-            return (
-              <div className="hd-poprow" key={name}>
-                <span style={{ flex: 1, fontSize: 12, opacity: hidden ? 0.55 : 1 }}>
-                  ◇ {name} <span style={{ opacity: 0.6 }}>({n})</span>
-                </span>
-                <button className={`hd-mini${hidden ? "" : " on"}`} title={hidden ? "Show this group" : "Hide this group"}
-                  onClick={() => toggleGroupHidden(name)}>{hidden ? "Hidden" : "Shown"}</button>
-                <button className="hd-mini" title="Select every piece in this group"
-                  onClick={() => selectGroupFromMenu(name)}>Select</button>
-              </div>
-            );
-          })}
-          {(hiddenKinds.size > 0 || hiddenGroups.size > 0) && (
-            <button className="hd-item" onClick={() => { setHiddenKinds(new Set()); setHiddenGroups(new Set()); }}>
-              <Icon name="eye" size={16} /> Show everything
-            </button>
+            </>
           )}
+          {(hiddenKinds.size > 0 || hiddenGroups.size > 0) && (
+            <div className="hd-vischips">
+              <button className="hd-vischip" style={{ borderColor: "#8a6d1a", color: "#ffd447" }}
+                onClick={() => { setHiddenKinds(new Set()); setHiddenGroups(new Set()); }}>
+                <Icon name="eye" size={13} /> Show everything
+              </button>
+            </div>
+          )}
+          <div className="hd-note">Tap a chip to hide/show — view-only, playback timing unchanged.</div>
         </div>
       )}
       {openMenu === "prefs" && (

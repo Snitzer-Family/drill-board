@@ -105,6 +105,15 @@ export const STYLES = `
         .hd-toolgrid.compact .hd-tool .hd-toolglyph { height:34px; font-size:20px; }
         .hd-tool span:last-child { font-size:10.5px; font-weight:600; line-height:1; text-align:center; }
         .hd-tool:active, .hd-tool.on { background:#1f4fa3; border-color:#1f4fa3; color:#fff; }
+        /* Visibility menu: a wrap of one-tap toggle chips — lit = shown, dim +
+           struck = hidden. Compact by design: whole board state in one glance. */
+        .hd-vischips { display:flex; flex-wrap:wrap; gap:5px; }
+        .hd-vischip { display:inline-flex; align-items:center; gap:5px; padding:6px 9px;
+          font-size:12px; font-weight:600; border-radius:999px; cursor:pointer;
+          border:1px solid #2c3846; background:#212b36; color:#dbe4ec; }
+        .hd-vischip .ct { font-weight:400; opacity:.6; }
+        .hd-vischip.off { opacity:.5; text-decoration:line-through; border-style:dashed; }
+        .hd-vischip.sel { padding:6px 7px; }   /* the ⌖ select-group chip */
         .hd-note { font-size:11.5px; color:#7d8b99; line-height:1.5; }
         .hd-note code { color:#a8c3da; }
         /* hint text lives in the bottom bar */
