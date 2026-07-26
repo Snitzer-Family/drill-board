@@ -437,10 +437,10 @@ export default function DrillAnimator() {
   const pinchRef = useRef(null);
   const segRefs = useRef({});
   const drag = useRef(null);
-  // undo history: coalesced snapshots of `pieces` (a drag = one entry)
+  // undo history: coalesced snapshots of the whole drill document (a drag = one entry)
   const undoStack = useRef([]);
   const redoStack = useRef([]);
-  const prevPiecesRef = useRef();
+  const prevDocRef = useRef();
   const lastSnapRef = useRef(0);
   const undoingRef = useRef(false);
   const [undoCount, setUndoCount] = useState(0);
@@ -3052,15 +3052,21 @@ export default function DrillAnimator() {
   const deletePiece = id => {
     setPieces(ps => scrubRefs(ps.filter(q => q.id !== id), id));
     setSelectedId(null); setPopup(null);
+    flash(`Deleted ${id} — Undo restores it`);
   };
 
-  // record a coalesced undo snapshot whenever `pieces` changes; rapid changes
-  // (a drag's frames) fold into a single entry, and an undo doesn't re-record
+  // record a coalesced undo snapshot whenever the drill DOCUMENT changes —
+  // pieces, rink, title/description, steps, notes, inventory — so text-editor
+  // Apply, file Load and Clear all are as undoable as a piece drag. Rapid
+  // changes (a drag's frames, typing) fold into one entry, and an undo doesn't
+  // re-record.
+  const DOC_KEYS = ["pieces", "rink", "drillTitle", "drillDesc", "drillSteps", "drillNotes", "drillItems"];
+  const curDoc = { pieces, rink, drillTitle, drillDesc, drillSteps, drillNotes, drillItems };
   useEffect(() => {
-    const prev = prevPiecesRef.current;
-    prevPiecesRef.current = pieces;
+    const prev = prevDocRef.current;
+    prevDocRef.current = curDoc;
     if (undoingRef.current) { undoingRef.current = false; return; }
-    if (prev === undefined || prev === pieces) return;
+    if (prev === undefined || DOC_KEYS.every(k => prev[k] === curDoc[k])) return;
     // a fresh edit invalidates the redo history
     if (redoStack.current.length) { redoStack.current = []; setRedoCount(0); }
     const now = performance.now();
@@ -3070,7 +3076,7 @@ export default function DrillAnimator() {
       setUndoCount(undoStack.current.length);
     }
     lastSnapRef.current = now;
-  }, [pieces]);
+  }, [pieces, rink, drillTitle, drillDesc, drillSteps, drillNotes, drillItems]);
 
   // auto-save the whole board to localStorage so it survives a refresh / the
   // app being killed. Debounced so a drag's frames coalesce into one write.
@@ -3090,26 +3096,28 @@ export default function DrillAnimator() {
     return () => clearTimeout(saveTimer.current);
   }, [rink, pieces, drillTitle, drillDesc, drillSteps, drillNotes, drillItems, aiPlay]);
 
+  function applyDoc(d) {
+    undoingRef.current = true;
+    setPieces(d.pieces); setRink(d.rink); setDrillTitle(d.drillTitle); setDrillDesc(d.drillDesc);
+    setDrillSteps(d.drillSteps); setDrillNotes(d.drillNotes); setDrillItems(d.drillItems);
+    setSelectedId(null); setMultiSel(null); setPopup(null); setOpenMenu(null);
+  }
   function undoLast() {
     if (!undoStack.current.length) return;
     const prev = undoStack.current.pop();
-    redoStack.current.push(pieces);            // current state → redo
+    redoStack.current.push(curDoc);            // current state → redo
     if (redoStack.current.length > 60) redoStack.current.shift();
     setRedoCount(redoStack.current.length);
-    undoingRef.current = true;
-    setPieces(prev);
-    setSelectedId(null); setMultiSel(null); setPopup(null); setOpenMenu(null);
+    applyDoc(prev);
     setUndoCount(undoStack.current.length);
   }
   function redoLast() {
     if (!redoStack.current.length) return;
     const next = redoStack.current.pop();
-    undoStack.current.push(pieces);            // current state → undo
+    undoStack.current.push(curDoc);            // current state → undo
     if (undoStack.current.length > 60) undoStack.current.shift();
     setUndoCount(undoStack.current.length);
-    undoingRef.current = true;
-    setPieces(next);
-    setSelectedId(null); setMultiSel(null); setPopup(null); setOpenMenu(null);
+    applyDoc(next);
     setRedoCount(redoStack.current.length);
   }
   const updateSeg = (id, i, patch, fork = null) =>
@@ -4056,8 +4064,10 @@ export default function DrillAnimator() {
   }
   function deleteGroup() {
     if (!multiSel || !multiSel.size) return;
+    const n = multiSel.size;
     setPieces(ps => { let list = ps.filter(q => !multiSel.has(q.id)); for (const id of multiSel) list = scrubRefs(list, id); return list; });
     setMultiSel(null); setSelectedId(null); setPopup(null);
+    flash(`Deleted ${n} item${n > 1 ? "s" : ""} — Undo restores them`);
   }
 
   // turn one puck into a pile: scatter a few more loose, individual pucks in a
@@ -4471,6 +4481,7 @@ export default function DrillAnimator() {
     if (r.errors.length) { setTextError(r.errors.join("\n")); return; }
     setRink(r.rink); setPieces(r.pieces); setDrillTitle(r.title); setDrillDesc(r.desc); setDrillSteps(r.steps || []); setDrillNotes(r.notes || ""); setDrillItems(r.items || []); setDrillVersion(r.dslVersion); setSelectedId(null); setPopup(null);
     resetAnim(); setTextError(""); setOpenMenu(null);
+    flash("Board replaced — Undo restores the old drill");
   }
   const slug = () => (drillTitle || "drill").replace(/[^\w-]+/g, "_").toLowerCase();
   // a drill as a markdown doc: title heading + description + a ```drill fenced
@@ -4647,6 +4658,7 @@ export default function DrillAnimator() {
       if (r.errors.length) { setTextDraft(txt); setTextError(r.errors.join("\n")); setOpenMenu("text"); return; }
       setRink(r.rink); setPieces(r.pieces); setDrillTitle(r.title); setDrillDesc(r.desc); setDrillSteps(r.steps || []); setDrillNotes(r.notes || ""); setDrillItems(r.items || []); setDrillVersion(r.dslVersion); setSelectedId(null); setPopup(null);
       resetAnim(); setTextError(""); setOpenMenu(null);
+      flash("Drill loaded — Undo restores the old board");
     };
     reader.readAsText(f);
     e.target.value = "";
@@ -6514,7 +6526,7 @@ export default function DrillAnimator() {
           )}
           <div className="hd-poprow" style={{ marginTop: 2 }}>
             {p.path.length > 0 && (
-              <button className="hd-mini" onClick={() => { updateById(p.id, { path: [] }); setPopup(null); }}>Clear route</button>
+              <button className="hd-mini" onClick={() => { updateById(p.id, { path: [] }); setPopup(null); flash("Route cleared — Undo restores it"); }}>Clear route</button>
             )}
             <button className="hd-mini" onClick={() => duplicatePiece(p.id)}><Icon name="duplicate" size={15} /> Duplicate</button>
             <button className="hd-mini danger" onClick={() => deletePiece(p.id)}>
@@ -8242,6 +8254,7 @@ export default function DrillAnimator() {
                 setDrillTitle(""); setDrillDesc(""); setDrillNotes(""); setDrillVersion(undefined);
                 setPlacingStep(null); setEditAnchor(null);
                 setSelectedId(null); setPopup(null); setOpenMenu(null);
+                flash("Board cleared — Undo restores it");
               }
             }}><Icon name="trash" size={16} /> Clear all</button>
           <button className={`hd-item${showZones ? " on" : ""}`}
