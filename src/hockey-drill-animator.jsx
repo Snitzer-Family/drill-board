@@ -6537,6 +6537,8 @@ export default function DrillAnimator() {
               <button className="hd-mini" onClick={() => { updateById(p.id, { path: [] }); setPopup(null); }}>Clear route</button>
             )}
             <button className="hd-mini" onClick={() => duplicatePiece(p.id)}><Icon name="duplicate" size={15} /> Duplicate</button>
+            <button className="hd-mini" title="Pin in place so it can't be moved or edited by accident."
+              onClick={() => updateById(p.id, { lock: true })}>🔒 Lock</button>
             <button className="hd-mini danger" onClick={() => deletePiece(p.id)}>
               <Icon name="trash" size={15} /> Delete
             </button>
@@ -6776,6 +6778,8 @@ export default function DrillAnimator() {
           })()}
           {p.kind === "player" && ActionSteps(p, i, fork)}
           <div className="hd-poprow" style={{ marginTop: 2 }}>
+            <button className="hd-mini" title="Pin this waypoint in place so it can't be moved or edited by accident."
+              onClick={() => uSeg(i, { lock: true })}>🔒 Lock point</button>
             <button className="hd-mini danger" onClick={() => deleteSeg(p.id, i, fork)}>Delete point</button>
           </div>
         </>
@@ -6809,11 +6813,11 @@ export default function DrillAnimator() {
             </div>
           </div>
         );
-      } else {
-        const lockRow = popup.type === "point"
-          ? <button className="hd-mini" onClick={() => updateSeg(p.id, popup.seg, { lock: true }, popup.fork || null)}>🔒 Lock point</button>
-          : <button className="hd-mini" onClick={() => updateById(p.id, { lock: true })}>🔒 Lock {p.kind === "player" ? "player" : "item"}</button>;
-        body = <>{body}<div className="hd-field"><div className="hd-poprow">{lockRow}</div>
+      } else if (popup.type === "line") {
+        // piece/point popups carry the Lock button inline in their action row;
+        // a leg popup has no such row, so it keeps the appended section
+        body = <>{body}<div className="hd-field"><div className="hd-poprow">
+          <button className="hd-mini" onClick={() => updateById(p.id, { lock: true })}>🔒 Lock {p.kind === "player" ? "player" : "item"}</button></div>
           <div className="hd-sechint">Pin in place so it can't be moved or edited by accident.</div></div></>;
       }
     }
