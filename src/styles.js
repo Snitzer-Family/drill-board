@@ -191,7 +191,8 @@ export const STYLES = `
           .hd-preso-tab { height:30px; font-size:13px; }
         }
         /* shared bits */
-        .hd-swatch { width:24px; height:24px; border-radius:50%; border:2px solid transparent; cursor:pointer; }
+        .hd-swatch { box-sizing:border-box; width:24px; height:24px; border-radius:50%; border:2px solid transparent;
+          cursor:pointer; flex:0 0 auto; }
         .hd-swatch.on { border-color:#ffd447; }
         .hd-input { background:#0f141a; border:1px solid #2c3846; color:#e8edf2; border-radius:8px;
           padding:7px 9px; font-size:14px; }
@@ -210,7 +211,9 @@ export const STYLES = `
           border-radius:0; border-top:none; border-right:none; border-bottom:none;
           box-shadow:-8px 0 24px rgba(0,0,0,.4); }
         .hd-pop.pinned.dock .hd-pophead { cursor:default; }
-        .hd-pop { position:absolute; z-index:20; box-sizing:border-box; width:256px; border:1px solid #33404f;
+        /* wide enough that a full swatch row (None + 7 swatches) fits on one
+           line — content = width − 24px padding; capped for narrow phones */
+        .hd-pop { position:absolute; z-index:20; box-sizing:border-box; width:min(296px, calc(100vw - 12px)); border:1px solid #33404f;
           border-radius:12px; padding:10px 12px; box-shadow:0 8px 24px rgba(0,0,0,.5);
           display:flex; flex-direction:column; gap:8px;
           max-height:calc(100% - 8px); overflow-y:auto; overscroll-behavior:contain;
