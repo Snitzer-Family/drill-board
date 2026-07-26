@@ -4790,6 +4790,12 @@ export default function DrillAnimator() {
   // `flat` = draw with plain rink-unit widths (used by the loupe, which has its
   // own near-square viewBox); otherwise use screen-uniform non-scaling strokes so
   // the fill-mode stretch can't make a line thicker along one axis than the other
+  // ice-coloured opaque under-stroke ("casing") for a drill line: where the line
+  // crosses the rink's red/blue markings it reads as a clean channel of ice, and
+  // because the casing matches the ice, the ink over it keeps its exact colour.
+  // Pure vector — no filter raster, no compositing lightening.
+  const caseOf = st => ({ ...st, stroke: "#f5fafd", opacity: 1,
+    strokeWidth: (st.strokeWidth || 1) * 2.1 });
   function segStroke(p, s, isLast, flat) {
     const W = w => (flat ? w : sw(w)) * lineScale;   // global route line-thickness scale
     const D = d => (flat ? d : sdash(d));
@@ -5447,6 +5453,9 @@ export default function DrillAnimator() {
           <polygon points={line} fill={m.fill} fillOpacity={m.fillOp != null ? m.fillOp : 0.25}
             stroke="none" pointerEvents="none" />
         )}
+        {/* ice-coloured casing keeps marker ink readable over dots/circles */}
+        <polyline points={line} fill="none" stroke="#f5fafd" strokeWidth={w * 2.1} strokeDasharray={dash}
+          strokeLinecap="round" strokeLinejoin="round" pointerEvents="none" />
         <polyline points={line} fill="none" stroke={m.color} strokeWidth={w} strokeDasharray={dash}
           strokeLinecap="round" strokeLinejoin="round" opacity={0.94}
           pointerEvents={hit ? "none" : undefined} />
@@ -6996,10 +7005,13 @@ export default function DrillAnimator() {
   // the planned puck lines (pass / shot / chip / rim travel) drawn from the
   // timing legs. `flat` = plain rink-unit widths for the loupe (which has no
   // non-scaling-stroke context); the main scene uses screen-constant widths.
-  function puckPathNodes(flat) {
+  function puckPathNodes(flat, casing = false) {
     if (!showPuckPaths) return null;
-    const W = w => (flat ? w : sw(w)) * lineScale;   // global route line-thickness scale
+    // casing pass: same geometry, ice-coloured and wider — rendered once under
+    // the ink pass so pass/shot/chip/rim lines stay readable over rink markings
+    const W = w => (flat ? w : sw(w)) * lineScale * (casing ? 2.1 : 1);
     const D = d => (flat ? d : sdash(d));
+    const INK = casing ? "#f5fafd" : "#14171a";
     const ve = flat ? undefined : "non-scaling-stroke";
     const { plans } = getIntentPlan();   // draw the shot's intent (on net), not a realistic miss
     const z = 1 / (view.s || 1);
@@ -7069,12 +7081,12 @@ export default function DrillAnimator() {
         out.push(
           <g key={`pp-${q.id}-${s}-${j}`} pointerEvents="none" opacity={0.62}>
             <line x1={sp.x} y1={sp.y} x2={ep.x} y2={ep.y} vectorEffect={ve}
-              stroke="#14171a" strokeWidth={W(0.55)} strokeDasharray={D("2.4 1.8")} />
+              stroke={INK} strokeWidth={W(0.55)} strokeDasharray={D("2.4 1.8")} />
             {head && (dx || dy) ? (flat
-              ? <circle cx={ep.x} cy={ep.y} r={1.1} fill="none" vectorEffect={ve} stroke="#14171a" strokeWidth={W(0.3)} />
+              ? <circle cx={ep.x} cy={ep.y} r={1.1} fill="none" vectorEffect={ve} stroke={INK} strokeWidth={W(0.3)} />
               : (() => { const fx = iconXf({ x: ep.x, y: ep.y, a: (Math.atan2(dy, dx) * 180) / Math.PI });
                   return <g transform={fx.t}><g transform={`scale(${z * lineScale})`}>
-                    <path d="M 0 0 L -3.6 -2.1 L -3.6 2.1 Z" fill="#14171a" stroke="#14171a" strokeWidth={0.5} strokeLinejoin="round" />
+                    <path d="M 0 0 L -3.6 -2.1 L -3.6 2.1 Z" fill={INK} stroke={INK} strokeWidth={casing ? 1.7 : 0.5} strokeLinejoin="round" />
                   </g></g>; })()) : null}
           </g>
         );
@@ -7125,21 +7137,21 @@ export default function DrillAnimator() {
                   const a1 = gmMove(sx, sy, -uy, ux, sep), a2 = gmMove(le.x, le.y, -uy, ux, sep);
                   const b1 = gmMove(sx, sy, uy, -ux, sep), b2 = gmMove(le.x, le.y, uy, -ux, sep);
                   return <>
-                    <line x1={a1.x} y1={a1.y} x2={a2.x} y2={a2.y} vectorEffect={ve} stroke="#14171a" strokeWidth={W(0.55)} />
-                    <line x1={b1.x} y1={b1.y} x2={b2.x} y2={b2.y} vectorEffect={ve} stroke="#14171a" strokeWidth={W(0.55)} />
+                    <line x1={a1.x} y1={a1.y} x2={a2.x} y2={a2.y} vectorEffect={ve} stroke={INK} strokeWidth={W(0.55)} />
+                    <line x1={b1.x} y1={b1.y} x2={b2.x} y2={b2.y} vectorEffect={ve} stroke={INK} strokeWidth={W(0.55)} />
                   </>;
                 })()
               : <line x1={sx} y1={sy} x2={ex} y2={ey} vectorEffect={ve}
-                  stroke="#14171a" strokeWidth={W(0.55)} strokeDasharray={D("2.4 1.8")} />}
+                  stroke={INK} strokeWidth={W(0.55)} strokeDasharray={D("2.4 1.8")} />}
             {runEnd && (dx || dy) && (flat
-              ? <circle cx={ex} cy={ey} r={1.1} fill="none" vectorEffect={ve} stroke="#14171a" strokeWidth={W(0.3)} />
+              ? <circle cx={ex} cy={ey} r={1.1} fill="none" vectorEffect={ve} stroke={INK} strokeWidth={W(0.3)} />
               : (() => { const fx = iconXf({ x: ex, y: ey, a: (Math.atan2(dy, dx) * 180) / Math.PI });
                   // heads scale with the line-thickness setting, like routeMark
                   return <g transform={fx.t}><g transform={`scale(${z * lineScale})`}>
                     {L.shot
                       // open caret ">" for a shot
-                      ? <path d="M -3.3 -2.2 L 0 0 L -3.3 2.2" fill="none" stroke="#14171a" strokeWidth={0.95} strokeLinecap="round" strokeLinejoin="round" />
-                      : <path d="M 0 0 L -3.6 -2.1 L -3.6 2.1 Z" fill="#14171a" stroke="#14171a" strokeWidth={0.5} strokeLinejoin="round" />}
+                      ? <path d="M -3.3 -2.2 L 0 0 L -3.3 2.2" fill="none" stroke={INK} strokeWidth={casing ? 2.1 : 0.95} strokeLinecap="round" strokeLinejoin="round" />
+                      : <path d="M 0 0 L -3.6 -2.1 L -3.6 2.1 Z" fill={INK} stroke={INK} strokeWidth={casing ? 1.7 : 0.5} strokeLinejoin="round" />}
                   </g></g>; })())}
           </g>
         );
@@ -7487,13 +7499,6 @@ export default function DrillAnimator() {
             onPointerUp={onSvgUp} onPointerCancel={onSvgUp}>
             <defs>
               <clipPath id="boards"><rect x={0.5} y={0.5} width={199} height={84} rx={28} ry={28 * yFix} /></clipPath>
-              {/* faint white halo under drill lines (routes, pass/shot/chip/rim
-                  plans, marker ink) so they stay readable crossing the rink's
-                  red/blue markings — dots especially. Static layers → Safari
-                  caches the filtered raster, so playback cost is one-time. */}
-              <filter id="linehalo" x="-15%" y="-15%" width="130%" height="130%">
-                <feDropShadow dx="0" dy="0" stdDeviation="0.35" floodColor="#ffffff" floodOpacity="0.85" />
-              </filter>
             </defs>
 
             <g transform={zoomXf}>
@@ -7502,7 +7507,7 @@ export default function DrillAnimator() {
 
             {/* freehand marker annotations sit on the ice, under the drill — they
                 are drill markings, so they honour Mark opacity */}
-            <g opacity={markMO} filter="url(#linehalo)">
+            <g opacity={markMO}>
             {pieces.filter(p => p.kind === "mark").map(m => renderMark(m, true))}
             </g>
 
@@ -7583,7 +7588,7 @@ export default function DrillAnimator() {
 
             {/* route lines, fork/branch visuals + their ref paths — drill markings,
                 dimmed by Mark opacity (players/implements below stay opaque) */}
-            <g opacity={markMO} filter="url(#linehalo)">
+            <g opacity={markMO}>
             {!aiPlay && pieces.map(p => {
               // DRAW the detour only when avoidance visuals are on; the animation's own
               // routeDetour (displayPos) is separate, so the skater still curves either way
@@ -7609,15 +7614,18 @@ export default function DrillAnimator() {
                 if (carry) for (let k = e.j + 1; k <= e.rw; k++) carry.add(k);             // credited late → wiggle from the catch onward
               }
               const ledSegCatch = i => { let best = null; for (const e of ledCs) if (e.j === i && (!best || e.t < best.t)) best = e; return best; };
-              let prev = { x: p.x, y: p.y };
-              return (
-                <g key={`rt-${p.id}`}>
-                  {p.path.map((s, i) => {
+              // two passes over the same geometry: casing (ice under-stroke)
+              // first for the whole route, then the ink — so segment joints never
+              // show a casing painted over an earlier segment's colour
+              const renderSegs = cas => {
+                let prev = { x: p.x, y: p.y };
+                return p.path.map((s, i) => {
                     const d = segD(prev, s);
                     const from = prev;
                     prev = { x: s.x, y: s.y };
                     const isLast = i === p.path.length - 1;
-                    const style = segStroke(p, s, isLast);
+                    const inkStyle = segStroke(p, s, isLast);
+                    const style = cas ? caseOf(inkStyle) : inkStyle;
                     // line style: zigzag skating backward · wiggle with the puck ·
                     // straight otherwise (hockey diagram convention)
                     const bwd = p.kind === "player" && s.dir === "bwd";
@@ -7632,10 +7640,10 @@ export default function DrillAnimator() {
                     if (endGap) { const t = trimSegEnd(vFrom, vSeg, endGap, strokeAR); if (t) vSeg = t.seg; }
                     const vD = (startGap || endGap) ? segD(vFrom, vSeg) : d;
                     return (
-                      <g key={`${p.id}/${i}`}>
+                      <g key={`${cas ? "c:" : ""}${p.id}/${i}`}>
                         {/* invisible ref path is always present — timing measures it */}
-                        <path d={d} fill="none" stroke="none"
-                          ref={el => { if (el) segRefs.current[`${p.id}/${i}`] = el; }} />
+                        {!cas && <path d={d} fill="none" stroke="none"
+                          ref={el => { if (el) segRefs.current[`${p.id}/${i}`] = el; }} />}
                         {showRoutes && !bent && (() => {
                           // a ghost catch mid-segment splits the drawn leg at the
                           // catch spot with the regular action-circle treatment:
@@ -7666,20 +7674,25 @@ export default function DrillAnimator() {
                             dashed ghost so the user can still see + grab it (add
                             waypoints / edit); the transparent hit path below drives
                             the interaction, so the ghost stays pointer-transparent */}
-                        {showRoutes && bent && (
+                        {!cas && showRoutes && bent && (
                           <path d={vD} fill="none" stroke={p.color}
                             strokeWidth={sw(0.5)} strokeDasharray={sdash("1.4 1.6")}
                             strokeLinecap="round" vectorEffect="non-scaling-stroke"
                             opacity={0.22} pointerEvents="none" />
                         )}
-                        {showRoutes && (
+                        {!cas && showRoutes && (
                           <path d={d} fill="none" stroke="transparent" strokeWidth={4}
                             onPointerDown={e => lineDown(e, p.id, i)} style={{ cursor: "pointer" }}
                             pointerEvents={p.lock && !lockedSelectable ? "none" : undefined} />
                         )}
                       </g>
                     );
-                  })}
+                  });
+              };
+              return (
+                <g key={`rt-${p.id}`}>
+                  {renderSegs(true)}
+                  {renderSegs(false)}
                   {bent && (() => {
                     // a detour collapses the route to one polyline — keep the
                     // hockey-diagram styling: wiggle a full carry, zigzag a fully
@@ -7695,15 +7708,16 @@ export default function DrillAnimator() {
                     const subs = gapPolyAt(line, centers, actGap, strokeAR);
                     const allCarry = p.kind === "player" && carry && p.path.length > 0 && p.path.every((_, i) => carry.has(i));
                     const allBwd = p.kind === "player" && p.path.length > 0 && p.path.every(s => s.dir === "bwd");
-                    const style = segStroke(p, p.path[p.path.length - 1] || {}, false);
-                    return subs.map((sub, k) => {
-                      if (allBwd) return <path key={k} d={zigzagPoly(sub, strokeAR, k === subs.length - 1)} {...style} strokeLinejoin="round" pointerEvents="none" />;
+                    const inkStyle = segStroke(p, p.path[p.path.length - 1] || {}, false);
+                    // casing pass first for the whole bent line, then the ink
+                    return [caseOf(inkStyle), inkStyle].flatMap((style, ci) => subs.map((sub, k) => {
+                      if (allBwd) return <path key={`${ci}/${k}`} d={zigzagPoly(sub, strokeAR, k === subs.length - 1)} {...style} strokeLinejoin="round" pointerEvents="none" />;
                       const shaped = allCarry ? wigglePoly(sub, strokeAR, true) : sub;
                       return (
-                        <polyline key={k} points={shaped.map(q => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" ")}
+                        <polyline key={`${ci}/${k}`} points={shaped.map(q => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" ")}
                           {...style} strokeLinejoin="round" pointerEvents="none" />
                       );
-                    });
+                    }));
                   })()}
                   {/* arrow + action badges last so they sit ON TOP of the line */}
                   {showRoutes && p.path.length > 0 && renderArrow(p, bent, acts, endStagger[p.id] || 0)}
@@ -7838,10 +7852,14 @@ export default function DrillAnimator() {
                     return { ea, bk: arrivalBack("main", ea.endPt.x, ea.endPt.y) };
                   })();
                   const endBk = endMark && !endMark.legacy ? (endMark.bk || 0) : 0;
-                  let prev = origin;
-                  items.push(
-                    <g key={ref}>
-                      {f.path.map((s, i) => {
+                  // casing pass first over the whole branch, then the ink pass —
+                  // dim (non-chosen) branches keep a softer casing so they don't
+                  // read heavier than their own line
+                  const caseLine = { ...caseOf(line), ...(solid ? {} : { opacity: 0.6 }) };
+                  const renderBranchSegs = cas => {
+                    const st = cas ? caseLine : line;
+                    let prev = origin;
+                    return f.path.map((s, i) => {
                         const from = prev, d = segD(prev, s);
                         prev = { x: s.x, y: s.y };
                         const isLast = i === f.path.length - 1;
@@ -7856,27 +7874,32 @@ export default function DrillAnimator() {
                         if (!bent && endGap) { const t = trimSegEnd(vFrom, vSeg, endGap, strokeAR); if (t) vSeg = t.seg; }
                         const vD = (!bent && (startGap || endGap)) ? segD(vFrom, vSeg) : d;
                         return (
-                          <g key={i}>
+                          <g key={`${cas ? "c:" : ""}${i}`}>
                             {!bent && (bwd
-                              ? <path d={zigzagPoints(vFrom, vSeg, strokeAR, isLast || acts.has(i))} {...line} strokeLinejoin="round" />
+                              ? <path d={zigzagPoints(vFrom, vSeg, strokeAR, isLast || acts.has(i))} {...st} strokeLinejoin="round" />
                               : wig
-                              ? <polyline points={wigglePoints(vFrom, vSeg, strokeAR, isLast || acts.has(i))} {...line} strokeLinejoin="round" />
-                              : <path d={vD} {...line} strokeDasharray={solid ? undefined : sdash("1.6 1.1")} />)}
+                              ? <polyline points={wigglePoints(vFrom, vSeg, strokeAR, isLast || acts.has(i))} {...st} strokeLinejoin="round" />
+                              : <path d={vD} {...st} strokeDasharray={solid ? undefined : sdash("1.6 1.1")} />)}
                             {/* detour active → the authored branch lingers as a faint dashed
                                 ghost, exactly like a base route */}
-                            {bent && (
+                            {!cas && bent && (
                               <path d={d} fill="none" stroke={routeCol} strokeWidth={sw(0.5)}
                                 strokeDasharray={sdash("1.4 1.6")} strokeLinecap="round"
                                 vectorEffect="non-scaling-stroke" opacity={0.22 * (solid ? 1 : 0.5)} pointerEvents="none" />
                             )}
-                            {editing && !playing && (
+                            {!cas && editing && !playing && (
                               <path d={d} fill="none" stroke="transparent" strokeWidth={4}
                                 onPointerDown={e => lineDown(e, p.id, i, ref)} style={{ cursor: "pointer" }}
                                 pointerEvents={p.lock && !lockedSelectable ? "none" : undefined} />
                             )}
                           </g>
                         );
-                      })}
+                      });
+                  };
+                  items.push(
+                    <g key={ref}>
+                      {renderBranchSegs(true)}
+                      {renderBranchSegs(false)}
                       {/* detour collapses the branch to one bent polyline (wiggle a carry,
                           zigzag a backward leg), same as a base route. actGap holes at
                           the origin (its reaction badge — the authored startGap) and at
@@ -7889,13 +7912,13 @@ export default function DrillAnimator() {
                           ...[...acts.keys()].filter(i => f.path[i]).map(i => ({ x: f.path[i].x, y: f.path[i].y })),
                           ...[...subForkAts].filter(i => f.path[i]).map(i => ({ x: f.path[i].x, y: f.path[i].y }))];
                         const subs = gapPolyAt(bLine, centers, actGap, strokeAR);
-                        return subs.map((sub, k) => {
-                          if (allBwd) return <path key={k} d={zigzagPoly(sub, strokeAR, k === subs.length - 1)}
-                            {...line} strokeDasharray={solid ? undefined : sdash("1.6 1.1")} strokeLinejoin="round" />;
+                        return [caseLine, line].flatMap((st, ci) => subs.map((sub, k) => {
+                          if (allBwd) return <path key={`${ci}/${k}`} d={zigzagPoly(sub, strokeAR, k === subs.length - 1)}
+                            {...st} strokeDasharray={solid ? undefined : sdash("1.6 1.1")} strokeLinejoin="round" />;
                           const shaped = allCarry ? wigglePoly(sub, strokeAR, true) : sub;
-                          return <polyline key={k} points={shaped.map(q => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" ")}
-                            {...line} strokeDasharray={solid ? undefined : sdash("1.6 1.1")} strokeLinejoin="round" />;
-                        });
+                          return <polyline key={`${ci}/${k}`} points={shaped.map(q => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" ")}
+                            {...st} strokeDasharray={solid ? undefined : sdash("1.6 1.1")} strokeLinejoin="round" />;
+                        }));
                       })()}
                       {/* action circles at every action waypoint on this branch (all branches,
                           dimmed to the branch's own opacity for the non-chosen ones) */}
@@ -7935,7 +7958,7 @@ export default function DrillAnimator() {
             {/* puck travel path, branch ghost arrows + the in-progress draw preview
                 are drill markings — dimmed by Mark opacity */}
             <g opacity={markMO}>
-            <g filter="url(#linehalo)">{puckPathNodes(false)}</g>
+            <g>{puckPathNodes(false, true)}{puckPathNodes(false)}</g>
             {renderBranchGhostArrows()}
             {renderRouteNumbers()}
 
