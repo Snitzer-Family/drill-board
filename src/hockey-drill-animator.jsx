@@ -170,7 +170,7 @@ function DelayTrigger({ value, onChange, sub, players, actorIds, nameOf }) {
       <div className="hd-sectitle">Delay trigger</div>
       <div className="hd-sechint">{sub} until a timer, a teammate’s arrival, or their puck action.</div>
       <div className="hd-poprow">
-        {[["none", "None"], ["timer", "Timer"], ["waypoint", "Waypoint"], ["action", "Action"]].map(([m, lab]) => (
+        {[["none", "None"], ["timer", "Timer"], ["waypoint", "Point"], ["action", "Action"]].map(([m, lab]) => (
           <button key={m} className={`hd-mini${mode === m ? " on" : ""}`} onClick={() => pickMode(m)}>{lab}</button>
         ))}
       </div>
@@ -1194,7 +1194,7 @@ export default function DrillAnimator() {
           return { ...s, idx, key: `step:${idx}`, resolved: true,
             t: waypointTime(effOf(pc), s.on.wp), label: `${pc.label || pc.id} · pt ${s.on.wp + 1}` };
         }
-        return { ...s, idx, key: `step:${idx}`, resolved: false, t: 0, label: "waypoint missing" };
+        return { ...s, idx, key: `step:${idx}`, resolved: false, t: 0, label: "point missing" };
       }
       const t = Math.min(s.at || 0, T);
       return { ...s, idx, key: `step:${idx}`, resolved: true, t, label: `${(s.at || 0).toFixed(1)}s` };
@@ -2730,7 +2730,7 @@ export default function DrillAnimator() {
                 <select value={c.mode || "action"} style={selStyle} title="trigger"
                   onChange={e => { const m = e.target.value; updateForkCond(p.id, ref, { mode: m, ...(m === "waypoint" && c.at == null ? { at: Math.max(0, (wps.length) - 1) } : {}) }); }}>
                   <option value="action">releases puck</option>
-                  <option value="waypoint">reaches wp</option>
+                  <option value="waypoint">reaches point</option>
                 </select>
                 {c.mode === "waypoint" && (
                   <select value={c.at != null ? c.at : Math.max(0, wps.length - 1)} style={selStyle} title="…reaches this waypoint"
@@ -6009,7 +6009,7 @@ export default function DrillAnimator() {
           <div className="hd-mh" style={{ marginBottom: 5 }}>Actions</div>
           {startLocked && (
             <div className="hd-poprow"><span style={{ fontSize: 10.5, color: "#c98a2b" }}>
-              This puck is passed or shot at a later waypoint — set that action there.
+              This puck is passed or shot at a later route point — set that action there.
             </span></div>
           )}
           {rows.length > 0 && addRow("addtop")}
@@ -6118,6 +6118,7 @@ export default function DrillAnimator() {
           {p.kind === "net" && (
             <>
               <div className="hd-field">
+                <div className="hd-sectitle">Goalie</div>
                 <div className="hd-poprow">
                   <button className={`hd-mini${p.goalie ? " on" : ""}`}
                     onClick={() => updateById(p.id, { goalie: !p.goalie })}>
@@ -6127,6 +6128,7 @@ export default function DrillAnimator() {
                 <div className="hd-sechint">Drag to move · ring to rotate.</div>
               </div>
               <div className="hd-field">
+                <div className="hd-sectitle">Crease</div>
                 <div className="hd-poprow">
                   <button className={`hd-mini${p.crease ? " on" : ""}`}
                     onClick={() => updateById(p.id, { crease: !p.crease })}>
@@ -6353,10 +6355,10 @@ export default function DrillAnimator() {
                   (the start); step into the route from here */}
               {p.path.length > 0 && (
                 <div className="hd-field">
-                  <div className="hd-sectitle">Route stops</div>
+                  <div className="hd-sectitle">Route points</div>
                   <div className="hd-poprow">
                     <button className="hd-mini" disabled>‹ Prev</button>
-                    <span className="hd-sechint">Start · 1 / {p.path.length + 1}</span>
+                    <span className="hd-sechint">Start · {p.path.length} point{p.path.length > 1 ? "s" : ""} follow</span>
                     <button className="hd-mini" onClick={() => navPopup({ type: "point", id: p.id, seg: 0 })}>Next ›</button>
                   </div>
                 </div>
@@ -6637,13 +6639,10 @@ export default function DrillAnimator() {
       if (!s) return null;
       anchorPt = { x: s.x, y: s.y };
       const next = route[i + 1];
-      // TITLE counts only the actual waypoints (not the standing start): route
-      // waypoint i (0-based) is "Waypoint i+1 of route.length". The NAV counter
-      // below still includes the start as position 1 (so start=1, wp0=2, …), so
-      // it uses wpNum/wpTotal instead.
-      const wpNum = fork ? i + 1 : i + 2;
-      const wpTotal = fork ? route.length : route.length + 1;
-      title = fork ? `Reaction wp ${i + 1}/${route.length}` : `Waypoint ${i + 1}/${route.length}`;
+      // ONE numbering everywhere: the standing start is point 0 (matching the
+      // DSL — "pass=2" fires at point 2), so route[i] is point i+1 of
+      // route.length. Title, pager, and DSL references all agree.
+      title = fork ? `Reaction · point ${i + 1}/${route.length}` : `${nameOf(p.id)} · point ${i + 1}/${route.length}`;
       // Prev at waypoint 0: a fork steps back to its branch (the base route's end);
       // a base route steps back to the player/start popup.
       const branchNav = () => p.path.length ? { type: "point", id: p.id, seg: p.path.length - 1 } : { type: "piece", id: p.id };
@@ -6653,9 +6652,10 @@ export default function DrillAnimator() {
         <>
           {route.length > 0 && (
             <div className="hd-field">
+              <div className="hd-sectitle">Route points</div>
               <div className="hd-poprow">
                 <button className="hd-mini" onClick={() => goSeg(i - 1)}>‹ {fork && i === 0 ? "Branch" : "Prev"}</button>
-                <span className="hd-sechint">{wpNum} / {wpTotal}</span>
+                <span className="hd-sechint">Point {i + 1} of {route.length}</span>
                 <button className="hd-mini" disabled={i >= route.length - 1}
                   onClick={() => goSeg(i + 1)}>Next ›</button>
               </div>
@@ -6783,7 +6783,7 @@ export default function DrillAnimator() {
               )}
               {p.kind === "player" && (
                 <div className="hd-field">
-                  <div className="hd-sectitle">Transition</div>
+                  <div className="hd-sectitle">Skate direction</div>
                   <div className="hd-poprow">
                     <button className={`hd-mini${(next.dir || "fwd") === "fwd" ? " on" : ""}`}
                       onClick={() => uSeg(i + 1, { dir: "fwd" })}>Forwards</button>
@@ -8793,7 +8793,7 @@ export default function DrillAnimator() {
               <div key={s.idx} className="hd-stepitem">
                 <div className="hd-steprow">
                   <button className={`hd-anchorbtn${s.on ? " wp" : ""}${s.resolved ? "" : " bad"}${editAnchor === s.idx ? " open" : ""}`}
-                    title="Edit when this step pops — a fixed time or a player's waypoint"
+                    title="Edit when this step pops — a fixed time or a player's route point"
                     onClick={() => setEditAnchor(v => v === s.idx ? null : s.idx)}>{s.resolved ? s.label : "⚠ " + s.label}</button>
                   <input className="hd-input" style={{ flex: 1, minWidth: 0 }} value={s.text}
                     placeholder="Describe this beat…" autoFocus={!s.text}
@@ -8808,7 +8808,7 @@ export default function DrillAnimator() {
                       onClick={() => anchorToTime(s.idx)}>⏱ Time</button>
                     <button className={`hd-mini${s.on ? " on" : ""}`}
                       disabled={!stepPlayers.length}
-                      onClick={() => anchorToWaypoint(s.idx)}>📍 Waypoint</button>
+                      onClick={() => anchorToWaypoint(s.idx)}>📍 Point</button>
                     {s.on ? (
                       <>
                         <select className="hd-select on" value={s.on.piece}
@@ -8855,10 +8855,10 @@ export default function DrillAnimator() {
               onClick={() => setPresentation(v => !v)}>Presentation: {presentation ? "On" : "Off"}</button>
           </div>
           <div className="hd-note">
-            Scrub the timeline, pause, then “＋ Add here” drops a note — near a waypoint it
+            Scrub the timeline, pause, then “＋ Add here” drops a note — near a route point it
             anchors there (and tracks edits); otherwise it pins the time. Type it on the ice and
             drag it clear of the action; “Place” re-places a caption. Tap the anchor chip to set an
-            exact time in seconds, or pin the step to a player's waypoint.
+            exact time in seconds, or pin the step to a player's route point.
             In Presentation mode, play pauses {presoDelay}s at each step (tap the ice to skip ahead).
           </div>
         </div>
