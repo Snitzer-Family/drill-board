@@ -5695,9 +5695,12 @@ export default function DrillAnimator() {
         // so "pass to P3" is findable on the ice
         const off = p.kind === "net" ? 6.5 : p.kind === "player" ? 4.6 : 5;
         // player tags rotate around the symbol to the clearest spot, so they
-        // never sit on a route line or a pass/shot plan line
+        // never sit on a route line or a pass/shot plan line; they read slightly
+        // larger than prop tags and in the player's own colour
         const spot = p.kind === "player" ? tagSpotFor(p, off) : { x: p.x, y: p.y + off };
-        els.push(labelNode(`nm-${p.id}`, spot.x, spot.y, p.label, 0.5, "#33414f", false, null, null));
+        els.push(p.kind === "player"
+          ? labelNode(`nm-${p.id}`, spot.x, spot.y, p.label, 0.62, p.color, false, null, null)
+          : labelNode(`nm-${p.id}`, spot.x, spot.y, p.label, 0.5, "#33414f", false, null, null));
       }
       (p.path || []).forEach((s, i) => {
         if (s.dmode !== "label" || !s.desc) return;
