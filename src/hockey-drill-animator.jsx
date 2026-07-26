@@ -5206,8 +5206,10 @@ export default function DrillAnimator() {
         onPointerDown: e => handleDown(e, { kind: "anchor", id: p.id, seg: li, wp: li }) }));
     }
     // while a leg popup is open ("Add point here"), ghost the would-be waypoint —
-    // a dashed anchor at the tap's projection onto the curve, where the split lands
-    if (popup && popup.type === "line" && popup.id === p.id && forkEq(popup.fork, fork) && popup.pt && route[popup.seg]) {
+    // a dashed anchor at the tap's projection onto the curve, where the split
+    // lands. Hidden the moment a point or curve handle is being dragged: the
+    // hand is busy re-shaping the leg, so the add-target is just noise there.
+    if (popup && popup.type === "line" && popup.id === p.id && forkEq(popup.fork, fork) && popup.pt && route[popup.seg] && !drag.current) {
       const gs = route[popup.seg];
       const gPrev = segEnd(rp, popup.seg - 1);
       const g = evalSeg(gPrev, gs, nearestT(gPrev, gs, popup.pt));
@@ -7485,6 +7487,13 @@ export default function DrillAnimator() {
             onPointerUp={onSvgUp} onPointerCancel={onSvgUp}>
             <defs>
               <clipPath id="boards"><rect x={0.5} y={0.5} width={199} height={84} rx={28} ry={28 * yFix} /></clipPath>
+              {/* faint white halo under drill lines (routes, pass/shot/chip/rim
+                  plans, marker ink) so they stay readable crossing the rink's
+                  red/blue markings — dots especially. Static layers → Safari
+                  caches the filtered raster, so playback cost is one-time. */}
+              <filter id="linehalo" x="-15%" y="-15%" width="130%" height="130%">
+                <feDropShadow dx="0" dy="0" stdDeviation="0.35" floodColor="#ffffff" floodOpacity="0.85" />
+              </filter>
             </defs>
 
             <g transform={zoomXf}>
@@ -7493,7 +7502,7 @@ export default function DrillAnimator() {
 
             {/* freehand marker annotations sit on the ice, under the drill — they
                 are drill markings, so they honour Mark opacity */}
-            <g opacity={markMO}>
+            <g opacity={markMO} filter="url(#linehalo)">
             {pieces.filter(p => p.kind === "mark").map(m => renderMark(m, true))}
             </g>
 
@@ -7574,7 +7583,7 @@ export default function DrillAnimator() {
 
             {/* route lines, fork/branch visuals + their ref paths — drill markings,
                 dimmed by Mark opacity (players/implements below stay opaque) */}
-            <g opacity={markMO}>
+            <g opacity={markMO} filter="url(#linehalo)">
             {!aiPlay && pieces.map(p => {
               // DRAW the detour only when avoidance visuals are on; the animation's own
               // routeDetour (displayPos) is separate, so the skater still curves either way
@@ -7926,7 +7935,7 @@ export default function DrillAnimator() {
             {/* puck travel path, branch ghost arrows + the in-progress draw preview
                 are drill markings — dimmed by Mark opacity */}
             <g opacity={markMO}>
-            {puckPathNodes(false)}
+            <g filter="url(#linehalo)">{puckPathNodes(false)}</g>
             {renderBranchGhostArrows()}
             {renderRouteNumbers()}
 
