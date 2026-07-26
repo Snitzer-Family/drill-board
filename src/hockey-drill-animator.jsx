@@ -7351,7 +7351,7 @@ export default function DrillAnimator() {
             const dp = displayPos(p);
             return (
               <PieceIcon key={`lp${p.id}`} p={p} pos={dp} thDeg={(dp.a || 0) + screenRot} wb={whiteboard} wbCircle={wbCircle}
-                selected={p.id === selectedId} dim={animT > 0} onDown={() => {}} swing={displaySwing(p)} />
+                selected={editing && p.id === selectedId} dim={animT > 0} onDown={() => {}} swing={displaySwing(p)} />
             );
           })}
           {/* labels are their own kind — render them as text, not the player fallback */}
@@ -8202,7 +8202,7 @@ export default function DrillAnimator() {
                     </g>
                     <g transform={`translate(${lp.x} ${lp.y}) scale(${k}) translate(${-lp.x} ${-lp.y})`}>
                       <PieceIcon p={p} pos={lp} xf={lfx.t} thDeg={lfx.th} noShadow={isJump} wb={whiteboard} wbCircle={wbCircle}
-                        selected={p.id === selectedId} swing={isJump ? displaySwing(p) : 0} dim={animT > 0} onDown={e => pieceDown(e, p.id)}
+                        selected={editing && p.id === selectedId} swing={isJump ? displaySwing(p) : 0} dim={animT > 0} onDown={e => pieceDown(e, p.id)}
                         hitOff={p.lock && !lockedSelectable} />
                     </g>
                   </g>
@@ -8211,7 +8211,7 @@ export default function DrillAnimator() {
               const fx = iconXf(dp);
               return (
                 <PieceIcon key={p.id} p={p} pos={dp} xf={fx.t} thDeg={fx.th} wb={whiteboard} wbCircle={wbCircle}
-                  selected={p.id === selectedId} swing={displaySwing(p)}
+                  selected={editing && p.id === selectedId} swing={displaySwing(p)}
                   dim={animT > 0} onDown={e => pieceDown(e, p.id)}
                   hitOff={p.lock && !lockedSelectable}
                   onStickDown={editing && tool !== "draw" && p.kind === "player" && !p.path.length && !(p.lock && !lockedSelectable)
