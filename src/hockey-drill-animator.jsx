@@ -1496,15 +1496,31 @@ export default function DrillAnimator() {
       viewRef.current = nv; setView(nv);
     };
     const end = e => { if (e.touches.length < 2) pinchRef.current = null; };
+    // Desktop: scroll wheel (and trackpad pinch, which arrives as ctrl+wheel)
+    // zooms about the cursor — same focal-pinning math as the touch pinch.
+    const onWheel = e => {
+      e.preventDefault();
+      const v = viewRef.current;
+      const dy = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 100 : 1);
+      const k = e.ctrlKey ? 0.01 : 0.002;
+      const s = v.s * Math.exp(-dy * k);
+      const pt = rootPt(e.clientX, e.clientY);
+      if (!pt) return;
+      const pcx = (pt.x - v.tx) / v.s, pcy = (pt.y - v.ty) / v.s;
+      const nv = clampView(s, pt.x - s * pcx, pt.y - s * pcy);
+      viewRef.current = nv; setView(nv);
+    };
     svg.addEventListener("touchstart", start, { passive: false });
     svg.addEventListener("touchmove", move, { passive: false });
     svg.addEventListener("touchend", end);
     svg.addEventListener("touchcancel", end);
+    svg.addEventListener("wheel", onWheel, { passive: false });
     return () => {
       svg.removeEventListener("touchstart", start);
       svg.removeEventListener("touchmove", move);
       svg.removeEventListener("touchend", end);
       svg.removeEventListener("touchcancel", end);
+      svg.removeEventListener("wheel", onWheel);
     };
   }, []);
 
