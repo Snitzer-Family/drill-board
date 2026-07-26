@@ -1450,9 +1450,11 @@ export default function DrillAnimator() {
   useEffect(() => { bumpTick(t => t + 1); }, []);
 
   // keep the pan/scale within bounds so the ice always fills the view
+  const MAX_ZOOM = 3;
+  const clampS = s => Math.max(1, Math.min(MAX_ZOOM, s));
   function clampView(s, tx, ty) {
     const g = geomRef.current;
-    s = Math.max(1, Math.min(6, s));
+    s = clampS(s);
     const clamp = (t, o, size) => Math.max((o + size) * (1 - s), Math.min(o * (1 - s), t));
     return { s, tx: clamp(tx, g.ox, g.rootW), ty: clamp(ty, g.oy, g.rootH) };
   }
@@ -1489,22 +1491,40 @@ export default function DrillAnimator() {
       const mid = rootPt((a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2);
       if (!mid) return;
       const { d0, mid0, view0 } = pin;
-      const s = view0.s * (d / (d0 || 1));
+      // clamp the scale BEFORE deriving the translation — otherwise past the
+      // zoom limit the pan keeps drifting toward the focal point every event
+      const s = clampS(view0.s * (d / (d0 || 1)));
       // keep the pinch focal point pinned, then pan by the midpoint drift
       const pcx = (mid0.x - view0.tx) / view0.s, pcy = (mid0.y - view0.ty) / view0.s;
       const nv = clampView(s, mid.x - s * pcx, mid.y - s * pcy);
       viewRef.current = nv; setView(nv);
     };
     const end = e => { if (e.touches.length < 2) pinchRef.current = null; };
+    // Desktop: scroll wheel (and trackpad pinch, which arrives as ctrl+wheel)
+    // zooms about the cursor — same focal-pinning math as the touch pinch.
+    const onWheel = e => {
+      e.preventDefault();
+      const v = viewRef.current;
+      const dy = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 100 : 1);
+      const k = e.ctrlKey ? 0.01 : 0.002;
+      const s = clampS(v.s * Math.exp(-dy * k));
+      const pt = rootPt(e.clientX, e.clientY);
+      if (!pt) return;
+      const pcx = (pt.x - v.tx) / v.s, pcy = (pt.y - v.ty) / v.s;
+      const nv = clampView(s, pt.x - s * pcx, pt.y - s * pcy);
+      viewRef.current = nv; setView(nv);
+    };
     svg.addEventListener("touchstart", start, { passive: false });
     svg.addEventListener("touchmove", move, { passive: false });
     svg.addEventListener("touchend", end);
     svg.addEventListener("touchcancel", end);
+    svg.addEventListener("wheel", onWheel, { passive: false });
     return () => {
       svg.removeEventListener("touchstart", start);
       svg.removeEventListener("touchmove", move);
       svg.removeEventListener("touchend", end);
       svg.removeEventListener("touchcancel", end);
+      svg.removeEventListener("wheel", onWheel);
     };
   }, []);
 
