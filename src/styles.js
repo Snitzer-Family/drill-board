@@ -331,6 +331,13 @@ export const STYLES = `
         .hd-stepper button { width:32px; min-height:32px; border:none; background:#212b36; color:#e8edf2;
           font-size:16px; cursor:pointer; }
         .hd-stepper span { min-width:44px; text-align:center; font-size:13px; font-variant-numeric:tabular-nums; }
+        /* empty-board coaching hint — floats over the ice, never intercepts taps */
+        .hd-emptyhint { position:absolute; z-index:12; left:50%; top:38%; transform:translate(-50%,-50%);
+          max-width:min(340px, 78vw); padding:14px 18px; text-align:center; pointer-events:none;
+          background:rgba(17,22,28,.92); border:1px solid #3a4756; border-radius:13px;
+          box-shadow:0 6px 22px rgba(0,0,0,.45); color:#dbe4ec; font-size:13.5px; line-height:1.55; }
+        .hd-emptyhint b { color:#fff; }
+        .hd-emptyhint .hd-ehsub { display:block; margin-top:4px; font-size:12px; color:#93a3b5; }
         .hd-loupe { position:absolute; z-index:30; width:118px; height:118px; border-radius:50%;
           border:2px solid #3b4a5a; box-shadow:0 6px 18px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.6);
           overflow:hidden; pointer-events:none; background:#f5fafd; }

@@ -4563,6 +4563,21 @@ export default function DrillAnimator() {
   useEffect(() => {
     if (linkBad) flash("Couldn't read the shared drill link — showing your saved board instead", 4200);
   }, []);
+  // one-time contextual tips for the gesture-only features (flagged in
+  // localStorage so each shows exactly once, ever)
+  const hintOnce = (key, msg) => {
+    try {
+      if (localStorage.getItem("hd-hint-" + key)) return;
+      localStorage.setItem("hd-hint-" + key, "1");
+    } catch { return; }   // private mode — skip rather than nag every session
+    flash(msg, 3600);
+  };
+  useEffect(() => {
+    if (popup?.type !== "piece") return;
+    const p = pieces.find(q => q.id === popup.id);
+    if (p && p.kind === "player" && p.path?.length)
+      hintOnce("dbltap-point", "Tip: double-tap the route line to add a point");
+  }, [popup?.type, popup?.id]);
   function copyMd() { copyToClipboard(toMarkdown(), "Markdown copied"); }
   // copy the drill text from the editor to the clipboard
   function copyText() { copyToClipboard(textDraft, "Text copied"); }
@@ -8195,6 +8210,15 @@ export default function DrillAnimator() {
           </div>
         );
       })()}
+
+      {/* ---------- empty-board coaching hint (new/cleared board only) ---------- */}
+      {editing && !openMenu && !popup && tool === "select" &&
+        pieces.every(p => p.kind === "net") && (
+        <div className="hd-emptyhint">
+          Tap <b>Add</b> below to place players, then <b>Draw a route</b> to animate them.
+          <span className="hd-ehsub">Quick add: double-tap anywhere on the ice</span>
+        </div>
+      )}
 
       {/* ---------- player bar: transport + scrubber in one strip ---------- */}
       {!aiPlay && !holdStep && hasTimeline && (
