@@ -139,7 +139,11 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
 
   function getPlan() {
     const pc = planCache.current;
-    if (pc.key === pieces && pc.pace === pace && pc.sig === lenSig && pc.seed === seed) { currentHolds = pc.holds || {}; currentStartWait = pc.startWait || {}; currentTrigPause = pc.trigPause || {}; return pc; }
+    // realisticShots / detail / odds change the OUTCOMES a plan bakes in (miss
+    // trajectories, rest spots) — a cached plan from the other mode must not be
+    // reused, or toggling e.g. Whiteboard replays a stale realistic miss
+    if (pc.key === pieces && pc.pace === pace && pc.sig === lenSig && pc.seed === seed
+      && pc.real === realisticShots && pc.det === detail && pc.odds === odds) { currentHolds = pc.holds || {}; currentStartWait = pc.startWait || {}; currentTrigPause = pc.trigPause || {}; return pc; }
     const warp = {};
     const plans = {};
     const rel = {};
@@ -732,7 +736,8 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
     events = newEvents;
     if (converged) break;
     }   // end action-trigger fixpoint loop
-    planCache.current = { key: pieces, pace, sig: lenSig, seed, warp, plans, rel, holds: {}, startWait: sw, trigPause: tp };
+    planCache.current = { key: pieces, pace, sig: lenSig, seed, real: realisticShots, det: detail, odds,
+      warp, plans, rel, holds: {}, startWait: sw, trigPause: tp };
     currentHolds = {};
 
     // blue-line entry holds: a "hold=line" player waits at their last neutral
