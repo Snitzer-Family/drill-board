@@ -899,21 +899,22 @@ export default function DrillAnimator() {
   const swapAxes = screenRot === 90 || screenRot === 270; // view turned vertical
   let canvasW = Math.max(50, stageSize.w);
   let canvasH = Math.max(20, stageSize.h);
-  // Full ice fills the stage. Half ice is constrained to its true 100'×85'
-  // proportions in every orientation (no stretch — the canvas letterboxes).
-  // Quarter keeps its true proportions up to a small over-stretch.
-  if (rink !== "full") {
+  // Full and half ice fill the stage. Quarter is constrained to its true
+  // proportions up to a small over-stretch (the canvas letterboxes).
+  if (rink === "quarter") {
     const vbW = swapAxes ? vhF : vwF, vbH = swapAxes ? vwF : vhF; // effective viewBox dims
-    const CAP = rink === "quarter" ? 1.12 : 1;                    // max stretch past true aspect
+    const CAP = 1.12;                                             // max stretch past true aspect
     canvasH = Math.min(canvasH, Math.round((canvasW * vbH) / vbW * CAP));
     canvasW = Math.min(canvasW, Math.round((canvasH * vbW) / vbH * CAP));
   }
-  // Full ice with "Stretch to fill" OFF letterboxes inside the viewBox instead
-  // of shrinking the canvas: the rink keeps true proportions with padded
-  // off-ice space around it, so pinch-zoom can expand the rink to fill the
-  // whole stage rather than staying boxed between letterbox bands.
+  // Full ice with "Stretch to fill" OFF — and half ice always (it keeps true
+  // 100'×85' proportions) — letterbox inside the viewBox instead of shrinking
+  // the canvas: the rink sits amid padded off-ice space, so zooming can expand
+  // it to fill the whole stage rather than staying boxed between letterbox
+  // bands. (Half ice additionally clips the scene to its viewBox rect so the
+  // padding never reveals the other half of the rink.)
   let padX = 0, padY = 0;
-  if (rink === "full" && !stretchFill) {
+  if ((rink === "full" && !stretchFill) || rink === "half") {
     const baseW = swapAxes ? vhF : vwF, baseH = swapAxes ? vwF : vhF;
     const want = canvasW / Math.max(1, canvasH);                  // stage aspect
     if (want > baseW / baseH) padX = (baseH * want - baseW) / 2;
@@ -7371,10 +7372,12 @@ export default function DrillAnimator() {
             onPointerUp={onSvgUp} onPointerCancel={onSvgUp}>
             <defs>
               <clipPath id="boards"><rect x={0.5} y={0.5} width={199} height={84} rx={28} ry={28 * yFix} /></clipPath>
+              {rink === "half" &&
+                <clipPath id="halfview"><rect x={mxF} y={myF} width={vwF} height={vhF} /></clipPath>}
             </defs>
 
             <g transform={zoomXf}>
-            <g ref={sceneRef} transform={sceneTransform}>
+            <g ref={sceneRef} transform={sceneTransform} clipPath={rink === "half" ? "url(#halfview)" : undefined}>
             <RinkMarkings yFix={yFix} />
 
             {/* freehand marker annotations sit on the ice, under the drill — they
