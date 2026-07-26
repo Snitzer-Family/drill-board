@@ -312,6 +312,7 @@ function DelayTrigger({ value, onChange, sub, players, actorIds, nameOf }) {
 const SAVE_KEY = "drillboard:autosave";   // the whole board, persisted across refreshes
 const WB_KEY = "drillboard:whiteboard";   // whiteboard-mode view pref, persisted on its own
 const WBC_KEY = "drillboard:whiteboard-circle";   // circled X/O symbols sub-pref
+const WBN_KEY = "drillboard:whiteboard-names";    // always-on player name tags sub-pref
 const HALFNS_KEY = "drillboard:half-ns";  // half-ice shown north-south (vertical)
 const HALFFLIP_KEY = "drillboard:half-flip";  // half-ice net at the far end (left / top)
 const STRETCH_KEY = "drillboard:stretch-fill";  // full ice stretches to fill the screen
@@ -397,6 +398,13 @@ export default function DrillAnimator() {
     try { return localStorage.getItem(WBC_KEY) === "1"; } catch { return false; }
   });
   useEffect(() => { try { localStorage.setItem(WBC_KEY, wbCircle ? "1" : "0"); } catch { /* private mode */ } }, [wbCircle]);
+  // player name tags under the X/O symbols: always-on when the pref is set;
+  // otherwise they still flash up while a player's popup is open (pass-target
+  // picking needs findable names) and hide again with it
+  const [wbNames, setWbNames] = useState(() => {
+    try { return localStorage.getItem(WBN_KEY) !== "0"; } catch { return true; }
+  });
+  useEffect(() => { try { localStorage.setItem(WBN_KEY, wbNames ? "1" : "0"); } catch { /* private mode */ } }, [wbNames]);
   // half-ice screen orientation: east-west (net right, default) or north-south
   // (net at the bottom, drill-book portrait style). A device view pref.
   const [halfNS, setHalfNS] = useState(() => {
@@ -532,6 +540,9 @@ export default function DrillAnimator() {
 
   const selected = pieces.find(p => p.id === selectedId) || null;
   const editing = animT === 0 && !playing && !aiPlay;
+  // whiteboard player name tags: on with the pref, or while a player's popup is open
+  const wbTags = whiteboard && (wbNames ||
+    (popup?.type === "piece" && pieces.some(q => q.id === popup.id && q.kind === "player")));
   // a pinned panel stays open + re-targets on the next tap (empty-tap keeps the
   // last item); "dock" renders as a right sidebar but only on a wide/fine-pointer
   // screen — a "dock" panel on a narrow screen falls back to the float render
@@ -5610,9 +5621,10 @@ export default function DrillAnimator() {
           e => pieceDown(e, p.id),
           canEdit && !p.lock ? e => handleDown(e, { kind: "resize", id: p.id, seg: null, cx: p.x, cy: p.y, size0: p.size || 1 }) : null,
           p.lock && !lockedSelectable));
-      } else if (p.label && (p.kind !== "player" || whiteboard)) {
+      } else if (p.label && (p.kind !== "player" || wbTags)) {
         // a name tag under any named prop/piece. Players normally wear the name
-        // on their jersey, but the whiteboard X/O symbols don't — tag them too,
+        // on their jersey, but the whiteboard X/O symbols don't — tag them when
+        // the pref is on, or while a player popup is open (pass-target picking),
         // so "pass to P3" is findable on the ice
         const off = p.kind === "net" ? 6.5 : p.kind === "player" ? 4.6 : 5;
         els.push(labelNode(`nm-${p.id}`, p.x, p.y + off, p.label, 0.5, "#33414f", false, null, null));
@@ -8653,11 +8665,18 @@ export default function DrillAnimator() {
             <span className="hd-sechint">classic X &amp; O player symbols, plain arrowed routes; shots stay on the ice, no splashes or detail animations</span>
           </div>
           {whiteboard && (
-            <div className="hd-poprow">
-              <button className={`hd-mini${wbCircle ? " on" : ""}`}
-                onClick={() => setWbCircle(v => !v)}>{wbCircle ? "✓ Circled symbols" : "Circled symbols"}</button>
-              <span className="hd-sechint">draw each X / O on an opaque white disc, like the action circles</span>
-            </div>
+            <>
+              <div className="hd-poprow">
+                <button className={`hd-mini${wbCircle ? " on" : ""}`}
+                  onClick={() => setWbCircle(v => !v)}>{wbCircle ? "✓ Circled symbols" : "Circled symbols"}</button>
+                <span className="hd-sechint">draw each X / O on an opaque white disc, like the action circles</span>
+              </div>
+              <div className="hd-poprow">
+                <button className={`hd-mini${wbNames ? " on" : ""}`}
+                  onClick={() => setWbNames(v => !v)}>{wbNames ? "✓ Player names" : "Player names"}</button>
+                <span className="hd-sechint">name tag under each X / O — off still shows them while a player's popup is open</span>
+              </div>
+            </>
           )}
           <div className="hd-poprow">
             <span>Line thickness</span>
