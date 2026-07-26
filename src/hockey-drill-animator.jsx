@@ -597,9 +597,10 @@ export default function DrillAnimator() {
     setPopPos({ top: r.top - pr.top, left: r.left - pr.left });
   }
   function togglePin() {
-    if (pinMode === "float") { setPinMode(null); return; }
+    if (pinMode === "float") { setPinMode(null); flash("Un-pinned — panel closes on the next ice tap"); return; }
     if (pinMode !== "dock") freezePopSpot();            // hold the current floating spot across re-targets
     setPinMode("float");
+    flash("Pinned — panel stays open and follows what you tap");
   }
   function toggleDock() { setPinMode(m => m === "dock" ? null : "dock"); }
 
@@ -2624,9 +2625,10 @@ export default function DrillAnimator() {
   const curveButtons = (onType, onDraw, activeType = null) => (
     <>
       {[["L", "segLine", "Straight"], ["Q", "segQuad", "Curve"], ["C", "segCubic", "S-curve"]].map(([t, ic, lbl]) => (
-        <button key={t} className={`hd-mini${activeType === t ? " on" : ""}`} title={lbl} onClick={() => onType(t)}><Icon name={ic} /></button>
+        <button key={t} className={`hd-mini iconlbl${activeType === t ? " on" : ""}`} title={lbl} onClick={() => onType(t)}>
+          <Icon name={ic} /><small>{lbl}</small></button>
       ))}
-      <button className="hd-mini" title="Freehand draw" onClick={onDraw}><Icon name="pencil" /></button>
+      <button className="hd-mini iconlbl" title="Freehand draw" onClick={onDraw}><Icon name="pencil" /><small>Draw</small></button>
     </>
   );
   // enter freehand draw mode for a route: a reaction fork, else the base route
@@ -6552,8 +6554,9 @@ export default function DrillAnimator() {
               <div className="hd-sectitle">Change to</div>
               <div className="hd-poprow" style={{ flexWrap: "wrap" }}>
                 {TOOL_KINDS.filter(k => k !== p.kind).map(k => (
-                  <button key={k} className="hd-mini hd-swapbtn" title={`Change to ${k}`}
-                    onClick={() => updateById(p.id, { kind: k, color: defaultColor(k) })}>{toolImg(k)}</button>
+                  <button key={k} className="hd-mini hd-swapbtn iconlbl" title={`Change to ${k}`}
+                    onClick={() => updateById(p.id, { kind: k, color: defaultColor(k) })}>
+                    {toolImg(k)}<small>{k}</small></button>
                 ))}
               </div>
             </div>
@@ -6607,7 +6610,7 @@ export default function DrillAnimator() {
       // it uses wpNum/wpTotal instead.
       const wpNum = fork ? i + 1 : i + 2;
       const wpTotal = fork ? route.length : route.length + 1;
-      title = fork ? `Reaction · waypoint ${i + 1} of ${route.length}` : `Waypoint ${i + 1} of ${route.length}`;
+      title = fork ? `Reaction wp ${i + 1}/${route.length}` : `Waypoint ${i + 1}/${route.length}`;
       // Prev at waypoint 0: a fork steps back to its branch (the base route's end);
       // a base route steps back to the player/start popup.
       const branchNav = () => p.path.length ? { type: "point", id: p.id, seg: p.path.length - 1 } : { type: "piece", id: p.id };
@@ -6733,13 +6736,13 @@ export default function DrillAnimator() {
                   Smooth = handles kept collinear (auto-smooths); Sym = collinear + equal */}
               {s.type !== "L" && next.type !== "L" && (
                 <div className="hd-field">
-                  <div className="hd-sectitle">Point</div>
+                  <div className="hd-sectitle">Corner style</div>
                   <div className="hd-poprow">
-                    {[["corner", "ptCorner", "Corner — independent handles"],
-                      ["smooth", "ptSmooth", "Smooth — linked handles, auto-smooths"],
-                      ["sym", "ptSym", "Symmetric — linked, equal-length handles"]].map(([j, ic, lbl]) => (
-                      <button key={j} className={`hd-mini${(s.join || "corner") === j ? " on" : ""}`} title={lbl}
-                        onClick={() => setJoint(p.id, i, j, fork)}><Icon name={ic} /></button>
+                    {[["corner", "ptCorner", "Sharp", "a hard turn at this point"],
+                      ["smooth", "ptSmooth", "Smooth", "rounds the turn through this point"],
+                      ["sym", "ptSym", "Even", "rounds it evenly on both sides"]].map(([j, ic, lbl, tip]) => (
+                      <button key={j} className={`hd-mini iconlbl${(s.join || "corner") === j ? " on" : ""}`} title={`${lbl} — ${tip}`}
+                        onClick={() => setJoint(p.id, i, j, fork)}><Icon name={ic} /><small>{lbl}</small></button>
                     ))}
                   </div>
                 </div>
@@ -7310,6 +7313,8 @@ export default function DrillAnimator() {
       : tool === "marker" ? "Marker — drag on the ice to draw"
       : tool !== "select" ? "Tap the ice to place" : null;
 
+  const mlbl = { fontSize: 8, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase",
+    lineHeight: 1, opacity: 0.8, marginTop: 2 };
   const mbtn = { display: "flex", alignItems: "center", justifyContent: "center", minWidth: 34, height: 34,
     padding: "0 8px", borderRadius: 999, border: "1px solid rgba(255,255,255,0.14)", background: "rgba(255,255,255,0.06)",
     color: "#eaf0f6", fontSize: 14, fontWeight: 700, cursor: "pointer" };
@@ -8128,10 +8133,13 @@ export default function DrillAnimator() {
               <span style={{ color: "#cdd6df", fontSize: 12, fontWeight: 700, padding: "0 4px", whiteSpace: "nowrap" }}>
                 {selGroupName() ? `◇ ${selGroupName()}` : `${multiSel.size} selected`}
               </span>
-              <button style={mbtn} onClick={() => rotateGroup(-15)} title="Rotate left 15°"><Icon name="rotateCcw" /></button>
-              <button style={mbtn} onClick={() => rotateGroup(15)} title="Rotate right 15°"><Icon name="rotateCw" /></button>
-              <button style={{ ...mbtn, fontSize: 12 }} onClick={() => rotateGroup(90)} title="Rotate 90°">90°</button>
-              <button style={mbtn} onClick={duplicateGroup} title="Duplicate the selection"><Icon name="duplicate" /></button>
+              <button style={{ ...mbtn, flexDirection: "column", height: 40 }} onClick={() => rotateGroup(-15)} title="Rotate left 15°">
+                <Icon name="rotateCcw" size={15} /><span style={mlbl}>-15°</span></button>
+              <button style={{ ...mbtn, flexDirection: "column", height: 40 }} onClick={() => rotateGroup(15)} title="Rotate right 15°">
+                <Icon name="rotateCw" size={15} /><span style={mlbl}>+15°</span></button>
+              <button style={{ ...mbtn, fontSize: 12, height: 40 }} onClick={() => rotateGroup(90)} title="Rotate 90°">90°</button>
+              <button style={{ ...mbtn, flexDirection: "column", height: 40 }} onClick={duplicateGroup} title="Duplicate the selection">
+                <Icon name="duplicate" size={15} /><span style={mlbl}>Copy</span></button>
               {/* named-group controls: name the selection, or ungroup it */}
               {groupInput != null ? (
                 <>
@@ -8146,8 +8154,11 @@ export default function DrillAnimator() {
               ) : (
                 <button style={{ ...mbtn, fontSize: 11.5 }} title="Group the selection" onClick={() => setGroupInput(selGroupName() || "")}>◇ Group</button>
               )}
-              <button style={{ ...mbtn, color: "#ff7a7a", borderColor: "rgba(255,90,90,0.35)" }} onClick={deleteGroup} title="Delete the selection"><Icon name="trash" /></button>
-              <button style={mbtn} onClick={() => { setMultiSel(null); setGroupInput(null); }} title="Clear selection"><Icon name="close" /></button>
+              <span style={{ width: 1, alignSelf: "stretch", margin: "3px 3px", background: "rgba(255,255,255,0.14)" }} />
+              <button style={{ ...mbtn, flexDirection: "column", height: 40, color: "#ff7a7a", borderColor: "rgba(255,90,90,0.35)" }}
+                onClick={deleteGroup} title="Delete the selection"><Icon name="trash" size={15} /><span style={mlbl}>Delete</span></button>
+              <button style={{ ...mbtn, flexDirection: "column", height: 40 }} onClick={() => { setMultiSel(null); setGroupInput(null); }}
+                title="Clear selection"><Icon name="close" size={15} /><span style={mlbl}>Done</span></button>
             </div>
           )}
           {view.s > 1.02 && (
@@ -8719,8 +8730,8 @@ export default function DrillAnimator() {
                     placeholder="Describe this beat…" autoFocus={!s.text}
                     onChange={e => setStepText(s.idx, e.target.value)} />
                   <button className={`hd-mini${s.pos ? " on" : ""}`} title="Place the caption on the ice"
-                    disabled={!s.resolved} onClick={() => enterPlacing(s.idx)}>⤢</button>
-                  <button className="hd-mini" title="delete step" onClick={() => deleteStep(s.idx)}>✕</button>
+                    disabled={!s.resolved} onClick={() => enterPlacing(s.idx)}><Icon name="pin" size={13} /> Place</button>
+                  <button className="hd-mini" title="Delete step" onClick={() => deleteStep(s.idx)}><Icon name="close" size={13} /></button>
                 </div>
                 {editAnchor === s.idx && (
                   <div className="hd-anchoredit">
@@ -8769,7 +8780,7 @@ export default function DrillAnimator() {
           <div className="hd-note">
             Scrub the timeline, pause, then “＋ Add here” drops a note — near a waypoint it
             anchors there (and tracks edits); otherwise it pins the time. Type it on the ice and
-            drag it clear of the action; ⤢ re-places a caption. Tap the anchor chip to set an
+            drag it clear of the action; “Place” re-places a caption. Tap the anchor chip to set an
             exact time in seconds, or pin the step to a player's waypoint.
             In Presentation mode, play pauses {presoDelay}s at each step (tap the ice to skip ahead).
           </div>

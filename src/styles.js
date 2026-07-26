@@ -279,7 +279,7 @@ export const STYLES = `
         .hd-sbthumb { position:absolute; top:0; right:-9px; width:5px; border-radius:3px;
           background:#7d93aa; box-shadow:0 0 0 1px rgba(0,0,0,.35); opacity:0;
           transition:opacity .18s; will-change:transform,height; }
-        .hd-pophead { display:flex; align-items:center; gap:6px; font-size:12px; font-weight:700;
+        .hd-pophead { display:flex; align-items:center; gap:7px; font-size:12px; font-weight:700;
           letter-spacing:.06em; text-transform:uppercase; color:#aab7c4;
           cursor:grab; touch-action:none; user-select:none; -webkit-user-select:none;
           margin:-10px -12px 0; padding:10px 12px 6px;
@@ -287,7 +287,7 @@ export const STYLES = `
         .hd-pophead:active { cursor:grabbing; }
         /* title: shrink + single-line (ellipsis) so it never spills to 2 rows */
         .hd-poptitle { flex:1 1 auto; min-width:0; white-space:nowrap; overflow:hidden;
-          text-overflow:ellipsis; font-size:11px; letter-spacing:.03em; }
+          text-overflow:ellipsis; font-size:12px; letter-spacing:0; text-transform:none; }
         /* resize handles: a bottom bar (height) + a bottom-right corner (both).
            Sticky so they ride the popup's visible bottom edge while it scrolls;
            margin-top:auto pins the bar to the bottom when the box is taller than
@@ -319,6 +319,10 @@ export const STYLES = `
           display:inline-flex; align-items:center; justify-content:center; gap:5px; }
         .hd-item svg, .hd-mini svg, .hd-btn svg { flex:0 0 auto; }
         .hd-mini.on { background:#0f766e; border-color:#0f766e; color:#fff; }
+        /* icon + caption mini-button: tooltips don't exist on touch */
+        .hd-mini.iconlbl { flex-direction:column; gap:2px; padding:5px 9px; }
+        .hd-mini.iconlbl small { font-size:8px; font-weight:700; letter-spacing:.04em;
+          text-transform:uppercase; line-height:1; opacity:.8; }
         .hd-mini.danger { color:#ff8d9c; border-color:#4a2a30; }
         .hd-select { flex:1 1 auto; min-width:80px; padding:6px 8px; font-size:12.5px; border-radius:7px;
           border:1px solid #2c3846; background:#212b36; color:#dbe4ec; cursor:pointer;
