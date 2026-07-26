@@ -4915,6 +4915,24 @@ export default function DrillAnimator() {
           tx = s.x - b.x; ty = s.y - b.y;
         } else { tx = 0; ty = 0; }
         if (Math.hypot(tx, ty) < 1e-4) {
+          // follow the CURVE: the visible line is ARC-trimmed by actGap, and on a
+          // hooked leg that end is nowhere near a straight step back along the
+          // end tangent — so trim identically and sit the carat exactly where
+          // the drawn line stops, pointing along its final run
+          const tr = trimSegEnd(prev, s, actGap, strokeAR);
+          if (tr && tr.seg) {
+            const tip0 = { x: tr.seg.x, y: tr.seg.y };
+            const back = arrivalBack("main", tip0.x, tip0.y);
+            const tr2 = back ? trimSegEnd(prev, s, actGap + back, strokeAR) : tr;
+            const fin = (tr2 && tr2.seg) ? tr2.seg : tr.seg;
+            const near2 = evalSeg(prev, fin, 0.94);
+            let dx = fin.x - near2.x, dy = fin.y - near2.y;
+            if (Math.hypot(dx, dy) < 1e-4) { dx = s.x - prev.x; dy = s.y - prev.y; }
+            els.push(routeMark(`${keyPrefix}am${i}`, { x: fin.x, y: fin.y },
+              (Math.atan2(dy, dx) * 180) / Math.PI, s.endStop, color));
+            if (!whiteboard) els.push(iconBadge({ x: s.x, y: s.y }, actionIconName(info.type), color, `${keyPrefix}ab${i}`, 1, info.count));
+            continue;
+          }
           const near = evalSeg(prev, s, 0.95); tx = s.x - near.x; ty = s.y - near.y;   // near the end → carat aligns with the incoming run
           if (Math.hypot(tx, ty) < 1e-4) { tx = s.x - prev.x; ty = s.y - prev.y; }
         }
