@@ -96,6 +96,82 @@ function parseSegments(tok, j, unq) {
   return segs;
 }
 
+// If a drill has a shot but NO shooting target on the board, auto-place an
+// empty net in the crease nearest each shooter (one per end as needed) —
+// otherwise doShot aims at a phantom point: no cage, no carom, no outcome.
+// Any net or passer counts as a target (both auto-attract shots); a shot
+// pinned to an existing bumper/tire is an explicit deflect, not needy.
+// Pure: returns the SAME array when there is nothing to add (callers use
+// that to skip state updates), else a copy with the net(s) appended.
+export function ensureShotNet(pieces) {
+  if (!pieces || pieces.some(p => p.kind === "net" || p.kind === "passer")) return pieces;
+  const byId = {};
+  pieces.forEach(p => { byId[p.id] = p; });
+  const deflect = id => { const q = id && byId[id]; return !!(q && (q.kind === "bumper" || q.kind === "tire")); };
+  // follow a mem ref ("#a/#b") down a piece's fork tree to its route node
+  const nodeByRef = (p, ref) => {
+    let list = p && p.forks, node = null;
+    for (const part of String(ref).split("/")) {
+      node = (list || []).find(f => (f.color || "").toLowerCase() === part.toLowerCase());
+      if (!node) return null;
+      list = node.forks;
+    }
+    return node;
+  };
+  // rough release x — only which half of the ice matters (mirrors doShot's
+  // side fallback): the shooter's route point at the shot index, else the
+  // shooter's own spot, else the puck's
+  const releaseX = (pk, t, shooterId) => {
+    const sh = shooterId ? byId[shooterId] : null;
+    let path = sh ? sh.path : null;
+    if (t.ref) {
+      const node = nodeByRef(sh, t.ref) || pieces.map(p => nodeByRef(p, t.ref)).find(Boolean);
+      if (node) path = node.path;
+    }
+    if (path && path.length) return path[Math.max(0, Math.min(t.at || 0, path.length - 1))].x;
+    return sh ? sh.x : pk.x;
+  };
+  const sides = new Set();
+  const addSide = (x, pin) =>
+    sides.add(pin === "left" || pin === "right" ? pin : x < 100 ? "left" : "right");
+  pieces.forEach(pk => {
+    const chainEnd = (pk.transfers || []).length ? pk.transfers[pk.transfers.length - 1].to
+      : (pk.carrier || (pk.pickup && pk.pickup.to) || null);
+    (pk.terminals || []).forEach(t => {
+      if (t.kind === "shot" && !deflect(t.net)) addSide(releaseX(pk, t, t.by || chainEnd), t.net);
+    });
+    (pk.transfers || []).forEach((t, k) => {   // rebound= — a shot whose carom is collected
+      if (t.kind !== "shot" || deflect(t.net)) return;
+      const rel = t.by || (k ? pk.transfers[k - 1].to : (pk.carrier || (pk.pickup && pk.pickup.to) || null));
+      addSide(releaseX(pk, t, rel), t.net);
+    });
+    const walk = list => (list || []).forEach(f => {   // BRANCH … shoot[:net]
+      if (f.action === "shoot" && !deflect(f.net)) {
+        const seg = (f.path || [])[(f.path || []).length - 1];
+        addSide(seg ? seg.x : pk.x, f.net);
+      }
+      walk(f.forks);
+    });
+    walk(pk.forks);
+  });
+  if (!sides.size) return pieces;
+  const used = new Set(pieces.map(p => p.id));
+  let n = 1;
+  const out = pieces.slice();
+  ["left", "right"].forEach(side => {
+    if (!sides.has(side)) return;
+    while (used.has("N" + n)) n++;
+    used.add("N" + n);
+    out.push({ id: "N" + n, kind: "net", x: side === "left" ? 11 : 189, y: 42.5, color: "#c81e33",
+      label: "", text: "", size: 1, speed: 1, hand: "R", sym: "", carrier: null,
+      facing: side === "left" ? 0 : 180, transfers: [], pickup: null, net: null,
+      holdLine: false, goalie: false, defense: false, wait: null, group: null,
+      crease: false, lock: false, cues: [], mode: "reactive", alwaysColor: null,
+      lightId: null, forks: [], path: [] });
+  });
+  return out;
+}
+
 export function parseDrill(text) {
   const pieces = [];
   const byId = {};
@@ -406,7 +482,7 @@ export function parseDrill(text) {
     } catch (e) { errors.push(`line ${i + 1}: ${e.message}`); }
   });
   if (capturingNotes) notes = noteBuf.join("\n");   // unterminated NOTES: flush what we have
-  return { rink, pieces, errors, title, desc, dslVersion, steps, notes: notes || "", items };
+  return { rink, pieces: ensureShotNet(pieces), errors, title, desc, dslVersion, steps, notes: notes || "", items };
 }
 
 const f1 = n => (Math.round(n * 10) / 10).toString();
