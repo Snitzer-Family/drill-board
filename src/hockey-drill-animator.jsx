@@ -3955,7 +3955,11 @@ export default function DrillAnimator() {
   // consult this (a hidden player still plays; the drill clock is unchanged)
   const hiddenIds = useMemo(() => {
     const s = new Set();
-    if (hiddenGroups.size) for (const p of pieces) if (p.group && hiddenGroups.has(p.group)) s.add(p.id);
+    if (hiddenGroups.size) {
+      for (const p of pieces) if (p.group && hiddenGroups.has(p.group)) s.add(p.id);
+      // a puck on a hidden carrier's blade hides with them (else it floats alone)
+      for (const p of pieces) if (p.kind === "puck" && p.carrier && s.has(p.carrier)) s.add(p.id);
+    }
     return s;
   }, [pieces, hiddenGroups]);
   const toggleGroupHidden = name => {
@@ -4391,7 +4395,7 @@ export default function DrillAnimator() {
       if (!d.moved) { setSelectedId(null); setMultiSel(null); return; }   // a plain tap deselects
       const x0 = Math.min(d.start.x, d.last.x), x1 = Math.max(d.start.x, d.last.x);
       const y0 = Math.min(d.start.y, d.last.y), y1 = Math.max(d.start.y, d.last.y);
-      const hit = pieces.filter(p => !p.lock && p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1).map(p => p.id);
+      const hit = pieces.filter(p => !p.lock && !hiddenIds.has(p.id) && p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1).map(p => p.id);
       setSelectedId(null); setPopup(null);
       setMultiSel(hit.length ? new Set(hit) : null);
       return;
@@ -5455,6 +5459,7 @@ export default function DrillAnimator() {
     const canEdit = editing && tool !== "draw";
     const els = [];
     pieces.forEach(p => {
+      if (hiddenIds.has(p.id)) return;
       if (p.kind === "label") {
         const sel = canEdit && p.id === selectedId;
         els.push(labelNode(`lbl-${p.id}`, p.x, p.y, p.text, p.size, p.color, sel,
@@ -6994,7 +6999,7 @@ export default function DrillAnimator() {
       return out;
     });
     return pieces
-      .filter(q => q.kind === "puck" && plans[q.id] && !condPuck(q))   // conditional pucks draw via renderBranchGhostArrows (plan geometry)
+      .filter(q => q.kind === "puck" && plans[q.id] && !condPuck(q) && !hiddenIds.has(q.id))   // conditional pucks draw via renderBranchGhostArrows (plan geometry)
       .map(q => [passArrows(q), plans[q.id].legs.map((L, k, legs) => {
         if (L.type !== "fly") return null;
         if (!L.shot && !L.rim && !L.chip) return null;   // a plain fly leg is a pass — drawn from the authored chain above
@@ -7075,7 +7080,7 @@ export default function DrillAnimator() {
     const els = [];
     for (const tid of targets) {
       const tgt = pieces.find(q => q.id === tid && q.kind === "player");
-      if (!tgt) continue;
+      if (!tgt || hiddenIds.has(tgt.id)) continue;
       for (const [ref, n] of forkNumbers(tgt)) {
         const rp = routePiece(tgt, ref);
         const segs = rp.path || [];
@@ -7152,7 +7157,7 @@ export default function DrillAnimator() {
     const specs = [];
     const els = [];
     for (const pk of pieces) {
-      if (pk.kind !== "puck" || !condPuck(pk)) continue;
+      if (pk.kind !== "puck" || !condPuck(pk) || hiddenIds.has(pk.id)) continue;
       const low = effById.get(pk.id);
       const won = low && low._winTerm;
       // terminals: releasePos resolves a branch ref within the SHOOTER's route tree, so
@@ -7222,7 +7227,7 @@ export default function DrillAnimator() {
         <svg viewBox={`0 0 ${2 * R} ${2 * R}`}>
           <g transform={loupeXf}>
           <RinkMarkings />
-          {pieces.map(p => {
+          {pieces.filter(p => !hiddenIds.has(p.id)).map(p => {
             let prev = { x: p.x, y: p.y };
             return p.path.map((s, i) => {
               const d = segD(prev, s);
@@ -7234,7 +7239,7 @@ export default function DrillAnimator() {
                 : <path key={`${p.id}${i}`} d={d} {...style} />;
             });
           })}
-          {pieces.map(p => <g key={`ls${p.id}`}>{renderStops(p, 1)}</g>)}
+          {pieces.filter(p => !hiddenIds.has(p.id)).map(p => <g key={`ls${p.id}`}>{renderStops(p, 1)}</g>)}
           {drawPreview && drawPreview.length > 1 && (
             <polyline points={drawPreview.map(q => `${q.x},${q.y}`).join(" ")}
               fill="none" stroke="#ffd447" strokeWidth={0.6} strokeDasharray="1.4 1" opacity={0.9} />
@@ -7243,8 +7248,8 @@ export default function DrillAnimator() {
           {selected && renderHandles(selected, 1)}
           {renderMarkHandles(1)}
           {selected && renderRotateHandle(selected, 1)}
-          {pieces.map(p => <g key={`ca-${p.id}`}>{renderAim(p, true, 1)}</g>)}
-          {pieces.filter(p => p.kind !== "label" && p.kind !== "mark").map(p => {
+          {pieces.filter(p => !hiddenIds.has(p.id)).map(p => <g key={`ca-${p.id}`}>{renderAim(p, true, 1)}</g>)}
+          {pieces.filter(p => p.kind !== "label" && p.kind !== "mark" && !hiddenIds.has(p.id)).map(p => {
             const dp = displayPos(p);
             return (
               <PieceIcon key={`lp${p.id}`} p={p} pos={dp} thDeg={(dp.a || 0) + screenRot} wb={whiteboard} wbCircle={wbCircle}
@@ -7252,7 +7257,7 @@ export default function DrillAnimator() {
             );
           })}
           {/* labels are their own kind — render them as text, not the player fallback */}
-          {pieces.filter(p => p.kind === "label" && p.text).map(p =>
+          {pieces.filter(p => p.kind === "label" && p.text && !hiddenIds.has(p.id)).map(p =>
             labelNode(`lp-lbl-${p.id}`, p.x, p.y, p.text, p.size, p.color, p.id === selectedId, null, null))}
           <circle cx={loupe.x} cy={loupe.y} r={1.1} fill="none" stroke="#d7263d" strokeWidth={0.25} />
           <line x1={loupe.x - 2} y1={loupe.y} x2={loupe.x + 2} y2={loupe.y} stroke="#d7263d" strokeWidth={0.18} />
@@ -7377,6 +7382,8 @@ export default function DrillAnimator() {
       for (const pk of pieces) if (pk.kind === "puck" && pk.carrier === q.id) previewHiddenIds.add(pk.id);
     }
   }
+  // hidden-group members join the render-only hide set (icons + ghosts filter on it)
+  for (const id of hiddenIds) previewHiddenIds.add(id);
 
   return (
     <div className={`hd-root${aiPlay ? "" : " scrub-on"}${docked ? " dock-open" : ""}`} ref={rootRef}>
@@ -7401,7 +7408,7 @@ export default function DrillAnimator() {
             {/* freehand marker annotations sit on the ice, under the drill — they
                 are drill markings, so they honour Mark opacity */}
             <g opacity={markMO}>
-            {pieces.filter(p => p.kind === "mark").map(m => renderMark(m, true))}
+            {pieces.filter(p => p.kind === "mark" && !hiddenIds.has(p.id)).map(m => renderMark(m, true))}
             </g>
 
             {showZones && (
@@ -7483,12 +7490,15 @@ export default function DrillAnimator() {
                 dimmed by Mark opacity (players/implements below stay opaque) */}
             <g opacity={markMO}>
             {!aiPlay && pieces.map(p => {
+              // hidden-group members keep their invisible ref paths (timing measures
+              // them) but draw no strokes, badges, or hit areas
+              const vis = showRoutes && !hiddenIds.has(p.id);
               // DRAW the detour only when avoidance visuals are on; the animation's own
               // routeDetour (displayPos) is separate, so the skater still curves either way
-              const rd = showRoutes && effAvoidVis ? routeDetour(p) : null;   // arc detour around a crossed net
+              const rd = vis && effAvoidVis ? routeDetour(p) : null;   // arc detour around a crossed net
               const bent = rd && rd.pts;
               const carry = p.kind === "player" ? carrySegs(p) : null;   // segments skated with the puck
-              const acts = showRoutes && p.kind === "player" ? actionWaypoints(p) : new Map();
+              const acts = vis && p.kind === "player" ? actionWaypoints(p) : new Map();
               // branch-departure waypoints: their reaction badge (and incoming carat)
               // needs the same visible-line gap as an action circle, so a possession
               // wiggle doesn't run underneath into the badge
@@ -7534,7 +7544,7 @@ export default function DrillAnimator() {
                         {/* invisible ref path is always present — timing measures it */}
                         <path d={d} fill="none" stroke="none"
                           ref={el => { if (el) segRefs.current[`${p.id}/${i}`] = el; }} />
-                        {showRoutes && !bent && (() => {
+                        {vis && !bent && (() => {
                           // a ghost catch mid-segment splits the drawn leg at the
                           // catch spot with the regular action-circle treatment:
                           // plain approach, actGap hole, wiggle away with the puck
@@ -7564,13 +7574,13 @@ export default function DrillAnimator() {
                             dashed ghost so the user can still see + grab it (add
                             waypoints / edit); the transparent hit path below drives
                             the interaction, so the ghost stays pointer-transparent */}
-                        {showRoutes && bent && (
+                        {vis && bent && (
                           <path d={vD} fill="none" stroke={p.color}
                             strokeWidth={sw(0.5)} strokeDasharray={sdash("1.4 1.6")}
                             strokeLinecap="round" vectorEffect="non-scaling-stroke"
                             opacity={0.22} pointerEvents="none" />
                         )}
-                        {showRoutes && (
+                        {vis && (
                           <path d={d} fill="none" stroke="transparent" strokeWidth={4}
                             onPointerDown={e => lineDown(e, p.id, i)} style={{ cursor: "pointer" }}
                             pointerEvents={p.lock && !lockedSelectable ? "none" : undefined} />
@@ -7604,9 +7614,9 @@ export default function DrillAnimator() {
                     });
                   })()}
                   {/* arrow + action badges last so they sit ON TOP of the line */}
-                  {showRoutes && p.path.length > 0 && renderArrow(p, bent, acts, endStagger[p.id] || 0)}
-                  {showRoutes && renderActionMarks(p, bent, acts)}
-                  {showRoutes && renderLedCatchMarks(p, ledCs)}
+                  {vis && p.path.length > 0 && renderArrow(p, bent, acts, endStagger[p.id] || 0)}
+                  {vis && renderActionMarks(p, bent, acts)}
+                  {vis && renderLedCatchMarks(p, ledCs)}
                 </g>
               );
             })}
@@ -7656,7 +7666,7 @@ export default function DrillAnimator() {
               return <g key={`segm-${p.id}`}>{els}</g>;
             })}
             {showRoutes && !aiPlay && pieces.map(p => {
-              if (p.kind !== "player" || !(p.forks || []).length) return null;
+              if (p.kind !== "player" || !(p.forks || []).length || hiddenIds.has(p.id)) return null;
               const chosen = chosenForkRefs(p);
               // while previewing all branches, EVERY candidate route reads as solid/active
               const previewAll = previewAllBranches && animT > 0;
@@ -7820,11 +7830,11 @@ export default function DrillAnimator() {
               return <g key={`fkv-${p.id}`}>{renderLevel(p.forks, p.path, branchPoint(p), "")}</g>;
             })}
 
-            {showRoutes && pieces.map(p => <g key={`s-${p.id}`}>{renderStops(p)}</g>)}
+            {showRoutes && pieces.filter(p => !hiddenIds.has(p.id)).map(p => <g key={`s-${p.id}`}>{renderStops(p)}</g>)}
             </g>{/* end route-markings opacity group */}
 
             {editing && pieces.map(p =>
-              p.kind === "puck" && p.carrier && p.path.length > 0
+              p.kind === "puck" && p.carrier && p.path.length > 0 && !hiddenIds.has(p.id)
                 ? hdot(p.x, p.y, 2.1, { key: `rel-${p.id}`, fill: "none", stroke: "#14171a",
                     strokeWidth: 0.35, strokeDasharray: "0.9 0.7", opacity: 0.6, pointerEvents: "none" })
                 : null
@@ -7855,6 +7865,7 @@ export default function DrillAnimator() {
               const mg = selGroupName();
               if (mg) shown.add(mg);
               return [...shown].map(name => {
+                if (hiddenGroups.has(name)) return null;
                 const mem = pieces.filter(p => p.group === name);
                 if (!mem.length) return null;
                 let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
@@ -7897,7 +7908,7 @@ export default function DrillAnimator() {
                puck that rides along and breaks to the net / receiver when that branch's
                action fires. Render-only — never enters timing, so the real run is unaffected. */}
             {previewAllBranches && animT > 0 && !aiPlay && pieces.map(p => {
-              if (p.kind !== "player" || !(p.forks || []).length) return null;
+              if (p.kind !== "player" || !(p.forks || []).length || hiddenIds.has(p.id)) return null;
               const routes = enumerateRoutes(p);
               if (routes.length <= 1) return null;
               const carried = pieces.find(q => q.kind === "puck" && q.carrier === p.id);   // the puck P starts with
@@ -8005,7 +8016,7 @@ export default function DrillAnimator() {
             {!aiPlay && [
                 ...pieces.filter(p => p.kind !== "label" && p.kind !== "mark" && !previewHiddenIds.has(p.id)),
                 // goalies ride at rank 0.5 — above their net + drawn crease, below the action
-                ...pieces.filter(q => (q.kind === "net" || q.kind === "tire") && q.goalie).map(n => ({ goalieOf: n })),
+                ...pieces.filter(q => (q.kind === "net" || q.kind === "tire") && q.goalie && !previewHiddenIds.has(q.id)).map(n => ({ goalieOf: n })),
               ]
               .sort((a, b) => {
                 const goalE = animT <= 0 ? 0 : animT * totalTime;
@@ -8063,7 +8074,7 @@ export default function DrillAnimator() {
             {/* editing handles ON TOP of all piece icons: a waypoint's grab target
                 must beat any prop (stick/cone/…) stacked over it, so these paint
                 after the pieces — same layer convention as the rotate/aim handles. */}
-            {pieces.map(p => (
+            {pieces.filter(p => !hiddenIds.has(p.id)).map(p => (
               <g key={`h-${p.id}`}>
                 {renderHandles(p)}
                 {/* a reaction fork open for editing gets its own handles */}
@@ -8074,7 +8085,7 @@ export default function DrillAnimator() {
             {renderMarkHandles()}
             {renderMarkResize()}
             {selected && renderRotateHandle(selected)}
-          <g opacity={markMO}>{pieces.map(p => <g key={`ca-${p.id}`}>{renderAim(p)}</g>)}</g>
+          <g opacity={markMO}>{pieces.filter(p => !hiddenIds.has(p.id)).map(p => <g key={`ca-${p.id}`}>{renderAim(p)}</g>)}</g>
             {!aiPlay && renderLabels()}
             {renderResultSplash()}
             </g>
@@ -8267,6 +8278,24 @@ export default function DrillAnimator() {
           <button className="hd-item" onClick={() => setOpenMenu("prefs")}>
             <Icon name="sliders" size={16} /> App &amp; drill settings…
           </button>
+          <div className="hd-mh" style={{ marginTop: 4 }}>Groups</div>
+          {groupNames.length === 0 ? (
+            <div className="hd-note">Box-select pieces and tap ◇ Group, or use a piece's Group field.</div>
+          ) : groupNames.map(name => {
+            const n = pieces.filter(p => p.group === name).length;
+            const hidden = hiddenGroups.has(name);
+            return (
+              <div className="hd-poprow" key={name}>
+                <span style={{ flex: 1, fontSize: 12, opacity: hidden ? 0.55 : 1 }}>
+                  ◇ {name} <span style={{ opacity: 0.6 }}>({n})</span>
+                </span>
+                <button className={`hd-mini${hidden ? "" : " on"}`} title={hidden ? "Show this group" : "Hide this group"}
+                  onClick={() => toggleGroupHidden(name)}>{hidden ? "Hidden" : "Shown"}</button>
+                <button className="hd-mini" title="Select every piece in this group"
+                  onClick={() => selectGroupFromMenu(name)}>Select</button>
+              </div>
+            );
+          })}
           <div className="hd-mh" style={{ marginTop: 4 }}>Let AI play</div>
           <div className="hd-poprow">
             <span>5v5 for</span>
