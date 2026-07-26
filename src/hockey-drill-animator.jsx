@@ -591,21 +591,31 @@ export default function DrillAnimator() {
   };
   // rotate a player's name tag to the clearest spot around them: below first,
   // then the diagonals, sides, and above — first comfortably clear spot wins,
-  // else the one farthest from any route/plan line
+  // else the one farthest from any route/plan line. The tag is a BOX, not a
+  // point: clearance is scored from its corners, and side placements stand
+  // further out so the box clears the symbol and nearby carats, not just its
+  // own centre.
   const tagSpotFor = (p, off) => {
+    const len = Math.max(1, String(p.label || "").length);
+    const hw = 0.62 * (1.8 + 1.26 * len);      // empirical half-extents of the
+    const hh = 1.7;                            // rendered tag at size 0.62
     const angles = [90, 135, 45, 180, 0, 225, 315, 270];
     let best = null;
     for (const deg of angles) {
       const a = (deg * Math.PI) / 180;
-      const c = boards.clampInside(p.x + Math.cos(a) * off, p.y + Math.sin(a) * off);
+      const reach = off + Math.max(0, Math.abs(Math.cos(a)) * (hw - 1.4))
+        + Math.max(0, Math.abs(Math.sin(a)) * (hh - 1.4));
+      const c = boards.clampInside(p.x + Math.cos(a) * reach, p.y + Math.sin(a) * reach);
+      const pts = [c, { x: c.x - hw, y: c.y - hh }, { x: c.x + hw, y: c.y - hh },
+        { x: c.x - hw, y: c.y + hh }, { x: c.x + hw, y: c.y + hh }];
       let d = Infinity;
       for (const [s1, s2] of tagObstacles()) {
-        if (Math.min(s1.x, s2.x) - 12 > c.x || Math.max(s1.x, s2.x) + 12 < c.x ||
-            Math.min(s1.y, s2.y) - 12 > c.y || Math.max(s1.y, s2.y) + 12 < c.y) continue;
-        d = Math.min(d, distToSeg(c.x, c.y, s1, s2));
-        if (d < 0.5) break;
+        if (Math.min(s1.x, s2.x) - 14 > c.x || Math.max(s1.x, s2.x) + 14 < c.x ||
+            Math.min(s1.y, s2.y) - 14 > c.y || Math.max(s1.y, s2.y) + 14 < c.y) continue;
+        for (const t of pts) d = Math.min(d, distToSeg(t.x, t.y, s1, s2));
+        if (d < 0.4) break;
       }
-      if (d >= 2.6) return c;
+      if (d >= 1.4) return c;
       if (!best || d > best.d) best = { x: c.x, y: c.y, d };
     }
     return best || { x: p.x, y: p.y + off };
