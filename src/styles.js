@@ -50,9 +50,9 @@ export const STYLES = `
         .hd-scrubrange::-webkit-slider-runnable-track { height:4px; background:transparent; }
         .hd-scrubrange::-moz-range-track { height:4px; background:transparent; }
         .hd-scrubrange::-webkit-slider-thumb { -webkit-appearance:none; appearance:none;
-          width:16px; height:16px; margin-top:-6px; border-radius:50%; background:#e8eef4;
+          width:20px; height:20px; margin-top:-8px; border-radius:50%; background:#e8eef4;
           border:1px solid #1f4fa3; box-shadow:0 1px 3px rgba(0,0,0,.4); cursor:pointer; }
-        .hd-scrubrange::-moz-range-thumb { width:16px; height:16px; border-radius:50%;
+        .hd-scrubrange::-moz-range-thumb { width:20px; height:20px; border-radius:50%;
           background:#e8eef4; border:1px solid #1f4fa3; cursor:pointer; }
         .hd-scrubtime { flex:none; font-size:11px; color:#93a4b2; font-variant-numeric:tabular-nums; }
         /* bottom menu bar — owns the chrome so the ice stays clear */
@@ -72,14 +72,28 @@ export const STYLES = `
         /* the version never runs off the edge: vN stays put, only the build
            stamp truncates (ellipsis) when the bar is too narrow */
         .hd-ver { flex:0 1 auto; min-width:0; display:flex; align-items:baseline;
-          justify-content:flex-end; overflow:hidden; font-size:10px; color:#5b6c7d;
+          justify-content:flex-end; overflow:hidden; font-size:10px; color:#77879a;
           font-variant-numeric:tabular-nums; letter-spacing:.02em; }
         .hd-vernum { flex:0 0 auto; white-space:nowrap; }
         .hd-verstamp { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-        /* corner menus */
-        .hd-menu { position:absolute; z-index:45; background:#1a222c; border:1px solid #33404f;
+        /* corner menus — same scroll-shadow cue as .hd-pop: a soft edge shadow
+           appears only while more content lies that way (iOS hides the native
+           bar for touch overflow, so without this a long menu reads as complete) */
+        .hd-menu { position:absolute; z-index:45; border:1px solid #33404f;
           border-radius:12px; padding:10px 12px; box-shadow:0 8px 24px rgba(0,0,0,.5);
-          display:flex; flex-direction:column; gap:8px; width:230px; max-height:70vh; overflow-y:auto; }
+          display:flex; flex-direction:column; gap:8px; width:230px; max-height:70vh; overflow-y:auto;
+          scrollbar-width:none; -ms-overflow-style:none;
+          background-color:#1a222c;
+          background-image:
+            linear-gradient(#1a222c 30%, rgba(26,34,44,0)),
+            linear-gradient(rgba(26,34,44,0), #1a222c 72%),
+            radial-gradient(farthest-side at 50% 0, rgba(0,0,0,.55), rgba(0,0,0,0)),
+            radial-gradient(farthest-side at 50% 100%, rgba(0,0,0,.6), rgba(0,0,0,0));
+          background-position:center top, center bottom, center top, center bottom;
+          background-size:100% 30px, 100% 34px, 100% 13px, 100% 15px;
+          background-repeat:no-repeat;
+          background-attachment:local, local, scroll, scroll; }
+        .hd-menu::-webkit-scrollbar { width:0; height:0; display:none; }
         .hd-menu.tl { bottom:calc(62px + var(--hd-b)); left:calc(10px + env(safe-area-inset-left)); }
         .hd-menu.bl { bottom:calc(62px + var(--hd-b)); left:calc(66px + env(safe-area-inset-left)); }
         .hd-menu.br { bottom:calc(62px + var(--hd-b)); right:calc(10px + env(safe-area-inset-right)); }
@@ -190,6 +204,29 @@ export const STYLES = `
           .hd-preso.placing { gap:8px; }
           .hd-preso-tab { height:30px; font-size:13px; }
         }
+        /* pressed feedback — every tappable control confirms the touch itself,
+           not just its end state (bench use: gloves, glances) */
+        .hd-barbtn:active, .hd-scrubbtn:active:not(:disabled), .hd-item:active,
+        .hd-mini:active, .hd-btn:active, .hd-stepper button:active,
+        .hd-x:active, .hd-anchorbtn:active, .hd-select:active {
+          filter:brightness(1.35); transform:scale(.96); }
+        /* menus/popups ease in instead of popping */
+        @keyframes hd-fadein { from { opacity:0; transform:translateY(5px); } }
+        .hd-menu, .hd-pop:not(.pinned) { animation:hd-fadein .13s ease-out; }
+        /* disabled is one look everywhere (individual buttons don't restyle it) */
+        button:disabled { opacity:.4; cursor:default; }
+        button:disabled:active { filter:none; transform:none; }
+        /* keyboard focus (projector/desktop use — Space/Esc already work) */
+        :where(button, input, select, textarea, [contenteditable]):focus-visible {
+          outline:2px solid #6ea8ff; outline-offset:1px; }
+        /* invisible hit-area extension: visual sizes stay, touch targets reach
+           ~44pt (bar/transport buttons sit below Apple's minimum otherwise) */
+        .hd-barbtn, .hd-scrubbtn, .hd-stepper button, .hd-x, .hd-swatch { position:relative; }
+        .hd-barbtn::after { content:""; position:absolute; inset:-3px; border-radius:12px; }
+        .hd-scrubbtn::after { content:""; position:absolute; inset:-5px; border-radius:12px; }
+        .hd-stepper button::after { content:""; position:absolute; inset:-4px 0; }
+        .hd-x::after { content:""; position:absolute; inset:-5px -3px; }
+        .hd-swatch::after { content:""; position:absolute; inset:-4px; border-radius:50%; }
         /* shared bits */
         .hd-swatch { width:24px; height:24px; border-radius:50%; border:2px solid transparent; cursor:pointer; }
         .hd-swatch.on { border-color:#ffd447; }
@@ -257,13 +294,13 @@ export const STYLES = `
           pointer-events:none; display:flex; align-items:center; justify-content:center; }
         .hd-resize-h { pointer-events:auto; width:48px; height:15px; cursor:ns-resize;
           touch-action:none; display:flex; align-items:center; justify-content:center; }
-        .hd-resize-h::before { content:""; width:40px; height:4px; border-radius:2px; background:#5b6c7d; }
+        .hd-resize-h::before { content:""; width:40px; height:4px; border-radius:2px; background:#77879a; }
         .hd-resize-h:active::before, .hd-resize-c:active::after { background:#9fb2c6; border-color:#9fb2c6; }
         .hd-resize-c { pointer-events:auto; position:absolute; right:0; bottom:0;
           width:22px; height:15px; cursor:nwse-resize; touch-action:none; }
         .hd-resize-c::after { content:""; position:absolute; right:5px; bottom:4px; width:7px; height:7px;
           border-right:2px solid #7d93aa; border-bottom:2px solid #7d93aa; }
-        .hd-grip { color:#5b6c7d; font-size:13px; letter-spacing:0; }
+        .hd-grip { color:#77879a; font-size:13px; letter-spacing:0; }
         .hd-poprow { display:flex; align-items:center; gap:7px; flex-wrap:wrap; font-size:12.5px; color:#cdd8e2; }
         /* labeled field — the one consistent shape for every popup setting:
            an uppercase title, an optional instruction under it, then the control

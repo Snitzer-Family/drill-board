@@ -1068,6 +1068,7 @@ export default function DrillAnimator() {
   // enough to show every cue (so a "read the light" reaction has time to resolve)
   const cueSpan = p => p.kind === "light" && p.cues ? p.cues.reduce((a, c) => a + Math.max(0.1, c.dur || 0), 0) : 0;
   const totalTime = Math.max(0.1, ...effPieces.map(pieceTime), ...effPieces.map(cueSpan));
+  const hasTimeline = totalTime > 0.1001; // static board (no routes/cues) → no player bar
   totalRef.current = totalTime;
 
   // natural phrase for an area name mid-sentence ("Dot lane" -> "the dot lane")
@@ -6268,7 +6269,7 @@ export default function DrillAnimator() {
               {p.path.length > 0 && (
                 <div className="hd-field">
                   <div className="hd-poprow">
-                    <button className="hd-mini" disabled style={{ opacity: 0.4 }}>‹ Prev</button>
+                    <button className="hd-mini" disabled>‹ Prev</button>
                     <span style={{ fontSize: 11, color: "#8b99a8" }}>1 / {p.path.length + 1}</span>
                     <button className="hd-mini" onClick={() => navPopup({ type: "point", id: p.id, seg: 0 })}>Next ›</button>
                   </div>
@@ -6418,7 +6419,7 @@ export default function DrillAnimator() {
                   const taken = takenBy.has(pl.id) && p.carrier !== pl.id;
                   return (
                     <button key={pl.id} className={`hd-mini${p.carrier === pl.id ? " on" : ""}`}
-                      disabled={taken} style={taken ? { opacity: 0.4, cursor: "not-allowed" } : undefined}
+                      disabled={taken}
                       title={taken ? `${nameOf(pl.id)} already has a puck` : undefined}
                       onClick={() => updateById(p.id, { carrier: p.carrier === pl.id ? null : pl.id })}>
                       {nameOf(pl.id)}
@@ -7358,7 +7359,7 @@ export default function DrillAnimator() {
   }
 
   return (
-    <div className={`hd-root${aiPlay ? "" : " scrub-on"}${docked ? " dock-open" : ""}`} ref={rootRef}>
+    <div className={`hd-root${aiPlay || !hasTimeline ? "" : " scrub-on"}${docked ? " dock-open" : ""}`} ref={rootRef}>
       <style>{STYLES}</style>
 
       {/* ---------- the ice, filling the screen ---------- */}
@@ -8153,7 +8154,7 @@ export default function DrillAnimator() {
       })()}
 
       {/* ---------- player bar: transport + scrubber in one strip ---------- */}
-      {!aiPlay && !holdStep && (
+      {!aiPlay && !holdStep && hasTimeline && (
         <div className="hd-scrub">
           <button className="hd-scrubbtn play" onClick={togglePlay} title={playing ? "Pause" : "Play"}>
             <Icon name={playing ? "pause" : "play"} size={20} /></button>
@@ -8189,9 +8190,9 @@ export default function DrillAnimator() {
         <button className={`hd-barbtn${openMenu === "prefs" ? " on" : ""}`} title="Settings"
           onClick={() => setOpenMenu(m => (m === "prefs" ? null : "prefs"))}><Icon name="sliders" /></button>
         <button className="hd-barbtn" title="Undo last change" disabled={!undoCount}
-          onClick={undoLast} style={undoCount ? undefined : { opacity: 0.4 }}><Icon name="undo" /></button>
+          onClick={undoLast}><Icon name="undo" /></button>
         <button className="hd-barbtn" title="Redo" disabled={!redoCount}
-          onClick={redoLast} style={redoCount ? undefined : { opacity: 0.4 }}><Icon name="redo" /></button>
+          onClick={redoLast}><Icon name="redo" /></button>
         <div className="hd-barhint">{toolHint || ""}</div>
         <div className="hd-ver"><span className="hd-vernum">v{APP_VERSION}</span><span className="hd-verstamp">&nbsp;· {BUILD_STAMP}</span></div>
       </div>
