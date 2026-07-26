@@ -72,7 +72,7 @@ restart so the settings watcher reloads it.
 - `docs/drill-dsl.md` — the full DSL reference + markdown embed format; keep it
   in sync with the parser/serializer on any DSL change
 - `geometry.js` — bezier eval/subdivision, zigzags, RDP + Catmull-Rom fitting
-- `rink.jsx` — rink markings (goal lines at x=17/183, end-zone dots at 42/158
+- `rink.jsx` — rink markings (goal lines at x=11/189 (regulation 11ft from the boards), end-zone dots at 31/169 (20ft from the goal line)
   — intentionally NOT regulation; yFix prop counter-corrects fill-stretch so
   circles render round)
 - `icons.jsx` — PieceIcon (screen-true matrix frames), Stepper, DiagPanel

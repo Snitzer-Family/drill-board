@@ -7,8 +7,8 @@
 // carry / pass / shoot / chip, and the rulebook enforces offside and icing
 // with proper faceoffs. This is the layer we'll keep teaching.
 //
-// Rink feet: x 0..200, y 0..85. Goal lines 17/183, blue lines 75/125,
-// center 100. End-zone dots (45/155, 20.5/64.5), neutral dots (80/120, …).
+// Rink feet: x 0..200, y 0..85. Goal lines 11/189, blue lines 75/125,
+// center 100. End-zone dots (31/169, 20.5/64.5), neutral dots (80/120, …).
 import * as boards from "./boards.js";
 import { netShapes, avoidNets, bounceOffNets } from "./net-collide.js";
 
@@ -34,20 +34,20 @@ const KNOCK = 15;                 // body-check knockback impulse
 
 /* ------------------------------------------------------------------ */
 /* geometry                                                           */
-const OWN_BLUE = 58, CENTER_F = 83, ATT_BLUE = 108, ATT_GOAL = 166;
-const NETS = [{ x: 17, y: 42.5 }, { x: 183, y: 42.5 }];
+const OWN_BLUE = 64, CENTER_F = 89, ATT_BLUE = 114, ATT_GOAL = 178;
+const NETS = [{ x: 11, y: 42.5 }, { x: 189, y: 42.5 }];
 // solid net footprints for collision: mouths face center ice (left net +x, right -x)
 const NET_SHAPES = netShapes([
-  { kind: "net", x: 17, y: 42.5, facing: 0, size: 1 },
-  { kind: "net", x: 183, y: 42.5, facing: 180, size: 1 },
+  { kind: "net", x: 11, y: 42.5, facing: 0, size: 1 },
+  { kind: "net", x: 189, y: 42.5, facing: 180, size: 1 },
 ]);
 const PLAY_R = 2.9;               // skater keep-apart radius (no skating through)
 
 const dir = t => (t === 0 ? 1 : -1);           // team 0 attacks +x
-const ownGoalX = t => (t === 0 ? 17 : 183);
+const ownGoalX = t => (t === 0 ? 11 : 189);
 const attNet = t => (t === 0 ? NETS[1] : NETS[0]);
 const ax = (t, feet) => ownGoalX(t) + dir(t) * feet;      // x at `feet` up-ice from own goal
-const feetOf = (t, x) => (t === 0 ? x - 17 : 183 - x);    // up-ice distance for team t
+const feetOf = (t, x) => (t === 0 ? x - 11 : 189 - x);    // up-ice distance for team t
 const zoneT = (t, x) => { const f = feetOf(t, x); return f < OWN_BLUE ? "dz" : f < ATT_BLUE ? "nz" : "oz"; };
 
 const R = () => Math.random();
@@ -83,8 +83,8 @@ export function newGame() {
   const g = {
     players,
     puck: { x: 100, y: 42.5, vx: 0, vy: 0, carrier: null, flying: false, shot: null,
-      lastTeam: 0, releaseFeet: 0, pf: 83 },
-    goalies: [{ x: 17, y: 42.5, a: 0 }, { x: 183, y: 42.5, a: 180 }],
+      lastTeam: 0, releaseFeet: 0, pf: 89 },
+    goalies: [{ x: 11, y: 42.5, a: 0 }, { x: 189, y: 42.5, a: 180 }],
     score: [0, 0], faceoff: 1, msg: "Face-off", flashT: 0,
   };
   faceoff(g, 100, 42.5, "Face-off");
@@ -95,7 +95,7 @@ export function newGame() {
 function faceoff(g, dotX, dotY, msg) {
   const p = g.puck;
   p.x = dotX; p.y = dotY; p.vx = 0; p.vy = 0;
-  p.carrier = null; p.flying = false; p.shot = null; p.pf = 83;
+  p.carrier = null; p.flying = false; p.shot = null; p.pf = 89;
   const back = { C: 2, LW: 7, RW: 7, LD: 17, RD: 17 };
   const yoff = { C: 0, LW: -9, RW: 9, LD: -12, RD: 12 };
   g.players.forEach(pl => {
@@ -408,7 +408,7 @@ export function stepGame(g, dt) {
   if (puck.flying && !puck.shot && puck.releaseFeet < CENTER_F) {
     const lt = puck.lastTeam;
     if (feetOf(lt, puck.x) >= ATT_GOAL) {
-      const dotX = lt === 0 ? 45 : 155, dotY = puck.y < 42.5 ? 20.5 : 64.5;
+      const dotX = lt === 0 ? 31 : 169, dotY = puck.y < 42.5 ? 20.5 : 64.5;
       faceoff(g, dotX, dotY, "Icing"); updateGoalies(g); return g;
     }
   }

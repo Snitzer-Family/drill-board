@@ -353,8 +353,9 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
       </g>
     );
   }
-  // nets and tires come in sizes — scale the drawn body + its grab area
-  const sz = (p.kind === "net" || p.kind === "tire") && p.size ? p.size : 1;
+  // nets and tires come in sizes — scale the drawn body + its grab area;
+  // players draw a touch under full scale so they crowd the ice less
+  const sz = (p.kind === "net" || p.kind === "tire") && p.size ? p.size : p.kind === "player" ? 0.93 : 1;
   // a locked, non-selectable piece is click-through: its transparent grab shape
   // hit-tests unless pointer-events is switched off, so taps fall to nearby
   // unlocked items instead of the locked one stealing them

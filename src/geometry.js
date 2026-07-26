@@ -116,30 +116,58 @@ export function wigglePoints(prev, s, ar = 1, taperEnd = false) {
   return pts.map(q => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" ");
 }
 
-export function zigzagPoints(prev, s, ar = 1) {
-  // arc length measured in aspect-weighted space (x scaled by ar) so bump
-  // spacing stays uniform on screen regardless of the segment's direction
+// Backward skating draws the traditional alternating-arc symbol: a chain of
+// half-arc humps offsetting above/below the line (see hockey drill books).
+// Arcs are a FIXED size — the chain adds/removes arcs as the leg length
+// changes (count = round(length / pitch)) instead of stretching the shape.
+// The profile is a SEMICIRCLE with a small baseline gap between arcs (cusps,
+// not smooth zero-crossings) so it reads as distinct arcs — a smooth sine
+// here would be indistinguishable from the puck-carry wiggle.
+const BWD_PITCH = 3.4, BWD_A = 1.25, BWD_GAP = 0.9;  // arc pitch/height/gap, screen units
+const bwdProfile = (u, pitch) => {                    // u = distance into this arc's cell
+  const r = (pitch - BWD_GAP) / 2, c = pitch / 2, d = (u - c) / (r || 1);
+  return Math.abs(d) >= 1 ? 0 : Math.sqrt(1 - d * d) * BWD_A;
+};
+// SVG path data for the arc chain over dense samples: the pen LIFTS between
+// arcs (M jumps) so each arc is a separate stroke — the traditional symbol's
+// arcs are visibly disconnected, not linked by baseline runs
+function bwdPathD(samples, cum, total, ar, trimEnd = false) {
+  const arcs = Math.max(1, Math.round(total / BWD_PITCH));
+  const pitch = (total || 1) / arcs;
+  // trimEnd drops the FINAL arc so the route's end mark (arrowhead / ‖) gets
+  // a clean run-in instead of an arc crowding it
+  const lastDrawn = trimEnd ? arcs - 1 : arcs;
+  let d = "", down = false;
+  for (let i = 0; i < samples.length; i++) {
+    const pt = samples[i];
+    let a = 0;
+    if (i > 0 && i < samples.length - 1) {
+      const k = Math.min(arcs - 1, Math.floor(cum[i] / pitch));
+      if (k < lastDrawn) a = (k % 2 ? -1 : 1) * bwdProfile(cum[i] - k * pitch, pitch);
+    }
+    if (a === 0) { down = false; continue; }
+    const ahead = samples[Math.min(i + 1, samples.length - 1)];
+    const tx = (ahead.x - pt.x) * ar, ty = ahead.y - pt.y;   // screen-space tangent
+    const px = -ty, py = tx, l = Math.hypot(px, py) || 1;    // screen-space normal
+    d += `${down ? "L" : "M"} ${(pt.x + (px / l) * a / ar).toFixed(2)} ${(pt.y + (py / l) * a).toFixed(2)} `;
+    down = true;
+  }
+  return d.trim();
+}
+export function zigzagPoints(prev, s, ar = 1, trimEnd = false) {
+  // arc length measured in aspect-weighted space (x scaled by ar) so the
+  // pattern stays uniform on screen regardless of the segment's direction
   const wlen = (ax, ay, bx, by) => Math.hypot((bx - ax) * ar, by - ay);
   const approx =
     s.type === "L" ? wlen(prev.x, prev.y, s.x, s.y)
     : s.type === "Q" ? wlen(prev.x, prev.y, s.cx, s.cy) + wlen(s.cx, s.cy, s.x, s.y)
     : wlen(prev.x, prev.y, s.c1x, s.c1y) + wlen(s.c1x, s.c1y, s.c2x, s.c2y) + wlen(s.c2x, s.c2y, s.x, s.y);
-  const n = Math.max(6, Math.round(approx / 2.4));
-  const A = 0.9;                                   // bump amplitude, in screen units
-  const pts = [];
-  for (let i = 0; i <= n; i++) {
-    const t = i / n;
-    const pt = evalSeg(prev, s, t);
-    if (i === 0 || i === n) { pts.push(pt); continue; }
-    const ahead = evalSeg(prev, s, Math.min(1, t + 0.01));
-    // perpendicular to the on-SCREEN tangent, then mapped back to rink coords
-    const tx = (ahead.x - pt.x) * ar, ty = ahead.y - pt.y;   // screen-space tangent
-    const px = -ty, py = tx;                                 // screen-space normal
-    const l = Math.hypot(px, py) || 1;
-    const a = (i % 2 ? 1 : -1) * A;
-    pts.push({ x: pt.x + (px / l) * a / ar, y: pt.y + (py / l) * a });
-  }
-  return pts.map(q => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" ");
+  const n = Math.max(16, Math.round(approx / 0.4));  // dense samples → smooth arcs
+  const samp = [evalSeg(prev, s, 0)];
+  let total = 0;
+  const cum = [0];
+  for (let i = 1; i <= n; i++) { const q = evalSeg(prev, s, i / n); total += wlen(samp[i - 1].x, samp[i - 1].y, q.x, q.y); cum.push(total); samp.push(q); }
+  return bwdPathD(samp, cum, total, ar, trimEnd);    // SVG path data (draw with <path d>)
 }
 
 // Resample a polyline to a uniform `step` spacing (measured in screen-weighted
@@ -195,27 +223,17 @@ export function wigglePoly(pts, ar = 1, taperEnd = false) {
   return out;
 }
 
-// Backward-skating zigzag along an already-sampled polyline (detour counterpart
-// of zigzagPoints). Alternating perpendicular bumps at a fixed screen spacing.
-export function zigzagPoly(pts, ar = 1) {
-  if (!pts || pts.length < 3) return pts;
-  const res = resamplePoly(pts, ar, 0.6);                // even samples so the bumps are uniform
+// Backward-skating arcs along an already-sampled polyline (detour counterpart
+// of zigzagPoints). Same disconnected fixed-size half-arc chain; returns SVG
+// path data (draw with <path d>).
+export function zigzagPoly(pts, ar = 1, trimEnd = false) {
+  if (!pts || pts.length < 3) return "";
+  const res = resamplePoly(pts, ar, 0.35);               // fine samples → smooth arcs
   const cum = [0];
   for (let i = 1; i < res.length; i++) cum.push(cum[i - 1] + Math.hypot((res[i].x - res[i - 1].x) * ar, res[i].y - res[i - 1].y));
   const total = cum[cum.length - 1];
-  if (total < 1e-3) return pts;
-  const A = 0.9, STEP = 2.4;                              // bump amplitude + spacing (screen units)
-  const out = [];
-  for (let i = 0; i < res.length; i++) {
-    const pt = res[i];
-    if (i === 0 || i === res.length - 1) { out.push({ x: pt.x, y: pt.y }); continue; }
-    const ahead = res[i + 1];
-    const tx = (ahead.x - pt.x) * ar, ty = ahead.y - pt.y;
-    const px = -ty, py = tx, l = Math.hypot(px, py) || 1;
-    const a = (Math.round(cum[i] / STEP) % 2 ? 1 : -1) * A;
-    out.push({ x: pt.x + (px / l) * a / ar, y: pt.y + (py / l) * a });
-  }
-  return out;
+  if (total < 1e-3) return "";
+  return bwdPathD(res, cum, total, ar, trimEnd);
 }
 
 export function convertSeg(seg, prev) {
