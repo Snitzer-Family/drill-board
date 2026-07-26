@@ -543,6 +543,52 @@ export default function DrillAnimator() {
   // whiteboard player name tags: on with the pref, or while a player's popup is open
   const wbTags = whiteboard && (wbNames ||
     (popup?.type === "piece" && pieces.some(q => q.id === popup.id && q.kind === "player")));
+  // obstacle segments for tag placement (route polylines + puck plan lines),
+  // built once per render on first use
+  let wbTagObs = null;
+  const tagObstacles = () => {
+    if (wbTagObs) return wbTagObs;
+    const segs = [];
+    pieces.forEach(q => {
+      if (q.kind !== "player" || !(q.path || []).length) return;
+      const poly = pathPolyline({ x: q.x, y: q.y }, q.path);
+      for (let i = 1; i < poly.length; i++) segs.push([poly[i - 1], poly[i]]);
+    });
+    try {
+      const { plans } = getIntentPlan();
+      pieces.forEach(q => {
+        if (q.kind !== "puck" || !plans[q.id]) return;
+        plans[q.id].legs.forEach(L => { if (L.type === "fly") segs.push([{ x: L.x0, y: L.y0 }, { x: L.x1, y: L.y1 }]); });
+      });
+    } catch { /* plan unavailable mid-edit — route lines alone still steer the tag */ }
+    return (wbTagObs = segs);
+  };
+  const distToSeg = (x, y, a, b) => {
+    const vx = b.x - a.x, vy = b.y - a.y, L2 = vx * vx + vy * vy || 1;
+    const t = Math.max(0, Math.min(1, ((x - a.x) * vx + (y - a.y) * vy) / L2));
+    return Math.hypot(x - (a.x + vx * t), y - (a.y + vy * t));
+  };
+  // rotate a player's name tag to the clearest spot around them: below first,
+  // then the diagonals, sides, and above — first comfortably clear spot wins,
+  // else the one farthest from any route/plan line
+  const tagSpotFor = (p, off) => {
+    const angles = [90, 135, 45, 180, 0, 225, 315, 270];
+    let best = null;
+    for (const deg of angles) {
+      const a = (deg * Math.PI) / 180;
+      const c = boards.clampInside(p.x + Math.cos(a) * off, p.y + Math.sin(a) * off);
+      let d = Infinity;
+      for (const [s1, s2] of tagObstacles()) {
+        if (Math.min(s1.x, s2.x) - 12 > c.x || Math.max(s1.x, s2.x) + 12 < c.x ||
+            Math.min(s1.y, s2.y) - 12 > c.y || Math.max(s1.y, s2.y) + 12 < c.y) continue;
+        d = Math.min(d, distToSeg(c.x, c.y, s1, s2));
+        if (d < 0.5) break;
+      }
+      if (d >= 2.6) return c;
+      if (!best || d > best.d) best = { x: c.x, y: c.y, d };
+    }
+    return best || { x: p.x, y: p.y + off };
+  };
   // a pinned panel stays open + re-targets on the next tap (empty-tap keeps the
   // last item); "dock" renders as a right sidebar but only on a wide/fine-pointer
   // screen — a "dock" panel on a narrow screen falls back to the float render
@@ -5627,7 +5673,10 @@ export default function DrillAnimator() {
         // the pref is on, or while a player popup is open (pass-target picking),
         // so "pass to P3" is findable on the ice
         const off = p.kind === "net" ? 6.5 : p.kind === "player" ? 4.6 : 5;
-        els.push(labelNode(`nm-${p.id}`, p.x, p.y + off, p.label, 0.5, "#33414f", false, null, null));
+        // player tags rotate around the symbol to the clearest spot, so they
+        // never sit on a route line or a pass/shot plan line
+        const spot = p.kind === "player" ? tagSpotFor(p, off) : { x: p.x, y: p.y + off };
+        els.push(labelNode(`nm-${p.id}`, spot.x, spot.y, p.label, 0.5, "#33414f", false, null, null));
       }
       (p.path || []).forEach((s, i) => {
         if (s.dmode !== "label" || !s.desc) return;
