@@ -7120,10 +7120,15 @@ export default function DrillAnimator() {
         const runEnd = !nxt || nxt.type !== "fly";   // last fly leg of a pass/shot/rim/chip run
         const runStart = k === 0 || legs[k - 1].type !== "fly";   // first fly leg of the run
         const dx = L.x1 - L.x0, dy = L.y1 - L.y0;
-        const len = Math.hypot(dx, dy) || 1, ux = dx / len, uy = dy / len;
         // start: released AT an action badge → begin just outside its round edge,
-        // measured from the badge CENTRE (not the stick); off a standing stick → start there
+        // measured from the badge CENTRE (not the stick); off a standing stick → start there.
+        // The drawn direction is badge→target (NOT the plan leg's own blade→target):
+        // the leg launches at the blade a couple of feet off the badge, and reusing
+        // its direction from a badge-centred start skews the visible line off-target
+        // while the head still points true — line and arrow must stay collinear.
         const sb = runStart ? nearBadge(L.x0, L.y0) : null;
+        const ox = sb ? sb.x : L.x0, oy = sb ? sb.y : L.y0;
+        const len = Math.hypot(L.x1 - ox, L.y1 - oy) || 1, ux = (L.x1 - ox) / len, uy = (L.y1 - oy) / len;
         const sp = sb ? gmMove(sb.x, sb.y, ux, uy, START_OFF) : { x: L.x0, y: L.y0 };
         const sx = sp.x, sy = sp.y;
         // end: a shot stops just short of the net (+ stagger for several on one net);
@@ -7163,7 +7168,7 @@ export default function DrillAnimator() {
                   stroke={INK} strokeWidth={W(0.55)} strokeDasharray={D("2.4 1.8")} />}
             {runEnd && (dx || dy) && (flat
               ? <circle cx={ex} cy={ey} r={1.1} fill="none" vectorEffect={ve} stroke={INK} strokeWidth={W(0.3)} />
-              : (() => { const fx = iconXf({ x: ex, y: ey, a: (Math.atan2(dy, dx) * 180) / Math.PI });
+              : (() => { const fx = iconXf({ x: ex, y: ey, a: (Math.atan2(uy, ux) * 180) / Math.PI });
                   // heads scale with the line-thickness setting, like routeMark
                   return <g transform={fx.t}><g transform={`scale(${z * lineScale})`}>
                     {L.shot
