@@ -514,6 +514,11 @@ export default function DrillAnimator() {
     if (preservePopPos.current) { preservePopPos.current = false; return; }
     setPopOff({ x: 0, y: 0 });
   }, [popup?.type, popup?.id, popup?.seg, popup?.pt?.x, popup?.pt?.y]);
+  // one working surface at a time: a corner menu opening takes over from an
+  // unpinned editor popout instead of stacking on top of it
+  useEffect(() => {
+    if (openMenu && !pinned) setPopup(null);
+  }, [openMenu]);
   // clear-space placement: after a fresh open renders at its anchor (default
   // size), measure it and, if it covers routes/players, move it to open space —
   // preferring a fully clear spot, else one that avoids the working chain
@@ -1426,7 +1431,10 @@ export default function DrillAnimator() {
   function resetAnim() { animRef.current = 0; setAnimT(0); holdRef.current = 0; loopPendingRef.current = false; nextStepRef.current = 0; setHoldStep(null); }
   // editing while the animation is paused/finished snaps the pieces back to their
   // start positions first — returns true if it consumed the interaction
-  function wakeEdit() { if (!playing && animT > 0) { resetAnim(); return true; } return false; }
+  function wakeEdit() {
+    if (!playing && animT > 0) { resetAnim(); flash("Back to start — editing"); return true; }
+    return false;
+  }
   function skipHold() { holdRef.current = 0; setHoldStep(null); }
 
   // "Let AI play" — a self-contained 5v5 sim loop, independent of the scripted timeline
@@ -6268,9 +6276,10 @@ export default function DrillAnimator() {
                   (the start); step into the route from here */}
               {p.path.length > 0 && (
                 <div className="hd-field">
+                  <div className="hd-sectitle">Route stops</div>
                   <div className="hd-poprow">
                     <button className="hd-mini" disabled>‹ Prev</button>
-                    <span style={{ fontSize: 11, color: "#8b99a8" }}>1 / {p.path.length + 1}</span>
+                    <span style={{ fontSize: 11, color: "#8b99a8" }}>Start · 1 / {p.path.length + 1}</span>
                     <button className="hd-mini" onClick={() => navPopup({ type: "point", id: p.id, seg: 0 })}>Next ›</button>
                   </div>
                 </div>
@@ -6565,7 +6574,7 @@ export default function DrillAnimator() {
               <div className="hd-poprow">
                 <button className="hd-mini" onClick={() => goSeg(i - 1)}>‹ {fork && i === 0 ? "Branch" : "Prev"}</button>
                 <span style={{ fontSize: 11, color: "#8b99a8" }}>{wpNum} / {wpTotal}</span>
-                <button className="hd-mini" disabled={i >= route.length - 1} style={{ opacity: i >= route.length - 1 ? 0.4 : 1 }}
+                <button className="hd-mini" disabled={i >= route.length - 1}
                   onClick={() => goSeg(i + 1)}>Next ›</button>
               </div>
             </div>
@@ -6811,11 +6820,11 @@ export default function DrillAnimator() {
       ? { ...common, bottom: `calc(var(--hd-b) + 60px)`,
           maxHeight: collapsed ? "none"
             : maxed ? "calc(100% - var(--hd-b) - 60px - env(safe-area-inset-top) - var(--hd-pintop, 78px))"
-            : "38%" }
+            : "52%" }
       : { ...common, top: `calc(env(safe-area-inset-top) + var(--hd-pintop, 78px))`,
           maxHeight: collapsed ? "none"
             : maxed ? "calc(100% - env(safe-area-inset-top) - var(--hd-pintop, 78px) - var(--hd-b) - 60px)"
-            : "38%" };
+            : "52%" };
     // layer explicit position (popPos) and size (popDim) over the anchor style —
     // they're independent, so a placed/frozen popup can still carry the user's
     // resize, and an auto-height (popDim.h == null) freeze grows to fit content
@@ -7244,7 +7253,9 @@ export default function DrillAnimator() {
   }
 
   const toolHint =
-    editingFork && tool === "select"
+    !playing && !aiPlay && animT > 0
+      ? "Paused — tap the ice or a piece to edit (jumps to start)"
+      : editingFork && tool === "select"
       ? `Editing the reaction — drag waypoints · tap the line to add · “✓ Editing” to finish`
       : tool === "draw" && forkDrawColor
       ? `Drawing the reaction — drag from the route's end`
@@ -8188,7 +8199,7 @@ export default function DrillAnimator() {
           <Icon name="rink" size={16} />
           <span className="hd-blbl">{rink === "full" ? "Full" : rink === "half" ? "Half" : "¼ ice"}</span>
         </button>
-        <button className={`hd-barbtn${tool === "draw" ? " draw-on" : openMenu === "tools" ? " on" : ""}`} title="Add / draw"
+        <button className={`hd-barbtn${tool !== "select" || openMenu === "tools" ? " on" : ""}`} title="Add / draw"
           onClick={() => setOpenMenu(m => (m === "tools" ? null : "tools"))}>
           <Icon name="pencil" size={16} /><span className="hd-blbl">Add</span></button>
         <button className={`hd-barbtn${openMenu === "prefs" ? " on" : ""}`} title="Settings"

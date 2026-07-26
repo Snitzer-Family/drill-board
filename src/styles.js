@@ -66,7 +66,6 @@ export const STYLES = `
           flex-direction:column; gap:2px; align-items:center; justify-content:center;
           cursor:pointer; flex:none; }
         .hd-barbtn.on { background:#1f4fa3; border-color:#1f4fa3; }
-        .hd-barbtn.draw-on { background:#b58900; border-color:#b58900; }
         .hd-barbtn small { font-size:10px; font-weight:800; letter-spacing:.05em; }
         /* caption under each bar icon — tooltips don't exist on touch */
         .hd-blbl { font-size:8.5px; font-weight:700; letter-spacing:.05em; line-height:1;
