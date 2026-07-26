@@ -294,6 +294,8 @@ export default function DrillAnimator() {
   const [multiSel, setMultiSel] = useState(null);  // Set<id> from a box-select, or null
   const [marquee, setMarquee] = useState(null);    // {x0,y0,x1,y1} while dragging a box
   const [groupInput, setGroupInput] = useState(null);   // pending group-name text while naming, or null
+  const [hiddenGroups, setHiddenGroups] = useState(() => new Set()); // group names hidden this session (view-only, never saved)
+  const [pieceGroupInput, setPieceGroupInput] = useState("");  // "new group" name draft in the piece popup
   const [popup, setPopup] = useState(null);
   const [tool, setTool] = useState("select");
   // freehand marker (annotation) settings, remembered between strokes
@@ -3943,11 +3945,44 @@ export default function DrillAnimator() {
     return g && sel.every(p => p.group === g) ? g : null;
   };
   const createGroup = name => {
-    const nm = (name || "").trim();
+    const nm = (name || "").replace(/,/g, "").trim();  // a comma would split DSL tokens on reload
     if (!nm || !multiSel || !multiSel.size) return;
     update(p => (multiSel.has(p.id) ? { ...p, group: nm } : p));
   };
   const ungroup = name => update(p => (p.group === name ? { ...p, group: undefined } : p));
+  const groupNames = useMemo(() => [...new Set(pieces.map(p => p.group).filter(Boolean))].sort(), [pieces]);
+  // pieces suppressed at RENDER ONLY by a hidden group — timing/possession never
+  // consult this (a hidden player still plays; the drill clock is unchanged)
+  const hiddenIds = useMemo(() => {
+    const s = new Set();
+    if (hiddenGroups.size) for (const p of pieces) if (p.group && hiddenGroups.has(p.group)) s.add(p.id);
+    return s;
+  }, [pieces, hiddenGroups]);
+  const toggleGroupHidden = name => {
+    const hiding = !hiddenGroups.has(name);
+    setHiddenGroups(prev => {
+      const s = new Set(prev);
+      if (s.has(name)) s.delete(name); else s.add(name);
+      return s;
+    });
+    if (hiding) {                              // don't leave an invisible selection behind
+      const members = groupMembers(name);
+      if (selectedId && members.has(selectedId)) { setSelectedId(null); setPopup(null); }
+      if (multiSel && multiSel.size) {
+        const kept = [...multiSel].filter(id => !members.has(id));
+        if (kept.length !== multiSel.size) setMultiSel(kept.length ? new Set(kept) : null);
+      }
+    }
+  };
+  const selectGroupFromMenu = name => {
+    setHiddenGroups(prev => {                  // selecting un-hides, so the selection is visible
+      if (!prev.has(name)) return prev;
+      const s = new Set(prev); s.delete(name); return s;
+    });
+    setSelectedId(null); setPopup(null);
+    setMultiSel(groupMembers(name));
+    setOpenMenu(null);
+  };
   // rotate the whole selection around its centroid (positions, routes, facings)
   function rotateGroup(deg) {
     if (!multiSel || !multiSel.size) return;
@@ -6441,9 +6476,9 @@ export default function DrillAnimator() {
               </div>
             </div>
           )}
-          {p.group && (
-            <div className="hd-field">
-              <div className="hd-sectitle">Group</div>
+          <div className="hd-field">
+            <div className="hd-sectitle">Group</div>
+            {p.group ? (
               <div className="hd-poprow">
                 <span>◇ {p.group}</span>
                 <button className="hd-mini" title="Select the whole group"
@@ -6451,8 +6486,32 @@ export default function DrillAnimator() {
                 <button className="hd-mini" title="Remove this piece from the group"
                   onClick={() => updateById(p.id, { group: undefined })}>Leave</button>
               </div>
-            </div>
-          )}
+            ) : (
+              <>
+                {groupNames.length > 0 && (
+                  <div className="hd-poprow">
+                    <select className="hd-select" style={{ flex: 1 }} value=""
+                      onChange={e => { if (e.target.value) updateById(p.id, { group: e.target.value }); }}>
+                      <option value="">Add to group…</option>
+                      {groupNames.map(n => <option key={n} value={n}>{n}</option>)}
+                    </select>
+                  </div>
+                )}
+                <div className="hd-poprow">
+                  <input className="hd-input" style={{ flex: 1, minWidth: 90 }} placeholder="New group…"
+                    value={pieceGroupInput}
+                    onChange={e => setPieceGroupInput(e.target.value.replace(/,/g, ""))}
+                    onKeyDown={e => {
+                      if (e.key === "Enter" && pieceGroupInput.trim()) {
+                        updateById(p.id, { group: pieceGroupInput.trim() }); setPieceGroupInput("");
+                      }
+                    }} />
+                  <button className="hd-mini" disabled={!pieceGroupInput.trim()}
+                    onClick={() => { updateById(p.id, { group: pieceGroupInput.trim() }); setPieceGroupInput(""); }}>＋ Add</button>
+                </div>
+              </>
+            )}
+          </div>
           {/* Actions panel at the player's standing/start spot — just above the
               bottom row of buttons */}
           {p.kind === "player" && ActionSteps(p, -1)}
