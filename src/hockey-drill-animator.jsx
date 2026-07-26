@@ -40,14 +40,17 @@ const defaultColor = (kind, playerColor) =>
   kind === "player" ? playerColor : kind === "cone" ? "#e0731d" : kind === "net" ? "#c81e33"
     : kind === "bumper" ? "#1b1e22" : kind === "deker" ? "#c79a4e" : kind === "passer" ? "#57636f"
     : kind === "label" ? "#14202b" : kind === "tire" ? "#1c1c1e" : kind === "light" ? "#2ea043" : "#14171a";
-const toolImg = kind => {
+const toolImg = (kind, wb = false, wbCircle = false) => {
   const k = kind === "playerpuck" ? "player" : kind;
   const g = TOOL_GLYPH[k];
   if (!g) return null;
   const p = { kind: k, color: g.color, label: "", facing: 0, hand: "R", size: 1, path: [] };
+  // whiteboard players draw as the X/O symbol, which is centred — swap the viewBox
+  const vb = wb && k === "player" ? "-4 -4 8 8" : g.vb;
   return (
-    <svg className="hd-toolimg" viewBox={g.vb} aria-hidden="true" preserveAspectRatio="xMidYMid meet">
-      <PieceIcon p={p} pos={{ x: 0, y: 0, a: 0 }} xf="translate(0 0)" thDeg={0} onDown={() => {}} />
+    <svg className="hd-toolimg" viewBox={vb} aria-hidden="true" preserveAspectRatio="xMidYMid meet">
+      <PieceIcon p={p} pos={{ x: 0, y: 0, a: 0 }} xf="translate(0 0)" thDeg={0}
+        wb={wb} wbCircle={wbCircle} onDown={() => {}} />
     </svg>
   );
 };
@@ -6066,8 +6069,8 @@ export default function DrillAnimator() {
             <Icon name="pencil" size={16} /> Draw a route
           </button>
           <div className="hd-toolgrid compact">
-            <button className="hd-tool" {...hov("player")} onClick={() => addPieceAt("player", popup.pt)}>{toolImg("player")}<span>Player</span></button>
-            <button className="hd-tool" {...hov("playerpuck")} onClick={() => addPlayerWithPuck(popup.pt, true)}>{toolImg("playerpuck")}<span>+ Puck</span></button>
+            <button className="hd-tool" {...hov("player")} onClick={() => addPieceAt("player", popup.pt)}>{toolImg("player", whiteboard, wbCircle)}<span>Player</span></button>
+            <button className="hd-tool" {...hov("playerpuck")} onClick={() => addPlayerWithPuck(popup.pt, true)}>{toolImg("playerpuck", whiteboard, wbCircle)}<span>+ Puck</span></button>
             <button className="hd-tool" {...hov("puck")} onClick={() => addPieceAt("puck", popup.pt)}>{toolImg("puck")}<span>Puck</span></button>
             <button className="hd-tool" {...hov("net")} onClick={() => addPieceAt("net", popup.pt)}>{toolImg("net")}<span>Net</span></button>
             <button className="hd-tool" {...hov("cone")} onClick={() => addPieceAt("cone", popup.pt)}>{toolImg("cone")}<span>Cone</span></button>
@@ -6602,7 +6605,7 @@ export default function DrillAnimator() {
                 {TOOL_KINDS.filter(k => k !== p.kind).map(k => (
                   <button key={k} className="hd-mini hd-swapbtn iconlbl" title={`Change to ${k}`}
                     onClick={() => updateById(p.id, { kind: k, color: defaultColor(k) })}>
-                    {toolImg(k)}<small>{k}</small></button>
+                    {toolImg(k, whiteboard, wbCircle)}<small>{k}</small></button>
                 ))}
               </div>
             </div>
@@ -7985,6 +7988,14 @@ export default function DrillAnimator() {
               const k = addHover === "playerpuck" ? "player" : addHover;
               if (k && k !== "draw") {
                 const gp = makePiece(k, pt);
+                // labels aren't a PieceIcon kind — ghost them with the real label renderer
+                if (k === "label") {
+                  return (
+                    <g key="addghost" opacity={0.55} pointerEvents="none">
+                      {labelNode("addghost-lbl", pt.x, pt.y, gp.text, gp.size, gp.color, false, null, null, true)}
+                    </g>
+                  );
+                }
                 const fx = iconXf({ x: pt.x, y: pt.y, a: gp.facing || 0 });
                 return (
                   <g key="addghost" opacity={0.55} pointerEvents="none">
@@ -8609,7 +8620,7 @@ export default function DrillAnimator() {
           <div className="hd-toolgrid">
             {[["player", "Player"], ["playerpuck", "+ Puck"], ["puck", "Puck"], ["net", "Net"]].map(([k, lbl]) => (
               <button key={k} className={`hd-tool${tool === k ? " on" : ""}`} onClick={() => { setTool(k); setOpenMenu(null); }}>
-                {toolImg(k)}<span>{lbl}</span>
+                {toolImg(k, whiteboard, wbCircle)}<span>{lbl}</span>
               </button>
             ))}
           </div>
@@ -8618,7 +8629,7 @@ export default function DrillAnimator() {
             {[["cone", "Cone"], ["tire", "Tire"], ["bumper", "Bumper"], ["deker", "Deker"],
               ["passer", "Passer"], ["stick", "Stick"], ["light", "Light"]].map(([k, lbl]) => (
               <button key={k} className={`hd-tool${tool === k ? " on" : ""}`} onClick={() => { setTool(k); setOpenMenu(null); }}>
-                {toolImg(k)}<span>{lbl}</span>
+                {toolImg(k, whiteboard, wbCircle)}<span>{lbl}</span>
               </button>
             ))}
           </div>
