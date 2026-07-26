@@ -48,6 +48,9 @@ const toolImg = kind => {
 
 // swatch palette for on-ice text labels (dark ink first — labels sit on light ice)
 const LABEL_COLORS = ["#14202b", "#d7263d", "#1f4fa3", "#1f8a4c", "#e0731d", "#7a3fa8"];
+// label background / border palettes (default first: paper for bg, faint ink for border)
+const LABEL_BG_COLORS = ["#f6fbfd", "#ffd447", "#d7263d", "#1f8a4c", "#3a8dff", "#e0731d", "#14202b"];
+const LABEL_BORDER_COLORS = ["#14202b", "#ffd447", "#d7263d", "#1f8a4c", "#3a8dff", "#e0731d", "#f6fbfd"];
 
 // cue colours a cognitive-training light can show (its screen fills with one)
 const LIGHT_COLORS = ["#2ea043", "#e5342b", "#2f6df6", "#f5c518", "#8a3ffc", "#f2f5f8"];
@@ -5229,7 +5232,7 @@ export default function DrillAnimator() {
   // a movable/resizable on-ice text label, drawn undistorted (icon frame) and
   // held screen-upright. Used for standalone labels and for waypoint
   // descriptions shown in "label" mode.
-  function labelNode(key, x, y, text, size, color, sel, onDown, resizeDown, hitOff = false) {
+  function labelNode(key, x, y, text, size, st, sel, onDown, resizeDown, hitOff = false) {
     const fx = iconXf({ x, y, a: 0 });
     const lines = String(text || " ").split("\n");
     // the icon frame bakes in ICON_SCALE (0.8), so on-ice height ≈ fs·0.8;
@@ -5238,16 +5241,26 @@ export default function DrillAnimator() {
     const lh = fs * 1.16;
     const w = Math.max(1, ...lines.map(l => l.length)) * fs * 0.56 + fs * 0.7;
     const h = lines.length * lh + fs * 0.34;
+    // st: { color, bg, bgOp, border, borderOp, textOp } — absent fields = the
+    // classic sticky-note look (near-white 0.95 bg, faint ink border)
+    const bgOff = st.bg === "none", bgCol = bgOff ? null : (st.bg || "#f6fbfd");
+    const bgOp = st.bgOp != null ? st.bgOp : 0.95;
+    const bdOff = st.border === "none", bdCol = bdOff ? null : (st.border || "#14202b");
+    const bdOp = st.borderOp != null ? st.borderOp : 0.35;
     return (
       <g key={key} transform={fx.t}>
         <g transform={`rotate(${-fx.th})`}>
           <rect x={-w / 2} y={-h / 2} width={w} height={h} rx={fs * 0.28}
-            fill="rgba(246,251,253,0.95)" stroke={sel ? "#ffd447" : "rgba(20,32,43,0.35)"}
-            strokeWidth={sel ? 0.7 : 0.4} onPointerDown={onDown} pointerEvents={hitOff ? "none" : undefined}
+            fill={bgOff ? "transparent" : bgCol} fillOpacity={bgOff ? undefined : bgOp}
+            stroke={sel ? "#ffd447" : bdOff ? "none" : bdCol}
+            strokeOpacity={sel || bdOff ? undefined : bdOp}
+            strokeWidth={sel ? 0.7 : bdOff ? 0 : 0.4} onPointerDown={onDown} pointerEvents={hitOff ? "none" : undefined}
             style={{ cursor: onDown ? "grab" : "default" }} />
-          <text textAnchor="middle" fontSize={fs} fontWeight={800} fill={color || "#14202b"}
+          <text textAnchor="middle" fontSize={fs} fontWeight={800} fill={st.color || "#14202b"}
+            opacity={st.textOp != null ? st.textOp : undefined}
             pointerEvents="none" style={{ fontFamily: "system-ui, sans-serif", userSelect: "none",
-              paintOrder: "stroke", stroke: "rgba(246,251,253,0.9)", strokeWidth: fs * 0.06 }}>
+              paintOrder: "stroke", stroke: bgCol || "rgba(246,251,253,0.9)", strokeWidth: fs * 0.06,
+              strokeOpacity: bgCol ? 0.9 : undefined }}>
             {lines.map((l, k) => (
               <tspan key={k} x={0} y={(k - (lines.length - 1) / 2) * lh + fs * 0.34}>{l || " "}</tspan>
             ))}
@@ -5422,21 +5435,21 @@ export default function DrillAnimator() {
     pieces.forEach(p => {
       if (p.kind === "label") {
         const sel = canEdit && p.id === selectedId;
-        els.push(labelNode(`lbl-${p.id}`, p.x, p.y, p.text, p.size, p.color, sel,
+        els.push(labelNode(`lbl-${p.id}`, p.x, p.y, p.text, p.size, p, sel,
           e => pieceDown(e, p.id),
           canEdit && !p.lock ? e => handleDown(e, { kind: "resize", id: p.id, seg: null, cx: p.x, cy: p.y, size0: p.size || 1 }) : null,
           p.lock && !lockedSelectable));
       } else if (p.label && p.kind !== "player") {
         // a name tag under any named prop/piece (players show their jersey instead)
         const off = p.kind === "net" ? 6.5 : 5;
-        els.push(labelNode(`nm-${p.id}`, p.x, p.y + off, p.label, 0.5, "#33414f", false, null, null));
+        els.push(labelNode(`nm-${p.id}`, p.x, p.y + off, p.label, 0.5, { color: "#33414f" }, false, null, null));
       }
       (p.path || []).forEach((s, i) => {
         if (s.dmode !== "label" || !s.desc) return;
         const cx = s.x + (s.dox || 0), cy = s.y + (s.doy != null ? s.doy : -5);
         const sel = canEdit && p.id === selectedId;
         const wlk = !!(p.lock || s.lock);
-        els.push(labelNode(`wl-${p.id}-${i}`, cx, cy, s.desc, s.dsize, "#14202b", sel,
+        els.push(labelNode(`wl-${p.id}-${i}`, cx, cy, s.desc, s.dsize, { color: "#14202b" }, sel,
           canEdit ? e => handleDown(e, { kind: "wlabel", id: p.id, seg: i }) : undefined,
           canEdit && !wlk ? e => handleDown(e, { kind: "resize", id: p.id, seg: i, cx, cy, size0: s.dsize || 1 }) : null,
           wlk && !lockedSelectable));
@@ -6001,6 +6014,52 @@ export default function DrillAnimator() {
                       onClick={() => updateById(p.id, { color: c })} />
                   ))}
                 </div>
+                <div className="hd-poprow">
+                  <span>Opacity</span>
+                  <input type="range" min={0.1} max={1} step={0.05} value={p.textOp != null ? p.textOp : 1}
+                    style={{ flex: 1, minWidth: 80 }}
+                    onChange={e => updateById(p.id, { textOp: parseFloat(e.target.value) })} />
+                </div>
+              </div>
+              <div className="hd-field">
+                <div className="hd-sectitle">Background</div>
+                <div className="hd-poprow">
+                  <button className={`hd-mini${p.bg === "none" ? " on" : ""}`}
+                    onClick={() => updateById(p.id, { bg: "none" })}>None</button>
+                  {LABEL_BG_COLORS.map(c => (
+                    <div key={c} className={`hd-swatch${p.bg !== "none" && (p.bg || "#f6fbfd") === c ? " on" : ""}`}
+                      style={{ background: c }}
+                      onClick={() => updateById(p.id, { bg: c, bgOp: p.bgOp != null ? p.bgOp : 0.95 })} />
+                  ))}
+                </div>
+                {p.bg !== "none" && (
+                  <div className="hd-poprow">
+                    <span>Opacity</span>
+                    <input type="range" min={0.05} max={1} step={0.05} value={p.bgOp != null ? p.bgOp : 0.95}
+                      style={{ flex: 1, minWidth: 80 }}
+                      onChange={e => updateById(p.id, { bgOp: parseFloat(e.target.value) })} />
+                  </div>
+                )}
+              </div>
+              <div className="hd-field">
+                <div className="hd-sectitle">Border</div>
+                <div className="hd-poprow">
+                  <button className={`hd-mini${p.border === "none" ? " on" : ""}`}
+                    onClick={() => updateById(p.id, { border: "none" })}>None</button>
+                  {LABEL_BORDER_COLORS.map(c => (
+                    <div key={c} className={`hd-swatch${p.border !== "none" && (p.border || "#14202b") === c ? " on" : ""}`}
+                      style={{ background: c }}
+                      onClick={() => updateById(p.id, { border: c, borderOp: p.borderOp != null ? p.borderOp : 0.35 })} />
+                  ))}
+                </div>
+                {p.border !== "none" && (
+                  <div className="hd-poprow">
+                    <span>Opacity</span>
+                    <input type="range" min={0.05} max={1} step={0.05} value={p.borderOp != null ? p.borderOp : 0.35}
+                      style={{ flex: 1, minWidth: 80 }}
+                      onChange={e => updateById(p.id, { borderOp: parseFloat(e.target.value) })} />
+                  </div>
+                )}
               </div>
             </>
           )}
@@ -7197,7 +7256,7 @@ export default function DrillAnimator() {
           })}
           {/* labels are their own kind — render them as text, not the player fallback */}
           {pieces.filter(p => p.kind === "label" && p.text).map(p =>
-            labelNode(`lp-lbl-${p.id}`, p.x, p.y, p.text, p.size, p.color, p.id === selectedId, null, null))}
+            labelNode(`lp-lbl-${p.id}`, p.x, p.y, p.text, p.size, p, p.id === selectedId, null, null))}
           <circle cx={loupe.x} cy={loupe.y} r={1.1} fill="none" stroke="#d7263d" strokeWidth={0.25} />
           <line x1={loupe.x - 2} y1={loupe.y} x2={loupe.x + 2} y2={loupe.y} stroke="#d7263d" strokeWidth={0.18} />
           <line x1={loupe.x} y1={loupe.y - 2} x2={loupe.x} y2={loupe.y + 2} stroke="#d7263d" strokeWidth={0.18} />
@@ -8543,7 +8602,9 @@ export default function DrillAnimator() {
             (<code>sym=</code> is a player&apos;s whiteboard symbol — ≤3 chars, shown instead of the skater when <b>Whiteboard mode</b> is on; <code>△</code>/<code>○</code>/<code>□</code> draw as real shapes; unset defaults to X for <code>defense</code>, else O)
             (a <b>bumper</b> is a solid barrier — players skate around it and pucks carom off it; a <b>deker</b> a stickhandling gate, a <b>passer</b> a rebounder box — all take <code>face=deg</code>)
             (a <b>tire</b> is an agility prop — <code>size=1</code> large / <code>size=0.55</code> small; add <code>goalie</code> for a keeper that works the full circle to defend shots at it)
-            (a <b>label</b> is a movable/resizable text note: <code>PIECE L1 label 100 40 size=1.2 "Regroup here"</code>)
+            (a <b>label</b> is a movable/resizable text note: <code>PIECE L1 label 100 40 size=1.2 "Regroup here"</code> —
+            style with <code>bg=</code>/<code>border=</code> (<code>none</code> or <code>&lt;hex&gt;[:&lt;opacity&gt;]</code>) and <code>textop=&lt;opacity&gt;</code>,
+            e.g. <code>bg=ffd447:0.6 border=none textop=0.8</code>)
             (a <b>net</b> takes <code>face=deg</code>, <code>goalie</code>, and <code>size</code> — <code>1</code> NHL / <code>0.62</code> mite; pucks
             enter only from the front and bounce off its sides/back) ·
             <b> PATH</b> id segments (<b>L</b> x,y · <b>Q</b> cx,cy x,y · <b>C</b> c1x,c1y c2x,c2y x,y).
