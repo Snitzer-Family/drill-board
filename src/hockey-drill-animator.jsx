@@ -7074,6 +7074,13 @@ export default function DrillAnimator() {
     const D = d => (flat ? d : sdash(d));
     const INK = casing ? "#f5fafd" : "#14171a";
     const ve = flat ? undefined : "non-scaling-stroke";
+    // the casing pass runs this whole renderer a second time — it must register
+    // its arrival tips in its OWN channel, or the ink pass would count them as
+    // earlier arrivals and queue itself back off its own casing. Seed the channel
+    // from "main"'s current state (route carats already registered) so both
+    // passes evolve identically and land every tip in the same spot.
+    const AR_SCENE = flat ? "flat" : casing ? "case" : "main";
+    if (AR_SCENE === "case") arrivalReg.set("case", [...(arrivalReg.get("main") || [])]);
     const { plans } = getIntentPlan();   // draw the shot's intent (on net), not a realistic miss
     const z = 1 / (view.s || 1);
     // action-badge centres: a pass/shot released AT a waypoint (not off a player's
@@ -7135,7 +7142,7 @@ export default function DrillAnimator() {
         let eGap = head ? Math.min(START_OFF, Math.max(0, len - 2)) : 0;
         if (eGap > 0) {
           const t0 = gmMove(b.x, b.y, -ux, -uy, eGap);
-          const back = arrivalBack(flat ? "flat" : "main", t0.x, t0.y);
+          const back = arrivalBack(AR_SCENE, t0.x, t0.y);
           if (back) eGap = Math.min(eGap + back, Math.max(0, len - 2));
         }
         const ep = eGap > 0 ? gmMove(b.x, b.y, -ux, -uy, eGap) : b;
@@ -7182,7 +7189,7 @@ export default function DrillAnimator() {
           if (eb2 && gap > 0) {
             const t0 = trimPolyEnd(line, gap, strokeAR);
             const tp = t0[t0.length - 1];
-            const back = arrivalBack(flat ? "flat" : "main", tp.x, tp.y);
+            const back = arrivalBack(AR_SCENE, tp.x, tp.y);
             if (back) gap += back;
           }
           const tipLine = gap > 0 ? trimPolyEnd(line, gap, strokeAR) : line;
@@ -7237,7 +7244,7 @@ export default function DrillAnimator() {
         // their own per-net stagger
         if (eb && eGap > 0) {
           const t0 = gmMove(L.x1, L.y1, -ux, -uy, eGap);
-          const back = arrivalBack(flat ? "flat" : "main", t0.x, t0.y);
+          const back = arrivalBack(AR_SCENE, t0.x, t0.y);
           if (back) eGap = Math.min(eGap + back, eCap);
         }
         const ep = eGap > 0 ? gmMove(L.x1, L.y1, -ux, -uy, eGap) : { x: L.x1, y: L.y1 };
