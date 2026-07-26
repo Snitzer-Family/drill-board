@@ -34,6 +34,16 @@ const TOOL_GLYPH = {
 // the interchangeable on-ice training tools: any one can be swapped for
 // another from its popup ("Change to" row) without re-placing it
 const TOOL_KINDS = ["cone", "tire", "bumper", "deker", "passer", "stick", "light"];
+// item categories of the Visibility menu (view-only show/hide; never touches timing)
+const VIS_KINDS = [
+  { key: "player", label: "Players", match: p => p.kind === "player" },
+  { key: "puck", label: "Pucks", match: p => p.kind === "puck" },
+  { key: "net", label: "Nets", match: p => p.kind === "net" },
+  { key: "cone", label: "Cones", match: p => p.kind === "cone" },
+  { key: "prop", label: "Props", match: p => ["tire", "bumper", "deker", "passer", "stick", "light"].includes(p.kind) },
+  { key: "mark", label: "Marker ink", match: p => p.kind === "mark" },
+  { key: "label", label: "Labels", match: p => p.kind === "label" },
+];
 const toolImg = kind => {
   const k = kind === "playerpuck" ? "player" : kind;
   const g = TOOL_GLYPH[k];
@@ -295,6 +305,7 @@ export default function DrillAnimator() {
   const [marquee, setMarquee] = useState(null);    // {x0,y0,x1,y1} while dragging a box
   const [groupInput, setGroupInput] = useState(null);   // pending group-name text while naming, or null
   const [hiddenGroups, setHiddenGroups] = useState(() => new Set()); // group names hidden this session (view-only, never saved)
+  const [hiddenKinds, setHiddenKinds] = useState(() => new Set());   // VIS_KINDS keys + "routes"/"pucklines" (view-only, never saved)
   const [pieceGroupInput, setPieceGroupInput] = useState("");  // "new group" name draft in the piece popup
   const [popup, setPopup] = useState(null);
   const [tool, setTool] = useState("select");
@@ -3955,13 +3966,23 @@ export default function DrillAnimator() {
   // consult this (a hidden player still plays; the drill clock is unchanged)
   const hiddenIds = useMemo(() => {
     const s = new Set();
-    if (hiddenGroups.size) {
-      for (const p of pieces) if (p.group && hiddenGroups.has(p.group)) s.add(p.id);
+    if (hiddenGroups.size || hiddenKinds.size) {
+      for (const p of pieces) {
+        if ((p.group && hiddenGroups.has(p.group)) || VIS_KINDS.some(c => hiddenKinds.has(c.key) && c.match(p))) s.add(p.id);
+      }
       // a puck on a hidden carrier's blade hides with them (else it floats alone)
       for (const p of pieces) if (p.kind === "puck" && p.carrier && s.has(p.carrier)) s.add(p.id);
     }
     return s;
-  }, [pieces, hiddenGroups]);
+  }, [pieces, hiddenGroups, hiddenKinds]);
+  // don't leave an invisible selection behind when a group/category hides
+  const dropHiddenSelection = members => {
+    if (selectedId && members.has(selectedId)) { setSelectedId(null); setPopup(null); }
+    if (multiSel && multiSel.size) {
+      const kept = [...multiSel].filter(id => !members.has(id));
+      if (kept.length !== multiSel.size) setMultiSel(kept.length ? new Set(kept) : null);
+    }
+  };
   const toggleGroupHidden = name => {
     const hiding = !hiddenGroups.has(name);
     setHiddenGroups(prev => {
@@ -3969,13 +3990,21 @@ export default function DrillAnimator() {
       if (s.has(name)) s.delete(name); else s.add(name);
       return s;
     });
-    if (hiding) {                              // don't leave an invisible selection behind
-      const members = groupMembers(name);
-      if (selectedId && members.has(selectedId)) { setSelectedId(null); setPopup(null); }
-      if (multiSel && multiSel.size) {
-        const kept = [...multiSel].filter(id => !members.has(id));
-        if (kept.length !== multiSel.size) setMultiSel(kept.length ? new Set(kept) : null);
-      }
+    if (hiding) dropHiddenSelection(groupMembers(name));
+  };
+  const toggleKindHidden = key => {
+    const hiding = !hiddenKinds.has(key);
+    setHiddenKinds(prev => {
+      const s = new Set(prev);
+      if (s.has(key)) s.delete(key); else s.add(key);
+      return s;
+    });
+    const cat = VIS_KINDS.find(c => c.key === key);
+    if (hiding && cat) {
+      const members = new Set(pieces.filter(cat.match).map(p => p.id));
+      if (key === "player") for (const p of pieces)
+        if (p.kind === "puck" && p.carrier && members.has(p.carrier)) members.add(p.id);
+      dropHiddenSelection(members);
     }
   };
   const selectGroupFromMenu = name => {
@@ -6914,7 +6943,7 @@ export default function DrillAnimator() {
   // timing legs. `flat` = plain rink-unit widths for the loupe (which has no
   // non-scaling-stroke context); the main scene uses screen-constant widths.
   function puckPathNodes(flat) {
-    if (!showPuckPaths) return null;
+    if (!showPuckPaths || hiddenKinds.has("pucklines")) return null;
     const W = w => (flat ? w : sw(w));
     const D = d => (flat ? d : sdash(d));
     const ve = flat ? undefined : "non-scaling-stroke";
@@ -7102,7 +7131,7 @@ export default function DrillAnimator() {
   // the other branches' stay faint ghosts. (puckPathNodes skips conditional pucks —
   // the animation plan's warped fly legs would draw the firing action differently.)
   function renderBranchGhostArrows() {
-    if (!showPuckPaths) return null;   // puck-action arrows follow the Routes-on-play "All +puck" rule
+    if (!showPuckPaths || hiddenKinds.has("pucklines")) return null;   // puck-action arrows follow the Routes-on-play "All +puck" rule
     const z = 1 / (view.s || 1);
     // in the planner at rest, every branch's line reads solid enough to edit; during
     // playback the non-chosen branches fade further back.
@@ -7227,7 +7256,7 @@ export default function DrillAnimator() {
         <svg viewBox={`0 0 ${2 * R} ${2 * R}`}>
           <g transform={loupeXf}>
           <RinkMarkings />
-          {pieces.filter(p => !hiddenIds.has(p.id)).map(p => {
+          {!hiddenKinds.has("routes") && pieces.filter(p => !hiddenIds.has(p.id)).map(p => {
             let prev = { x: p.x, y: p.y };
             return p.path.map((s, i) => {
               const d = segD(prev, s);
@@ -7239,7 +7268,7 @@ export default function DrillAnimator() {
                 : <path key={`${p.id}${i}`} d={d} {...style} />;
             });
           })}
-          {pieces.filter(p => !hiddenIds.has(p.id)).map(p => <g key={`ls${p.id}`}>{renderStops(p, 1)}</g>)}
+          {!hiddenKinds.has("routes") && pieces.filter(p => !hiddenIds.has(p.id)).map(p => <g key={`ls${p.id}`}>{renderStops(p, 1)}</g>)}
           {drawPreview && drawPreview.length > 1 && (
             <polyline points={drawPreview.map(q => `${q.x},${q.y}`).join(" ")}
               fill="none" stroke="#ffd447" strokeWidth={0.6} strokeDasharray="1.4 1" opacity={0.9} />
@@ -7492,7 +7521,7 @@ export default function DrillAnimator() {
             {!aiPlay && pieces.map(p => {
               // hidden-group members keep their invisible ref paths (timing measures
               // them) but draw no strokes, badges, or hit areas
-              const vis = showRoutes && !hiddenIds.has(p.id);
+              const vis = showRoutes && !hiddenKinds.has("routes") && !hiddenIds.has(p.id);
               // DRAW the detour only when avoidance visuals are on; the animation's own
               // routeDetour (displayPos) is separate, so the skater still curves either way
               const rd = vis && effAvoidVis ? routeDetour(p) : null;   // arc detour around a crossed net
@@ -7665,7 +7694,7 @@ export default function DrillAnimator() {
               emit(p.path, { x: p.x, y: p.y }, "", p.forks);
               return <g key={`segm-${p.id}`}>{els}</g>;
             })}
-            {showRoutes && !aiPlay && pieces.map(p => {
+            {showRoutes && !hiddenKinds.has("routes") && !aiPlay && pieces.map(p => {
               if (p.kind !== "player" || !(p.forks || []).length || hiddenIds.has(p.id)) return null;
               const chosen = chosenForkRefs(p);
               // while previewing all branches, EVERY candidate route reads as solid/active
@@ -7830,7 +7859,7 @@ export default function DrillAnimator() {
               return <g key={`fkv-${p.id}`}>{renderLevel(p.forks, p.path, branchPoint(p), "")}</g>;
             })}
 
-            {showRoutes && pieces.filter(p => !hiddenIds.has(p.id)).map(p => <g key={`s-${p.id}`}>{renderStops(p)}</g>)}
+            {showRoutes && !hiddenKinds.has("routes") && pieces.filter(p => !hiddenIds.has(p.id)).map(p => <g key={`s-${p.id}`}>{renderStops(p)}</g>)}
             </g>{/* end route-markings opacity group */}
 
             {editing && pieces.map(p =>
@@ -8275,27 +8304,12 @@ export default function DrillAnimator() {
             onClick={() => { setShowDiag(s => !s); setOpenMenu(null); }}>
             <Icon name="gauge" size={16} /> Diagnostics {showDiag ? "(on)" : ""}
           </button>
+          <button className={`hd-item${hiddenKinds.size || hiddenGroups.size ? " on" : ""}`} onClick={() => setOpenMenu("visibility")}>
+            <Icon name="eye" size={16} /> Visibility… {hiddenKinds.size || hiddenGroups.size ? "(some hidden)" : ""}
+          </button>
           <button className="hd-item" onClick={() => setOpenMenu("prefs")}>
             <Icon name="sliders" size={16} /> App &amp; drill settings…
           </button>
-          <div className="hd-mh" style={{ marginTop: 4 }}>Groups</div>
-          {groupNames.length === 0 ? (
-            <div className="hd-note">Box-select pieces and tap ◇ Group, or use a piece's Group field.</div>
-          ) : groupNames.map(name => {
-            const n = pieces.filter(p => p.group === name).length;
-            const hidden = hiddenGroups.has(name);
-            return (
-              <div className="hd-poprow" key={name}>
-                <span style={{ flex: 1, fontSize: 12, opacity: hidden ? 0.55 : 1 }}>
-                  ◇ {name} <span style={{ opacity: 0.6 }}>({n})</span>
-                </span>
-                <button className={`hd-mini${hidden ? "" : " on"}`} title={hidden ? "Show this group" : "Hide this group"}
-                  onClick={() => toggleGroupHidden(name)}>{hidden ? "Hidden" : "Shown"}</button>
-                <button className="hd-mini" title="Select every piece in this group"
-                  onClick={() => selectGroupFromMenu(name)}>Select</button>
-              </div>
-            );
-          })}
           <div className="hd-mh" style={{ marginTop: 4 }}>Let AI play</div>
           <div className="hd-poprow">
             <span>5v5 for</span>
@@ -8325,6 +8339,62 @@ export default function DrillAnimator() {
         </div>
       )}
 
+      {openMenu === "visibility" && (
+        <div className="hd-menu tl">
+          <div className="hd-mh">Visibility</div>
+          <div className="hd-note">View-only, for this session — hiding never changes playback timing or the saved drill.</div>
+          <div className="hd-mh" style={{ marginTop: 4 }}>Items</div>
+          {VIS_KINDS.map(c => {
+            const n = pieces.filter(c.match).length;
+            const hidden = hiddenKinds.has(c.key);
+            return (
+              <div className="hd-poprow" key={c.key}>
+                <span style={{ flex: 1, fontSize: 12, opacity: hidden ? 0.55 : 1 }}>
+                  {c.label} <span style={{ opacity: 0.6 }}>({n})</span>
+                </span>
+                <button className={`hd-mini${hidden ? "" : " on"}`} disabled={!n && !hidden}
+                  title={hidden ? `Show ${c.label.toLowerCase()}` : `Hide ${c.label.toLowerCase()}`}
+                  onClick={() => toggleKindHidden(c.key)}>{hidden ? "Hidden" : "Shown"}</button>
+              </div>
+            );
+          })}
+          <div className="hd-mh" style={{ marginTop: 4 }}>Lines</div>
+          {[["routes", "Skating routes & stops"], ["pucklines", "Pass & shot lines"]].map(([key, lbl]) => {
+            const hidden = hiddenKinds.has(key);
+            return (
+              <div className="hd-poprow" key={key}>
+                <span style={{ flex: 1, fontSize: 12, opacity: hidden ? 0.55 : 1 }}>{lbl}</span>
+                <button className={`hd-mini${hidden ? "" : " on"}`}
+                  onClick={() => toggleKindHidden(key)}>{hidden ? "Hidden" : "Shown"}</button>
+              </div>
+            );
+          })}
+          <div className="hd-mh" style={{ marginTop: 4 }}>Groups</div>
+          {groupNames.length === 0 ? (
+            <div className="hd-note">Box-select pieces and tap ◇ Group, or use a piece's Group field.</div>
+          ) : groupNames.map(name => {
+            const n = pieces.filter(p => p.group === name).length;
+            const hidden = hiddenGroups.has(name);
+            return (
+              <div className="hd-poprow" key={name}>
+                <span style={{ flex: 1, fontSize: 12, opacity: hidden ? 0.55 : 1 }}>
+                  ◇ {name} <span style={{ opacity: 0.6 }}>({n})</span>
+                </span>
+                <button className={`hd-mini${hidden ? "" : " on"}`} title={hidden ? "Show this group" : "Hide this group"}
+                  onClick={() => toggleGroupHidden(name)}>{hidden ? "Hidden" : "Shown"}</button>
+                <button className="hd-mini" title="Select every piece in this group"
+                  onClick={() => selectGroupFromMenu(name)}>Select</button>
+              </div>
+            );
+          })}
+          {(hiddenKinds.size > 0 || hiddenGroups.size > 0) && (
+            <button className="hd-item" onClick={() => { setHiddenKinds(new Set()); setHiddenGroups(new Set()); }}>
+              <Icon name="eye" size={16} /> Show everything
+            </button>
+          )}
+          <button className="hd-item" onClick={() => setOpenMenu("settings")}>‹ Back to menu</button>
+        </div>
+      )}
       {openMenu === "prefs" && (
         <div className="hd-menu tl">
           <div className="hd-mh">App &amp; drill settings</div>

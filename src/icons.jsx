@@ -66,6 +66,7 @@ const ICONS = {
   lock: <><rect x="4.5" y="10.5" width="15" height="10" rx="2" /><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" /></>,
   unlock: <><rect x="4.5" y="10.5" width="15" height="10" rx="2" /><path d="M8 10.5V7.5a4 4 0 0 1 7.7-1.5" /></>,
   gauge: <><path d="M4 18a8 8 0 1 1 16 0" /><path d="M12 18l4-5" /></>,
+  eye: <><path d="M2.5 12C5 7.2 8.3 4.8 12 4.8s7 2.4 9.5 7.2c-2.5 4.8-5.8 7.2-9.5 7.2S5 16.8 2.5 12Z" /><circle cx="12" cy="12" r="3.1" /></>,
   sliders: <><path d="M5 5v14M12 5v14M19 5v14" /><circle cx="5" cy="9" r="1.9" {...F} /><circle cx="12" cy="14" r="1.9" {...F} /><circle cx="19" cy="8" r="1.9" {...F} /></>,
   // line-segment types (player/waypoint popups)
   segLine: <path d="M4.5 19.5L19.5 4.5" />,
