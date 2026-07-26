@@ -364,8 +364,8 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
             Math.hypot(b.x - launch.x, b.y - launch.y) < Math.hypot(a.x - launch.x, a.y - launch.y) ? b : a);
         }
         if (netPiece) net = { x: netPiece.x, y: netPiece.y };
-        else net = netId === "left" ? { x: 15, y: 42.5 } : netId === "right" ? { x: 185, y: 42.5 }
-          : launch.x < 100 ? { x: 15, y: 42.5 } : { x: 185, y: 42.5 };
+        else net = netId === "left" ? { x: 11, y: 42.5 } : netId === "right" ? { x: 189, y: 42.5 }
+          : launch.x < 100 ? { x: 11, y: 42.5 } : { x: 189, y: 42.5 };   // crease centers — where an auto-net would sit
         const vShot = pace * SPEED.shot * (pk.speed || 1);
         const inx = net.x - launch.x, iny = net.y - launch.y;
         const mag = Math.hypot(inx, iny) || 1;

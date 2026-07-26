@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo } from "react";
 import { VIEWS, COLORS, vb, APP_VERSION, ICON_SCALE, ROUTE_START_GAP, BUILD_STAMP, DEFAULT_TEXT, SPEED,
   SAVE_PROB, MISS_POST, MISS_WIDE, MISS_OVER, SHOT_AIR_PROB, BOUNCE_REST } from "./constants.js";
-import { parseDrill, serializeDrill, extractDrill, deriveInventory } from "./drill-format.js";
+import { parseDrill, serializeDrill, extractDrill, deriveInventory, ensureShotNet } from "./drill-format.js";
 import { prepareImage, drillFromImage, ANTHROPIC_KEY_STORE } from "./drill-vision.js";
 import { drillSvg } from "./drill-svg.js";
 import { mdEscape, mdInline, mdBlock } from "./md.js";
@@ -3107,6 +3107,15 @@ export default function DrillAnimator() {
     };
   }
 
+  // a shot authored on a netless board conjures its target: an empty net in
+  // the shooter's nearest crease (drill loads get the same via parseDrill).
+  // ensureShotNet returns the same array when nothing's needed, so this is
+  // a free no-op whenever a net or passer is already on the ice.
+  const ensureNet = () => {
+    if (!pieces.some(q => q.kind === "net" || q.kind === "passer")) flash("Added a net to shoot at");
+    setPieces(ps => ensureShotNet(ps));
+  };
+
   // append a new waypoint after the route's end, continuing in its heading, and
   // open the new point so it can be dragged/edited right away
   function addSegment(id, type, fork = null) {
@@ -5745,6 +5754,7 @@ export default function DrillAnimator() {
         patch.terminals = [...base, { kind, at: i, ref: fork || "", by: p.id,
           ...(kind === "shot" ? (net ? { net } : {}) : { aim: null, dist }) }];
         updateById(pk.id, patch);
+        if (kind === "shot") ensureNet();
       };
       const createType = t => {
         if (t === "receive") { const src = defaultPasser(); if (src) doReceiveFrom(p.id, i, src, fork); else flash("Add another player to pass from"); }
@@ -5779,6 +5789,7 @@ export default function DrillAnimator() {
               patch.terminals = [...base, { kind: kind2, at: i, ref: fork || "", by: p.id, ...(kind2 === "shot" ? {} : { aim: null, dist }) }];
               return { ...q, ...patch };
             });
+            if (kind2 === "shot") ensureNet();
           }
           return;
         }
@@ -8564,7 +8575,8 @@ export default function DrillAnimator() {
             Shots randomly rip along the ice or rise in the air (sauce look, shadow underneath). On a
             goalie it's <b>SAVE!</b> or <b>GOAL!</b>; on an <b>empty net</b> it usually buries (rests in the
             cage, under the mesh) but can ring the <b>POST!</b>, sail <b>WIDE!</b>, or go <b>OVER!</b> — each
-            re-rolls every replay.
+            re-rolls every replay. A drill with a shot but <b>no net or passer at all</b> auto-places an
+            empty net in the crease nearest the shooter (one per end as needed).
             <code> rim=4~90*80</code> hard-rims around the
             boards and <code>chip=4~-45*30</code> chips into space; the <code>~deg</code> is the direction and
             <code>*ft</code> the distance — or just drag the on-ice <b>handle</b> at the end of the release
