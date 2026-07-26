@@ -320,6 +320,7 @@ export default function DrillAnimator() {
   const [genAsk, setGenAsk] = useState(false);       // inline "replace steps?" confirm
   const [keyEdit, setKeyEdit] = useState(null);      // API-key inline editor draft, or null
   const [cuePick, setCuePick] = useState(null);      // light-cue index with its colour palette open
+  const [addHover, setAddHover] = useState(null);    // tool kind hovered in the "Add here" popup → ghost preview
   const [playing, setPlaying] = useState(false);
   const [animT, setAnimT] = useState(0);
   const [restFade, setRestFade] = useState(1);         // extra splash fade-out that runs while paused/stopped
@@ -516,12 +517,13 @@ export default function DrillAnimator() {
     // fresh open: reset to the auto edge-anchor at default size, then (next
     // render) run clear-space placement now that the real content is measurable
     setPopState("mid"); setPopPos(null); setPopDim(null);
-    if (popup && popup.type !== "add") setPlaceToken(t => t + 1);
+    if (popup) setPlaceToken(t => t + 1);
   }, [popup?.type, popup?.id, popup?.seg]);
   useEffect(() => {
     if (preservePopPos.current) { preservePopPos.current = false; return; }
     setPopOff({ x: 0, y: 0 });
     setCuePick(null);
+    setAddHover(null);
   }, [popup?.type, popup?.id, popup?.seg, popup?.pt?.x, popup?.pt?.y]);
   // one working surface at a time: a corner menu opening takes over from an
   // unpinned editor popout instead of stacking on top of it
@@ -697,7 +699,14 @@ export default function DrillAnimator() {
   // These stick out beyond the sampled route, so route samples alone miss them.
   function targetHandlePoints(pop) {
     const out = [];
-    if (!pop || pop.type === "add") return out;
+    if (!pop) return out;
+    if (pop.type === "add") {
+      // the "add here" popup's self-obstacle is the tap spot: the target reticle
+      // and hover ghost render there, so the popup must not sit on top of it
+      const c = pop.pt && rinkToClient(pop.pt.x, pop.pt.y);
+      if (c) out.push(c);
+      return out;
+    }
     const p = pieces.find(q => q.id === pop.id);
     if (!p) return out;
     const add = (x, y) => { if (x == null || y == null) return; const c = rinkToClient(x, y); if (c) out.push(c); };
@@ -746,7 +755,7 @@ export default function DrillAnimator() {
   // the responsive edge-anchor (when the natural spot is already clear).
   function computePlacement() {
     const el = popRef.current;
-    if (!el || !popup || popup.type === "add") return null;
+    if (!el || !popup) return null;
     const par = el.offsetParent || el.parentElement;
     if (!par) return null;
     const cr = par.getBoundingClientRect();
@@ -6044,6 +6053,11 @@ export default function DrillAnimator() {
       if (!popup.pt) return null;
       anchorPt = popup.pt;
       title = "Add here";
+      // hover/focus a tile → ghost-preview that piece at the tap spot
+      const hov = k => ({
+        onPointerEnter: () => setAddHover(k), onPointerLeave: () => setAddHover(null),
+        onFocus: () => setAddHover(k), onBlur: () => setAddHover(null),
+      });
       body = (
         <>
           {/* same order as the main Add/draw palette so both grids build one
@@ -6052,18 +6066,18 @@ export default function DrillAnimator() {
             <Icon name="pencil" size={16} /> Draw a route
           </button>
           <div className="hd-toolgrid compact">
-            <button className="hd-tool" onClick={() => addPieceAt("player", popup.pt)}>{toolImg("player")}<span>Player</span></button>
-            <button className="hd-tool" onClick={() => addPlayerWithPuck(popup.pt, true)}>{toolImg("playerpuck")}<span>+ Puck</span></button>
-            <button className="hd-tool" onClick={() => addPieceAt("puck", popup.pt)}>{toolImg("puck")}<span>Puck</span></button>
-            <button className="hd-tool" onClick={() => addPieceAt("net", popup.pt)}>{toolImg("net")}<span>Net</span></button>
-            <button className="hd-tool" onClick={() => addPieceAt("cone", popup.pt)}>{toolImg("cone")}<span>Cone</span></button>
-            <button className="hd-tool" onClick={() => addPieceAt("tire", popup.pt)}>{toolImg("tire")}<span>Tire</span></button>
-            <button className="hd-tool" onClick={() => addPieceAt("bumper", popup.pt)}>{toolImg("bumper")}<span>Bumper</span></button>
-            <button className="hd-tool" onClick={() => addPieceAt("deker", popup.pt)}>{toolImg("deker")}<span>Deker</span></button>
-            <button className="hd-tool" onClick={() => addPieceAt("passer", popup.pt)}>{toolImg("passer")}<span>Passer</span></button>
-            <button className="hd-tool" onClick={() => addPieceAt("stick", popup.pt)}>{toolImg("stick")}<span>Stick</span></button>
-            <button className="hd-tool" onClick={() => addPieceAt("light", popup.pt)}>{toolImg("light")}<span>Light</span></button>
-            <button className="hd-tool" onClick={() => addPieceAt("label", popup.pt)}><span className="hd-toolglyph"><Icon name="label" size={22} /></span><span>Label</span></button>
+            <button className="hd-tool" {...hov("player")} onClick={() => addPieceAt("player", popup.pt)}>{toolImg("player")}<span>Player</span></button>
+            <button className="hd-tool" {...hov("playerpuck")} onClick={() => addPlayerWithPuck(popup.pt, true)}>{toolImg("playerpuck")}<span>+ Puck</span></button>
+            <button className="hd-tool" {...hov("puck")} onClick={() => addPieceAt("puck", popup.pt)}>{toolImg("puck")}<span>Puck</span></button>
+            <button className="hd-tool" {...hov("net")} onClick={() => addPieceAt("net", popup.pt)}>{toolImg("net")}<span>Net</span></button>
+            <button className="hd-tool" {...hov("cone")} onClick={() => addPieceAt("cone", popup.pt)}>{toolImg("cone")}<span>Cone</span></button>
+            <button className="hd-tool" {...hov("tire")} onClick={() => addPieceAt("tire", popup.pt)}>{toolImg("tire")}<span>Tire</span></button>
+            <button className="hd-tool" {...hov("bumper")} onClick={() => addPieceAt("bumper", popup.pt)}>{toolImg("bumper")}<span>Bumper</span></button>
+            <button className="hd-tool" {...hov("deker")} onClick={() => addPieceAt("deker", popup.pt)}>{toolImg("deker")}<span>Deker</span></button>
+            <button className="hd-tool" {...hov("passer")} onClick={() => addPieceAt("passer", popup.pt)}>{toolImg("passer")}<span>Passer</span></button>
+            <button className="hd-tool" {...hov("stick")} onClick={() => addPieceAt("stick", popup.pt)}>{toolImg("stick")}<span>Stick</span></button>
+            <button className="hd-tool" {...hov("light")} onClick={() => addPieceAt("light", popup.pt)}>{toolImg("light")}<span>Light</span></button>
+            <button className="hd-tool" {...hov("label")} onClick={() => addPieceAt("label", popup.pt)}><span className="hd-toolglyph"><Icon name="label" size={22} /></span><span>Label</span></button>
           </div>
         </>
       );
@@ -7962,6 +7976,31 @@ export default function DrillAnimator() {
                 fill="rgba(58,141,255,0.12)" stroke="#3a8dff" strokeWidth={sw(0.5)} strokeDasharray={sdash("1.5 1")}
                 vectorEffect="non-scaling-stroke" pointerEvents="none" />
             )}
+
+            {/* double-tap "Add here": a target reticle marks where the piece will
+                land; hovering/focusing a tool in the popup previews that exact
+                piece (same colour/label the real placement would get) in place */}
+            {popup?.type === "add" && popup.pt && (() => {
+              const pt = popup.pt;
+              const k = addHover === "playerpuck" ? "player" : addHover;
+              if (k && k !== "draw") {
+                const gp = makePiece(k, pt);
+                const fx = iconXf({ x: pt.x, y: pt.y, a: gp.facing || 0 });
+                return (
+                  <g key="addghost" opacity={0.55} pointerEvents="none">
+                    <PieceIcon p={gp} pos={{ x: pt.x, y: pt.y, a: gp.facing || 0 }} xf={fx.t} thDeg={fx.th}
+                      wb={whiteboard} wbCircle={wbCircle} noShadow hitOff onDown={() => {}} />
+                  </g>
+                );
+              }
+              return (
+                <g key="addtarget" pointerEvents="none">
+                  {hdot(pt.x, pt.y, 2.4, { fill: "none", stroke: "#0f766e", strokeWidth: sw(0.55),
+                    strokeDasharray: sdash("1.2 1"), vectorEffect: "non-scaling-stroke" })}
+                  {hdot(pt.x, pt.y, 0.45, { fill: "#0f766e" })}
+                </g>
+              );
+            })()}
 
             {/* route/mark editing handles are painted LAST (below, after the piece
                 icons) so grabbing a waypoint always wins over any prop stacked on
