@@ -1456,9 +1456,11 @@ export default function DrillAnimator() {
   useEffect(() => { bumpTick(t => t + 1); }, []);
 
   // keep the pan/scale within bounds so the ice always fills the view
+  const MAX_ZOOM = 3;
+  const clampS = s => Math.max(1, Math.min(MAX_ZOOM, s));
   function clampView(s, tx, ty) {
     const g = geomRef.current;
-    s = Math.max(1, Math.min(6, s));
+    s = clampS(s);
     const clamp = (t, o, size) => Math.max((o + size) * (1 - s), Math.min(o * (1 - s), t));
     return { s, tx: clamp(tx, g.ox, g.rootW), ty: clamp(ty, g.oy, g.rootH) };
   }
@@ -1495,22 +1497,40 @@ export default function DrillAnimator() {
       const mid = rootPt((a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2);
       if (!mid) return;
       const { d0, mid0, view0 } = pin;
-      const s = view0.s * (d / (d0 || 1));
+      // clamp the scale BEFORE deriving the translation — otherwise past the
+      // zoom limit the pan keeps drifting toward the focal point every event
+      const s = clampS(view0.s * (d / (d0 || 1)));
       // keep the pinch focal point pinned, then pan by the midpoint drift
       const pcx = (mid0.x - view0.tx) / view0.s, pcy = (mid0.y - view0.ty) / view0.s;
       const nv = clampView(s, mid.x - s * pcx, mid.y - s * pcy);
       viewRef.current = nv; setView(nv);
     };
     const end = e => { if (e.touches.length < 2) pinchRef.current = null; };
+    // Desktop: scroll wheel (and trackpad pinch, which arrives as ctrl+wheel)
+    // zooms about the cursor — same focal-pinning math as the touch pinch.
+    const onWheel = e => {
+      e.preventDefault();
+      const v = viewRef.current;
+      const dy = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 100 : 1);
+      const k = e.ctrlKey ? 0.01 : 0.002;
+      const s = clampS(v.s * Math.exp(-dy * k));
+      const pt = rootPt(e.clientX, e.clientY);
+      if (!pt) return;
+      const pcx = (pt.x - v.tx) / v.s, pcy = (pt.y - v.ty) / v.s;
+      const nv = clampView(s, pt.x - s * pcx, pt.y - s * pcy);
+      viewRef.current = nv; setView(nv);
+    };
     svg.addEventListener("touchstart", start, { passive: false });
     svg.addEventListener("touchmove", move, { passive: false });
     svg.addEventListener("touchend", end);
     svg.addEventListener("touchcancel", end);
+    svg.addEventListener("wheel", onWheel, { passive: false });
     return () => {
       svg.removeEventListener("touchstart", start);
       svg.removeEventListener("touchmove", move);
       svg.removeEventListener("touchend", end);
       svg.removeEventListener("touchcancel", end);
+      svg.removeEventListener("wheel", onWheel);
     };
   }, []);
 
@@ -6855,7 +6875,7 @@ export default function DrillAnimator() {
   // non-scaling-stroke context); the main scene uses screen-constant widths.
   function puckPathNodes(flat) {
     if (!showPuckPaths) return null;
-    const W = w => (flat ? w : sw(w));
+    const W = w => (flat ? w : sw(w)) * lineScale;   // global route line-thickness scale
     const D = d => (flat ? d : sdash(d));
     const ve = flat ? undefined : "non-scaling-stroke";
     const { plans } = getIntentPlan();   // draw the shot's intent (on net), not a realistic miss
@@ -6930,7 +6950,7 @@ export default function DrillAnimator() {
             {head && (dx || dy) ? (flat
               ? <circle cx={ep.x} cy={ep.y} r={1.1} fill="none" vectorEffect={ve} stroke="#14171a" strokeWidth={W(0.3)} />
               : (() => { const fx = iconXf({ x: ep.x, y: ep.y, a: (Math.atan2(dy, dx) * 180) / Math.PI });
-                  return <g transform={fx.t}><g transform={`scale(${z})`}>
+                  return <g transform={fx.t}><g transform={`scale(${z * lineScale})`}>
                     <path d="M 0 0 L -3.6 -2.1 L -3.6 2.1 Z" fill="#14171a" stroke="#14171a" strokeWidth={0.5} strokeLinejoin="round" />
                   </g></g>; })()) : null}
           </g>
@@ -6977,9 +6997,10 @@ export default function DrillAnimator() {
               // The lines stop at the caret's mouth (backed off by its zoom-
               // scaled depth) so they never protrude past the head.
               ? (() => {
-                  const le = runEnd ? gmMove(ex, ey, -ux, -uy, 2.9 * z) : { x: ex, y: ey };
-                  const a1 = gmMove(sx, sy, -uy, ux, 0.65), a2 = gmMove(le.x, le.y, -uy, ux, 0.65);
-                  const b1 = gmMove(sx, sy, uy, -ux, 0.65), b2 = gmMove(le.x, le.y, uy, -ux, 0.65);
+                  const le = runEnd ? gmMove(ex, ey, -ux, -uy, 2.9 * z * lineScale) : { x: ex, y: ey };
+                  const sep = 0.65 * lineScale;   // pair separation keeps pace so the double line stays readable
+                  const a1 = gmMove(sx, sy, -uy, ux, sep), a2 = gmMove(le.x, le.y, -uy, ux, sep);
+                  const b1 = gmMove(sx, sy, uy, -ux, sep), b2 = gmMove(le.x, le.y, uy, -ux, sep);
                   return <>
                     <line x1={a1.x} y1={a1.y} x2={a2.x} y2={a2.y} vectorEffect={ve} stroke="#14171a" strokeWidth={W(0.55)} />
                     <line x1={b1.x} y1={b1.y} x2={b2.x} y2={b2.y} vectorEffect={ve} stroke="#14171a" strokeWidth={W(0.55)} />
@@ -6990,7 +7011,8 @@ export default function DrillAnimator() {
             {runEnd && (dx || dy) && (flat
               ? <circle cx={ex} cy={ey} r={1.1} fill="none" vectorEffect={ve} stroke="#14171a" strokeWidth={W(0.3)} />
               : (() => { const fx = iconXf({ x: ex, y: ey, a: (Math.atan2(dy, dx) * 180) / Math.PI });
-                  return <g transform={fx.t}><g transform={`scale(${z})`}>
+                  // heads scale with the line-thickness setting, like routeMark
+                  return <g transform={fx.t}><g transform={`scale(${z * lineScale})`}>
                     {L.shot
                       // open caret ">" for a shot
                       ? <path d="M -3.3 -2.2 L 0 0 L -3.3 2.2" fill="none" stroke="#14171a" strokeWidth={0.95} strokeLinecap="round" strokeLinejoin="round" />
@@ -7072,17 +7094,18 @@ export default function DrillAnimator() {
             // standard shot notation: two parallel lines with an open caret
             // that the lines stop at (never protrude past)
             ? (() => {
-                const le = gmMove(ep.x, ep.y, -ux, -uy, 2.9 * z);
-                const a1 = gmMove(sp.x, sp.y, -uy, ux, 0.65), a2 = gmMove(le.x, le.y, -uy, ux, 0.65);
-                const b1 = gmMove(sp.x, sp.y, uy, -ux, 0.65), b2 = gmMove(le.x, le.y, uy, -ux, 0.65);
+                const le = gmMove(ep.x, ep.y, -ux, -uy, 2.9 * z * lineScale);
+                const sep = 0.65 * lineScale;
+                const a1 = gmMove(sp.x, sp.y, -uy, ux, sep), a2 = gmMove(le.x, le.y, -uy, ux, sep);
+                const b1 = gmMove(sp.x, sp.y, uy, -ux, sep), b2 = gmMove(le.x, le.y, uy, -ux, sep);
                 return <>
-                  <line x1={a1.x} y1={a1.y} x2={a2.x} y2={a2.y} vectorEffect="non-scaling-stroke" stroke="#14171a" strokeWidth={sw(0.55)} />
-                  <line x1={b1.x} y1={b1.y} x2={b2.x} y2={b2.y} vectorEffect="non-scaling-stroke" stroke="#14171a" strokeWidth={sw(0.55)} />
+                  <line x1={a1.x} y1={a1.y} x2={a2.x} y2={a2.y} vectorEffect="non-scaling-stroke" stroke="#14171a" strokeWidth={sw(0.55) * lineScale} />
+                  <line x1={b1.x} y1={b1.y} x2={b2.x} y2={b2.y} vectorEffect="non-scaling-stroke" stroke="#14171a" strokeWidth={sw(0.55) * lineScale} />
                 </>;
               })()
             : <line x1={sp.x} y1={sp.y} x2={ep.x} y2={ep.y} vectorEffect="non-scaling-stroke"
-                stroke="#14171a" strokeWidth={sw(0.55)} strokeDasharray={sdash("2.4 1.8")} />}
-          <g transform={fx.t}><g transform={`scale(${z})`}>
+                stroke="#14171a" strokeWidth={sw(0.55) * lineScale} strokeDasharray={sdash("2.4 1.8")} />}
+          <g transform={fx.t}><g transform={`scale(${z * lineScale})`}>
             {shot
               ? <path d="M -3.3 -2.2 L 0 0 L -3.3 2.2" fill="none" stroke="#14171a" strokeWidth={0.95} strokeLinecap="round" strokeLinejoin="round" />
               : <path d="M 0 0 L -3.6 -2.1 L -3.6 2.1 Z" fill="#14171a" stroke="#14171a" strokeWidth={0.5} strokeLinejoin="round" />}
@@ -8129,6 +8152,8 @@ export default function DrillAnimator() {
             <Icon name="loop" size={17} /></button>
           <button className={`hd-scrubbtn${presentation ? " on" : ""}`} onClick={() => setPresentation(v => !v)} title="Presentation mode">
             <Icon name="presentation" size={17} /></button>
+          <button className="hd-scrubbtn" disabled={playing} onClick={addStepHere}
+            title="Add a description at this point"><Icon name="note" size={17} /></button>
           <div className="hd-scrubtrack">
             {wpTicks.map((f, k) => <span key={"w" + k} className="hd-tick wp" style={{ left: f * 100 + "%" }} />)}
             {stepTicks.map((f, k) => <span key={"s" + k} className="hd-tick step" style={{ left: f * 100 + "%" }} />)}
@@ -8137,8 +8162,6 @@ export default function DrillAnimator() {
               onChange={e => scrubTo(+e.target.value)} />
           </div>
           <span className="hd-scrubtime">{(animT * totalTime).toFixed(1)}/{totalTime.toFixed(1)}s</span>
-          <button className="hd-scrubadd" disabled={playing} onClick={addStepHere}
-            title="Add a description at this point">＋ note</button>
         </div>
       )}
 

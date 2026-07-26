@@ -35,6 +35,7 @@ export const STYLES = `
           border:1px solid #33404f; color:#dbe4ec; display:flex; align-items:center;
           justify-content:center; cursor:pointer; }
         .hd-scrubbtn.on { background:#1f4fa3; border-color:#1f4fa3; }
+        .hd-scrubbtn:disabled { opacity:.4; cursor:default; }
         .hd-scrubbtn.play { width:34px; height:34px; border-radius:50%;
           background:#d7263d; border-color:#d7263d; color:#fff; margin-right:2px; }
         .hd-scrubtrack { position:relative; flex:1; min-width:0; height:22px; display:flex; align-items:center; margin:0 4px; }
@@ -54,9 +55,6 @@ export const STYLES = `
         .hd-scrubrange::-moz-range-thumb { width:16px; height:16px; border-radius:50%;
           background:#e8eef4; border:1px solid #1f4fa3; cursor:pointer; }
         .hd-scrubtime { flex:none; font-size:11px; color:#93a4b2; font-variant-numeric:tabular-nums; }
-        .hd-scrubadd { flex:none; padding:5px 10px; font-size:12px; font-weight:700; color:#cdd8e2;
-          background:#26313d; border:1px solid #3a4756; border-radius:8px; cursor:pointer; white-space:nowrap; }
-        .hd-scrubadd:disabled { opacity:.4; cursor:default; }
         /* bottom menu bar — owns the chrome so the ice stays clear */
         .hd-bar { position:absolute; z-index:44; left:env(safe-area-inset-left, 0px);
           right:env(safe-area-inset-right, 0px); bottom:0;
