@@ -106,6 +106,15 @@ export const STYLES = `
           cursor:pointer; text-align:left; }
         .hd-item.on { background:#0f766e; border-color:#0f766e; color:#fff; }
         .hd-item.danger { color:#ff8d9c; border-color:#4a2a30; }
+        /* menu-item grammar: a trailing chevron marks rows that open another
+           surface; a mini switch marks toggles (state without filling the row) */
+        .hd-chev { margin-left:auto; color:#66768a; display:inline-flex; }
+        .hd-sw { margin-left:auto; flex:none; width:30px; height:18px; border-radius:9px;
+          background:#33404f; position:relative; transition:background .15s; }
+        .hd-sw::after { content:""; position:absolute; top:2px; left:2px; width:14px; height:14px;
+          border-radius:50%; background:#8b99a8; transition:transform .15s, background .15s; }
+        .hd-sw.on { background:#0f766e; }
+        .hd-sw.on::after { transform:translateX(12px); background:#fff; }
         /* icon-forward add-tool grid: the photo fills the tile, label underneath */
         .hd-toolgrid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; }
         .hd-toolgrid.compact { grid-template-columns:repeat(4,minmax(0,1fr)); gap:5px; }

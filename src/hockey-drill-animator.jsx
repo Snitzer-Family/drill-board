@@ -317,6 +317,8 @@ export default function DrillAnimator() {
   const [textDraft, setTextDraft] = useState(DEFAULT_TEXT);
   const [textError, setTextError] = useState("");
   const [textCloseAsk, setTextCloseAsk] = useState(false);  // "unapplied edits" guard on Done
+  const [genAsk, setGenAsk] = useState(false);       // inline "replace steps?" confirm
+  const [keyEdit, setKeyEdit] = useState(null);      // API-key inline editor draft, or null
   const [playing, setPlaying] = useState(false);
   const [animT, setAnimT] = useState(0);
   const [restFade, setRestFade] = useState(1);         // extra splash fade-out that runs while paused/stopped
@@ -523,6 +525,8 @@ export default function DrillAnimator() {
   // unpinned editor popout instead of stacking on top of it
   useEffect(() => {
     if (openMenu && !pinned) setPopup(null);
+    if (openMenu !== "steps") setGenAsk(false);      // stale inline confirms don't survive
+    if (openMenu !== "prefs") setKeyEdit(null);      // a menu switch
   }, [openMenu]);
   // clear-space placement: after a fresh open renders at its anchor (default
   // size), measure it and, if it covers routes/players, move it to open space —
@@ -1339,8 +1343,9 @@ export default function DrillAnimator() {
   // materialize the legacy auto-derivation into editable authored steps: movement
   // beats become waypoint anchors (wp = i-1, where buildSteps fires them), puck
   // events (pass/shot/pickup/collect) stay time-anchored.
-  function generateSteps() {
-    if (drillSteps.length && !window.confirm("Replace the current presentation steps with ones generated from the play?")) return;
+  function generateSteps(force = false) {
+    if (drillSteps.length && !force) { setGenAsk(true); return; }
+    setGenAsk(false);
     const raw = buildSteps().filter(s => s.key !== "start");
     setDrillSteps(raw.map(s => {
       const m = /^([^:]+):(?:move|say):(\d+)$/.exec(s.key);
@@ -1350,6 +1355,7 @@ export default function DrillAnimator() {
       }
       return { text: s.text, at: s.t };
     }));
+    flash("Steps generated from the play");
   }
   // scrubber tick positions (fractions 0..1): player waypoint activations + steps
   const scrubDur = Math.max(0.1, totalTime);
@@ -4514,8 +4520,8 @@ export default function DrillAnimator() {
     a.download = name; a.click();
     URL.revokeObjectURL(a.href);
   }
-  function exportTxt() { download(`${slug()}.txt`, serializeDrill(rink, pieces, drillTitle, drillDesc, drillSteps, drillNotes, drillItems), "text/plain"); }
-  function exportMd() { download(`${slug()}.md`, toMarkdown(), "text/markdown"); }
+  function exportTxt() { download(`${slug()}.txt`, serializeDrill(rink, pieces, drillTitle, drillDesc, drillSteps, drillNotes, drillItems), "text/plain"); flash(`Saved ${slug()}.txt`); }
+  function exportMd() { download(`${slug()}.md`, toMarkdown(), "text/markdown"); flash(`Saved ${slug()}.md`); }
   // render the drill (via the DSL→SVG renderer) and rasterise it to a PNG
   function exportImage() {
     const dsl = serializeDrill(rink, pieces, drillTitle, drillDesc, drillSteps, drillNotes, drillItems);
@@ -4539,6 +4545,7 @@ export default function DrillAnimator() {
         const a = document.createElement("a");
         a.href = URL.createObjectURL(b); a.download = `${slug()}.png`; a.click();
         URL.revokeObjectURL(a.href);
+        flash(`Saved ${slug()}.png`);
       }, "image/png");
     };
     img.onerror = () => { URL.revokeObjectURL(url); flash("Image export failed"); };
@@ -4711,13 +4718,14 @@ export default function DrillAnimator() {
     setDrillVersion(r.dslVersion); setSelectedId(null); setPopup(null);
     resetAnim();
   }
-  // Anthropic API key for photo import — kept in localStorage on this device
+  // Anthropic API key for photo import — kept in localStorage on this device.
+  // No key yet → open the settings menu with the inline key editor showing.
   function getApiKey() {
-    let key = localStorage.getItem(ANTHROPIC_KEY_STORE);
+    const key = localStorage.getItem(ANTHROPIC_KEY_STORE);
     if (!key) {
-      key = (window.prompt("Anthropic API key for photo import (sk-ant-…)\nStored only on this device — use a spend-capped key.") || "").trim();
-      if (!key) return null;
-      localStorage.setItem(ANTHROPIC_KEY_STORE, key);
+      setOpenMenu("prefs"); setKeyEdit("");
+      flash("Add your Claude API key to import photos", 3000);
+      return null;
     }
     return key;
   }
@@ -8289,10 +8297,10 @@ export default function DrillAnimator() {
             onChange={e => setDrillTitle(e.target.value)} />
           <textarea className="hd-input" style={{ minHeight: 46, resize: "vertical", fontFamily: "inherit" }}
             placeholder="Description" value={drillDesc} onChange={e => setDrillDesc(e.target.value)} spellCheck={false} />
-          <button className="hd-item" onClick={() => setOpenMenu("notes")}><Icon name="keyboard" size={16} /> Notes / writeup…{drillNotes.trim() ? " ✓" : ""}</button>
-          <button className="hd-item" onClick={() => setOpenMenu("inventory")}><Icon name="grid" size={16} /> Inventory / gear…</button>
+          <button className="hd-item" onClick={() => setOpenMenu("notes")}><Icon name="note" size={16} /> Notes / writeup{drillNotes.trim() ? " ✓" : ""}<span className="hd-chev"><Icon name="chevronRight" size={14} /></span></button>
+          <button className="hd-item" onClick={() => setOpenMenu("inventory")}><Icon name="grid" size={16} /> Inventory / gear<span className="hd-chev"><Icon name="chevronRight" size={14} /></span></button>
           <button className="hd-item" onClick={() => { printSheet(); setOpenMenu(null); }}><Icon name="image" size={16} /> Print sheet…</button>
-          <button className="hd-item" onClick={openText}><Icon name="keyboard" size={16} /> Text editor</button>
+          <button className="hd-item" onClick={openText}><Icon name="keyboard" size={16} /> Text editor<span className="hd-chev"><Icon name="chevronRight" size={14} /></span></button>
           <button className="hd-item" onClick={() => { exportTxt(); setOpenMenu(null); }}><Icon name="download" size={16} /> Export .txt</button>
           <button className="hd-item" onClick={() => { exportMd(); setOpenMenu(null); }}><Icon name="download" size={16} /> Export .md</button>
           <button className="hd-item" onClick={() => { exportImage(); setOpenMenu(null); }}><Icon name="image" size={16} /> Export image</button>
@@ -8300,24 +8308,24 @@ export default function DrillAnimator() {
           <button className="hd-item" onClick={() => { previewLink(); setOpenMenu(null); }}><Icon name="share" size={16} /> Share preview link</button>
           <button className="hd-item" onClick={() => fileRef.current?.click()}><Icon name="upload" size={16} /> Load .txt / .md</button>
           <button className="hd-item" disabled={!!photoBusy} onClick={() => { setOpenMenu(null); photoRef.current?.click(); }}><Icon name="image" size={16} /> Import from photo…</button>
-          <button className={`hd-item${showZones ? " on" : ""}`}
+          <button className="hd-item"
             onClick={() => setShowZones(s => !s)}>
-            <Icon name="grid" size={16} /> Ice zones {showZones ? "(on)" : ""}
+            <Icon name="grid" size={16} /> Ice zones<span className={`hd-sw${showZones ? " on" : ""}`} />
           </button>
-          <button className={`hd-item${anyLocked ? " on" : ""}`}
-            onClick={() => { toggleLockAll(); setOpenMenu(null); }}>
-            <Icon name={anyLocked ? "unlock" : "lock"} size={16} /> {anyLocked ? "Unlock all" : "Lock board"}
+          <button className="hd-item"
+            onClick={toggleLockAll}>
+            <Icon name={anyLocked ? "unlock" : "lock"} size={16} /> {anyLocked ? "Unlock all" : "Lock board"}<span className={`hd-sw${anyLocked ? " on" : ""}`} />
           </button>
-          <button className={`hd-item${lockedSelectable ? " on" : ""}`}
+          <button className="hd-item"
             onClick={() => setLockedSelectable(s => !s)}>
-            <Icon name="lock" size={16} /> Locked items selectable {lockedSelectable ? "(on)" : ""}
+            <Icon name="lock" size={16} /> Allow selecting locked items<span className={`hd-sw${lockedSelectable ? " on" : ""}`} />
           </button>
-          <button className={`hd-item${showDiag ? " on" : ""}`}
-            onClick={() => { setShowDiag(s => !s); setOpenMenu(null); }}>
-            <Icon name="gauge" size={16} /> Diagnostics {showDiag ? "(on)" : ""}
+          <button className="hd-item"
+            onClick={() => setShowDiag(s => !s)}>
+            <Icon name="gauge" size={16} /> Diagnostics<span className={`hd-sw${showDiag ? " on" : ""}`} />
           </button>
           <button className="hd-item" onClick={() => setOpenMenu("prefs")}>
-            <Icon name="sliders" size={16} /> App &amp; drill settings…
+            <Icon name="sliders" size={16} /> App &amp; drill settings<span className="hd-chev"><Icon name="chevronRight" size={14} /></span>
           </button>
           <div className="hd-mh" style={{ marginTop: 4 }}>Let AI play</div>
           <div className="hd-poprow">
@@ -8394,16 +8402,26 @@ export default function DrillAnimator() {
               <span style={{ fontSize: 11, color: "#8b99a8" }}>draw each X / O on an opaque white disc, like the action circles</span>
             </div>
           )}
-          <div className="hd-poprow">
-            <button className="hd-mini" onClick={() => {
-              const cur = localStorage.getItem(ANTHROPIC_KEY_STORE) || "";
-              const next = window.prompt("Anthropic API key for photo import (empty to clear)", cur);
-              if (next == null) return;
-              if (next.trim()) { localStorage.setItem(ANTHROPIC_KEY_STORE, next.trim()); flash("API key saved"); }
-              else { localStorage.removeItem(ANTHROPIC_KEY_STORE); flash("API key cleared"); }
-            }}>Claude API key…</button>
-            <span style={{ fontSize: 11, color: "#8b99a8" }}>{localStorage.getItem(ANTHROPIC_KEY_STORE) ? "set — used by Import from photo" : "needed for Import from photo"}</span>
-          </div>
+          {keyEdit == null ? (
+            <div className="hd-poprow">
+              <button className="hd-mini" onClick={() => setKeyEdit(localStorage.getItem(ANTHROPIC_KEY_STORE) || "")}>Claude API key…</button>
+              <span style={{ fontSize: 11, color: "#8b99a8" }}>{localStorage.getItem(ANTHROPIC_KEY_STORE) ? "set — used by Import from photo" : "needed for Import from photo"}</span>
+            </div>
+          ) : (
+            <div className="hd-poprow">
+              <input className="hd-input" type="password" autoFocus placeholder="sk-ant-…" value={keyEdit}
+                autoComplete="off" style={{ flex: 1, minWidth: 0, fontFamily: "ui-monospace, monospace", fontSize: 12 }}
+                onChange={e => setKeyEdit(e.target.value)} />
+              <button className="hd-mini" onClick={() => {
+                if (keyEdit.trim()) { localStorage.setItem(ANTHROPIC_KEY_STORE, keyEdit.trim()); flash("API key saved"); }
+                else { localStorage.removeItem(ANTHROPIC_KEY_STORE); flash("API key cleared"); }
+                setKeyEdit(null);
+              }}>Save</button>
+              <button className="hd-mini" onClick={() => setKeyEdit(null)}><Icon name="close" size={13} /></button>
+              <span style={{ fontSize: 11, color: "#8b99a8", width: "100%" }}>
+                Stored only on this device — use a spend-capped key. Empty + Save clears it.</span>
+            </div>
+          )}
           <div className="hd-poprow">
             <button className={`hd-mini${collisions ? " on" : ""}`}
               onClick={() => setCollisions(v => !v)}>{collisions ? "✓ Route avoidance" : "Route avoidance"}</button>
@@ -8542,7 +8560,7 @@ export default function DrillAnimator() {
               <span className="hd-toolglyph"><Icon name="marker" size={22} /></span><span>Marker</span>
             </button>
             {[["square", "□", "Square"], ["circle", "○", "Circle"], ["triangle", "△", "Triangle"]].map(([k, glyph, lbl]) => (
-              <button key={k} className="hd-tool" onClick={() => addShapeMark(k)}>
+              <button key={k} className="hd-tool" onClick={() => { resetAnim(); setPlaying(false); addShapeMark(k); setOpenMenu(null); }}>
                 <span className="hd-toolglyph">{glyph}</span><span>{lbl}</span>
               </button>
             ))}
@@ -8784,14 +8802,22 @@ export default function DrillAnimator() {
               </div>
             ))}
           </div>
-          <div className="hd-row">
-            <button className="hd-btn" disabled={playing} onClick={addStepHere}>＋ Add here</button>
-            <button className="hd-btn" onClick={generateSteps}>⚙ Generate from play</button>
-          </div>
+          {genAsk ? (
+            <div className="hd-row" style={{ alignItems: "center" }}>
+              <span style={{ fontSize: 12.5, color: "#e8d48b" }}>Replace the current {drillSteps.length} step{drillSteps.length > 1 ? "s" : ""}?</span>
+              <button className="hd-btn primary" onClick={() => generateSteps(true)}>Replace</button>
+              <button className="hd-btn" onClick={() => setGenAsk(false)}>Cancel</button>
+            </div>
+          ) : (
+            <div className="hd-row">
+              <button className="hd-btn" disabled={playing} onClick={addStepHere}><Icon name="plus" size={14} /> Add here</button>
+              <button className="hd-btn" onClick={() => generateSteps()}><Icon name="brain" size={14} /> Generate from play</button>
+            </div>
+          )}
           <div className="hd-row">
             <button className="hd-btn primary" onClick={() => { setOpenMenu(null); setEditAnchor(null); }}>Done</button>
             <button className={`hd-btn${presentation ? " primary" : ""}`}
-              onClick={() => setPresentation(v => !v)}>{presentation ? "Presentation on" : "Turn on"}</button>
+              onClick={() => setPresentation(v => !v)}>Presentation: {presentation ? "On" : "Off"}</button>
           </div>
           <div className="hd-note">
             Scrub the timeline, pause, then “＋ Add here” drops a note — near a waypoint it

@@ -25,6 +25,7 @@ const ICONS = {
   plus: <path d="M12 5v14M5 12h14" />,
   chevronUp: <path d="M6 15l6-6 6 6" />,
   chevronDown: <path d="M6 9.5l6 6 6-6" />,
+  chevronRight: <path d="M9.5 6l6 6-6 6" />,
   // corner arrows out = maximize; corner arrows in = restore
   expand: <><path d="M9 4.5H4.5V9" /><path d="M15 4.5h4.5V9" /><path d="M9 19.5H4.5V15" /><path d="M15 19.5h4.5V15" /></>,
   restore: <><path d="M4.5 8.5H9V4" /><path d="M19.5 8.5H15V4" /><path d="M4.5 15.5H9V20" /><path d="M19.5 15.5H15V20" /></>,
