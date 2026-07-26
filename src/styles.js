@@ -110,6 +110,13 @@ export const STYLES = `
         .hd-sheet { position:absolute; inset:0; z-index:50; background:rgba(10,13,17,.96);
           display:flex; flex-direction:column; gap:10px; padding:16px;
           padding-top:calc(16px + env(safe-area-inset-top)); }
+        /* tool-swap mini buttons in the piece popup */
+        .hd-swapbtn { padding:4px 7px; }
+        .hd-swapbtn .hd-toolimg { width:24px; height:19px; display:block; pointer-events:none; }
+        /* photo-import busy spinner */
+        .hd-spinner { width:34px; height:34px; border-radius:50%; border:3px solid #2c3846;
+          border-top-color:#6ea8ff; animation:hd-spin 0.9s linear infinite; }
+        @keyframes hd-spin { to { transform:rotate(360deg); } }
         .hd-ta { flex:1; min-height:120px; background:#0f141a; color:#cfe0ee; border:1px solid #2c3846;
           border-radius:8px; font-family:ui-monospace, monospace; font-size:12.5px; padding:8px; resize:none; }
         /* live markdown preview of the coaching notes */

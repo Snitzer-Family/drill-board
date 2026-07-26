@@ -130,7 +130,7 @@ function trimSegStart(prev, s, d) {
   return subSegFrom(prev, s, t);
 }
 
-const NET_L = { x: 17, y: 42.5 }, NET_R = { x: 183, y: 42.5 };
+const NET_L = { x: 11, y: 42.5 }, NET_R = { x: 189, y: 42.5 };
 const f = n => Math.round(n * 100) / 100;
 const V = (name, fb) => `var(--${name},${fb})`;
 const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -174,20 +174,24 @@ function rink() {
   const mk = V("mark", "#cf3346"), mkb = V("mark-blue", "#2f5fb0");
   const dot = (x, y, r = 1, c = mk) => `<circle cx="${x}" cy="${y}" r="${r}" fill="${c}"/>`;
   const fo = (x, y, c) => `<circle cx="${x}" cy="${y}" r="15" fill="none" stroke="${c}" stroke-width="0.45" opacity="0.9"/>`;
+  // end-zone circle hash marks: 2' long, ~5'7" apart, outside the circle edge
+  const hash = (x, y) => `<path d="M ${x - 2.8} ${y - 17} V ${y - 15} M ${x + 2.8} ${y - 17} V ${y - 15} M ${x - 2.8} ${y + 15} V ${y + 17} M ${x + 2.8} ${y + 15} V ${y + 17}" stroke="${mk}" stroke-width="0.45" opacity="0.9" fill="none"/>`;
   return `
-    <rect x="0.6" y="0.6" width="198.8" height="83.8" rx="26" fill="${V("surface", "#f6fafd")}" stroke="${V("ink", "#14202b")}" stroke-width="1.1"/>
+    <rect x="0.6" y="0.6" width="198.8" height="83.8" rx="28" fill="${V("surface", "#f6fafd")}" stroke="${V("ink", "#14202b")}" stroke-width="1.1"/>
     <g clip-path="url(#ice)">
       <g stroke-linecap="round">
-        <line x1="17" y1="0" x2="17" y2="85" stroke="${mk}" stroke-width="0.45"/>
-        <line x1="183" y1="0" x2="183" y2="85" stroke="${mk}" stroke-width="0.45"/>
+        <line x1="11" y1="0" x2="11" y2="85" stroke="${mk}" stroke-width="0.45"/>
+        <line x1="189" y1="0" x2="189" y2="85" stroke="${mk}" stroke-width="0.45"/>
         <line x1="75" y1="0" x2="75" y2="85" stroke="${mkb}" stroke-width="1.1"/>
         <line x1="125" y1="0" x2="125" y2="85" stroke="${mkb}" stroke-width="1.1"/>
         <line x1="100" y1="0" x2="100" y2="85" stroke="${mk}" stroke-width="1.1"/>
-        <path d="M 17 36.5 A 6 6 0 0 1 17 48.5" fill="${mkb}" stroke="${mk}" stroke-width="0.35" opacity="0.9"/>
-        <path d="M 183 36.5 A 6 6 0 0 0 183 48.5" fill="${mkb}" stroke="${mk}" stroke-width="0.35" opacity="0.9"/>
+        <path d="M 11 38.5 L 15.5 38.5 A 6 6 0 0 1 15.5 46.5 L 11 46.5 Z" fill="${mkb}" stroke="${mk}" stroke-width="0.35" opacity="0.9"/>
+        <path d="M 189 38.5 L 184.5 38.5 A 6 6 0 0 0 184.5 46.5 L 189 46.5 Z" fill="${mkb}" stroke="${mk}" stroke-width="0.35" opacity="0.9"/>
+        <path d="M 90 85 A 10 10 0 0 1 110 85" fill="none" stroke="${mk}" stroke-width="0.3" opacity="0.8"/>
       </g>
-      ${fo(100, 42.5, mkb)}${fo(45, 20.5, mk)}${fo(45, 64.5, mk)}${fo(155, 20.5, mk)}${fo(155, 64.5, mk)}
-      ${dot(100, 42.5, 0.9, mkb)}${dot(45, 20.5)}${dot(45, 64.5)}${dot(155, 20.5)}${dot(155, 64.5)}
+      ${fo(100, 42.5, mkb)}${fo(31, 20.5, mk)}${fo(31, 64.5, mk)}${fo(169, 20.5, mk)}${fo(169, 64.5, mk)}
+      ${hash(31, 20.5)}${hash(31, 64.5)}${hash(169, 20.5)}${hash(169, 64.5)}
+      ${dot(100, 42.5, 0.5, mkb)}${dot(31, 20.5)}${dot(31, 64.5)}${dot(169, 20.5)}${dot(169, 64.5)}
       ${dot(80, 20.5)}${dot(80, 64.5)}${dot(120, 20.5)}${dot(120, 64.5)}
     </g>`;
 }
@@ -197,8 +201,10 @@ function rink() {
 function markMarkup(m) {
   if (!m.pts || m.pts.length < 2) return "";
   const w = m.width || 1.1;
-  // smooth the control points into a Catmull-Rom curve (matches the app)
-  const smooth = cp => {
+  // smooth the control points into a Catmull-Rom curve (matches the app);
+  // points flagged `c` are sharp CORNERS — the smoothing splits there and each
+  // side curves independently, meeting in a hard join
+  const smoothRun = cp => {
     if (cp.length < 3) return cp;
     const out = [{ x: cp[0].x, y: cp[0].y }];
     for (let i = 0; i < cp.length - 1; i++) {
@@ -214,13 +220,28 @@ function markMarkup(m) {
     }
     return out;
   };
+  const smooth = cp => {
+    if (cp.length < 3) return cp;
+    const runs = []; let cur = [cp[0]];
+    for (let i = 1; i < cp.length; i++) {
+      cur.push(cp[i]);
+      if (cp[i].c && i < cp.length - 1) { runs.push(cur); cur = [cp[i]]; }
+    }
+    runs.push(cur);
+    if (runs.length === 1) return smoothRun(cp);
+    const out = [];
+    runs.forEach((run, ri) => { const sm = smoothRun(run); out.push(...(ri ? sm.slice(1) : sm)); });
+    return out;
+  };
   let pts = smooth(m.pts);
   if (m.style === "wavy") {
     const d = []; for (let i = 1; i < pts.length; i++) { const a = pts[i - 1], b = pts[i], n = Math.max(1, Math.round(Math.hypot(b.x - a.x, b.y - a.y) / 0.4)); for (let k = i === 1 ? 0 : 1; k <= n; k++) d.push({ x: a.x + (b.x - a.x) * k / n, y: a.y + (b.y - a.y) * k / n }); }
     let acc = 0; const amp = Math.max(0.5, w * 0.9); pts = d.map((pt, i) => { const p0 = d[Math.max(0, i - 1)], p1 = d[Math.min(d.length - 1, i + 1)]; const dx = p1.x - p0.x, dy = p1.y - p0.y, mm = Math.hypot(dx, dy) || 1; if (i > 0) acc += Math.hypot(d[i].x - d[i - 1].x, d[i].y - d[i - 1].y); const edge = Math.min(1, i / 3, (d.length - 1 - i) / 3); const off = Math.sin((acc / 2.8) * Math.PI * 2) * amp * edge; return { x: pt.x + (-dy / mm) * off, y: pt.y + (dx / mm) * off }; });
   }
   const dash = m.style === "dashed" ? ` stroke-dasharray="${f(w * 2.6)} ${f(w * 1.9)}"` : m.style === "dotted" ? ` stroke-dasharray="0.02 ${f(w * 2)}"` : "";
-  return `<polyline points="${pts.map(q => `${f(q.x)},${f(q.y)}`).join(" ")}" fill="none" stroke="${m.color}" stroke-width="${f(w)}"${dash} stroke-linecap="round" stroke-linejoin="round" opacity="0.94"/>`;
+  const ptStr = pts.map(q => `${f(q.x)},${f(q.y)}`).join(" ");
+  const fillEl = m.fill ? `<polygon points="${ptStr}" fill="${m.fill}" fill-opacity="${f(m.fillOp != null ? m.fillOp : 0.25)}" stroke="none"/>` : "";
+  return `${fillEl}<polyline points="${ptStr}" fill="none" stroke="${m.color}" stroke-width="${f(w)}"${dash} stroke-linecap="round" stroke-linejoin="round" opacity="0.94"/>`;
 }
 /* piece icons                                                         */
 function piece(p) {
@@ -315,14 +336,30 @@ const BLOCKED_COLOR = "#e01f2b";      // a rebound that can't reach its collecto
 // how far to hold each END (arrowhead) and START off its icon (net/player/point)
 const CHAIN_TRIM = { shot: 4.6, rebound: 3, "rebound-x": 3, pass: 4 };
 const CHAIN_START = { shot: 4, rebound: 3, "rebound-x": 3, pass: 4 };
+// offset a polyline sideways by `o` feet (perpendicular to the local direction)
+const offsetPoly = (pts, o) => pts.map((p, i) => {
+  const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)];
+  const dx = b.x - a.x, dy = b.y - a.y, l = Math.hypot(dx, dy) || 1;
+  return { x: p.x - (dy / l) * o, y: p.y + (dx / l) * o };
+});
 const chainLine = (pts, mode) => {
   const rebound = mode === "rebound", blocked = mode === "rebound-x", shot = mode === "shot";
   const dotted = rebound || blocked;
   const color = blocked ? BLOCKED_COLOR : rebound ? REBOUND_COLOR : V("puck", "#14171a");
-  const dash = shot ? "" : dotted ? ' stroke-dasharray="0.1 1.9"' : ' stroke-dasharray="2.4 2"';
-  const marker = blocked ? "arrowRX" : rebound ? "arrowRB" : "arrowP";
   const line = trimLine(pts, CHAIN_START[mode] != null ? CHAIN_START[mode] : 3.5, CHAIN_TRIM[mode] != null ? CHAIN_TRIM[mode] : 3.5);
-  return `<polyline points="${polyPts(line)}" fill="none" stroke="${color}" stroke-width="${shot ? 0.72 : blocked ? 0.72 : 0.6}"`
+  if (shot) {
+    // standard shot notation: two parallel lines + an open caret at the end
+    // (the caret rides an invisible center line so it stays on-axis; the
+    // visible lines stop at the caret's mouth so they never poke past it)
+    const body = trimLine(line, 0, 2.2);
+    const s = `fill="none" stroke="${color}" stroke-width="0.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"`;
+    return `<polyline points="${polyPts(offsetPoly(body, 0.65))}" ${s}/>`
+      + `<polyline points="${polyPts(offsetPoly(body, -0.65))}" ${s}/>`
+      + `<polyline points="${polyPts(line)}" fill="none" stroke="${color}" stroke-opacity="0" stroke-width="0.72" marker-end="url(#arrowS)"/>`;
+  }
+  const dash = dotted ? ' stroke-dasharray="0.1 1.9"' : ' stroke-dasharray="2.4 2"';
+  const marker = blocked ? "arrowRX" : rebound ? "arrowRB" : "arrowP";
+  return `<polyline points="${polyPts(line)}" fill="none" stroke="${color}" stroke-width="${blocked ? 0.72 : 0.6}"`
     + `${dash} stroke-linecap="round" stroke-linejoin="round" opacity="0.9" marker-end="url(#${marker})"/>`;
 };
 
@@ -340,7 +377,12 @@ function chain(pk, byId, pieces) {
   const out = [];
   const rimPoly = (launch, aim, anchor) => (aim != null ? boards.rimTo(launch, aim, anchor) : boards.rimPath(launch, anchor));
   const transfers = pk.transfers || [];
-  const termAt = pk.shotAt != null ? pk.shotAt : pk.rimAt != null ? pk.rimAt : pk.chipAt != null ? pk.chipAt : null;
+  // the chain's unconditional END lives in terminals[] (ref="" = base chain;
+  // ref'd terminals belong to branch conditions and aren't part of the base
+  // plan). Legacy shotAt/rimAt/chipAt fields still win if present.
+  const baseTerm = (pk.terminals || []).find(t => !t.ref) || null;
+  const termAt = pk.shotAt != null ? pk.shotAt : pk.rimAt != null ? pk.rimAt : pk.chipAt != null ? pk.chipAt
+    : baseTerm ? baseTerm.at : null;
   const lastAt = {};                                  // player id → route index where they last released
   // a give-and-go return: the receiver already carried the puck, so they catch
   // it a bit up their route from where they gave it (not at their final waypoint,
@@ -379,6 +421,12 @@ function chain(pk, byId, pieces) {
   if (pk.shotAt != null) { const l = routePoint(cur, pk.shotAt); out.push(chainLine([l, shotNet(l)], "shot")); }
   else if (pk.rimAt != null) { const l = routePoint(cur, pk.rimAt); out.push(chainLine(boards.rimAround(l, pk.rimDist != null ? pk.rimDist : 65, pk.rimAim), "pass")); }
   else if (pk.chipAt != null) { const l = routePoint(cur, pk.chipAt); const h = pk.chipAim != null ? aimVec(pk.chipAim) : heading(cur, pk.chipAt); out.push(chainLine(boards.slide(l.x, l.y, h.x, h.y, pk.chipDist != null ? pk.chipDist : 26), "pass")); }
+  else if (baseTerm) {
+    const l = routePoint(cur, baseTerm.at);
+    if (baseTerm.kind === "shot") out.push(chainLine([l, shotNet(l, baseTerm.net != null ? baseTerm.net : null)], "shot"));
+    else if (baseTerm.kind === "rim") out.push(chainLine(boards.rimAround(l, baseTerm.dist != null ? baseTerm.dist : 65, baseTerm.aim), "pass"));
+    else if (baseTerm.kind === "chip") { const h = baseTerm.aim != null ? aimVec(baseTerm.aim) : heading(cur, baseTerm.at); out.push(chainLine(boards.slide(l.x, l.y, h.x, h.y, baseTerm.dist != null ? baseTerm.dist : 26), "pass")); }
+  }
   return out.join("");
 }
 
@@ -392,12 +440,16 @@ export function drillSvg(dsl, opts = {}) {
   const byId = id => pieces.find(p => p.id === id);
   const rank = k => (k === "net" || k === "bumper" || k === "deker" || k === "passer" || k === "tire" || k === "stick" || k === "mark" ? 0 : k === "player" ? 2 : 1);
   const defs = `<defs>
-      <clipPath id="ice"><rect x="0.6" y="0.6" width="198.8" height="83.8" rx="26"/></clipPath>
+      <clipPath id="ice"><rect x="0.6" y="0.6" width="198.8" height="83.8" rx="28"/></clipPath>
       <marker id="arrowR" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4" fill="none" stroke="${V("mark", "#cf3346")}" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></marker>
       <marker id="arrowP" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="${V("puck", "#14171a")}"/></marker>
+      <marker id="arrowS" markerWidth="8" markerHeight="8" refX="5.6" refY="4" orient="auto"><path d="M1.4 1.9 L5.9 4 L1.4 6.1" fill="none" stroke="${V("puck", "#14171a")}" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/></marker>
       <marker id="arrowRB" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="${REBOUND_COLOR}"/></marker>
       <marker id="arrowRX" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="${BLOCKED_COLOR}"/></marker>
     </defs>`;
+  // freehand ink (MARK) sits at the very bottom — directly on the ice, under
+  // routes, puck lines, and every piece/tool
+  const inks = pieces.filter(p => p.kind === "mark").map(p => piece(p)).join("");
   const routes = pieces.map(p => routePath(p, pieces)).join("");
   const chains = pieces.filter(p => p.kind === "puck").map(pk => chain(pk, byId, pieces)).join("");
   // a carried puck draws close to its player, not at its loose stored spot
@@ -407,7 +459,7 @@ export function drillSvg(dsl, opts = {}) {
     const dx = p.x - c.x, dy = p.y - c.y, dd = Math.hypot(dx, dy) || 1, off = 4.2;
     return { ...p, x: c.x + dx / dd * off, y: c.y + dy / dd * off };
   };
-  const icons = [...pieces].sort((a, b) => rank(a.kind) - rank(b.kind)).map(p => piece(drawPos(p))).join("");
+  const icons = [...pieces].filter(p => p.kind !== "mark").sort((a, b) => rank(a.kind) - rank(b.kind)).map(p => piece(drawPos(p))).join("");
   // text labels paint on top: standalone label pieces + "label"-mode waypoints
   const labels = pieces.filter(p => p.kind === "label").map(p => labelSvg(p.x, p.y, p.text, p.size, p.color)).join("")
     + pieces.flatMap(p => (p.path || []).filter(s => s.dmode === "label" && s.desc)
@@ -421,5 +473,5 @@ export function drillSvg(dsl, opts = {}) {
   const viewBox = `${vx - px} ${vy - py} ${vw + 2 * px} ${vh + 2 * py}`;
   // icons paint over the chain lines; arrowheads are trimmed back so they point
   // at their target instead of vanishing under a circle. Labels stay on top.
-  return `<svg class="rink" viewBox="${viewBox}"${wattr} xmlns="http://www.w3.org/2000/svg" role="img">${defs}${rink()}${routes}${chains}${icons}${labels}</svg>`;
+  return `<svg class="rink" viewBox="${viewBox}"${wattr} xmlns="http://www.w3.org/2000/svg" role="img">${defs}${rink()}${inks}${routes}${chains}${icons}${labels}</svg>`;
 }

@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useLayoutEffect, useMemo } from "react";
 import { VIEWS, COLORS, vb, APP_VERSION, ICON_SCALE, ROUTE_START_GAP, BUILD_STAMP, DEFAULT_TEXT, SPEED,
   SAVE_PROB, MISS_POST, MISS_WIDE, MISS_OVER, SHOT_AIR_PROB, BOUNCE_REST } from "./constants.js";
 import { parseDrill, serializeDrill, extractDrill, deriveInventory } from "./drill-format.js";
+import { prepareImage, drillFromImage, ANTHROPIC_KEY_STORE } from "./drill-vision.js";
 import { drillSvg } from "./drill-svg.js";
 import { mdEscape, mdInline, mdBlock } from "./md.js";
 import { clampX, clampY, segEnd, segD, nearestT, splitSeg, zigzagPoints, wigglePoints, wigglePoly, zigzagPoly, convertSeg, fitRoute, evalSeg, rdp, catmullToBezier, alignJoint, mirrorJoint, translateJointHandles, trimSegStart, trimSegEnd, trimPolyStart, trimPolyEnd, gapPolyAt } from "./geometry.js";
@@ -30,6 +31,9 @@ const TOOL_GLYPH = {
   stick: { vb: "-6.4 -2.4 13.4 4.8", color: "#8a929c" },
   light: { vb: "-3.7 -3.7 7.4 7.4", color: "#2ea043" },
 };
+// the interchangeable on-ice training tools: any one can be swapped for
+// another from its popup ("Change to" row) without re-placing it
+const TOOL_KINDS = ["cone", "tire", "bumper", "deker", "passer", "stick", "light"];
 const toolImg = kind => {
   const k = kind === "playerpuck" ? "player" : kind;
   const g = TOOL_GLYPH[k];
@@ -258,6 +262,9 @@ function DelayTrigger({ value, onChange, sub, players, actorIds, nameOf }) {
 const SAVE_KEY = "drillboard:autosave";   // the whole board, persisted across refreshes
 const WB_KEY = "drillboard:whiteboard";   // whiteboard-mode view pref, persisted on its own
 const WBC_KEY = "drillboard:whiteboard-circle";   // circled X/O symbols sub-pref
+const HALFNS_KEY = "drillboard:half-ns";  // half-ice shown north-south (vertical)
+const HALFFLIP_KEY = "drillboard:half-flip";  // half-ice net at the far end (left / top)
+const STRETCH_KEY = "drillboard:stretch-fill";  // full ice stretches to fill the screen
 
 export default function DrillAnimator() {
   // a shared drill link (#d=<url-safe base64 DSL> — the preview-link format from
@@ -331,6 +338,23 @@ export default function DrillAnimator() {
     try { return localStorage.getItem(WBC_KEY) === "1"; } catch { return false; }
   });
   useEffect(() => { try { localStorage.setItem(WBC_KEY, wbCircle ? "1" : "0"); } catch { /* private mode */ } }, [wbCircle]);
+  // half-ice screen orientation: east-west (net right, default) or north-south
+  // (net at the bottom, drill-book portrait style). A device view pref.
+  const [halfNS, setHalfNS] = useState(() => {
+    try { return localStorage.getItem(HALFNS_KEY) === "1"; } catch { return false; }
+  });
+  useEffect(() => { try { localStorage.setItem(HALFNS_KEY, halfNS ? "1" : "0"); } catch { /* private mode */ } }, [halfNS]);
+  // flipped ends: E-W with the net at the LEFT, or N-S with the net at the TOP
+  const [halfFlip, setHalfFlip] = useState(() => {
+    try { return localStorage.getItem(HALFFLIP_KEY) === "1"; } catch { return false; }
+  });
+  useEffect(() => { try { localStorage.setItem(HALFFLIP_KEY, halfFlip ? "1" : "0"); } catch { /* private mode */ } }, [halfFlip]);
+  // full ice: stretch to fill the screen (default, the app's signature look) or
+  // letterbox to true 200'×85' proportions so every marking is geometrically exact
+  const [stretchFill, setStretchFill] = useState(() => {
+    try { return localStorage.getItem(STRETCH_KEY) !== "0"; } catch { return true; }
+  });
+  useEffect(() => { try { localStorage.setItem(STRETCH_KEY, stretchFill ? "1" : "0"); } catch { /* private mode */ } }, [stretchFill]);
   const effDetail = detailAnim && !whiteboard;
   // whiteboard also drops the shot theatrics: no random miss/post/air rolls
   // (shots bury flat) and no GOAL!/SAVE! splashes — a diagram, not a broadcast
@@ -427,6 +451,12 @@ export default function DrillAnimator() {
   // leave fork-edit mode when another piece is selected
   useEffect(() => { if (editingFork && selectedId !== editingFork.id) setEditingFork(null); }, [selectedId, editingFork]);
   const fileRef = useRef(null);
+  // photo → DSL import (Claude vision): hidden image input, busy status text,
+  // pre-import board snapshot (non-null = Keep/Discard bar showing), abort
+  const photoRef = useRef(null);
+  const photoAbort = useRef(null);
+  const [photoBusy, setPhotoBusy] = useState(null);
+  const [photoUndo, setPhotoUndo] = useState(null);
   const animRef = useRef(0);
   const totalRef = useRef(1);
   const holdRef = useRef(0);        // seconds remaining in the current step hold
@@ -852,36 +882,64 @@ export default function DrillAnimator() {
   // comparing the stage aspect to the rink's aspect both ways (log scale
   // so "2x too wide" and "2x too tall" weigh equally).
   const sa = stageSize.w / Math.max(1, stageSize.h);
-  const rotated =
+  const autoRotated =
     Math.abs(Math.log(sa / (vhF / vwF))) < Math.abs(Math.log(sa / (vwF / vhF)));
+  // half ice: orientation is the user's choice (rink menu) — four compass
+  // orientations: 0 = net right, 180 = net left, 90 = net bottom, 270 = net
+  // top; full/quarter keep the fill-mode auto orientation (0 or 90).
+  const screenRot = rink === "half"
+    ? (halfNS ? (halfFlip ? 270 : 90) : (halfFlip ? 180 : 0))
+    : (autoRotated ? 90 : 0);
+  const swapAxes = screenRot === 90 || screenRot === 270; // view turned vertical
   let canvasW = Math.max(50, stageSize.w);
   let canvasH = Math.max(20, stageSize.h);
-  // Full ice fills the stage (fill mode). Half / quarter keep their true
-  // proportions: fit the width, then cap the height (and vice-versa) to at most
-  // a small over-stretch, letterboxing the surplus instead of stretching tall.
+  // Full ice fills the stage. Half ice is constrained to its true 100'×85'
+  // proportions in every orientation (no stretch — the canvas letterboxes).
+  // Quarter keeps its true proportions up to a small over-stretch.
   if (rink !== "full") {
-    const vbW = rotated ? vhF : vwF, vbH = rotated ? vwF : vhF;   // effective viewBox dims
-    const CAP = 1.12;                                             // max stretch past true aspect
+    const vbW = swapAxes ? vhF : vwF, vbH = swapAxes ? vwF : vhF; // effective viewBox dims
+    const CAP = rink === "quarter" ? 1.12 : 1;                    // max stretch past true aspect
     canvasH = Math.min(canvasH, Math.round((canvasW * vbH) / vbW * CAP));
     canvasW = Math.min(canvasW, Math.round((canvasH * vbW) / vbH * CAP));
   }
-  // maps rink coords into the rotated viewBox: (x,y) -> (my+vh-y, x-mx)
-  const sceneTransform = rotated ? `rotate(90) translate(${-mxF} ${-(myF + vhF)})` : undefined;
-  const screenRot = rotated ? 90 : 0;
-  // the root viewBox the pinch-zoom transform operates in (rotated swaps axes)
-  geomRef.current = rotated
-    ? { ox: 0, oy: 0, rootW: vhF, rootH: vwF }
-    : { ox: mxF, oy: myF, rootW: vwF, rootH: vhF };
+  // Full ice with "Stretch to fill" OFF letterboxes inside the viewBox instead
+  // of shrinking the canvas: the rink keeps true proportions with padded
+  // off-ice space around it, so pinch-zoom can expand the rink to fill the
+  // whole stage rather than staying boxed between letterbox bands.
+  let padX = 0, padY = 0;
+  if (rink === "full" && !stretchFill) {
+    const baseW = swapAxes ? vhF : vwF, baseH = swapAxes ? vwF : vhF;
+    const want = canvasW / Math.max(1, canvasH);                  // stage aspect
+    if (want > baseW / baseH) padX = (baseH * want - baseW) / 2;
+    else padY = (baseW / want - baseH) / 2;
+  }
+  // maps rink coords into the rotated viewBox: 90° -> (my+vh-y, x-mx),
+  // 180° -> (mx+vw-x, my+vh-y), 270° -> (y-my, mx+vw-x)
+  const sceneTransform =
+    screenRot === 90 ? `rotate(90) translate(${-mxF} ${-(myF + vhF)})`
+    : screenRot === 180 ? `rotate(180) translate(${-(mxF + vwF)} ${-(myF + vhF)})`
+    : screenRot === 270 ? `rotate(-90) translate(${-(mxF + vwF)} ${-myF})`
+    : undefined;
+  // the root viewBox the pinch-zoom transform operates in (vertical swaps
+  // axes; any rotation re-origins the root at 0,0 via the scene transform;
+  // letterbox padding widens it symmetrically)
+  geomRef.current = swapAxes
+    ? { ox: -padX, oy: -padY, rootW: vhF + 2 * padX, rootH: vwF + 2 * padY }
+    : screenRot === 180
+      ? { ox: -padX, oy: -padY, rootW: vwF + 2 * padX, rootH: vhF + 2 * padY }
+      : { ox: mxF - padX, oy: myF - padY, rootW: vwF + 2 * padX, rootH: vhF + 2 * padY };
+  const rootGeom = geomRef.current;
   const zoomXf = view.s !== 1 || view.tx || view.ty ? `translate(${view.tx} ${view.ty}) scale(${view.s})` : undefined;
   // "Mark opacity" fades only the drawn drill markings (routes, forks, stops,
   // freehand ink, shot-aim). Players/pucks/cones/nets and editing UI stay opaque.
   const markMO = markOpacity < 1 ? markOpacity : undefined;
   // roundness correction: the fill-mode stretch scales the two rink axes
   // differently; circles are drawn as ellipses with ry scaled by yFix so
-  // they render perfectly round on screen after the stretch
+  // they render perfectly round on screen after the stretch. Expressed in
+  // root-viewBox scales so viewBox letterbox padding is accounted for.
   const yFix = (() => {
-    const sx = rotated ? canvasH / vwF : canvasW / vwF;
-    const sy = rotated ? canvasW / vhF : canvasH / vhF;
+    const sx = swapAxes ? canvasH / rootGeom.rootH : canvasW / rootGeom.rootW;
+    const sy = swapAxes ? canvasW / rootGeom.rootW : canvasH / rootGeom.rootH;
     return sy > 0 ? Math.max(0.2, Math.min(5, sx / sy)) : 1;
   })();
   // a handle dot that stays a true circle on screen despite the fill-mode
@@ -895,24 +953,28 @@ export default function DrillAnimator() {
   // heading as a pure screen rotation at a uniform scale (geometric mean
   // of the two axis scales, so sizes stay consistent in any orientation).
   const iconGeom = (() => {
-    const Sx = Math.max(1e-6, rotated ? canvasH / vwF : canvasW / vwF);
-    const Sy = Math.max(1e-6, rotated ? canvasW / vhF : canvasH / vhF);
+    const Sx = Math.max(1e-6, swapAxes ? canvasH / rootGeom.rootH : canvasW / rootGeom.rootW);
+    const Sy = Math.max(1e-6, swapAxes ? canvasW / rootGeom.rootW : canvasH / rootGeom.rootH);
     return { Sx, Sy, k: ICON_SCALE * Math.sqrt(Sx * Sy) };
   })();
+  // exact rotation terms for screenRot ∈ {0, 90, 180, 270} (avoids fp drift)
+  const rotCf = screenRot === 0 ? 1 : screenRot === 180 ? -1 : 0;
+  const rotSf = screenRot === 90 ? 1 : screenRot === 270 ? -1 : 0;
   function iconXf(pos) {
     const { Sx, Sy, k } = iconGeom;
     const a = ((pos.a || 0) * Math.PI) / 180;
     const c = Math.cos(a), s = Math.sin(a);
-    const th = rotated ? Math.atan2(Sx * c, -Sy * s) : Math.atan2(Sy * s, Sx * c);
+    // root-axis scales: the rink-axis scales re-labelled when the view is vertical
+    const sW = swapAxes ? Sy : Sx, sH = swapAxes ? Sx : Sy;
+    // on-screen direction of the piece's rink heading: rotate, then stretch
+    const th = Math.atan2(sH * (rotSf * c + rotCf * s), sW * (rotCf * c - rotSf * s));
     const ct = Math.cos(th), st = Math.sin(th);
-    let m00, m01, m10, m11;
-    if (rotated) {
-      m00 = (k * st) / Sx; m01 = (k * ct) / Sx;
-      m10 = (-k * ct) / Sy; m11 = (k * st) / Sy;
-    } else {
-      m00 = (k * ct) / Sx; m01 = (-k * st) / Sx;
-      m10 = (k * st) / Sy; m11 = (k * ct) / Sy;
-    }
+    // M = R(-rot)·diag(1/sW,1/sH)·k·R(th): cancels the scene rotation and the
+    // stretch, re-applies the heading as a pure screen rotation at uniform k
+    const m00 = (rotCf * (k * ct)) / sW + (rotSf * (k * st)) / sH;
+    const m01 = (rotCf * (-k * st)) / sW + (rotSf * (k * ct)) / sH;
+    const m10 = (-rotSf * (k * ct)) / sW + (rotCf * (k * st)) / sH;
+    const m11 = (rotSf * (k * st)) / sW + (rotCf * (k * ct)) / sH;
     return {
       t: `translate(${pos.x} ${pos.y}) matrix(${m00} ${m10} ${m01} ${m11} 0 0)`,
       th: (th * 180) / Math.PI,
@@ -1475,7 +1537,7 @@ export default function DrillAnimator() {
     const home = { x: p.x, y: p.y };
     // net this D defends: nearest net piece, else the goal line on its side
     const nets = pieces.filter(q => q.kind === "net");
-    let net = home.x < 100 ? { x: 17, y: 42.5 } : { x: 183, y: 42.5 };
+    let net = home.x < 100 ? { x: 11, y: 42.5 } : { x: 189, y: 42.5 };
     if (nets.length) {
       const n = nets.reduce((a, b) => (Math.hypot(b.x - home.x, b.y - home.y) < Math.hypot(a.x - home.x, a.y - home.y) ? b : a));
       net = { x: n.x, y: n.y };
@@ -3357,7 +3419,7 @@ export default function DrillAnimator() {
         const launch = t.at < 0 || !carrier.path.length ? { x: carrier.x, y: carrier.y } : segEnd(carrier, Math.min(t.at, carrier.path.length - 1));
         const shotNetId = t.net != null ? t.net : null;   // this rebound's own target
         const net = shotNetId ? (nets.find(x => x.id === shotNetId) || null) : (nets.length ? nets.reduce((a, b) => Math.hypot(b.x - launch.x, b.y - launch.y) < Math.hypot(a.x - launch.x, a.y - launch.y) ? b : a) : null);
-        const nPt = net ? { x: net.x, y: net.y } : (launch.x < 100 ? { x: 17, y: 42.5 } : { x: 183, y: 42.5 });
+        const nPt = net ? { x: net.x, y: net.y } : (launch.x < 100 ? { x: 11, y: 42.5 } : { x: 189, y: 42.5 });
         const anchor = t.recvAt != null && rec.path.length ? segEnd(rec, Math.min(t.recvAt, rec.path.length - 1)) : { x: rec.x, y: rec.y };
         if (segCrossesNet(nPt, anchor, shapes)) blockStage = Math.min(blockStage, s);
       });
@@ -3688,11 +3750,70 @@ export default function DrillAnimator() {
     drawTarget.current = null;
     setTool("select");
     if (!id || raw.length < 3) return;
+    /* (route drawing continues below) */
     setPieces(ps => ps.map(p => {
       if (p.id !== id) return p;
       const route = fitRoute({ x: p.x, y: p.y }, raw);
       return route.length ? { ...p, path: route } : p;
     }));
+  }
+
+  // Preset shape markers (square / circle / triangle) — placed parametrically
+  // instead of freehanded, then moved/scaled/stretched from the mark popup.
+  // Straight edges carry dense collinear points so the ink smoothing keeps
+  // them straight (same trick as imported zone overlays).
+  function shapeMarkPts(shape, cx, cy, w, h) {
+    const P = [];
+    if (shape === "circle") {
+      const n = 24;
+      for (let i = 0; i <= n; i++) { const t = (i / n) * 2 * Math.PI; P.push({ x: cx + (Math.cos(t) * w) / 2, y: cy + (Math.sin(t) * h) / 2 }); }
+      return P;
+    }
+    const cs = shape === "triangle"
+      ? [{ x: cx, y: cy - h / 2 }, { x: cx + w / 2, y: cy + h / 2 }, { x: cx - w / 2, y: cy + h / 2 }]
+      : [{ x: cx - w / 2, y: cy - h / 2 }, { x: cx + w / 2, y: cy - h / 2 }, { x: cx + w / 2, y: cy + h / 2 }, { x: cx - w / 2, y: cy + h / 2 }];
+    for (let i = 0; i < cs.length; i++) {
+      const a = cs[i], b = cs[(i + 1) % cs.length];
+      const n = Math.max(1, Math.floor(Math.hypot(b.x - a.x, b.y - a.y) / 3));
+      // the vertex itself is a sharp corner (break handle); interior points smooth
+      for (let k = 0; k < n; k++) P.push({ x: a.x + ((b.x - a.x) * k) / n, y: a.y + ((b.y - a.y) * k) / n, ...(k === 0 ? { c: true } : {}) });
+    }
+    P.push({ ...cs[0], c: true });
+    return P;
+  }
+  function addShapeMark(shape) {
+    const [mx, my, vw, vh] = VIEWS[rink];
+    const pts = shapeMarkPts(shape, mx + vw / 2, my + vh / 2, 20, shape === "triangle" ? 17 : 20);
+    const id = nextId("mark");
+    setPieces(ps => [...ps, { id, kind: "mark", pts, x: pts[0].x, y: pts[0].y,
+      color: markColor, width: markWidth, style: markStyle, path: [] }]);
+    setTool("select"); setOpenMenu(null);
+    setSelectedId(id);
+    setPopup({ type: "piece", id });
+  }
+  // rotate a mark's points about its centroid (degrees; rink feet are square
+  // units, so data-space rotation is geometrically true)
+  function rotateMark(id, deg) {
+    const m = pieces.find(q => q.id === id);
+    if (!m || !m.pts || m.pts.length < 2) return;
+    const cx = m.pts.reduce((a, q) => a + q.x, 0) / m.pts.length;
+    const cy = m.pts.reduce((a, q) => a + q.y, 0) / m.pts.length;
+    const r = (deg * Math.PI) / 180, c = Math.cos(r), s = Math.sin(r);
+    const pts = m.pts.map(q => ({
+      ...q,
+      x: clampX(cx + (q.x - cx) * c - (q.y - cy) * s),
+      y: clampY(cy + (q.x - cx) * s + (q.y - cy) * c),
+    }));
+    updateById(id, { pts, x: pts[0].x, y: pts[0].y });
+  }
+  // scale a mark's points about its centroid — sx/sy per axis (size & proportion)
+  function scaleMark(id, sx, sy) {
+    const m = pieces.find(q => q.id === id);
+    if (!m || !m.pts || m.pts.length < 2) return;
+    const cx = m.pts.reduce((a, q) => a + q.x, 0) / m.pts.length;
+    const cy = m.pts.reduce((a, q) => a + q.y, 0) / m.pts.length;
+    const pts = m.pts.map(q => ({ ...q, x: clampX(cx + (q.x - cx) * sx), y: clampY(cy + (q.y - cy) * sy) }));
+    updateById(id, { pts, x: pts[0].x, y: pts[0].y });
   }
 
   /* ----- pointer handling ----- */
@@ -4100,7 +4221,7 @@ export default function DrillAnimator() {
       const cp = boards.clampInside(pt.x, pt.y);
       update(p => {
         if (p.id !== d.id || p.kind !== "mark") return p;
-        const pts = p.pts.map((q, i) => (i === d.idx ? { x: cp.x, y: cp.y } : q));
+        const pts = p.pts.map((q, i) => (i === d.idx ? { ...q, x: cp.x, y: cp.y } : q));
         return { ...p, pts, x: pts[0].x, y: pts[0].y };
       });
       return;
@@ -4119,6 +4240,29 @@ export default function DrillAnimator() {
       const size = Math.max(0.4, Math.min(6, (d.size0 || 1) * (dist / d.dist0)));
       if (d.seg == null) updateById(d.id, { size });
       else updateSeg(d.id, d.seg, { dsize: size });
+      return;
+    }
+    if (d.kind === "markrotate") {
+      // rotate handle: spin the mark about its centroid, following the pointer
+      d.moved = true;
+      const ang = Math.atan2(pt.y - d.cy, pt.x - d.cx) - d.a0;
+      const c = Math.cos(ang), s = Math.sin(ang);
+      const pts = d.pts0.map(q => ({
+        ...q,
+        x: clampX(d.cx + (q.x - d.cx) * c - (q.y - d.cy) * s),
+        y: clampY(d.cy + (q.x - d.cx) * s + (q.y - d.cy) * c),
+      }));
+      updateById(d.id, { pts, x: pts[0].x, y: pts[0].y });
+      return;
+    }
+    if (d.kind === "markscale") {
+      // corner drag scales the mark about the OPPOSITE corner, each axis free
+      // (the popup's Size/Wide/Tall buttons cover constrained adjustments)
+      d.moved = true;
+      const sx = Math.max(0.12, Math.min(8, (pt.x - d.ax) / ((d.x0 - d.ax) || 1e-6)));
+      const sy = Math.max(0.12, Math.min(8, (pt.y - d.ay) / ((d.y0 - d.ay) || 1e-6)));
+      const pts = d.pts0.map(q => ({ ...q, x: clampX(d.ax + (q.x - d.ax) * sx), y: clampY(d.ay + (q.y - d.ay) * sy) }));
+      updateById(d.id, { pts, x: pts[0].x, y: pts[0].y });
       return;
     }
     if (d.kind === "wlabel") {
@@ -4140,7 +4284,8 @@ export default function DrillAnimator() {
       update(p => {
         if (p.id !== d.id) return p;
         if (p.kind === "mark") {   // a marker annotation moves all its points together
-          const pts = p.pts.map(q => ci(q.x + dx, q.y + dy));
+          // spread q first so per-point flags (sharp corners) survive the move
+          const pts = p.pts.map(q => ({ ...q, ...ci(q.x + dx, q.y + dy) }));
           return { ...p, pts, x: pts[0].x, y: pts[0].y };
         }
         if (d.line == null) {
@@ -4222,7 +4367,7 @@ export default function DrillAnimator() {
     if (d.kind === "piece" && d.moved && d.line == null) {
       const pc = pieces.find(q => q.id === d.id);
       if (pc && pc.kind === "net") {
-        const spots = [{ x: 17, y: 42.5, facing: 0 }, { x: 183, y: 42.5, facing: 180 }];
+        const spots = [{ x: 11, y: 42.5, facing: 0 }, { x: 189, y: 42.5, facing: 180 }];
         const near = spots.find(s => Math.hypot(s.x - pc.x, s.y - pc.y) < 12);
         if (near) updateById(pc.id, near);
       }
@@ -4235,7 +4380,18 @@ export default function DrillAnimator() {
     }
     if (d.moved) return;
     if (d.kind === "wlabel") { setSelectedId(d.id); setPopup({ type: "point", id: d.id, seg: d.seg }); return; }
-    if (d.kind === "resize") return;
+    if (d.kind === "resize" || d.kind === "markscale" || d.kind === "markrotate") return;
+    if (d.kind === "markpt") {
+      // tap (no drag) on a mark control point toggles its kind: sharp corner
+      // (break handle) ↔ smooth curve point — like route waypoint kinds
+      const mk = pieces.find(q => q.id === d.id && q.kind === "mark");
+      if (mk?.pts?.[d.idx]) {
+        const c = !mk.pts[d.idx].c;
+        updateById(d.id, { pts: mk.pts.map((q, i) => (i === d.idx ? { ...q, c: c || undefined } : q)) });
+        flash(c ? "Sharp corner" : "Smooth point");
+      }
+      return;
+    }
     if (d.kind === "aim") { setAim(d.pkId, d.target, null); return; }  // tap to clear the aim
     if (d.kind === "release") { setAim(d.pkId, { term: d.term }, null); return; }  // tap clears direction back to auto
     if (d.kind === "rotate") { setPopup({ type: "piece", id: d.id }); return; }
@@ -4452,6 +4608,68 @@ export default function DrillAnimator() {
     };
     reader.readAsText(f);
     e.target.value = "";
+  }
+  // apply a parsed drill to the board without committing it to the autosave —
+  // same preview contract as a #d= link: the saved board survives until the
+  // user edits (or taps Keep on the import bar)
+  function applyDrillPreview(r) {
+    skipFirstSave.current = true;
+    setRink(r.rink); setPieces(r.pieces); setDrillTitle(r.title); setDrillDesc(r.desc);
+    setDrillSteps(r.steps || []); setDrillNotes(r.notes || ""); setDrillItems(r.items || []);
+    setDrillVersion(r.dslVersion); setSelectedId(null); setPopup(null);
+    resetAnim();
+  }
+  // Anthropic API key for photo import — kept in localStorage on this device
+  function getApiKey() {
+    let key = localStorage.getItem(ANTHROPIC_KEY_STORE);
+    if (!key) {
+      key = (window.prompt("Anthropic API key for photo import (sk-ant-…)\nStored only on this device — use a spend-capped key.") || "").trim();
+      if (!key) return null;
+      localStorage.setItem(ANTHROPIC_KEY_STORE, key);
+    }
+    return key;
+  }
+  async function importPhoto(e) {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f || photoBusy) return;
+    const apiKey = getApiKey();
+    if (!apiKey) return;
+    photoAbort.current = new AbortController();
+    try {
+      setPhotoBusy("Reading photo…");
+      const img = await prepareImage(f);
+      setPhotoBusy("Transcribing with Claude… can take a minute — keep the app open");
+      const result = await drillFromImage({
+        apiKey, ...img, onStatus: setPhotoBusy, signal: photoAbort.current.signal,
+      });
+      if (result.drill) {
+        const prior = serializeDrill(rink, pieces, drillTitle, drillDesc, drillSteps, drillNotes, drillItems);
+        applyDrillPreview(result.drill);
+        setTextError(""); setOpenMenu(null);
+        setPhotoUndo(prior);
+      } else {
+        // repair pass didn't converge — hand the raw text to the editor to fix
+        setTextDraft(result.text); setTextError(result.errors.join("\n")); setOpenMenu("text");
+      }
+    } catch (err) {
+      if (err?.name === "AbortError") return;
+      if (err?.status === 401) localStorage.removeItem(ANTHROPIC_KEY_STORE);
+      flash(err?.message || "Photo import failed");
+    } finally {
+      setPhotoBusy(null);
+      photoAbort.current = null;
+    }
+  }
+  function keepImport() {
+    try { localStorage.setItem(SAVE_KEY, serializeDrill(rink, pieces, drillTitle, drillDesc, drillSteps, drillNotes, drillItems)); }
+    catch { /* storage full / disabled */ }
+    setPhotoUndo(null);
+  }
+  function discardImport() {
+    const r = parseDrill(photoUndo);
+    if (!r.errors.length) applyDrillPreview(r);
+    setPhotoUndo(null);
   }
 
   /* ----- render helpers ----- */
@@ -5071,10 +5289,9 @@ export default function DrillAnimator() {
     }
     return out;
   };
-  // sample a smooth Catmull-Rom curve through the mark's control points so a
-  // stroke reads as a curve (and stays smooth when its points are re-shaped)
-  const markCurve = cp => {
-    if (!cp || cp.length < 3) return cp || [];
+  // sample a smooth Catmull-Rom curve through a run of control points
+  const smoothRun = cp => {
+    if (cp.length < 3) return cp.map(q => ({ x: q.x, y: q.y }));
     const segs = catmullToBezier(cp);
     let prev = cp[0]; const out = [{ x: cp[0].x, y: cp[0].y }];
     segs.forEach(s => {
@@ -5082,6 +5299,22 @@ export default function DrillAnimator() {
       for (let k = 1; k <= n; k++) out.push(evalSeg(prev, s, k / n));
       prev = { x: s.x, y: s.y };
     });
+    return out;
+  };
+  // the mark's control points → drawn curve. A point flagged `c` is a sharp
+  // CORNER (a break handle, like a route corner waypoint): the smoothing
+  // splits there and each side curves independently, meeting in a hard join
+  const markCurve = cp => {
+    if (!cp || cp.length < 3) return cp || [];
+    const runs = []; let cur = [cp[0]];
+    for (let i = 1; i < cp.length; i++) {
+      cur.push(cp[i]);
+      if (cp[i].c && i < cp.length - 1) { runs.push(cur); cur = [cp[i]]; }
+    }
+    runs.push(cur);
+    if (runs.length === 1) return smoothRun(cp);
+    const out = [];
+    runs.forEach((run, ri) => { const sm = smoothRun(run); out.push(...(ri ? sm.slice(1) : sm)); });
     return out;
   };
   function renderMark(m, hit) {
@@ -5094,6 +5327,10 @@ export default function DrillAnimator() {
     const line = pts.map(q => `${clampX(q.x)},${clampY(q.y)}`).join(" ");
     return (
       <g key={`mk-${m.id}`}>
+        {m.fill && (
+          <polygon points={line} fill={m.fill} fillOpacity={m.fillOp != null ? m.fillOp : 0.25}
+            stroke="none" pointerEvents="none" />
+        )}
         <polyline points={line} fill="none" stroke={m.color} strokeWidth={w} strokeDasharray={dash}
           strokeLinecap="round" strokeLinejoin="round" opacity={0.94}
           pointerEvents={hit ? "none" : undefined} />
@@ -5118,14 +5355,66 @@ export default function DrillAnimator() {
     if (!m || !m.pts) return null;
     return m.pts.map((q, i) => (
       <g key={`mp-${m.id}-${i}`}>
-        {hdot(clampX(q.x), clampY(q.y), 1.7, {
-          fill: "#ffd447", stroke: "#14171a", strokeWidth: 0.35, pointerEvents: "none" }, yf)}
+        {/* route convention: a round node is a smooth point, a square one a
+            sharp corner (break handle). Tap to toggle, drag to re-shape. */}
+        {q.c
+          ? <rect x={clampX(q.x) - 1.5} y={clampY(q.y) - 1.5 * yf} width={3} height={3 * yf}
+              fill="#ffd447" stroke="#14171a" strokeWidth={0.35} pointerEvents="none" />
+          : hdot(clampX(q.x), clampY(q.y), 1.7, {
+              fill: "#ffd447", stroke: "#14171a", strokeWidth: 0.35, pointerEvents: "none" }, yf)}
         {/* a larger transparent target so a fingertip can grab the point */}
         {hdot(clampX(q.x), clampY(q.y), 4.5, {
           fill: "transparent", style: { cursor: "grab" },
           onPointerDown: e => markPtDown(e, m.id, i) }, yf)}
       </g>
     ));
+  }
+  // Bounding-box resize handles for a selected mark (shape overlays included):
+  // drag a corner to scale about the opposite corner, editor-style. Per-point
+  // reshaping stays behind the popup's "Edit points" toggle.
+  function renderMarkResize(yf = yFix) {
+    if (!editing || markEdit || tool !== "select") return null;
+    const m = pieces.find(q => q.id === selectedId && q.kind === "mark");
+    if (!m || !m.pts || m.pts.length < 2 || (m.lock && !lockedSelectable)) return null;
+    const xs = m.pts.map(q => q.x), ys = m.pts.map(q => q.y);
+    const x1 = Math.min(...xs), x2 = Math.max(...xs), y1 = Math.min(...ys), y2 = Math.max(...ys);
+    if (x2 - x1 < 1.5 && y2 - y1 < 1.5) return null;
+    const corners = [[x1, y1, x2, y2], [x2, y1, x1, y2], [x2, y2, x1, y1], [x1, y2, x2, y1]];
+    return (
+      <g key={`mkrs-${m.id}`}>
+        <rect x={x1} y={y1} width={Math.max(0.1, x2 - x1)} height={Math.max(0.1, y2 - y1)}
+          fill="none" stroke="#ffd447" strokeWidth={sw(0.35)} strokeDasharray={sdash("1.6 1.2")}
+          vectorEffect="non-scaling-stroke" opacity={0.8} pointerEvents="none" />
+        {corners.map(([cx, cy, ax, ay], i) => {
+          const down = e => handleDown(e, { kind: "markscale", id: m.id, x0: cx, y0: cy, ax, ay,
+            pts0: m.pts.map(q => ({ ...q })) });
+          return <g key={`c${i}`}>
+            {hdot(cx, cy, 1.3, { fill: "#ffd447", stroke: "#14202b", strokeWidth: 0.28, pointerEvents: "none" }, yf)}
+            {/* generous invisible touch target over the visible dot */}
+            {hdot(cx, cy, 3.4, { fill: "transparent", style: { cursor: "grab" }, onPointerDown: down }, yf)}
+          </g>;
+        })}
+        {(() => {
+          // rotate handle: a lollipop above the box's top edge, spins about the
+          // centroid. Stem is long enough to clear the corner touch targets,
+          // and the grab area is a big invisible disc for fingertips.
+          const mx = (x1 + x2) / 2;
+          const cx = m.pts.reduce((a, q) => a + q.x, 0) / m.pts.length;
+          const cy = m.pts.reduce((a, q) => a + q.y, 0) / m.pts.length;
+          const hy = y1 - 7 * yf;
+          const down = e => { const pt0 = svgPt(e);
+            handleDown(e, { kind: "markrotate", id: m.id, cx, cy,
+              a0: Math.atan2(pt0.y - cy, pt0.x - cx),
+              pts0: m.pts.map(q => ({ ...q })) }); };
+          return <g key="rot">
+            <line x1={mx} y1={y1} x2={mx} y2={hy} stroke="#ffd447" strokeWidth={sw(0.35)}
+              vectorEffect="non-scaling-stroke" opacity={0.8} pointerEvents="none" />
+            {hdot(mx, hy, 1.5, { fill: "#14202b", stroke: "#ffd447", strokeWidth: 0.35, pointerEvents: "none" }, yf)}
+            {hdot(mx, hy, 4.2, { fill: "transparent", style: { cursor: "grab" }, onPointerDown: down }, yf)}
+          </g>;
+        })()}
+      </g>
+    );
   }
   function renderLabels() {
     const canEdit = editing && tool !== "draw";
@@ -5301,8 +5590,19 @@ export default function DrillAnimator() {
   /* ----- popout ----- */
   function popoutAnchor(pt) {
     const [mx, my, vw, vh] = VIEWS[rink];
-    const lx = rotated ? ((my + vh - pt.y) / vh) * 100 : ((pt.x - mx) / vw) * 100;
-    const ty = rotated ? ((pt.x - mx) / vw) * 100 : ((pt.y - my) / vh) * 100;
+    // rink point → root-viewBox coords, then fractions of the (possibly
+    // letterbox-padded) root the canvas actually shows
+    const g = geomRef.current;
+    const rx = screenRot === 90 ? my + vh - pt.y
+      : screenRot === 180 ? mx + vw - pt.x
+      : screenRot === 270 ? pt.y - my
+      : pt.x;
+    const ry = screenRot === 90 ? pt.x - mx
+      : screenRot === 180 ? my + vh - pt.y
+      : screenRot === 270 ? mx + vw - pt.x
+      : pt.y;
+    const lx = ((rx - g.ox) / g.rootW) * 100;
+    const ty = ((ry - g.oy) / g.rootH) * 100;
     if (lx < -2 || lx > 102 || ty < -2 || ty > 102) return null;
     return { lx: Math.max(0, Math.min(100, lx)), ty: Math.max(0, Math.min(100, ty)) };
   }
@@ -5880,12 +6180,49 @@ export default function DrillAnimator() {
                 </div>
               </div>
               <div className="hd-field">
+                <div className="hd-sectitle">Fill</div>
+                <div className="hd-poprow">
+                  <button className={`hd-mini${!p.fill ? " on" : ""}`} onClick={() => updateById(p.id, { fill: null })}>None</button>
+                  {["#ffd447", "#d7263d", "#1f8a4c", "#3a8dff", "#e0731d", "#ffffff", "#14202b"].map(c => (
+                    <div key={c} className={`hd-swatch${p.fill === c ? " on" : ""}`} style={{ background: c }}
+                      onClick={() => updateById(p.id, { fill: c, fillOp: p.fillOp != null ? p.fillOp : 0.25 })} />
+                  ))}
+                </div>
+                {p.fill && (
+                  <div className="hd-poprow">
+                    <span>Opacity</span>
+                    <input type="range" min={0.05} max={0.9} step={0.05} value={p.fillOp != null ? p.fillOp : 0.25}
+                      style={{ flex: 1, minWidth: 80 }}
+                      onChange={e => updateById(p.id, { fillOp: parseFloat(e.target.value) })} />
+                  </div>
+                )}
+              </div>
+              <div className="hd-field">
+                <div className="hd-sectitle">Size &amp; proportion</div>
+                <div className="hd-poprow">
+                  <span>Size</span>
+                  <button className="hd-mini" onClick={() => scaleMark(p.id, 1 / 1.12, 1 / 1.12)}>−</button>
+                  <button className="hd-mini" onClick={() => scaleMark(p.id, 1.12, 1.12)}>＋</button>
+                  <span style={{ marginLeft: 8 }}>Wide</span>
+                  <button className="hd-mini" onClick={() => scaleMark(p.id, 1 / 1.12, 1)}>−</button>
+                  <button className="hd-mini" onClick={() => scaleMark(p.id, 1.12, 1)}>＋</button>
+                  <span style={{ marginLeft: 8 }}>Tall</span>
+                  <button className="hd-mini" onClick={() => scaleMark(p.id, 1, 1 / 1.12)}>−</button>
+                  <button className="hd-mini" onClick={() => scaleMark(p.id, 1, 1.12)}>＋</button>
+                </div>
+                <div className="hd-poprow">
+                  <span>Rotate</span>
+                  <button className="hd-mini" onClick={() => rotateMark(p.id, -15)}>↺ 15°</button>
+                  <button className="hd-mini" onClick={() => rotateMark(p.id, 15)}>↻ 15°</button>
+                </div>
+              </div>
+              <div className="hd-field">
                 <div className="hd-poprow">
                   <button className={`hd-mini${markEdit ? " on" : ""}`} onClick={() => setMarkEdit(v => !v)}>
                     {markEdit ? "Done editing" : "Edit points"}
                   </button>
                 </div>
-                {markEdit && <div className="hd-sechint">Drag a dot to re-shape.</div>}
+                {markEdit && <div className="hd-sechint">Drag a dot to re-shape; tap one to toggle sharp corner (square) ↔ smooth (round).</div>}
               </div>
             </>
           )}
@@ -5947,7 +6284,7 @@ export default function DrillAnimator() {
                   <div className="hd-poprow" style={{ flexWrap: "wrap" }}>
                     <button className={`hd-mini${!(p.sym && p.sym.trim()) ? " on" : ""}`}
                       onClick={() => updateById(p.id, { sym: "" })}>Auto ({p.defense ? "X" : "O"})</button>
-                    {["X", "O", "F", "D", "G", "C", "W", "CO", "W1", "W2"].map(s => (
+                    {["X", "O", "F", "D", "G", "C", "W", "CO", "LW", "RW", "LD", "RD", "△", "○", "□"].map(s => (
                       <button key={s} className={`hd-mini${p.sym === s ? " on" : ""}`}
                         onClick={() => updateById(p.id, { sym: s })}>{s}</button>
                     ))}
@@ -6119,6 +6456,17 @@ export default function DrillAnimator() {
           {/* Actions panel at the player's standing/start spot — just above the
               bottom row of buttons */}
           {p.kind === "player" && ActionSteps(p, -1)}
+          {TOOL_KINDS.includes(p.kind) && (
+            <div className="hd-field">
+              <div className="hd-sectitle">Change to</div>
+              <div className="hd-poprow" style={{ flexWrap: "wrap" }}>
+                {TOOL_KINDS.filter(k => k !== p.kind).map(k => (
+                  <button key={k} className="hd-mini hd-swapbtn" title={`Change to ${k}`}
+                    onClick={() => updateById(p.id, { kind: k })}>{toolImg(k)}</button>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="hd-poprow" style={{ marginTop: 2 }}>
             {p.path.length > 0 && (
               <button className="hd-mini" onClick={() => { updateById(p.id, { path: [] }); setPopup(null); }}>Clear route</button>
@@ -6605,7 +6953,7 @@ export default function DrillAnimator() {
         // a pass/rim/chip into a receiver's badge stops just off its edge. Clamp the
         // offset so a SHORT leg's arrow never overshoots its own start and reverses.
         const eb = runEnd && !L.shot ? nearBadge(L.x1, L.y1) : null;
-        let eGap = L.shot && runEnd ? 4.5 + (shotStagger[`${q.id}/${k}`] || 0) : eb ? START_OFF : 0;
+        let eGap = L.shot && runEnd ? 6 + (shotStagger[`${q.id}/${k}`] || 0) : eb ? START_OFF : 0;
         const eCap = Math.max(0, Math.hypot((L.x1 - sx) * gmSar, (L.y1 - sy) / gmSar) - 2);
         if (eGap > 0) eGap = Math.min(eGap, eCap);
         // pass/rim/chip arrivals register their natural TIP so same-direction heads at
@@ -6620,16 +6968,28 @@ export default function DrillAnimator() {
         const ex = ep.x, ey = ep.y;
         return (
           <g key={`pf-${q.id}-${k}`} pointerEvents="none" opacity={0.62}>
-            <line x1={sx} y1={sy} x2={ex} y2={ey} vectorEffect={ve}
-              stroke="#14171a" strokeWidth={W(L.shot ? 1.1 : 0.55)}
-              strokeDasharray={L.shot ? undefined : D("2.4 1.8")} />
+            {L.shot
+              // standard shot notation: two parallel lines with an open caret.
+              // The lines stop at the caret's mouth (backed off by its zoom-
+              // scaled depth) so they never protrude past the head.
+              ? (() => {
+                  const le = runEnd ? gmMove(ex, ey, -ux, -uy, 2.9 * z) : { x: ex, y: ey };
+                  const a1 = gmMove(sx, sy, -uy, ux, 0.65), a2 = gmMove(le.x, le.y, -uy, ux, 0.65);
+                  const b1 = gmMove(sx, sy, uy, -ux, 0.65), b2 = gmMove(le.x, le.y, uy, -ux, 0.65);
+                  return <>
+                    <line x1={a1.x} y1={a1.y} x2={a2.x} y2={a2.y} vectorEffect={ve} stroke="#14171a" strokeWidth={W(0.55)} />
+                    <line x1={b1.x} y1={b1.y} x2={b2.x} y2={b2.y} vectorEffect={ve} stroke="#14171a" strokeWidth={W(0.55)} />
+                  </>;
+                })()
+              : <line x1={sx} y1={sy} x2={ex} y2={ey} vectorEffect={ve}
+                  stroke="#14171a" strokeWidth={W(0.55)} strokeDasharray={D("2.4 1.8")} />}
             {runEnd && (dx || dy) && (flat
               ? <circle cx={ex} cy={ey} r={1.1} fill="none" vectorEffect={ve} stroke="#14171a" strokeWidth={W(0.3)} />
               : (() => { const fx = iconXf({ x: ex, y: ey, a: (Math.atan2(dy, dx) * 180) / Math.PI });
                   return <g transform={fx.t}><g transform={`scale(${z})`}>
                     {L.shot
-                      // double chevron ">>" for a shot
-                      ? <path d="M -3.4 -2.2 L 0 0 L -3.4 2.2 M -6.8 -2.2 L -3.4 0 L -6.8 2.2" fill="none" stroke="#14171a" strokeWidth={1} strokeLinecap="round" strokeLinejoin="round" />
+                      // open caret ">" for a shot
+                      ? <path d="M -3.3 -2.2 L 0 0 L -3.3 2.2" fill="none" stroke="#14171a" strokeWidth={0.95} strokeLinecap="round" strokeLinejoin="round" />
                       : <path d="M 0 0 L -3.6 -2.1 L -3.6 2.1 Z" fill="#14171a" stroke="#14171a" strokeWidth={0.5} strokeLinejoin="round" />}
                   </g></g>; })())}
           </g>
@@ -6697,18 +7057,30 @@ export default function DrillAnimator() {
     const arrow = (a, b, shot, key, op = OP_GHOST) => {
       const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1, ux = dx / len, uy = dy / len;
       const sp = gmMove(a.x, a.y, ux, uy, Math.min(START_OFF, len / 2));
-      const base = Math.min(shot ? 4.5 : START_OFF, Math.max(0, len - 2));
+      const base = Math.min(shot ? 6 : START_OFF, Math.max(0, len - 2));
       const ep0 = gmMove(b.x, b.y, -ux, -uy, base);
       const back = arrivalBack("main", ep0.x, ep0.y);
       const ep = back ? gmMove(b.x, b.y, -ux, -uy, Math.min(base + back, Math.max(0, len - 2))) : ep0;
       const fx = iconXf({ x: ep.x, y: ep.y, a: (Math.atan2(dy, dx) * 180) / Math.PI });
       return (
         <g key={key} pointerEvents="none" opacity={op}>
-          <line x1={sp.x} y1={sp.y} x2={ep.x} y2={ep.y} vectorEffect="non-scaling-stroke"
-            stroke="#14171a" strokeWidth={sw(shot ? 1.1 : 0.55)} strokeDasharray={shot ? undefined : sdash("2.4 1.8")} />
+          {shot
+            // standard shot notation: two parallel lines with an open caret
+            // that the lines stop at (never protrude past)
+            ? (() => {
+                const le = gmMove(ep.x, ep.y, -ux, -uy, 2.9 * z);
+                const a1 = gmMove(sp.x, sp.y, -uy, ux, 0.65), a2 = gmMove(le.x, le.y, -uy, ux, 0.65);
+                const b1 = gmMove(sp.x, sp.y, uy, -ux, 0.65), b2 = gmMove(le.x, le.y, uy, -ux, 0.65);
+                return <>
+                  <line x1={a1.x} y1={a1.y} x2={a2.x} y2={a2.y} vectorEffect="non-scaling-stroke" stroke="#14171a" strokeWidth={sw(0.55)} />
+                  <line x1={b1.x} y1={b1.y} x2={b2.x} y2={b2.y} vectorEffect="non-scaling-stroke" stroke="#14171a" strokeWidth={sw(0.55)} />
+                </>;
+              })()
+            : <line x1={sp.x} y1={sp.y} x2={ep.x} y2={ep.y} vectorEffect="non-scaling-stroke"
+                stroke="#14171a" strokeWidth={sw(0.55)} strokeDasharray={sdash("2.4 1.8")} />}
           <g transform={fx.t}><g transform={`scale(${z})`}>
             {shot
-              ? <path d="M -3.4 -2.2 L 0 0 L -3.4 2.2 M -6.8 -2.2 L -3.4 0 L -6.8 2.2" fill="none" stroke="#14171a" strokeWidth={1} strokeLinecap="round" strokeLinejoin="round" />
+              ? <path d="M -3.3 -2.2 L 0 0 L -3.3 2.2" fill="none" stroke="#14171a" strokeWidth={0.95} strokeLinecap="round" strokeLinejoin="round" />
               : <path d="M 0 0 L -3.6 -2.1 L -3.6 2.1 Z" fill="#14171a" stroke="#14171a" strokeWidth={0.5} strokeLinejoin="round" />}
           </g></g>
         </g>
@@ -6776,8 +7148,12 @@ export default function DrillAnimator() {
     const xShift = fx < LOUPE / 2 + 8 ? "0%" : canvasW - fx < LOUPE / 2 + 8 ? "-100%" : "-50%";
     // the loupe's scene rotates the same way as the main ice, so the
     // magnified view matches what's under the finger
-    const loupeXf = rotated
+    const loupeXf = screenRot === 90
       ? `rotate(90) translate(${R - loupe.x} ${-loupe.y - R})`
+      : screenRot === 180
+      ? `rotate(180) translate(${-loupe.x - R} ${-loupe.y - R})`
+      : screenRot === 270
+      ? `rotate(-90) translate(${-loupe.x - R} ${R - loupe.y})`
       : `translate(${R - loupe.x} ${R - loupe.y})`;
     return (
       <div className="hd-loupe" style={{
@@ -6795,7 +7171,7 @@ export default function DrillAnimator() {
               prev = { x: s.x, y: s.y };
               const style = segStroke(p, s, i === p.path.length - 1, true);
               return p.kind === "player" && s.dir === "bwd"
-                ? <polyline key={`${p.id}${i}`} points={zigzagPoints(from, s)} {...style} strokeLinejoin="round" />
+                ? <path key={`${p.id}${i}`} d={zigzagPoints(from, s, 1, i === p.path.length - 1)} {...style} strokeLinejoin="round" />
                 : <path key={`${p.id}${i}`} d={d} {...style} />;
             });
           })}
@@ -6951,12 +7327,12 @@ export default function DrillAnimator() {
       <div className="hd-stage" ref={stageRef}>
         <div className="hd-canvas" style={{ width: canvasW, height: canvasH }}>
           <svg ref={svgRef} className="hd-ice"
-            viewBox={rotated ? `0 0 ${vhF} ${vwF}` : vb(rink)}
+            viewBox={`${rootGeom.ox} ${rootGeom.oy} ${rootGeom.rootW} ${rootGeom.rootH}`}
             preserveAspectRatio="none"
             onPointerDown={onSvgDown} onPointerMove={onSvgMove}
             onPointerUp={onSvgUp} onPointerCancel={onSvgUp}>
             <defs>
-              <clipPath id="boards"><rect x={0.5} y={0.5} width={199} height={84} rx={27.5} ry={27.5 * yFix} /></clipPath>
+              <clipPath id="boards"><rect x={0.5} y={0.5} width={199} height={84} rx={28} ry={28 * yFix} /></clipPath>
             </defs>
 
             <g transform={zoomXf}>
@@ -6996,7 +7372,7 @@ export default function DrillAnimator() {
             {/* ---- "Let AI play" 5v5 overlay (replaces the scripted content) ---- */}
             {aiPlay && aiRef.current && (
               <g pointerEvents="none">
-                {[{ x: 17, y: 42.5, a: 0 }, { x: 183, y: 42.5, a: 180 }].map((n, i) => {
+                {[{ x: 11, y: 42.5, a: 0 }, { x: 189, y: 42.5, a: 180 }].map((n, i) => {
                   const fx = iconXf(n);
                   return <PieceIcon key={`ainet-${i}`} p={{ kind: "net", color: "#c81e33" }}
                     pos={n} xf={fx.t} thDeg={fx.th} onDown={() => {}} />;
@@ -7120,7 +7496,7 @@ export default function DrillAnimator() {
                             </g>);
                           }
                           return bwd
-                          ? <polyline points={zigzagPoints(vFrom, vSeg, strokeAR)} {...style} strokeLinejoin="round" pointerEvents="none" />
+                          ? <path d={zigzagPoints(vFrom, vSeg, strokeAR, isLast || acts.has(i))} {...style} strokeLinejoin="round" pointerEvents="none" />
                           : wig
                           ? <polyline points={wigglePoints(vFrom, vSeg, strokeAR, isLast || acts.has(i))} {...style} strokeLinejoin="round" pointerEvents="none" />
                           : <path d={vD} {...style} pointerEvents="none" />;
@@ -7160,9 +7536,8 @@ export default function DrillAnimator() {
                     const allBwd = p.kind === "player" && p.path.length > 0 && p.path.every(s => s.dir === "bwd");
                     const style = segStroke(p, p.path[p.path.length - 1] || {}, false);
                     return subs.map((sub, k) => {
-                      const shaped = allCarry ? wigglePoly(sub, strokeAR, true)
-                        : allBwd ? zigzagPoly(sub, strokeAR)
-                        : sub;
+                      if (allBwd) return <path key={k} d={zigzagPoly(sub, strokeAR, k === subs.length - 1)} {...style} strokeLinejoin="round" pointerEvents="none" />;
+                      const shaped = allCarry ? wigglePoly(sub, strokeAR, true) : sub;
                       return (
                         <polyline key={k} points={shaped.map(q => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" ")}
                           {...style} strokeLinejoin="round" pointerEvents="none" />
@@ -7322,7 +7697,7 @@ export default function DrillAnimator() {
                         return (
                           <g key={i}>
                             {!bent && (bwd
-                              ? <polyline points={zigzagPoints(vFrom, vSeg, strokeAR)} {...line} strokeLinejoin="round" />
+                              ? <path d={zigzagPoints(vFrom, vSeg, strokeAR, isLast || acts.has(i))} {...line} strokeLinejoin="round" />
                               : wig
                               ? <polyline points={wigglePoints(vFrom, vSeg, strokeAR, isLast || acts.has(i))} {...line} strokeLinejoin="round" />
                               : <path d={vD} {...line} strokeDasharray={solid ? undefined : sdash("1.6 1.1")} />)}
@@ -7354,7 +7729,9 @@ export default function DrillAnimator() {
                           ...[...subForkAts].filter(i => f.path[i]).map(i => ({ x: f.path[i].x, y: f.path[i].y }))];
                         const subs = gapPolyAt(bLine, centers, actGap, strokeAR);
                         return subs.map((sub, k) => {
-                          const shaped = allCarry ? wigglePoly(sub, strokeAR, true) : allBwd ? zigzagPoly(sub, strokeAR) : sub;
+                          if (allBwd) return <path key={k} d={zigzagPoly(sub, strokeAR, k === subs.length - 1)}
+                            {...line} strokeDasharray={solid ? undefined : sdash("1.6 1.1")} strokeLinejoin="round" />;
+                          const shaped = allCarry ? wigglePoly(sub, strokeAR, true) : sub;
                           return <polyline key={k} points={shaped.map(q => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" ")}
                             {...line} strokeDasharray={solid ? undefined : sdash("1.6 1.1")} strokeLinejoin="round" />;
                         });
@@ -7636,6 +8013,7 @@ export default function DrillAnimator() {
               </g>
             ))}
             {renderMarkHandles()}
+            {renderMarkResize()}
             {selected && renderRotateHandle(selected)}
           <g opacity={markMO}>{pieces.map(p => <g key={`ca-${p.id}`}>{renderAim(p)}</g>)}</g>
             {!aiPlay && renderLabels()}
@@ -7798,6 +8176,7 @@ export default function DrillAnimator() {
           <button className="hd-item" onClick={() => { copyMd(); setOpenMenu(null); }}><Icon name="duplicate" size={16} /> Copy markdown</button>
           <button className="hd-item" onClick={() => { previewLink(); setOpenMenu(null); }}><Icon name="share" size={16} /> Share preview link</button>
           <button className="hd-item" onClick={() => fileRef.current?.click()}><Icon name="upload" size={16} /> Load .txt / .md</button>
+          <button className="hd-item" disabled={!!photoBusy} onClick={() => { setOpenMenu(null); photoRef.current?.click(); }}><Icon name="image" size={16} /> Import from photo…</button>
           <button className="hd-item danger"
             onClick={() => {
               const hasContent = pieces.length || drillSteps.length || drillItems.length ||
@@ -7877,6 +8256,11 @@ export default function DrillAnimator() {
             <span style={{ fontSize: 11, color: "#8b99a8" }}>skater stride, stick swing, puck cradle, airborne shots</span>
           </div>
           <div className="hd-poprow">
+            <button className={`hd-mini${stretchFill ? " on" : ""}`}
+              onClick={() => setStretchFill(v => !v)}>{stretchFill ? "✓ Stretch to fill" : "Stretch to fill"}</button>
+            <span style={{ fontSize: 11, color: "#8b99a8" }}>full ice fills the screen — off letterboxes it to true 200′×85′ proportions</span>
+          </div>
+          <div className="hd-poprow">
             <button className={`hd-mini${whiteboard ? " on" : ""}`}
               onClick={() => setWhiteboard(v => !v)}>{whiteboard ? "✓ Whiteboard mode" : "Whiteboard mode"}</button>
             <span style={{ fontSize: 11, color: "#8b99a8" }}>classic X &amp; O player symbols, plain arrowed routes; shots bury flat, no splashes or detail animations</span>
@@ -7888,6 +8272,16 @@ export default function DrillAnimator() {
               <span style={{ fontSize: 11, color: "#8b99a8" }}>draw each X / O on an opaque white disc, like the action circles</span>
             </div>
           )}
+          <div className="hd-poprow">
+            <button className="hd-mini" onClick={() => {
+              const cur = localStorage.getItem(ANTHROPIC_KEY_STORE) || "";
+              const next = window.prompt("Anthropic API key for photo import (empty to clear)", cur);
+              if (next == null) return;
+              if (next.trim()) { localStorage.setItem(ANTHROPIC_KEY_STORE, next.trim()); flash("API key saved"); }
+              else { localStorage.removeItem(ANTHROPIC_KEY_STORE); flash("API key cleared"); }
+            }}>Claude API key…</button>
+            <span style={{ fontSize: 11, color: "#8b99a8" }}>{localStorage.getItem(ANTHROPIC_KEY_STORE) ? "set — used by Import from photo" : "needed for Import from photo"}</span>
+          </div>
           <div className="hd-poprow">
             <button className={`hd-mini${collisions ? " on" : ""}`}
               onClick={() => setCollisions(v => !v)}>{collisions ? "✓ Route avoidance" : "Route avoidance"}</button>
@@ -7982,23 +8376,49 @@ export default function DrillAnimator() {
       {openMenu === "rinkmenu" && (
         <div className="hd-menu bl">
           <div className="hd-mh">Ice surface</div>
-          {["full", "half", "quarter"].map(m => (
-            <button key={m} className={`hd-item${rink === m ? " on" : ""}`}
-              onClick={() => { setRink(m); setOpenMenu(null); }}>
-              {m === "full" ? "Full ice" : m === "half" ? "Half ice" : "Quarter sheet"}
-            </button>
-          ))}
+          <button className={`hd-item${rink === "full" ? " on" : ""}`}
+            onClick={() => { setRink("full"); setOpenMenu(null); }}>Full ice</button>
+          <button className={`hd-item${rink === "half" && !halfNS && !halfFlip ? " on" : ""}`}
+            onClick={() => { setRink("half"); setHalfNS(false); setHalfFlip(false); setOpenMenu(null); }}>Half ice · net →</button>
+          <button className={`hd-item${rink === "half" && !halfNS && halfFlip ? " on" : ""}`}
+            onClick={() => { setRink("half"); setHalfNS(false); setHalfFlip(true); setOpenMenu(null); }}>Half ice · net ←</button>
+          <button className={`hd-item${rink === "half" && halfNS && !halfFlip ? " on" : ""}`}
+            onClick={() => { setRink("half"); setHalfNS(true); setHalfFlip(false); setOpenMenu(null); }}>Half ice · net ↓</button>
+          <button className={`hd-item${rink === "half" && halfNS && halfFlip ? " on" : ""}`}
+            onClick={() => { setRink("half"); setHalfNS(true); setHalfFlip(true); setOpenMenu(null); }}>Half ice · net ↑</button>
+          <button className={`hd-item${rink === "quarter" ? " on" : ""}`}
+            onClick={() => { setRink("quarter"); setOpenMenu(null); }}>Quarter sheet</button>
         </div>
       )}
 
       {openMenu === "tools" && (
         <div className="hd-menu br">
-          <div className="hd-mh">Add to the ice</div>
+          <div className="hd-mh">Main items</div>
           <div className="hd-toolgrid">
-            {[["player", "Player"], ["playerpuck", "+ Puck"], ["puck", "Puck"], ["cone", "Cone"],
-              ["net", "Net"], ["bumper", "Bumper"], ["deker", "Deker"], ["passer", "Passer"], ["tire", "Tire"], ["stick", "Stick"], ["light", "Light"]].map(([k, lbl]) => (
+            {[["player", "Player"], ["playerpuck", "+ Puck"], ["puck", "Puck"], ["net", "Net"]].map(([k, lbl]) => (
               <button key={k} className={`hd-tool${tool === k ? " on" : ""}`} onClick={() => { setTool(k); setOpenMenu(null); }}>
                 {toolImg(k)}<span>{lbl}</span>
+              </button>
+            ))}
+          </div>
+          <div className="hd-mh" style={{ marginTop: 4 }}>Tools</div>
+          <div className="hd-toolgrid">
+            {[["cone", "Cone"], ["tire", "Tire"], ["bumper", "Bumper"], ["deker", "Deker"],
+              ["passer", "Passer"], ["stick", "Stick"], ["light", "Light"]].map(([k, lbl]) => (
+              <button key={k} className={`hd-tool${tool === k ? " on" : ""}`} onClick={() => { setTool(k); setOpenMenu(null); }}>
+                {toolImg(k)}<span>{lbl}</span>
+              </button>
+            ))}
+          </div>
+          <div className="hd-mh" style={{ marginTop: 4 }}>Ice markers &amp; overlays</div>
+          <div className="hd-toolgrid">
+            <button className={`hd-tool${tool === "marker" ? " on" : ""}`}
+              onClick={() => { resetAnim(); setPlaying(false); setPopup(null); setTool("marker"); }}>
+              <span className="hd-toolglyph"><Icon name="marker" size={22} /></span><span>Marker</span>
+            </button>
+            {[["square", "□", "Square"], ["circle", "○", "Circle"], ["triangle", "△", "Triangle"]].map(([k, glyph, lbl]) => (
+              <button key={k} className="hd-tool" onClick={() => addShapeMark(k)}>
+                <span className="hd-toolglyph">{glyph}</span><span>{lbl}</span>
               </button>
             ))}
             <button className={`hd-tool${tool === "label" ? " on" : ""}`} onClick={() => { setTool("label"); setOpenMenu(null); }}>
@@ -8007,9 +8427,6 @@ export default function DrillAnimator() {
           </div>
           <button className="hd-item" onClick={() => { resetAnim(); setPlaying(false); setPopup(null); setTool("draw"); setOpenMenu(null); }}>
             <Icon name="pencil" size={16} /> Draw a route
-          </button>
-          <button className={`hd-item${tool === "marker" ? " on" : ""}`} onClick={() => { resetAnim(); setPlaying(false); setPopup(null); setTool("marker"); }}>
-            <Icon name="marker" size={16} /> Marker — draw on the ice
           </button>
           {/* marker style/colour/thickness, shown once the marker is picked */}
           {tool === "marker" && (
@@ -8031,7 +8448,7 @@ export default function DrillAnimator() {
                 <input type="range" min={0.5} max={3} step={0.1} value={markWidth} style={{ flex: 1, minWidth: 80 }}
                   onChange={e => setMarkWidth(parseFloat(e.target.value))} />
               </div>
-              <span style={{ fontSize: 11, color: "#8b99a8", padding: "0 2px" }}>drag on the ice to draw; tap a mark to restyle or delete</span>
+              <span style={{ fontSize: 11, color: "#8b99a8", padding: "0 2px" }}>drag on the ice to draw; tap a mark to restyle, resize by its corners, or delete</span>
             </>
           )}
           {tool !== "select" && (
@@ -8119,8 +8536,8 @@ export default function DrillAnimator() {
           </div>
           <div className="hd-note">
             Feet: x 0–200, y 0–85. <b>RINK</b> full|half|quarter ·
-            <b> PIECE</b> id player|puck|cone|net|bumper|deker|passer|label|tire x y [#color] [label] [speed=1.2] [hand=L] [sym=W1] [on=F1]
-            (<code>sym=</code> is a player&apos;s whiteboard symbol — ≤3 chars, shown instead of the skater when <b>Whiteboard mode</b> is on; unset defaults to X for <code>defense</code>, else O)
+            <b> PIECE</b> id player|puck|cone|net|bumper|deker|passer|label|tire x y [#color] [label] [speed=1.2] [hand=L] [sym=LW] [on=F1]
+            (<code>sym=</code> is a player&apos;s whiteboard symbol — ≤3 chars, shown instead of the skater when <b>Whiteboard mode</b> is on; <code>△</code>/<code>○</code>/<code>□</code> draw as real shapes; unset defaults to X for <code>defense</code>, else O)
             (a <b>bumper</b> is a solid barrier — players skate around it and pucks carom off it; a <b>deker</b> a stickhandling gate, a <b>passer</b> a rebounder box — all take <code>face=deg</code>)
             (a <b>tire</b> is an agility prop — <code>size=1</code> large / <code>size=0.55</code> small; add <code>goalie</code> for a keeper that works the full circle to defend shots at it)
             (a <b>label</b> is a movable/resizable text note: <code>PIECE L1 label 100 40 size=1.2 "Regroup here"</code>)
@@ -8248,6 +8665,24 @@ export default function DrillAnimator() {
       )}
 
       <input ref={fileRef} type="file" accept=".txt,.md,.markdown,text/plain,text/markdown" style={{ display: "none" }} onChange={importTxt} />
+      <input ref={photoRef} type="file" accept="image/*" style={{ display: "none" }} onChange={importPhoto} />
+      {photoBusy && (
+        <div className="hd-sheet" style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16 }}>
+          <div className="hd-spinner" />
+          <div style={{ color: "#eaf2f8", fontSize: 14, textAlign: "center", padding: "0 24px" }}>{photoBusy}</div>
+          <button className="hd-mini" onClick={() => photoAbort.current?.abort()}>Cancel</button>
+        </div>
+      )}
+      {photoUndo != null && !photoBusy && (
+        <div style={{ position: "fixed", left: "50%", bottom: "calc(64px + env(safe-area-inset-bottom))",
+          transform: "translateX(-50%)", background: "rgba(20,26,32,0.94)", color: "#eaf2f8",
+          padding: "8px 14px", borderRadius: 10, fontSize: 13, zIndex: 9998,
+          display: "flex", alignItems: "center", gap: 10 }}>
+          <span>Imported drill</span>
+          <button className="hd-mini on" onClick={keepImport}>Keep</button>
+          <button className="hd-mini" onClick={discardImport}>Discard</button>
+        </div>
+      )}
       {toast && (
         <div style={{ position: "fixed", left: "50%", bottom: "calc(64px + env(safe-area-inset-bottom))",
           transform: "translateX(-50%)", background: "rgba(20,26,32,0.92)", color: "#eaf2f8",
