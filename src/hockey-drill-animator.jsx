@@ -306,6 +306,7 @@ export default function DrillAnimator() {
   const [groupInput, setGroupInput] = useState(null);   // pending group-name text while naming, or null
   const [hiddenGroups, setHiddenGroups] = useState(() => new Set()); // group names hidden this session (view-only, never saved)
   const [hiddenKinds, setHiddenKinds] = useState(() => new Set());   // VIS_KINDS keys + "routes"/"pucklines" (view-only, never saved)
+  const [visAnchor, setVisAnchor] = useState(null); // {x,y} screen px when the Visibility menu opened via right-click, else null (bar-anchored)
   const [pieceGroupInput, setPieceGroupInput] = useState("");  // "new group" name draft in the piece popup
   const [popup, setPopup] = useState(null);
   const [tool, setTool] = useState("select");
@@ -3833,6 +3834,7 @@ export default function DrillAnimator() {
   const TAP_DIST = 1.4;
 
   function onSvgDown(e) {
+    if (e.button === 2) return;                // right button → the contextmenu handler owns it
     if (holdStep) { skipHold(); return; }      // presentation hold → a tap on the ice advances early
     setOpenMenu(null);                         // a tap on the ice always closes any open menu
     if (playing || pinchRef.current) return;
@@ -4117,6 +4119,7 @@ export default function DrillAnimator() {
   }
 
   function pieceDown(e, id) {
+    if (e.button === 2) { e.stopPropagation(); return; }  // right button → contextmenu handler
     if (playing || pinchRef.current) return;
     e.stopPropagation();
     setOpenMenu(null);
@@ -4189,6 +4192,7 @@ export default function DrillAnimator() {
     return best;
   }
   function lineDown(e, id, segIdx, fork = null) {
+    if (e.button === 2) { e.stopPropagation(); return; }  // right button → contextmenu handler
     if (playing || pinchRef.current) return;
     e.stopPropagation();
     setOpenMenu(null);
@@ -4209,6 +4213,7 @@ export default function DrillAnimator() {
   }
 
   function handleDown(e, payload) {
+    if (e.button === 2) { e.stopPropagation(); return; }  // right button → contextmenu handler
     if (!editing || pinchRef.current) return;
     e.stopPropagation();
     if (wakeEdit()) return;
@@ -4230,6 +4235,7 @@ export default function DrillAnimator() {
   // own angular offset from the body is subtracted so the blade tracks
   // the pointer exactly instead of jumping on grab
   function stickDown(e, p) {
+    if (e.button === 2) { e.stopPropagation(); return; }  // right button → contextmenu handler
     if (playing || pinchRef.current) return;
     if (wakeEdit()) return;
     e.stopPropagation();
@@ -7419,7 +7425,14 @@ export default function DrillAnimator() {
       <style>{STYLES}</style>
 
       {/* ---------- the ice, filling the screen ---------- */}
-      <div className="hd-stage" ref={stageRef}>
+      {/* right-click on the rink → the Visibility menu at the cursor (drill-design
+          power feature; touch devices keep using the bar's eye button) */}
+      <div className="hd-stage" ref={stageRef}
+        onContextMenu={e => {
+          e.preventDefault();
+          setVisAnchor({ x: e.clientX, y: e.clientY });
+          setOpenMenu("visibility");
+        }}>
         <div className="hd-canvas" style={{ width: canvasW, height: canvasH }}>
           <svg ref={svgRef} className="hd-ice"
             viewBox={`${rootGeom.ox} ${rootGeom.oy} ${rootGeom.rootW} ${rootGeom.rootH}`}
@@ -8247,6 +8260,10 @@ export default function DrillAnimator() {
         </button>
         <button className={`hd-barbtn${tool === "draw" ? " draw-on" : openMenu === "tools" ? " on" : ""}`} title="Add / draw"
           onClick={() => setOpenMenu(m => (m === "tools" ? null : "tools"))}><Icon name="pencil" /></button>
+        <button className={`hd-barbtn${openMenu === "visibility" ? " on" : ""}`} title="Visibility"
+          style={hiddenKinds.size || hiddenGroups.size ? { color: "#ffd447" } : undefined}
+          onClick={() => { setVisAnchor(null); setOpenMenu(m => (m === "visibility" ? null : "visibility")); }}>
+          <Icon name="eye" /></button>
         <button className={`hd-barbtn${openMenu === "prefs" ? " on" : ""}`} title="Settings"
           onClick={() => setOpenMenu(m => (m === "prefs" ? null : "prefs"))}><Icon name="sliders" /></button>
         <button className="hd-barbtn" title="Undo last change" disabled={!undoCount}
@@ -8304,9 +8321,6 @@ export default function DrillAnimator() {
             onClick={() => { setShowDiag(s => !s); setOpenMenu(null); }}>
             <Icon name="gauge" size={16} /> Diagnostics {showDiag ? "(on)" : ""}
           </button>
-          <button className={`hd-item${hiddenKinds.size || hiddenGroups.size ? " on" : ""}`} onClick={() => setOpenMenu("visibility")}>
-            <Icon name="eye" size={16} /> Visibility… {hiddenKinds.size || hiddenGroups.size ? "(some hidden)" : ""}
-          </button>
           <button className="hd-item" onClick={() => setOpenMenu("prefs")}>
             <Icon name="sliders" size={16} /> App &amp; drill settings…
           </button>
@@ -8340,7 +8354,12 @@ export default function DrillAnimator() {
       )}
 
       {openMenu === "visibility" && (
-        <div className="hd-menu tl">
+        <div className="hd-menu tl" style={visAnchor ? {
+          // right-click: anchor at the cursor instead of above the bar, clamped on-screen
+          left: Math.max(8, Math.min(visAnchor.x, window.innerWidth - 246)),
+          top: Math.max(8, Math.min(visAnchor.y, window.innerHeight * 0.36)),
+          bottom: "auto", right: "auto", maxHeight: "62vh",
+        } : undefined}>
           <div className="hd-mh">Visibility</div>
           <div className="hd-note">View-only, for this session — hiding never changes playback timing or the saved drill.</div>
           <div className="hd-mh" style={{ marginTop: 4 }}>Items</div>
@@ -8392,7 +8411,6 @@ export default function DrillAnimator() {
               <Icon name="eye" size={16} /> Show everything
             </button>
           )}
-          <button className="hd-item" onClick={() => setOpenMenu("settings")}>‹ Back to menu</button>
         </div>
       )}
       {openMenu === "prefs" && (
