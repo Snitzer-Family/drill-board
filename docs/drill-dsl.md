@@ -131,6 +131,7 @@ Places a piece. `id` is any unique token (e.g. `F1`, `PK1`, `N2`).
 | `face=<deg>` | route-less player, net, bumper, deker, passer | Facing angle (0 = +x / toward the right) |
 | `defense` | player | Auto-reacting defenceman (holds the slot, stays goal-side) |
 | `lock` | any | Pin the piece in place — it can't be dragged, rotated, or edited until unlocked. Toggle *🔒 Lock* on the piece popup, or lock/unlock everything via **☰ → Lock board**. (Bare word, parsed before the jersey-label catch-all.) |
+| `group=<name>` | any (incl. label, MARK) | Named-group membership (underscores read as spaces). Members drag, rotate, and duplicate as one formation. In the app: box-select → *◇ Group*, or the **Group** field on any piece popup; **☰ → Groups** lists every group with select and show/hide toggles (hiding is a session-only view state — it is never written to the file and never changes drill timing). |
 | `hold=line` | player | Wait at the blue line until the puck enters the zone |
 | `wait=<player>[@<pt>]` | player | Hold at the start until `<player>` **reaches** point `<pt>`, then run the route. Chains resolve (A waits for B waits for C). In the app: *Delay trigger → Waypoint* on the player popup. |
 | `act=<player>[@<pt>]` | player | Hold at the start until `<player>` **releases the puck** (pass/chip/rim/shot) at point `<pt>`; omit `@<pt>` to fire at any of their actions. Correct for stationary passers / held passes where arrival time is wrong. In the app: *Delay trigger → Action*. |
@@ -451,5 +452,7 @@ and the preset square/circle/triangle shape markers. The optional
 **`corners=<i>;<j>;…`** flags points (0-based) as **sharp corners**: the
 smoothing breaks there instead of rounding through, so straight-sided shapes
 keep crisp vertices. In the app: *Edit points* → tap a point to toggle sharp
-(square node) ↔ smooth (round node), matching route waypoint kinds. In the app: **☰ tools → Marker**, pick a colour /
+(square node) ↔ smooth (round node), matching route waypoint kinds. A MARK also
+accepts an optional **`group=<name>`** token (see the PIECE modifier table) so an
+annotation can travel with a named group. In the app: **☰ tools → Marker**, pick a colour /
 style / thickness, then drag on the ice. Tap a mark to restyle or delete it.

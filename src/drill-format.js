@@ -352,9 +352,13 @@ export function parseDrill(text) {
         // readers drop the token harmlessly via the isNaN filter)
         const mcTok = rest.find(t => /^corners=/i.test(t));
         if (mcTok) mcTok.slice(8).split(";").forEach(s => { const i = parseInt(s, 10); if (pts[i]) pts[i].c = true; });
+        // optional named-group membership: group=<name> (underscores read as
+        // spaces; non-numeric, so older readers drop it via the isNaN filter)
+        const mgTok = rest.find(t => /^group=/i.test(t));
+        const mgroup = mgTok ? mgTok.slice(6).replace(/_/g, " ").trim() : null;
         if (mid && pts.length >= 2) {
           const m = { id: mid, kind: "mark", color: mcol, width: mw, style: ["dashed", "dotted", "wavy"].includes(mst) ? mst : "solid",
-            ...(mlock ? { lock: true } : {}), ...(mfill ? { fill: mfill, fillOp: mfillOp } : {}), x: pts[0].x, y: pts[0].y, pts, path: [] };
+            ...(mlock ? { lock: true } : {}), ...(mfill ? { fill: mfill, fillOp: mfillOp } : {}), ...(mgroup ? { group: mgroup } : {}), x: pts[0].x, y: pts[0].y, pts, path: [] };
           pieces.push(m); byId[mid] = m;
         }
       } else if (cmd === "STEP") {
@@ -439,10 +443,13 @@ export function serializeDrill(rink, pieces, title = "", desc = "", steps = [], 
   }
   out.push("");
   pieces.forEach(p => {
+    // labels and marks bypass the generic attribute tail, so they carry their own
+    // group= token (same underscore escaping as line pieces)
+    const gtok = p.group ? ` group=${String(p.group).trim().replace(/\s+/g, "_")}` : "";
     if (p.kind === "label") {
       const sz = p.size && p.size !== 1 ? ` size=${f2(p.size)}` : "";
       const lk = p.lock ? " lock" : "";
-      out.push(`PIECE ${p.id} label ${f1(p.x)} ${f1(p.y)} ${p.color}${sz}${lk} ${qesc(p.text || "")}`);
+      out.push(`PIECE ${p.id} label ${f1(p.x)} ${f1(p.y)} ${p.color}${sz}${lk}${gtok} ${qesc(p.text || "")}`);
       return;
     }
     if (p.kind === "mark") {
@@ -450,7 +457,7 @@ export function serializeDrill(rink, pieces, title = "", desc = "", steps = [], 
       const fl = p.fill ? ` fill=${String(p.fill).replace("#", "")}:${f2(p.fillOp != null ? p.fillOp : 0.25)}` : "";
       const cIdx = (p.pts || []).map((q, i) => (q.c ? i : -1)).filter(i => i >= 0);
       const cr = cIdx.length ? ` corners=${cIdx.join(";")}` : "";
-      out.push(`MARK ${p.id} ${p.color} ${f2(p.width || 1.1)} ${p.style || "solid"}${lk}${fl}${cr} ${(p.pts || []).map(q => `${f1(q.x)},${f1(q.y)}`).join(" ")}`);
+      out.push(`MARK ${p.id} ${p.color} ${f2(p.width || 1.1)} ${p.style || "solid"}${lk}${fl}${cr}${gtok} ${(p.pts || []).map(q => `${f1(q.x)},${f1(q.y)}`).join(" ")}`);
       return;
     }
     const lbl = p.label ? " " + String(p.label).replace(/[\s,]+/g, "_") : "";
@@ -514,7 +521,6 @@ export function serializeDrill(rink, pieces, title = "", desc = "", steps = [], 
     const df = p.kind === "player" && p.defense ? " defense" : "";
     const lck = p.lock ? " lock" : "";
     const siz = (p.kind === "net" || p.kind === "tire") && p.size && p.size !== 1 ? ` size=${f2(p.size)}` : "";
-    const grp = p.group ? ` group=${String(p.group).trim().replace(/\s+/g, "_")}` : "";
     // player: the reaction light it's designated to read (else nearest is used)
     const lgt = p.kind === "player" && p.lightId ? ` light=${p.lightId}` : "";
     const cue = p.kind === "light" && (p.cues || []).length
@@ -527,7 +533,7 @@ export function serializeDrill(rink, pieces, title = "", desc = "", steps = [], 
           ? ` mode=always${p.alwaysColor || (p.cues && p.cues[0] && p.cues[0].color) ? ":" + String(p.alwaysColor || p.cues[0].color).replace("#", "") : ""}`
           : ` mode=${lm}`)
       : "";
-    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${sm}${car}${gp}${pas}${terms}${hld}${wt}${fac}${gl}${crs}${df}${lck}${siz}${grp}${lgt}${cue}${rnd}${spd}`);
+    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${sm}${car}${gp}${pas}${terms}${hld}${wt}${fac}${gl}${crs}${df}${lck}${siz}${gtok}${lgt}${cue}${rnd}${spd}`);
     if (p.path.length) out.push(`PATH ${p.id} ${p.path.map(segToStr).join(" ")}`);
     // route branches (players): one conditional continuation per cue colour, with
     // the action the player performs at its end (skate default → omitted). Branches
