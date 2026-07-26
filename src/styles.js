@@ -61,12 +61,16 @@ export const STYLES = `
           height:calc(54px + var(--hd-b)); padding:0 8px var(--hd-b);
           box-sizing:border-box; display:flex; align-items:center; gap:6px;
           background:#11161c; border-top:1px solid #2a3542; }
-        .hd-barbtn { width:46px; height:40px; border-radius:10px; background:#1b232c;
+        .hd-barbtn { width:50px; height:44px; border-radius:10px; background:#1b232c;
           border:1px solid #33404f; color:#dbe4ec; font-size:17px; display:flex;
-          align-items:center; justify-content:center; cursor:pointer; flex:none; }
+          flex-direction:column; gap:2px; align-items:center; justify-content:center;
+          cursor:pointer; flex:none; }
         .hd-barbtn.on { background:#1f4fa3; border-color:#1f4fa3; }
         .hd-barbtn.draw-on { background:#b58900; border-color:#b58900; }
         .hd-barbtn small { font-size:10px; font-weight:800; letter-spacing:.05em; }
+        /* caption under each bar icon — tooltips don't exist on touch */
+        .hd-blbl { font-size:8.5px; font-weight:700; letter-spacing:.05em; line-height:1;
+          text-transform:uppercase; opacity:.8; }
         .hd-barhint { flex:1 1 0; min-width:0; font-size:12px; color:#8b99a8; text-align:right;
           white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
         /* the version never runs off the edge: vN stays put, only the build

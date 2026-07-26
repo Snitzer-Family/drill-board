@@ -15,6 +15,7 @@ const ICONS = {
   undo: <><path d="M9 14L4 9l5-5" /><path d="M4 9h10a6 6 0 0 1 0 12H9" /></>,
   redo: <><path d="M15 14l5-5-5-5" /><path d="M20 9H10a6 6 0 0 0 0 12h5" /></>,
   menu: <path d="M3.5 6.5h17M3.5 12h17M3.5 17.5h17" />,
+  rink: <><rect x="2.5" y="6" width="19" height="12" rx="5" /><path d="M12 6v12" /><circle cx="12" cy="12" r="2.2" /></>,
   pencil: <><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z" /><path d="M14 8l3 3" /></>,
   duplicate: <><rect x="8.5" y="8.5" width="11" height="11" rx="2.2" /><path d="M4.5 15.5V6a2 2 0 0 1 2-2h9.5" /></>,
   trash: <><path d="M4 6.5h16" /><path d="M8 6.5V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v1.5" /><path d="M6.5 6.5l1 13a2 2 0 0 0 2 1.8h5a2 2 0 0 0 2-1.8l1-13" /></>,

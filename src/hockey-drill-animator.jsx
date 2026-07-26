@@ -8100,7 +8100,7 @@ export default function DrillAnimator() {
                 font: "600 13px system-ui, sans-serif", color: "#e8edf2",
                 background: "rgba(23,29,37,.92)", border: "1px solid #33404f", borderRadius: 999,
                 boxShadow: "0 2px 10px rgba(0,0,0,.4)", cursor: "pointer" }}>
-              ⤢ Fit · {view.s.toFixed(1)}×
+              <Icon name="expand" size={14} /> Fit · {view.s.toFixed(1)}×
             </button>
           )}
         </div>
@@ -8117,7 +8117,8 @@ export default function DrillAnimator() {
               {Math.max(0, Math.ceil(aiMins * 60 - aiClockRef.current))}s{aiRef.current.msg ? ` · ${aiRef.current.msg}` : ""}
             </span>
           </div>
-          <button className="hd-preso-btn" onClick={() => setAiPlay(false)}>■ Stop</button>
+          <button className="hd-preso-btn" onClick={() => setAiPlay(false)}
+            style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><Icon name="stop" size={13} /> Stop</button>
         </div>
       )}
 
@@ -8180,19 +8181,23 @@ export default function DrillAnimator() {
       {/* ---------- bottom menu bar ---------- */}
       <div className="hd-bar">
         <button className={`hd-barbtn${openMenu === "settings" ? " on" : ""}`} title="Menu"
-          onClick={() => setOpenMenu(m => (m === "settings" ? null : "settings"))}><Icon name="menu" /></button>
-        <button className={`hd-barbtn${openMenu === "rinkmenu" ? " on" : ""}`}
+          onClick={() => setOpenMenu(m => (m === "settings" ? null : "settings"))}>
+          <Icon name="menu" size={16} /><span className="hd-blbl">Menu</span></button>
+        <button className={`hd-barbtn${openMenu === "rinkmenu" ? " on" : ""}`} title="Rink"
           onClick={() => setOpenMenu(m => (m === "rinkmenu" ? null : "rinkmenu"))}>
-          <small>{rink === "full" ? "FULL" : rink === "half" ? "½" : "¼"}</small>
+          <Icon name="rink" size={16} />
+          <span className="hd-blbl">{rink === "full" ? "Full" : rink === "half" ? "Half" : "¼ ice"}</span>
         </button>
         <button className={`hd-barbtn${tool === "draw" ? " draw-on" : openMenu === "tools" ? " on" : ""}`} title="Add / draw"
-          onClick={() => setOpenMenu(m => (m === "tools" ? null : "tools"))}><Icon name="pencil" /></button>
+          onClick={() => setOpenMenu(m => (m === "tools" ? null : "tools"))}>
+          <Icon name="pencil" size={16} /><span className="hd-blbl">Add</span></button>
         <button className={`hd-barbtn${openMenu === "prefs" ? " on" : ""}`} title="Settings"
-          onClick={() => setOpenMenu(m => (m === "prefs" ? null : "prefs"))}><Icon name="sliders" /></button>
+          onClick={() => setOpenMenu(m => (m === "prefs" ? null : "prefs"))}>
+          <Icon name="sliders" size={16} /><span className="hd-blbl">Tune</span></button>
         <button className="hd-barbtn" title="Undo last change" disabled={!undoCount}
-          onClick={undoLast}><Icon name="undo" /></button>
+          onClick={undoLast}><Icon name="undo" size={16} /><span className="hd-blbl">Undo</span></button>
         <button className="hd-barbtn" title="Redo" disabled={!redoCount}
-          onClick={redoLast}><Icon name="redo" /></button>
+          onClick={redoLast}><Icon name="redo" size={16} /><span className="hd-blbl">Redo</span></button>
         <div className="hd-barhint">{toolHint || ""}</div>
         <div className="hd-ver"><span className="hd-vernum">v{APP_VERSION}</span><span className="hd-verstamp">&nbsp;· {BUILD_STAMP}</span></div>
       </div>
@@ -8251,7 +8256,7 @@ export default function DrillAnimator() {
           <div className="hd-poprow">
             <span>5v5 for</span>
             <Stepper value={aiMins} onChange={setAiMins} step={1} min={1} suffix="m" />
-            <button className="hd-mini" onClick={startAiPlay}>▶ Start</button>
+            <button className="hd-mini" onClick={startAiPlay}><Icon name="play" size={13} /> Start</button>
           </div>
           <div className="hd-mh" style={{ marginTop: 4 }}>Presentation</div>
           <div className="hd-poprow">
@@ -8432,6 +8437,9 @@ export default function DrillAnimator() {
 
       {openMenu === "tools" && (
         <div className="hd-menu br">
+          <button className="hd-item" onClick={() => { resetAnim(); setPlaying(false); setPopup(null); setTool("draw"); setOpenMenu(null); }}>
+            <Icon name="pencil" size={16} /> Draw a route
+          </button>
           <div className="hd-mh">Main items</div>
           <div className="hd-toolgrid">
             {[["player", "Player"], ["playerpuck", "+ Puck"], ["puck", "Puck"], ["net", "Net"]].map(([k, lbl]) => (
@@ -8464,9 +8472,6 @@ export default function DrillAnimator() {
               <span className="hd-toolglyph"><Icon name="label" size={22} /></span><span>Label</span>
             </button>
           </div>
-          <button className="hd-item" onClick={() => { resetAnim(); setPlaying(false); setPopup(null); setTool("draw"); setOpenMenu(null); }}>
-            <Icon name="pencil" size={16} /> Draw a route
-          </button>
           {/* marker style/colour/thickness, shown once the marker is picked */}
           {tool === "marker" && (
             <>
