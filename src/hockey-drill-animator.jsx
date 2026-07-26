@@ -7096,15 +7096,17 @@ export default function DrillAnimator() {
           if (back) eGap = Math.min(eGap + back, Math.max(0, len - 2));
         }
         const ep = eGap > 0 ? gmMove(b.x, b.y, -ux, -uy, eGap) : b;
+        // line stops at the open caret's mouth so it never pokes through it
+        const le = head && !flat ? gmMove(ep.x, ep.y, -ux, -uy, 2.9 * z * lineScale) : ep;
         out.push(
           <g key={`pp-${q.id}-${s}-${j}`} pointerEvents="none" opacity={0.62}>
-            <line x1={sp.x} y1={sp.y} x2={ep.x} y2={ep.y} vectorEffect={ve}
+            <line x1={sp.x} y1={sp.y} x2={le.x} y2={le.y} vectorEffect={ve}
               stroke={INK} strokeWidth={W(0.55)} strokeDasharray={D("2.4 1.8")} />
             {head && (dx || dy) ? (flat
               ? <circle cx={ep.x} cy={ep.y} r={1.1} fill="none" vectorEffect={ve} stroke={INK} strokeWidth={W(0.3)} />
               : (() => { const fx = iconXf({ x: ep.x, y: ep.y, a: (Math.atan2(dy, dx) * 180) / Math.PI });
                   return <g transform={fx.t}><g transform={`scale(${z * lineScale})`}>
-                    <path d="M 0 0 L -3.6 -2.1 L -3.6 2.1 Z" fill={INK} stroke={INK} strokeWidth={casing ? 1.7 : 0.5} strokeLinejoin="round" />
+                    <path d="M -3.3 -2.2 L 0 0 L -3.3 2.2" fill="none" stroke={INK} strokeWidth={casing ? 2.1 : 0.95} strokeLinecap="round" strokeLinejoin="round" />
                   </g></g>; })()) : null}
           </g>
         );
@@ -7138,7 +7140,7 @@ export default function DrillAnimator() {
         // whiteboard: a chip/rim that lands LOOSE (no collector badge) gets a
         // ghost puck sitting on the landing spot — the line stops just short
         const ghostLand = !flat && whiteboard && runEnd && (L.rim || L.chip) && !eb;
-        let eGap = L.shot && runEnd ? 6 + (shotStagger[`${q.id}/${k}`] || 0) : eb ? START_OFF : ghostLand ? 2.4 : 0;
+        let eGap = L.shot && runEnd ? 6 + (shotStagger[`${q.id}/${k}`] || 0) : eb ? START_OFF : ghostLand ? 3.4 : 0;
         const eCap = Math.max(0, Math.hypot((L.x1 - sx) * gmSar, (L.y1 - sy) / gmSar) - 2);
         if (eGap > 0) eGap = Math.min(eGap, eCap);
         // pass/rim/chip arrivals register their natural TIP so same-direction heads at
@@ -7167,17 +7169,20 @@ export default function DrillAnimator() {
                     <line x1={b1.x} y1={b1.y} x2={b2.x} y2={b2.y} vectorEffect={ve} stroke={INK} strokeWidth={W(0.55)} />
                   </>;
                 })()
-              : <line x1={sx} y1={sy} x2={ex} y2={ey} vectorEffect={ve}
-                  stroke={INK} strokeWidth={W(0.55)} strokeDasharray={D("2.4 1.8")} />}
+              : (() => {
+                  // line stops at the caret's mouth on the run-end leg
+                  const lt = runEnd && (dx || dy) && !flat ? gmMove(ex, ey, -ux, -uy, 2.9 * z * lineScale) : { x: ex, y: ey };
+                  return <line x1={sx} y1={sy} x2={lt.x} y2={lt.y} vectorEffect={ve}
+                    stroke={INK} strokeWidth={W(0.55)} strokeDasharray={D("2.4 1.8")} />;
+                })()}
             {runEnd && (dx || dy) && (flat
               ? <circle cx={ex} cy={ey} r={1.1} fill="none" vectorEffect={ve} stroke={INK} strokeWidth={W(0.3)} />
               : (() => { const fx = iconXf({ x: ex, y: ey, a: (Math.atan2(uy, ux) * 180) / Math.PI });
                   // heads scale with the line-thickness setting, like routeMark
                   return <g transform={fx.t}><g transform={`scale(${z * lineScale})`}>
-                    {L.shot
-                      // open caret ">" for a shot
-                      ? <path d="M -3.3 -2.2 L 0 0 L -3.3 2.2" fill="none" stroke={INK} strokeWidth={casing ? 2.1 : 0.95} strokeLinecap="round" strokeLinejoin="round" />
-                      : <path d="M 0 0 L -3.6 -2.1 L -3.6 2.1 Z" fill={INK} stroke={INK} strokeWidth={casing ? 1.7 : 0.5} strokeLinejoin="round" />}
+                    {/* one caret vocabulary: shots, passes, chips, and rims all
+                        end in the standard open ">" like skating routes */}
+                    <path d="M -3.3 -2.2 L 0 0 L -3.3 2.2" fill="none" stroke={INK} strokeWidth={casing ? 2.1 : 0.95} strokeLinecap="round" strokeLinejoin="round" />
                   </g></g>; })())}
             {ghostLand && !casing && (() => {
               // ghost puck resting where the chip/rim lands
@@ -7271,12 +7276,13 @@ export default function DrillAnimator() {
                   <line x1={b1.x} y1={b1.y} x2={b2.x} y2={b2.y} vectorEffect="non-scaling-stroke" stroke="#14171a" strokeWidth={sw(0.55) * lineScale} />
                 </>;
               })()
-            : <line x1={sp.x} y1={sp.y} x2={ep.x} y2={ep.y} vectorEffect="non-scaling-stroke"
-                stroke="#14171a" strokeWidth={sw(0.55) * lineScale} strokeDasharray={sdash("2.4 1.8")} />}
+            : (() => {
+                const lg = gmMove(ep.x, ep.y, -ux, -uy, 2.9 * z * lineScale);
+                return <line x1={sp.x} y1={sp.y} x2={lg.x} y2={lg.y} vectorEffect="non-scaling-stroke"
+                  stroke="#14171a" strokeWidth={sw(0.55) * lineScale} strokeDasharray={sdash("2.4 1.8")} />;
+              })()}
           <g transform={fx.t}><g transform={`scale(${z * lineScale})`}>
-            {shot
-              ? <path d="M -3.3 -2.2 L 0 0 L -3.3 2.2" fill="none" stroke="#14171a" strokeWidth={0.95} strokeLinecap="round" strokeLinejoin="round" />
-              : <path d="M 0 0 L -3.6 -2.1 L -3.6 2.1 Z" fill="#14171a" stroke="#14171a" strokeWidth={0.5} strokeLinejoin="round" />}
+            <path d="M -3.3 -2.2 L 0 0 L -3.3 2.2" fill="none" stroke="#14171a" strokeWidth={0.95} strokeLinecap="round" strokeLinejoin="round" />
           </g></g>
         </g>
       );
