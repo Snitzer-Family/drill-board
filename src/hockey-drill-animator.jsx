@@ -5252,10 +5252,16 @@ export default function DrillAnimator() {
         <g transform={`rotate(${-fx.th})`}>
           <rect x={-w / 2} y={-h / 2} width={w} height={h} rx={fs * 0.28}
             fill={bgOff ? "transparent" : bgCol} fillOpacity={bgOff ? undefined : bgOp}
-            stroke={sel ? "#ffd447" : bdOff ? "none" : bdCol}
-            strokeOpacity={sel || bdOff ? undefined : bdOp}
-            strokeWidth={sel ? 0.7 : bdOff ? 0 : 0.4} onPointerDown={onDown} pointerEvents={hitOff ? "none" : undefined}
+            stroke={bdOff ? "none" : bdCol} strokeOpacity={bdOff ? undefined : bdOp}
+            strokeWidth={bdOff ? 0 : 0.4} onPointerDown={onDown} pointerEvents={hitOff ? "none" : undefined}
             style={{ cursor: onDown ? "grab" : "default" }} />
+          {sel && (
+            // selection = a dashed halo OUTSIDE the box, so the label's own
+            // border colour/opacity stays visible while it's being edited
+            <rect x={-w / 2 - fs * 0.22} y={-h / 2 - fs * 0.22} width={w + fs * 0.44} height={h + fs * 0.44}
+              rx={fs * 0.28 + fs * 0.22} fill="none" stroke="#ffd447" strokeWidth={0.55}
+              strokeDasharray={`${fs * 0.3} ${fs * 0.22}`} pointerEvents="none" />
+          )}
           <text textAnchor="middle" fontSize={fs} fontWeight={800} fill={st.color || "#14202b"}
             opacity={st.textOp != null ? st.textOp : undefined}
             pointerEvents="none" style={{ fontFamily: "system-ui, sans-serif", userSelect: "none",
