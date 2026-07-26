@@ -69,7 +69,7 @@ export const STYLES = `
         .hd-barbtn small { font-size:10px; font-weight:800; letter-spacing:.05em; }
         /* caption under each bar icon — tooltips don't exist on touch */
         .hd-blbl { font-size:8.5px; font-weight:700; letter-spacing:.05em; line-height:1;
-          text-transform:uppercase; opacity:.8; }
+          text-transform:uppercase; opacity:.8; white-space:nowrap; }
         .hd-barhint { flex:1 1 0; min-width:0; font-size:12px; color:#8b99a8; text-align:right;
           white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
         /* the version never runs off the edge: vN stays put, only the build
@@ -260,7 +260,8 @@ export const STYLES = `
           border-radius:0; border-top:none; border-right:none; border-bottom:none;
           box-shadow:-8px 0 24px rgba(0,0,0,.4); }
         .hd-pop.pinned.dock .hd-pophead { cursor:default; }
-        .hd-pop { position:absolute; z-index:20; box-sizing:border-box; width:256px; border:1px solid #33404f;
+        .hd-pop { position:absolute; z-index:20; box-sizing:border-box; width:312px;
+          max-width:calc(100vw - 16px); border:1px solid #33404f;
           border-radius:12px; padding:10px 12px; box-shadow:0 8px 24px rgba(0,0,0,.5);
           display:flex; flex-direction:column; gap:8px;
           max-height:calc(100% - 8px); overflow-y:auto; overscroll-behavior:contain;
@@ -329,8 +330,9 @@ export const STYLES = `
           display:inline-flex; align-items:center; justify-content:center; gap:5px; }
         .hd-item svg, .hd-mini svg, .hd-btn svg { flex:0 0 auto; }
         .hd-mini.on { background:#0f766e; border-color:#0f766e; color:#fff; }
-        /* icon + caption mini-button: tooltips don't exist on touch */
-        .hd-mini.iconlbl { flex-direction:column; gap:2px; padding:5px 9px; }
+        /* icon + caption mini-button: tooltips don't exist on touch.
+           Kept narrow so a 4-up row (curve shapes) fits the popup width. */
+        .hd-mini.iconlbl { flex-direction:column; gap:2px; padding:4px 7px; }
         .hd-mini.iconlbl small { font-size:8px; font-weight:700; letter-spacing:.04em;
           text-transform:uppercase; line-height:1; opacity:.8; }
         .hd-mini.danger { color:#ff8d9c; border-color:#4a2a30; }
