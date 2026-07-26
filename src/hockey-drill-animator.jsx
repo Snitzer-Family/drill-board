@@ -276,6 +276,9 @@ export default function DrillAnimator() {
   // a shared drill link (#d=<url-safe base64 DSL> — the preview-link format from
   // previewLink()) boots straight into that drill. It wins over the autosave, and
   // (see the auto-save effect) doesn't overwrite the saved board until you edit.
+  // a malformed link falls through to autosave/demo, but the recipient is TOLD
+  // (linkBad → boot toast) instead of silently seeing the wrong drill
+  let linkBad = false;
   const linkDrill = (() => {
     try {
       const h = typeof window !== "undefined" ? window.location.hash : "";
@@ -283,8 +286,9 @@ export default function DrillAnimator() {
       if (!m) return null;
       const dsl = decodeURIComponent(escape(atob(m[1].replace(/-/g, "+").replace(/_/g, "/"))));
       const r = parseDrill(dsl);
-      return r.errors.length ? null : r;
-    } catch { return null; }   // malformed link → fall through to autosave/demo
+      if (r.errors.length) { linkBad = true; return null; }
+      return r;
+    } catch { linkBad = true; return null; }
   })();
   // boot from a link, else the last auto-saved board, else the built-in demo
   const init = linkDrill || (() => {
@@ -4536,24 +4540,39 @@ export default function DrillAnimator() {
     img.onerror = () => { URL.revokeObjectURL(url); flash("Image export failed"); };
     img.src = url;
   }
-  function copyMd() {
-    navigator.clipboard?.writeText(toMarkdown());
-    setToast("Markdown copied"); setTimeout(() => setToast(""), 1400);
+  const flash = (msg, ms = 1400) => { setToast(msg); setTimeout(() => setToast(""), ms); };
+  // clipboard needs a secure context (https / localhost) — on a plain-http LAN
+  // URL navigator.clipboard is absent, so fall back to execCommand and never
+  // claim "copied" unless a copy actually happened
+  function copyToClipboard(text, okMsg) {
+    const fallback = () => {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+        document.body.appendChild(ta); ta.focus(); ta.select();
+        const ok = document.execCommand("copy");
+        ta.remove();
+        flash(ok ? okMsg : "Copy failed — use Export or Share instead", ok ? 1400 : 3000);
+      } catch { flash("Copy failed — use Export or Share instead", 3000); }
+    };
+    if (navigator.clipboard?.writeText)
+      navigator.clipboard.writeText(text).then(() => flash(okMsg), fallback);
+    else fallback();
   }
-  const flash = msg => { setToast(msg); setTimeout(() => setToast(""), 1400); };
+  // a #d= link that failed to parse fell back to the saved board — say so
+  useEffect(() => {
+    if (linkBad) flash("Couldn't read the shared drill link — showing your saved board instead", 4200);
+  }, []);
+  function copyMd() { copyToClipboard(toMarkdown(), "Markdown copied"); }
   // copy the drill text from the editor to the clipboard
-  function copyText() {
-    navigator.clipboard?.writeText(textDraft);
-    flash("Text copied");
-  }
+  function copyText() { copyToClipboard(textDraft, "Text copied"); }
   // share the drill (native share sheet where available, else copy the markdown)
   function shareDrill() {
     const md = toMarkdown();
     if (navigator.share) {
       navigator.share({ title: (drillTitle || "Drill").trim(), text: md }).catch(() => {});
     } else {
-      navigator.clipboard?.writeText(md);
-      flash("Markdown copied");
+      copyToClipboard(md, "Markdown copied");
     }
   }
   // build a link to the standalone preview page with the current drill encoded in
@@ -4564,7 +4583,7 @@ export default function DrillAnimator() {
       .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
     const url = new URL("drill-preview.html", window.location.href).href + "#d=" + enc;
     if (navigator.share) navigator.share({ title: (drillTitle || "Drill").trim(), url }).catch(() => {});
-    else { navigator.clipboard?.writeText(url); flash("Preview link copied"); }
+    else copyToClipboard(url, "Preview link copied");
   }
   // open a clean, self-contained print sheet (diagram + notes + inventory +
   // steps) in a new window and offer to print it. Reuses the same DSL→SVG
