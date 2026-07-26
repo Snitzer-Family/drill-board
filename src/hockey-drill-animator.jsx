@@ -5569,9 +5569,11 @@ export default function DrillAnimator() {
           e => pieceDown(e, p.id),
           canEdit && !p.lock ? e => handleDown(e, { kind: "resize", id: p.id, seg: null, cx: p.x, cy: p.y, size0: p.size || 1 }) : null,
           p.lock && !lockedSelectable));
-      } else if (p.label && p.kind !== "player") {
-        // a name tag under any named prop/piece (players show their jersey instead)
-        const off = p.kind === "net" ? 6.5 : 5;
+      } else if (p.label && (p.kind !== "player" || whiteboard)) {
+        // a name tag under any named prop/piece. Players normally wear the name
+        // on their jersey, but the whiteboard X/O symbols don't — tag them too,
+        // so "pass to P3" is findable on the ice
+        const off = p.kind === "net" ? 6.5 : p.kind === "player" ? 4.6 : 5;
         els.push(labelNode(`nm-${p.id}`, p.x, p.y + off, p.label, 0.5, "#33414f", false, null, null));
       }
       (p.path || []).forEach((s, i) => {
@@ -7121,6 +7123,52 @@ export default function DrillAnimator() {
         const nxt = legs[k + 1];
         const runEnd = !nxt || nxt.type !== "fly";   // last fly leg of a pass/shot/rim/chip run
         const runStart = k === 0 || legs[k - 1].type !== "fly";   // first fly leg of the run
+        // rim/chip runs arrive as MANY short legs (one per boards-path vertex);
+        // a line per leg restarts the dash phase every segment and reads as a
+        // near-solid chain. Draw the WHOLE run as ONE polyline so the dash
+        // rhythm matches a pass exactly. (The block below then handles shots only.)
+        if (L.rim || L.chip) {
+          if (!runEnd) return null;                    // the run draws once, at its end
+          let s0 = k; while (s0 > 0 && legs[s0 - 1].type === "fly") s0--;
+          const pts = [{ x: legs[s0].x0, y: legs[s0].y0 }];
+          for (let m = s0; m <= k; m++) pts.push({ x: legs[m].x1, y: legs[m].y1 });
+          const land = pts[pts.length - 1];
+          const sb2 = nearBadge(pts[0].x, pts[0].y);
+          const line = sb2 ? trimPolyStart([{ x: sb2.x, y: sb2.y }, ...pts.slice(1)], START_OFF, strokeAR) : pts;
+          const eb2 = nearBadge(land.x, land.y);
+          const gl = !flat && whiteboard && !eb2;      // loose landing → ghost puck
+          let gap = eb2 ? START_OFF : gl ? 3.4 : 0;
+          if (eb2 && gap > 0) {
+            const t0 = trimPolyEnd(line, gap, strokeAR);
+            const tp = t0[t0.length - 1];
+            const back = arrivalBack(flat ? "flat" : "main", tp.x, tp.y);
+            if (back) gap += back;
+          }
+          const tipLine = gap > 0 ? trimPolyEnd(line, gap, strokeAR) : line;
+          const tip = tipLine[tipLine.length - 1];
+          const pv = tipLine[Math.max(0, tipLine.length - 2)];
+          const ta = (Math.atan2(tip.y - pv.y, tip.x - pv.x) * 180) / Math.PI;
+          const vis = flat ? tipLine : trimPolyEnd(tipLine, 2.9 * z * lineScale, strokeAR);
+          return (
+            <g key={`pf-${q.id}-${k}`} pointerEvents="none" opacity={0.62}>
+              <polyline points={vis.map(q2 => `${q2.x.toFixed(2)},${q2.y.toFixed(2)}`).join(" ")} fill="none"
+                vectorEffect={ve} stroke={INK} strokeWidth={W(0.55)} strokeDasharray={D("2.4 1.8")}
+                strokeLinecap="round" strokeLinejoin="round" />
+              {flat
+                ? <circle cx={tip.x} cy={tip.y} r={1.1} fill="none" vectorEffect={ve} stroke={INK} strokeWidth={W(0.3)} />
+                : (() => { const fx = iconXf({ x: tip.x, y: tip.y, a: ta });
+                    return <g transform={fx.t}><g transform={`scale(${z * lineScale})`}>
+                      <path d="M -3.3 -2.2 L 0 0 L -3.3 2.2" fill="none" stroke={INK} strokeWidth={casing ? 2.1 : 0.95} strokeLinecap="round" strokeLinejoin="round" />
+                    </g></g>; })()}
+              {gl && !casing && (() => {
+                const fx = iconXf({ x: land.x, y: land.y, a: 0 });
+                return <g opacity={0.55}>
+                  <PieceIcon p={{ kind: "puck", color: "#14171a" }} pos={{ x: land.x, y: land.y, a: 0 }}
+                    xf={fx.t} thDeg={fx.th} noShadow hitOff onDown={() => {}} />
+                </g>; })()}
+            </g>
+          );
+        }
         const dx = L.x1 - L.x0, dy = L.y1 - L.y0;
         // start: released AT an action badge → begin just outside its round edge,
         // measured from the badge CENTRE (not the stick); off a standing stick → start there.
