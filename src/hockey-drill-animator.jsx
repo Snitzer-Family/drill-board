@@ -34,6 +34,12 @@ const TOOL_GLYPH = {
 // the interchangeable on-ice training tools: any one can be swapped for
 // another from its popup ("Change to" row) without re-placing it
 const TOOL_KINDS = ["cone", "tire", "bumper", "deker", "passer", "stick", "light"];
+// the creation-time default colour for each piece kind (players cycle COLORS,
+// so their pick is passed in); also re-applied when a tool is swapped kinds
+const defaultColor = (kind, playerColor) =>
+  kind === "player" ? playerColor : kind === "cone" ? "#e0731d" : kind === "net" ? "#c81e33"
+    : kind === "bumper" ? "#1b1e22" : kind === "deker" ? "#c79a4e" : kind === "passer" ? "#57636f"
+    : kind === "label" ? "#14202b" : kind === "tire" ? "#1c1c1e" : kind === "light" ? "#2ea043" : "#14171a";
 const toolImg = kind => {
   const k = kind === "playerpuck" ? "player" : kind;
   const g = TOOL_GLYPH[k];
@@ -3120,9 +3126,7 @@ export default function DrillAnimator() {
     return {
       id, kind, x: pt.x, y: pt.y, speed: kind === "player" ? defaultSpeed : 1, hand: "R", sym: "", carrier: null,
       facing: kind === "net" && pt.x >= 100 ? 180 : 0, transfers: [], pickup: null, net: null, holdLine: false, goalie: false, defense: false,
-      color: kind === "player" ? COLORS[colorIdx] : kind === "cone" ? "#e0731d" : kind === "net" ? "#c81e33"
-        : kind === "bumper" ? "#1b1e22" : kind === "deker" ? "#c79a4e" : kind === "passer" ? "#57636f"
-        : kind === "label" ? "#14202b" : kind === "tire" ? "#1c1c1e" : kind === "light" ? "#2ea043" : "#14171a",
+      color: defaultColor(kind, COLORS[colorIdx]),
       label: kind === "player" ? id : "", text: kind === "label" ? "Label" : "", size: 1, path: [],
     };
   }
@@ -6482,7 +6486,7 @@ export default function DrillAnimator() {
               <div className="hd-poprow" style={{ flexWrap: "wrap" }}>
                 {TOOL_KINDS.filter(k => k !== p.kind).map(k => (
                   <button key={k} className="hd-mini hd-swapbtn" title={`Change to ${k}`}
-                    onClick={() => updateById(p.id, { kind: k })}>{toolImg(k)}</button>
+                    onClick={() => updateById(p.id, { kind: k, color: defaultColor(k) })}>{toolImg(k)}</button>
                 ))}
               </div>
             </div>
