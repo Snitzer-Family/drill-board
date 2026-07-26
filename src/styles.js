@@ -34,7 +34,7 @@ export const STYLES = `
         .hd-scrubbtn { flex:none; width:32px; height:32px; border-radius:9px; background:#1b232c;
           border:1px solid #33404f; color:#dbe4ec; display:flex; align-items:center;
           justify-content:center; cursor:pointer; }
-        .hd-scrubbtn.on { background:#1f4fa3; border-color:#1f4fa3; }
+        .hd-scrubbtn.on { background:#0f766e; border-color:#0f766e; }
         .hd-scrubbtn:disabled { opacity:.4; cursor:default; }
         .hd-scrubbtn.play { width:34px; height:34px; border-radius:50%;
           background:#d7263d; border-color:#d7263d; color:#fff; margin-right:2px; }
@@ -51,9 +51,9 @@ export const STYLES = `
         .hd-scrubrange::-moz-range-track { height:4px; background:transparent; }
         .hd-scrubrange::-webkit-slider-thumb { -webkit-appearance:none; appearance:none;
           width:20px; height:20px; margin-top:-8px; border-radius:50%; background:#e8eef4;
-          border:1px solid #1f4fa3; box-shadow:0 1px 3px rgba(0,0,0,.4); cursor:pointer; }
+          border:1px solid #0f766e; box-shadow:0 1px 3px rgba(0,0,0,.4); cursor:pointer; }
         .hd-scrubrange::-moz-range-thumb { width:20px; height:20px; border-radius:50%;
-          background:#e8eef4; border:1px solid #1f4fa3; cursor:pointer; }
+          background:#e8eef4; border:1px solid #0f766e; cursor:pointer; }
         .hd-scrubtime { flex:none; font-size:11px; color:#93a4b2; font-variant-numeric:tabular-nums; }
         /* bottom menu bar — owns the chrome so the ice stays clear */
         .hd-bar { position:absolute; z-index:44; left:env(safe-area-inset-left, 0px);
@@ -65,7 +65,7 @@ export const STYLES = `
           border:1px solid #33404f; color:#dbe4ec; font-size:17px; display:flex;
           flex-direction:column; gap:2px; align-items:center; justify-content:center;
           cursor:pointer; flex:none; }
-        .hd-barbtn.on { background:#1f4fa3; border-color:#1f4fa3; }
+        .hd-barbtn.on { background:#0f766e; border-color:#0f766e; }
         .hd-barbtn small { font-size:10px; font-weight:800; letter-spacing:.05em; }
         /* caption under each bar icon — tooltips don't exist on touch */
         .hd-blbl { font-size:8.5px; font-weight:700; letter-spacing:.05em; line-height:1;
@@ -104,7 +104,7 @@ export const STYLES = `
         .hd-item { display:flex; align-items:center; gap:8px; padding:9px 10px; font-size:14px;
           border:1px solid #2c3846; background:#212b36; color:#dbe4ec; border-radius:8px;
           cursor:pointer; text-align:left; }
-        .hd-item.on { background:#1f4fa3; border-color:#1f4fa3; color:#fff; }
+        .hd-item.on { background:#0f766e; border-color:#0f766e; color:#fff; }
         .hd-item.danger { color:#ff8d9c; border-color:#4a2a30; }
         /* icon-forward add-tool grid: the photo fills the tile, label underneath */
         .hd-toolgrid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; }
@@ -119,7 +119,7 @@ export const STYLES = `
         .hd-tool .hd-toolglyph { height:46px; display:flex; align-items:center; justify-content:center; font-size:26px; }
         .hd-toolgrid.compact .hd-tool .hd-toolglyph { height:34px; font-size:20px; }
         .hd-tool span:last-child { font-size:10.5px; font-weight:600; line-height:1; text-align:center; }
-        .hd-tool:active, .hd-tool.on { background:#1f4fa3; border-color:#1f4fa3; color:#fff; }
+        .hd-tool:active, .hd-tool.on { background:#0f766e; border-color:#0f766e; color:#fff; }
         .hd-note { font-size:11.5px; color:#7d8b99; line-height:1.5; }
         .hd-note code { color:#a8c3da; }
         /* hint text lives in the bottom bar */
@@ -168,7 +168,7 @@ export const STYLES = `
           cursor:pointer; font-variant-numeric:tabular-nums; }
         .hd-anchorbtn.wp { color:#cddffb; background:#1c2b45; border-color:#2c477a; }
         .hd-anchorbtn.bad { color:#ffb0ba; background:#3a2126; border-color:#6b2f38; }
-        .hd-anchorbtn.open { box-shadow:0 0 0 1px #1f4fa3 inset; border-color:#1f4fa3; }
+        .hd-anchorbtn.open { box-shadow:0 0 0 1px #0f766e inset; border-color:#0f766e; }
         /* presentation caption — floats over the ice; text on top, actions below so
            it reads cleanly on a narrow phone instead of squishing beside the button.
            Default spot is bottom-centre; a saved pos (inline style) overrides it. */
@@ -183,10 +183,10 @@ export const STYLES = `
         /* read mode: the whole caption is a tap target that advances the hold */
         .hd-preso.tap { cursor:pointer; gap:5px; -webkit-user-select:none; user-select:none; }
         .hd-preso-btn { flex:none; padding:8px 14px; font-size:13px; font-weight:700;
-          background:#1f4fa3; border:1px solid #1f4fa3; color:#fff; border-radius:8px; cursor:pointer; }
+          background:#0f766e; border:1px solid #0f766e; color:#fff; border-radius:8px; cursor:pointer; }
         /* placement mode: the box is the SAME size the caption plays at (text-sized);
            the text is edited inline and the controls hang above it as tabs. */
-        .hd-preso.placing { gap:5px; border-color:#3f6bbf; box-shadow:0 8px 26px rgba(0,0,0,.6); }
+        .hd-preso.placing { gap:5px; border-color:#2ca6ad; box-shadow:0 8px 26px rgba(0,0,0,.6); }
         .hd-preso-text[contenteditable] { outline:none; cursor:text; min-width:4.5em; }
         .hd-preso-text[contenteditable]:empty:before { content:attr(data-ph); color:#7d8b99; font-weight:500; }
         /* control tabs: sit just above the box's top edge like folder tabs */
@@ -199,7 +199,7 @@ export const STYLES = `
         .hd-preso-tab.move { cursor:grab; touch-action:none; color:#9fb0c2; }
         .hd-preso-tab.move:active { cursor:grabbing; }
         .hd-preso-tab.del { color:#ffb0ba; padding:0 9px; }
-        .hd-preso-tab.done { color:#fff; background:#1f4fa3; border-color:#1f4fa3; }
+        .hd-preso-tab.done { color:#fff; background:#0f766e; border-color:#0f766e; }
         @media (pointer: fine) and (min-width: 760px) {
           .hd-preso { --cap-hw:min(310px, 30vw); max-width:min(620px, 60vw); gap:12px; padding:16px 20px; bottom:calc(74px + var(--hd-b) + var(--hd-scrub)); }
           .hd-preso-text { font-size:22px; }
@@ -221,7 +221,7 @@ export const STYLES = `
         button:disabled:active { filter:none; transform:none; }
         /* keyboard focus (projector/desktop use — Space/Esc already work) */
         :where(button, input, select, textarea, [contenteditable]):focus-visible {
-          outline:2px solid #6ea8ff; outline-offset:1px; }
+          outline:2px solid #45c1cb; outline-offset:1px; }
         /* invisible hit-area extension: visual sizes stay, touch targets reach
            ~44pt (bar/transport buttons sit below Apple's minimum otherwise) */
         .hd-barbtn, .hd-scrubbtn, .hd-stepper button, .hd-x, .hd-swatch { position:relative; }
@@ -318,14 +318,14 @@ export const STYLES = `
           color:#dbe4ec; border-radius:7px; cursor:pointer; min-height:34px;
           display:inline-flex; align-items:center; justify-content:center; gap:5px; }
         .hd-item svg, .hd-mini svg, .hd-btn svg { flex:0 0 auto; }
-        .hd-mini.on { background:#1f4fa3; border-color:#1f4fa3; color:#fff; }
+        .hd-mini.on { background:#0f766e; border-color:#0f766e; color:#fff; }
         .hd-mini.danger { color:#ff8d9c; border-color:#4a2a30; }
         .hd-select { flex:1 1 auto; min-width:80px; padding:6px 8px; font-size:12.5px; border-radius:7px;
           border:1px solid #2c3846; background:#212b36; color:#dbe4ec; cursor:pointer;
           -webkit-appearance:none; appearance:none;
           background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' stroke='%238b99a8' stroke-width='1.4' fill='none' stroke-linecap='round'/></svg>");
           background-repeat:no-repeat; background-position:right 8px center; padding-right:22px; }
-        .hd-select.on { border-color:#1f4fa3; }
+        .hd-select.on { border-color:#0f766e; }
         .hd-stepper { display:inline-flex; align-items:center; gap:2px;
           background:#0f141a; border:1px solid #2c3846; border-radius:7px; overflow:hidden; }
         .hd-stepper button { width:32px; min-height:32px; border:none; background:#212b36; color:#e8edf2;
