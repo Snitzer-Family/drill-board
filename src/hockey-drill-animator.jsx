@@ -555,10 +555,31 @@ export default function DrillAnimator() {
       for (let i = 1; i < poly.length; i++) segs.push([poly[i - 1], poly[i]]);
     });
     try {
+      // shots/chips/rims: the drawn lines follow the plan's fly legs
       const { plans } = getIntentPlan();
       pieces.forEach(q => {
         if (q.kind !== "puck" || !plans[q.id]) return;
         plans[q.id].legs.forEach(L => { if (L.type === "fly") segs.push([{ x: L.x0, y: L.y0 }, { x: L.x1, y: L.y1 }]); });
+      });
+      // passes: drawn from the AUTHORED chain (release waypoint → receiver), NOT
+      // the plan's blade-warped fly legs — those drift a few feet off the drawn
+      // line, enough to let a tag sit right on it. Mirror passArrows' geometry.
+      pieces.forEach(q => {
+        if (q.kind !== "puck") return;
+        (q.transfers || []).forEach((t, s) => {
+          if (t.kind !== "pass") return;
+          const actor = t.by || releaserOf(q, s);
+          const wp = releasePos(actor, t);
+          const rec0 = pieces.find(x => x.id === t.to);
+          if (!wp || !rec0) return;
+          const rec = t.recvRef ? routePiece(rec0, t.recvRef) : rec0;
+          const rw = t.recvAt != null ? t.recvAt : -1;
+          const tgt = rw >= 0 && (rec.path || [])[Math.min(rw, rec.path.length - 1)]
+            ? rec.path[Math.min(rw, rec.path.length - 1)] : { x: rec0.x, y: rec0.y };
+          const via = t.via ? pieces.find(x => x.id === t.via) : null;
+          const pts = via ? [wp, { x: via.x, y: via.y }, tgt] : [wp, tgt];
+          for (let j = 1; j < pts.length; j++) segs.push([pts[j - 1], pts[j]]);
+        });
       });
     } catch { /* plan unavailable mid-edit — route lines alone still steer the tag */ }
     return (wbTagObs = segs);
