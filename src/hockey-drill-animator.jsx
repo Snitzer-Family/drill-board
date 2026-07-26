@@ -6851,7 +6851,7 @@ export default function DrillAnimator() {
   // non-scaling-stroke context); the main scene uses screen-constant widths.
   function puckPathNodes(flat) {
     if (!showPuckPaths) return null;
-    const W = w => (flat ? w : sw(w));
+    const W = w => (flat ? w : sw(w)) * lineScale;   // global route line-thickness scale
     const D = d => (flat ? d : sdash(d));
     const ve = flat ? undefined : "non-scaling-stroke";
     const { plans } = getIntentPlan();   // draw the shot's intent (on net), not a realistic miss
@@ -6926,7 +6926,7 @@ export default function DrillAnimator() {
             {head && (dx || dy) ? (flat
               ? <circle cx={ep.x} cy={ep.y} r={1.1} fill="none" vectorEffect={ve} stroke="#14171a" strokeWidth={W(0.3)} />
               : (() => { const fx = iconXf({ x: ep.x, y: ep.y, a: (Math.atan2(dy, dx) * 180) / Math.PI });
-                  return <g transform={fx.t}><g transform={`scale(${z})`}>
+                  return <g transform={fx.t}><g transform={`scale(${z * lineScale})`}>
                     <path d="M 0 0 L -3.6 -2.1 L -3.6 2.1 Z" fill="#14171a" stroke="#14171a" strokeWidth={0.5} strokeLinejoin="round" />
                   </g></g>; })()) : null}
           </g>
@@ -6973,9 +6973,10 @@ export default function DrillAnimator() {
               // The lines stop at the caret's mouth (backed off by its zoom-
               // scaled depth) so they never protrude past the head.
               ? (() => {
-                  const le = runEnd ? gmMove(ex, ey, -ux, -uy, 2.9 * z) : { x: ex, y: ey };
-                  const a1 = gmMove(sx, sy, -uy, ux, 0.65), a2 = gmMove(le.x, le.y, -uy, ux, 0.65);
-                  const b1 = gmMove(sx, sy, uy, -ux, 0.65), b2 = gmMove(le.x, le.y, uy, -ux, 0.65);
+                  const le = runEnd ? gmMove(ex, ey, -ux, -uy, 2.9 * z * lineScale) : { x: ex, y: ey };
+                  const sep = 0.65 * lineScale;   // pair separation keeps pace so the double line stays readable
+                  const a1 = gmMove(sx, sy, -uy, ux, sep), a2 = gmMove(le.x, le.y, -uy, ux, sep);
+                  const b1 = gmMove(sx, sy, uy, -ux, sep), b2 = gmMove(le.x, le.y, uy, -ux, sep);
                   return <>
                     <line x1={a1.x} y1={a1.y} x2={a2.x} y2={a2.y} vectorEffect={ve} stroke="#14171a" strokeWidth={W(0.55)} />
                     <line x1={b1.x} y1={b1.y} x2={b2.x} y2={b2.y} vectorEffect={ve} stroke="#14171a" strokeWidth={W(0.55)} />
@@ -6986,7 +6987,8 @@ export default function DrillAnimator() {
             {runEnd && (dx || dy) && (flat
               ? <circle cx={ex} cy={ey} r={1.1} fill="none" vectorEffect={ve} stroke="#14171a" strokeWidth={W(0.3)} />
               : (() => { const fx = iconXf({ x: ex, y: ey, a: (Math.atan2(dy, dx) * 180) / Math.PI });
-                  return <g transform={fx.t}><g transform={`scale(${z})`}>
+                  // heads scale with the line-thickness setting, like routeMark
+                  return <g transform={fx.t}><g transform={`scale(${z * lineScale})`}>
                     {L.shot
                       // open caret ">" for a shot
                       ? <path d="M -3.3 -2.2 L 0 0 L -3.3 2.2" fill="none" stroke="#14171a" strokeWidth={0.95} strokeLinecap="round" strokeLinejoin="round" />
@@ -7068,17 +7070,18 @@ export default function DrillAnimator() {
             // standard shot notation: two parallel lines with an open caret
             // that the lines stop at (never protrude past)
             ? (() => {
-                const le = gmMove(ep.x, ep.y, -ux, -uy, 2.9 * z);
-                const a1 = gmMove(sp.x, sp.y, -uy, ux, 0.65), a2 = gmMove(le.x, le.y, -uy, ux, 0.65);
-                const b1 = gmMove(sp.x, sp.y, uy, -ux, 0.65), b2 = gmMove(le.x, le.y, uy, -ux, 0.65);
+                const le = gmMove(ep.x, ep.y, -ux, -uy, 2.9 * z * lineScale);
+                const sep = 0.65 * lineScale;
+                const a1 = gmMove(sp.x, sp.y, -uy, ux, sep), a2 = gmMove(le.x, le.y, -uy, ux, sep);
+                const b1 = gmMove(sp.x, sp.y, uy, -ux, sep), b2 = gmMove(le.x, le.y, uy, -ux, sep);
                 return <>
-                  <line x1={a1.x} y1={a1.y} x2={a2.x} y2={a2.y} vectorEffect="non-scaling-stroke" stroke="#14171a" strokeWidth={sw(0.55)} />
-                  <line x1={b1.x} y1={b1.y} x2={b2.x} y2={b2.y} vectorEffect="non-scaling-stroke" stroke="#14171a" strokeWidth={sw(0.55)} />
+                  <line x1={a1.x} y1={a1.y} x2={a2.x} y2={a2.y} vectorEffect="non-scaling-stroke" stroke="#14171a" strokeWidth={sw(0.55) * lineScale} />
+                  <line x1={b1.x} y1={b1.y} x2={b2.x} y2={b2.y} vectorEffect="non-scaling-stroke" stroke="#14171a" strokeWidth={sw(0.55) * lineScale} />
                 </>;
               })()
             : <line x1={sp.x} y1={sp.y} x2={ep.x} y2={ep.y} vectorEffect="non-scaling-stroke"
-                stroke="#14171a" strokeWidth={sw(0.55)} strokeDasharray={sdash("2.4 1.8")} />}
-          <g transform={fx.t}><g transform={`scale(${z})`}>
+                stroke="#14171a" strokeWidth={sw(0.55) * lineScale} strokeDasharray={sdash("2.4 1.8")} />}
+          <g transform={fx.t}><g transform={`scale(${z * lineScale})`}>
             {shot
               ? <path d="M -3.3 -2.2 L 0 0 L -3.3 2.2" fill="none" stroke="#14171a" strokeWidth={0.95} strokeLinecap="round" strokeLinejoin="round" />
               : <path d="M 0 0 L -3.6 -2.1 L -3.6 2.1 Z" fill="#14171a" stroke="#14171a" strokeWidth={0.5} strokeLinejoin="round" />}
