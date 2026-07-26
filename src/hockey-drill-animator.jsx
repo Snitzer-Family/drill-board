@@ -6558,7 +6558,7 @@ export default function DrillAnimator() {
                   <div className="hd-sectitle">Whiteboard icon</div>
                   <div className="hd-poprow" style={{ flexWrap: "wrap" }}>
                     <button className={`hd-mini${!(p.sym && p.sym.trim()) ? " on" : ""}`}
-                      onClick={() => updateById(p.id, { sym: "" })}>Auto ({p.defense ? "X" : "O"})</button>
+                      onClick={() => updateById(p.id, { sym: "" })}>Auto (X)</button>
                     {["X", "O", "F", "D", "G", "C", "W", "CO", "LW", "RW", "LD", "RD", "△", "○", "□"].map(s => (
                       <button key={s} className={`hd-mini${p.sym === s ? " on" : ""}`}
                         onClick={() => updateById(p.id, { sym: s })}>{s}</button>
@@ -6566,7 +6566,7 @@ export default function DrillAnimator() {
                   </div>
                   <div className="hd-poprow">
                     <input className="hd-input" style={{ width: 56 }} value={p.sym || ""} maxLength={3}
-                      placeholder={p.defense ? "X" : "O"}
+                      placeholder="X"
                       onChange={e => updateById(p.id, { sym: e.target.value })} />
                   </div>
                 </div>
@@ -9025,7 +9025,7 @@ export default function DrillAnimator() {
           <div className="hd-note">
             Feet: x 0–200, y 0–85. <b>RINK</b> full|half|quarter ·
             <b> PIECE</b> id player|puck|cone|net|bumper|deker|passer|label|tire x y [#color] [label] [speed=1.2] [hand=L] [sym=LW] [on=F1]
-            (<code>sym=</code> is a player&apos;s whiteboard symbol — ≤3 chars, shown instead of the skater when <b>Whiteboard mode</b> is on; <code>△</code>/<code>○</code>/<code>□</code> draw as real shapes; unset defaults to X for <code>defense</code>, else O)
+            (<code>sym=</code> is a player&apos;s whiteboard symbol — ≤3 chars, shown instead of the skater when <b>Whiteboard mode</b> is on; <code>△</code>/<code>○</code>/<code>□</code> draw as real shapes; unset defaults to X)
             (a <b>bumper</b> is a solid barrier — players skate around it and pucks carom off it; a <b>deker</b> a stickhandling gate, a <b>passer</b> a rebounder box — all take <code>face=deg</code>)
             (a <b>tire</b> is an agility prop — <code>size=1</code> large / <code>size=0.55</code> small; add <code>goalie</code> for a keeper that works the full circle to defend shots at it)
             (a <b>label</b> is a movable/resizable text note: <code>PIECE L1 label 100 40 size=1.2 "Regroup here"</code>)

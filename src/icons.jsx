@@ -298,7 +298,7 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
   } else if (wb && p.kind === "player") {
     // whiteboard mode: the classic coach's symbol (X / O / LW / △…) instead of
     // the skater art — flat (no shadow), upright via the label's counter-rotation
-    const sym = (p.sym && p.sym.trim()) || (p.defense ? "X" : "O");
+    const sym = (p.sym && p.sym.trim()) || "X";
     // △ ○ □ draw as real strokes — font glyphs for these are hairline-thin and
     // vary by OS, so they can't match the 900-weight letters
     const shapePath = sym === "△" ? "M 0 -2.9 L 2.75 2.05 L -2.75 2.05 Z"
