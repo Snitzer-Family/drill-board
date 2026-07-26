@@ -148,7 +148,8 @@ export const STYLES = `
         .hd-row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
         .hd-btn { padding:9px 16px; font-size:13.5px; font-weight:600; border:1px solid #2c3846;
           background:#1b232c; color:#e8edf2; border-radius:8px; cursor:pointer; min-height:40px; }
-        .hd-btn.primary { background:#d7263d; border-color:#d7263d; }
+        .hd-btn.primary { background:#0f766e; border-color:#0f766e; }
+        .hd-btn.danger { color:#ff8d9c; border-color:#4a2a30; }
         /* presentation steps editor */
         .hd-steplist { flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:7px; }
         .hd-stepitem { display:flex; flex-direction:column; gap:6px; }
@@ -238,9 +239,9 @@ export const STYLES = `
         .hd-x { background:none; border:none; color:#8b99a8; cursor:pointer;
           font-size:16px; padding:2px 5px; display:inline-flex; align-items:center; justify-content:center; }
         .hd-x:first-of-type { margin-left:auto; }
-        .hd-x.on { color:#ffd447; }   /* an active toggle (pinned / docked) */
+        .hd-x.on { color:#45c1cb; }   /* an active toggle (pinned / docked) */
         .hd-grip { display:inline-flex; align-items:center; }
-        input[type=range] { accent-color:#d7263d; height:30px; }
+        input[type=range] { accent-color:#0f766e; height:30px; }
         .hd-pop.pinned { z-index:43; }   /* just under the play dock, never behind it */
         /* docked editing sidebar: a fixed full-height column on the right edge,
            square outer corners, shadow only on its inner (left) edge */

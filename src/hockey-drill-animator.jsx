@@ -316,6 +316,7 @@ export default function DrillAnimator() {
   const [openMenu, setOpenMenu] = useState(null); // settings | rinkmenu | tools | text
   const [textDraft, setTextDraft] = useState(DEFAULT_TEXT);
   const [textError, setTextError] = useState("");
+  const [textCloseAsk, setTextCloseAsk] = useState(false);  // "unapplied edits" guard on Done
   const [playing, setPlaying] = useState(false);
   const [animT, setAnimT] = useState(0);
   const [restFade, setRestFade] = useState(1);         // extra splash fade-out that runs while paused/stopped
@@ -4480,6 +4481,7 @@ export default function DrillAnimator() {
   function openText() {
     setTextDraft(serializeDrill(rink, pieces, drillTitle, drillDesc, drillSteps, drillNotes, drillItems));
     setTextError("");
+    setTextCloseAsk(false);
     setOpenMenu("text");
   }
   function applyText() {
@@ -8298,19 +8300,6 @@ export default function DrillAnimator() {
           <button className="hd-item" onClick={() => { previewLink(); setOpenMenu(null); }}><Icon name="share" size={16} /> Share preview link</button>
           <button className="hd-item" onClick={() => fileRef.current?.click()}><Icon name="upload" size={16} /> Load .txt / .md</button>
           <button className="hd-item" disabled={!!photoBusy} onClick={() => { setOpenMenu(null); photoRef.current?.click(); }}><Icon name="image" size={16} /> Import from photo…</button>
-          <button className="hd-item danger"
-            onClick={() => {
-              const hasContent = pieces.length || drillSteps.length || drillItems.length ||
-                drillTitle.trim() || drillDesc.trim() || drillNotes.trim();
-              if (!hasContent || window.confirm("Clear everything — pieces, steps, items, and drill info?")) {
-                setPlaying(false); resetAnim();
-                setPieces([]); setDrillSteps([]); setDrillItems([]);
-                setDrillTitle(""); setDrillDesc(""); setDrillNotes(""); setDrillVersion(undefined);
-                setPlacingStep(null); setEditAnchor(null);
-                setSelectedId(null); setPopup(null); setOpenMenu(null);
-                flash("Board cleared — Undo restores it");
-              }
-            }}><Icon name="trash" size={16} /> Clear all</button>
           <button className={`hd-item${showZones ? " on" : ""}`}
             onClick={() => setShowZones(s => !s)}>
             <Icon name="grid" size={16} /> Ice zones {showZones ? "(on)" : ""}
@@ -8349,9 +8338,20 @@ export default function DrillAnimator() {
             <span style={{ fontSize: 11, color: "#8b99a8" }}>describe areas skated through</span>
           </div>
           <div className="hd-poprow">
-            <button className="hd-mini" onClick={() => setOpenMenu("steps")}>✎ Edit steps</button>
+            <button className="hd-mini" onClick={() => setOpenMenu("steps")}><Icon name="pencil" size={13} /> Edit steps</button>
             <span style={{ fontSize: 11, color: "#8b99a8" }}>{drillSteps.length ? `${drillSteps.length} step${drillSteps.length > 1 ? "s" : ""} — play pauses at each` : "scrub, pause, add your own"}</span>
           </div>
+          {/* destructive action lives alone at the very bottom, behind a divider */}
+          <div style={{ height: 1, background: "#2c3846", margin: "4px 0" }} />
+          <button className="hd-item danger"
+            onClick={() => {
+              setPlaying(false); resetAnim();
+              setPieces([]); setDrillSteps([]); setDrillItems([]);
+              setDrillTitle(""); setDrillDesc(""); setDrillNotes(""); setDrillVersion(undefined);
+              setPlacingStep(null); setEditAnchor(null);
+              setSelectedId(null); setPopup(null); setOpenMenu(null);
+              flash("Board cleared — Undo restores it", 3000);
+            }}><Icon name="trash" size={16} /> Clear all</button>
           <div className="hd-note">
             Tap a piece, route point, or line for its settings.
             Double-tap a line to add a point. Drag to move; touch drags show a magnifier.
@@ -8589,7 +8589,8 @@ export default function DrillAnimator() {
           )}
           <div className="hd-row">
             <button className="hd-btn primary" onClick={() => setOpenMenu(null)}>Done</button>
-            <button className="hd-btn" onClick={() => setDrillNotes("")}>Clear</button>
+            <button className="hd-btn danger" style={{ marginLeft: "auto" }}
+              onClick={() => { setDrillNotes(""); flash("Notes cleared — Undo restores them"); }}>Clear</button>
           </div>
           <div className="hd-note">
             A written writeup shown on the print sheet and preview page. Supports markdown:
@@ -8618,7 +8619,7 @@ export default function DrillAnimator() {
                   <Stepper value={r.count} min={0} step={1} suffix=""
                     onChange={n => (r.custom ? setCustomItem(r, { count: n }) : setCanonItem(r, { count: n }))} />
                   {r.custom
-                    ? <button className="hd-mini" title="Remove gear row" onClick={() => setCustomItem(r, { remove: true })}>✕</button>
+                    ? <button className="hd-mini" title="Remove gear row" onClick={() => setCustomItem(r, { remove: true })}><Icon name="close" size={13} /></button>
                     : <button className={`hd-mini${r.hide ? " on" : ""}`} title={r.hide ? "Hidden from the sheet — show it" : "Hide from the sheet (piece stays on the ice)"}
                         onClick={() => setCanonItem(r, { hide: !r.hide })}>{r.hide ? "hidden" : "hide"}</button>}
                 </div>
@@ -8642,14 +8643,29 @@ export default function DrillAnimator() {
           <div className="hd-mh">Drill text</div>
           <textarea className="hd-ta" value={textDraft} onChange={e => setTextDraft(e.target.value)} spellCheck={false} />
           {textError && <div className="hd-err">{textError}</div>}
-          <div className="hd-row">
-            <button className="hd-btn primary" onClick={applyText}>Apply</button>
-            <button className="hd-btn" title="Copy text" aria-label="Copy text" onClick={copyText}><Icon name="duplicate" size={15} /></button>
-            <button className="hd-btn" title="Erase text" onClick={() => setTextDraft("")}>Erase</button>
-            <button className="hd-btn" title="Share drill" onClick={shareDrill}>Share</button>
-            <button className="hd-btn" onClick={() => fileRef.current?.click()}>Load</button>
-            <button className="hd-btn" onClick={() => setOpenMenu(null)}>Close</button>
-          </div>
+          {textCloseAsk ? (
+            /* edits in the box haven't been applied to the board — never lose
+               them to a stray Done tap */
+            <div className="hd-row" style={{ alignItems: "center" }}>
+              <span style={{ fontSize: 12.5, color: "#e8d48b" }}>Edits not applied yet —</span>
+              <button className="hd-btn primary" onClick={() => { setTextCloseAsk(false); applyText(); }}>Apply &amp; close</button>
+              <button className="hd-btn" onClick={() => setTextCloseAsk(false)}>Keep editing</button>
+              <button className="hd-btn danger" onClick={() => { setTextCloseAsk(false); setOpenMenu(null); }}>Discard</button>
+            </div>
+          ) : (
+            <div className="hd-row">
+              <button className="hd-btn primary" onClick={applyText}>Apply</button>
+              <button className="hd-btn" onClick={() => {
+                if (textDraft !== serializeDrill(rink, pieces, drillTitle, drillDesc, drillSteps, drillNotes, drillItems)) setTextCloseAsk(true);
+                else setOpenMenu(null);
+              }}>Done</button>
+              <button className="hd-btn" title="Copy text" onClick={copyText}><Icon name="duplicate" size={15} /> Copy</button>
+              <button className="hd-btn" title="Share drill" onClick={shareDrill}>Share</button>
+              <button className="hd-btn" onClick={() => fileRef.current?.click()}>Load</button>
+              <button className="hd-btn danger" style={{ marginLeft: "auto" }} title="Clear the text box"
+                onClick={() => setTextDraft("")}>Clear</button>
+            </div>
+          )}
           <div className="hd-row" style={{ alignItems: "center" }}>
             <span style={{ fontSize: 12, color: "#8b99a8" }}>Export</span>
             <button className="hd-btn" onClick={exportTxt}>.txt</button>
