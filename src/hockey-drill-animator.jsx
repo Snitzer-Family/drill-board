@@ -4136,16 +4136,9 @@ export default function DrillAnimator() {
       svgRef.current.setPointerCapture?.(e.pointerId);
       return;
     }
-    // a piece in a NAMED group: dragging any member slides the whole formation;
-    // a plain tap still selects/edits just this piece
-    const pc = pieces.find(q => q.id === id);
-    if (pc && pc.group) {
-      setMultiSel(null);
-      setSelectedId(id);
-      drag.current = { kind: "gmove", id, members: groupMembers(pc.group), start: pt, last: pt, moved: false, touch: e.pointerType !== "mouse", locked };
-      svgRef.current.setPointerCapture?.(e.pointerId);
-      return;
-    }
+    // a piece in a NAMED group drags individually like any other — the whole
+    // formation slides only while the group is SELECTED (box-select or the
+    // Visibility menu's ⌖), via the multiSel branch above
     setMultiSel(null);
     setSelectedId(id);
     // was this piece's editor already open (or a pinned panel) at grab time? A
@@ -4276,7 +4269,6 @@ export default function DrillAnimator() {
     // group move: slide every selected piece by the pointer delta
     if (d.kind === "group") { const dx = pt.x - d.last.x, dy = pt.y - d.last.y; d.last = pt; moveGroupBy(dx, dy); if (d.touch) setLoupe(pt); return; }
     // named-group move: slide the whole formation by dragging one member
-    if (d.kind === "gmove") { const dx = pt.x - d.last.x, dy = pt.y - d.last.y; d.last = pt; moveMembersBy(id => d.members.has(id), dx, dy); if (d.touch) setLoupe(pt); return; }
     if (d.touch) setLoupe(pt);
     if (d.kind === "rotate") {
       update(p => {
@@ -4436,7 +4428,6 @@ export default function DrillAnimator() {
       return;
     }
     if (d.kind === "group") return;   // group move already applied live
-    if (d.kind === "gmove") { if (!d.moved) setPopup({ type: "piece", id: d.id }); return; }   // tap a grouped piece = edit it
     // snap a dropped net into a standard goal position if it's near one
     if (d.kind === "piece" && d.moved && d.line == null) {
       const pc = pieces.find(q => q.id === d.id);
