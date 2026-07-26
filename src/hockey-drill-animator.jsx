@@ -55,6 +55,47 @@ const toolImg = (kind, wb = false, wbCircle = false) => {
   );
 };
 
+// Split a detoured route polyline into per-leg spans, cutting at each waypoint's
+// nearest point on the line, so every leg keeps its OWN zigzag/wiggle/plain
+// styling when a detour collapses the route into one polyline (a mixed
+// fwd/bwd route must not flatten to a single plain line).
+function polyLegSpans(poly, path) {
+  if (poly.length < 2 || path.length < 2) return [{ pts: poly, leg: Math.max(0, path.length - 1) }];
+  const paramOf = pt => {          // fractional vertex index of the closest point
+    let best = 0, bd = Infinity;
+    for (let i = 0; i < poly.length - 1; i++) {
+      const ax = poly[i].x, ay = poly[i].y, vx = poly[i + 1].x - ax, vy = poly[i + 1].y - ay;
+      const L2 = vx * vx + vy * vy || 1;
+      const t = Math.max(0, Math.min(1, ((pt.x - ax) * vx + (pt.y - ay) * vy) / L2));
+      const dxq = pt.x - (ax + vx * t), dyq = pt.y - (ay + vy * t);
+      const d = dxq * dxq + dyq * dyq;
+      if (d < bd) { bd = d; best = i + t; }
+    }
+    return best;
+  };
+  const pointAt = u => {
+    const i = Math.min(poly.length - 2, Math.floor(u)), t = u - i;
+    return { x: poly[i].x + (poly[i + 1].x - poly[i].x) * t, y: poly[i].y + (poly[i + 1].y - poly[i].y) * t };
+  };
+  const cuts = path.slice(0, -1).map(s => paramOf({ x: s.x, y: s.y }));
+  for (let i = 1; i < cuts.length; i++) cuts[i] = Math.max(cuts[i], cuts[i - 1]);   // a detour can fold back — keep cuts monotone
+  const spans = [];
+  let u0 = 0;
+  for (let leg = 0; leg < path.length; leg++) {
+    const u1 = leg < cuts.length ? cuts[leg] : poly.length - 1;
+    if (u1 - u0 > 1e-6) {
+      const pts = [pointAt(u0)];
+      for (let i = Math.floor(u0) + 1; i <= Math.floor(u1) && i < poly.length; i++)
+        if (i - u0 > 1e-6) pts.push(poly[i]);
+      const pe = pointAt(u1), lp = pts[pts.length - 1];
+      if (Math.hypot(pe.x - lp.x, pe.y - lp.y) > 1e-6) pts.push(pe);
+      if (pts.length > 1) spans.push({ pts, leg });
+    }
+    u0 = u1;
+  }
+  return spans.length ? spans : [{ pts: poly, leg: path.length - 1 }];
+}
+
 // swatch palette for on-ice text labels (dark ink first — labels sit on light ice)
 const LABEL_COLORS = ["#14202b", "#d7263d", "#1f4fa3", "#1f8a4c", "#e0731d", "#7a3fa8"];
 
@@ -7792,18 +7833,25 @@ export default function DrillAnimator() {
                     const centers = [...new Set([...acts.keys(), ...forkAts])]
                       .filter(i => p.path[i]).map(i => ({ x: p.path[i].x, y: p.path[i].y }))
                       .concat(ledCs.map(e => ({ x: e.x, y: e.y })));   // ghost catch waypoints cut holes too
-                    const subs = gapPolyAt(line, centers, actGap, strokeAR);
-                    const allCarry = p.kind === "player" && carry && p.path.length > 0 && p.path.every((_, i) => carry.has(i));
-                    const allBwd = p.kind === "player" && p.path.length > 0 && p.path.every(s => s.dir === "bwd");
                     const inkStyle = segStroke(p, p.path[p.path.length - 1] || {}, false);
+                    // each LEG of the bent line keeps its own zigzag/wiggle/plain
+                    // shape (a mixed fwd/bwd route must not flatten to plain);
                     // casing pass first for the whole bent line, then the ink
-                    return [caseOf(inkStyle), inkStyle].flatMap((style, ci) => subs.map((sub, k) => {
-                      if (allBwd) return <path key={`${ci}/${k}`} d={zigzagPoly(sub, strokeAR, k === subs.length - 1)} {...style} strokeLinejoin="round" pointerEvents="none" />;
-                      const shaped = allCarry ? wigglePoly(sub, strokeAR, true) : sub;
-                      return (
-                        <polyline key={`${ci}/${k}`} points={shaped.map(q => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" ")}
-                          {...style} strokeLinejoin="round" pointerEvents="none" />
-                      );
+                    const spans = polyLegSpans(line, p.path);
+                    return [caseOf(inkStyle), inkStyle].flatMap((style, ci) => spans.flatMap(({ pts, leg }, si) => {
+                      const seg = p.path[leg] || {};
+                      const bwd = p.kind === "player" && seg.dir === "bwd";
+                      const wig = !bwd && p.kind === "player" && carry && carry.has(leg);
+                      const subs = gapPolyAt(pts, centers, actGap, strokeAR);
+                      return subs.map((sub, k) => {
+                        const lastBit = si === spans.length - 1 && k === subs.length - 1;
+                        if (bwd) return <path key={`${ci}/${si}/${k}`} d={zigzagPoly(sub, strokeAR, lastBit)} {...style} strokeLinejoin="round" pointerEvents="none" />;
+                        const shaped = wig ? wigglePoly(sub, strokeAR, lastBit) : sub;
+                        return (
+                          <polyline key={`${ci}/${si}/${k}`} points={shaped.map(q => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" ")}
+                            {...style} strokeLinejoin="round" pointerEvents="none" />
+                        );
+                      });
                     }));
                   })()}
                   {/* arrow + action badges last so they sit ON TOP of the line */}
@@ -7992,19 +8040,25 @@ export default function DrillAnimator() {
                           the origin (its reaction badge — the authored startGap) and at
                           the branch's own action circles keep the bent line clear of them */}
                       {bent && (() => {
-                        const allBwd = solid && f.path.length > 0 && f.path.every(s => s.dir === "bwd");
-                        const allCarry = solid && f.path.length > 0 && f.path.every((_, i) => carry.has(i));
                         const bLine = endBk ? trimPolyEnd(bent, endBk, strokeAR) : bent;
                         const centers = [{ x: origin.x, y: origin.y },
                           ...[...acts.keys()].filter(i => f.path[i]).map(i => ({ x: f.path[i].x, y: f.path[i].y })),
                           ...[...subForkAts].filter(i => f.path[i]).map(i => ({ x: f.path[i].x, y: f.path[i].y }))];
-                        const subs = gapPolyAt(bLine, centers, actGap, strokeAR);
-                        return [caseLine, line].flatMap((st, ci) => subs.map((sub, k) => {
-                          if (allBwd) return <path key={`${ci}/${k}`} d={zigzagPoly(sub, strokeAR, k === subs.length - 1)}
-                            {...st} strokeDasharray={solid ? undefined : sdash("1.6 1.1")} strokeLinejoin="round" />;
-                          const shaped = allCarry ? wigglePoly(sub, strokeAR, true) : sub;
-                          return <polyline key={`${ci}/${k}`} points={shaped.map(q => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" ")}
-                            {...st} strokeDasharray={solid ? undefined : sdash("1.6 1.1")} strokeLinejoin="round" />;
+                        // per-leg spans, exactly like a bent base route
+                        const spans = polyLegSpans(bLine, f.path);
+                        return [caseLine, line].flatMap((st, ci) => spans.flatMap(({ pts, leg }, si) => {
+                          const seg = f.path[leg] || {};
+                          const bwd = solid && seg.dir === "bwd";
+                          const wig = !bwd && solid && carry.has(leg);
+                          const subs = gapPolyAt(pts, centers, actGap, strokeAR);
+                          return subs.map((sub, k) => {
+                            const lastBit = si === spans.length - 1 && k === subs.length - 1;
+                            if (bwd) return <path key={`${ci}/${si}/${k}`} d={zigzagPoly(sub, strokeAR, lastBit)}
+                              {...st} strokeDasharray={solid ? undefined : sdash("1.6 1.1")} strokeLinejoin="round" />;
+                            const shaped = wig ? wigglePoly(sub, strokeAR, lastBit) : sub;
+                            return <polyline key={`${ci}/${si}/${k}`} points={shaped.map(q => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" ")}
+                              {...st} strokeDasharray={solid ? undefined : sdash("1.6 1.1")} strokeLinejoin="round" />;
+                          });
                         }));
                       })()}
                       {/* action circles at every action waypoint on this branch (all branches,
