@@ -322,7 +322,7 @@ export const STYLES = `
         .hd-field + .hd-field { border-top:1px solid #243040; padding-top:9px; }
         .hd-sectitle { font-size:10.5px; font-weight:700; letter-spacing:.07em;
           text-transform:uppercase; color:#93a3b5; }
-        .hd-sechint { font-size:11px; color:#8b99a8; line-height:1.35; }
+        .hd-sechint { font-size:11.5px; color:#8b99a8; line-height:1.4; }
         .hd-field .hd-poprow { gap:6px; }
         .hd-mini { padding:6px 10px; font-size:12.5px; border:1px solid #2c3846; background:#212b36;
           color:#dbe4ec; border-radius:7px; cursor:pointer; min-height:34px;
