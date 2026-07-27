@@ -8,6 +8,8 @@ export const STYLES = `
           --hd-dock-w: min(320px, 34vw);   /* width of the docked editing sidebar (desktop) */
           font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
         .hd-root.scrub-on { --hd-scrub: 48px; }
+        /* the pen palette replaces the player bar and needs two rows */
+        .hd-root.pen-on { --hd-scrub: 84px; }
         /* editing sidebar docked: shrink the ice to the left of it (the stage's
            ResizeObserver re-fits the rink automatically) */
         .hd-root.dock-open .hd-stage { right:calc(env(safe-area-inset-right, 0px) + var(--hd-dock-w)); }
@@ -38,6 +40,37 @@ export const STYLES = `
         .hd-scrubbtn:disabled { opacity:.4; cursor:default; }
         .hd-scrubbtn.play { width:34px; height:34px; border-radius:50%;
           background:#d7263d; border-color:#d7263d; color:#fff; margin-right:2px; }
+        /* ---- pen palette (sits in the player-bar band while sketching) ---- */
+        .hd-pen { position:absolute; z-index:44; left:8px; right:8px;
+          bottom:calc(54px + var(--hd-b) + 4px); display:flex; flex-direction:column; gap:4px;
+          padding:5px 7px; background:rgba(23,29,37,.90); border:1px solid #2c3846;
+          border-radius:12px; box-shadow:0 3px 12px rgba(0,0,0,.4); backdrop-filter:blur(4px); }
+        .hd-penrow { display:flex; align-items:center; gap:5px; }
+        .hd-pensep { flex:none; width:1px; height:20px; background:#33404f; margin:0 2px; }
+        .hd-penspacer { flex:1 1 auto; min-width:0; }
+        .hd-penbtn { flex:none; width:30px; height:30px; border-radius:8px; background:#1b232c;
+          border:1px solid #33404f; color:#dbe4ec; display:flex; align-items:center;
+          justify-content:center; cursor:pointer; padding:0; }
+        .hd-penbtn.wide { flex:1 1 0; min-width:26px; }
+        .hd-penbtn.on { background:#0f766e; border-color:#0f766e; color:#fff; }
+        .hd-penbtn.danger { color:#ff8b8b; }
+        .hd-penmode { flex:none; display:flex; align-items:center; gap:5px; height:30px;
+          padding:0 10px; border-radius:8px; background:#1b232c; border:1px solid #33404f;
+          color:#dbe4ec; font-size:12px; font-weight:700; cursor:pointer; }
+        .hd-penmode.on { background:#0f766e; border-color:#0f766e; color:#fff; }
+        .hd-penswatch { flex:1 1 0; min-width:20px; height:26px; border-radius:7px;
+          border:1px solid rgba(255,255,255,.22); cursor:pointer; padding:0; }
+        .hd-penswatch.on { outline:2px solid #eaf2f8; outline-offset:1px; }
+        /* thickness preview: a bar whose height is the stroke weight */
+        .hd-penwdot { display:block; width:16px; border-radius:2px; }
+        /* line-style preview drawn with borders in the current ink colour */
+        .hd-penstyle { display:block; width:18px; height:0; border-top:2.5px solid currentColor; }
+        .hd-penstyle.dashed { border-top-style:dashed; }
+        .hd-penstyle.dotted { border-top-style:dotted; }
+        .hd-penstyle.wavy { border-top:none; height:8px;
+          background:radial-gradient(circle at 3px 6px, transparent 2.4px, currentColor 2.4px 3.4px, transparent 3.5px),
+                     radial-gradient(circle at 9px 2px, transparent 2.4px, currentColor 2.4px 3.4px, transparent 3.5px);
+          background-size:12px 8px; background-repeat:repeat-x; }
         .hd-scrubtrack { position:relative; flex:1; min-width:0; height:22px; display:flex; align-items:center; margin:0 4px; }
         .hd-scrubtrack::before { content:""; position:absolute; left:0; right:0; top:50%;
           height:4px; margin-top:-2px; border-radius:2px; background:#3a4756; }

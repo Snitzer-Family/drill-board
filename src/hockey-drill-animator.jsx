@@ -17,6 +17,11 @@ import { classifyPenGroup, SYMBOL_MAX, SYMBOL_MAX_PX } from "./sketch-recognize.
 import { newGame, stepGame } from "./ai-game.js";
 import { STYLES } from "./styles.js";
 
+// Pen inks. These double as PIECE colours — a symbol you draw becomes a player
+// in the ink you drew it with — so they're the team colours plus the classic
+// yellow whiteboard marker. No white: it vanishes on the ice.
+const PEN_INKS = ["#ffd447", "#d7263d", "#1f4fa3", "#1f8a4c", "#e0731d", "#7a3fa8", "#111318"];
+
 // the add-tool buttons show the SAME vector sprite the piece uses on the ice.
 // Each kind renders a mini PieceIcon in a viewBox tight to its body (raw icon
 // units, since we pass a scale-1 frame) so it fills the tile.
@@ -356,7 +361,7 @@ export default function DrillAnimator() {
   const [popup, setPopup] = useState(null);
   const [tool, setTool] = useState("select");
   // freehand marker (annotation) settings, remembered between strokes
-  const [markColor, setMarkColor] = useState("#ffd447");
+  const [markColor, setMarkColor] = useState("#111318");   // black ink by default
   const [markWidth, setMarkWidth] = useState(1.1);   // rink feet
   const [markStyle, setMarkStyle] = useState("solid"); // solid | dashed | dotted | wavy
   const [markEdit, setMarkEdit] = useState(false);   // show draggable control points on the selected mark
@@ -377,6 +382,28 @@ export default function DrillAnimator() {
   const inkStepFt = () => Math.max(0.25, 2.5 * Math.min(penScale.current.x || 1.1, penScale.current.y || 1.1));
   const inkEpsFt = () => Math.max(0.3, 4 * Math.min(penScale.current.x || 1.3, penScale.current.y || 1.3));
   const symbolMaxPx = () => (penScale.current.x > 0 ? SYMBOL_MAX_PX : SYMBOL_MAX);
+  // erase everything an eraser stroke passes through: ink by its drawn points,
+  // pieces by their spot. Runs through scrubRefs so deleting a player also
+  // unpicks any puck chain that referenced it.
+  function eraseAlong(raw) {
+    const R = Math.max(2.5, 16 * Math.min(penScale.current.x || 0.2, penScale.current.y || 0.2));
+    const near = (x, y) => raw.some(q => Math.hypot(q.x - x, q.y - y) < R);
+    const hit = piecesRef.current.filter(p => p.lock ? false
+      : p.kind === "mark" ? (p.pts || []).some(q => near(q.x, q.y))
+      : near(p.x, p.y));
+    if (!hit.length) return false;
+    const ids = new Set(hit.map(p => p.id));
+    setPieces(ps => { let list = ps.filter(q => !ids.has(q.id)); for (const id of ids) list = scrubRefs(list, id); return list; });
+    flash(`Erased ${ids.size} item${ids.size > 1 ? "s" : ""}`);
+    return true;
+  }
+  const clearInk = () => {
+    const n = piecesRef.current.filter(p => p.kind === "mark" && !p.lock).length;
+    if (!n) { flash("No ink to clear"); return; }
+    setPieces(ps => ps.filter(p => !(p.kind === "mark" && !p.lock)));
+    flash(`Cleared ${n} ink mark${n > 1 ? "s" : ""} — Undo restores them`);
+  };
+
   // the last pen burst, kept so it can be copied off-device when a symbol
   // won't convert — a screenshot can't show stroke data
   const penLast = useRef(null);
@@ -413,6 +440,13 @@ export default function DrillAnimator() {
   const STYLUS_STICKY = 300000;       // 5 min of no Pencil → fingers draw again
   const stylusAt = useRef(0);
   const [palmReject, setPalmReject] = useState(true);
+  // the pen palette takes over the player-bar band while sketching. It stays
+  // put when you flip to the item editor, so moving a piece and going back to
+  // drawing is one tap instead of a trip through the Add sheet.
+  const [penMode, setPenMode] = useState(false);
+  const [eraser, setEraser] = useState(false);
+  const eraserRef = useRef(false);          // finishDraw reads it from a stale closure
+  eraserRef.current = eraser;
   const [stylusOn, setStylusOn] = useState(false);   // drives the hint text only
   // NB the `> 0` guard: performance.now() starts near zero, so without it a
   // never-touched-by-a-Pencil session would reject fingers for its first 5 min
@@ -4051,6 +4085,10 @@ export default function DrillAnimator() {
     if (penDraw.current) {            // smart pen: buffer, don't leave the tool
       const { t0 } = penDraw.current;
       penDraw.current = false;
+      if (eraserRef.current) {        // eraser: the stroke rubs out, never draws
+        if (raw.length) eraseAlong(raw);
+        return;
+      }
       if (raw.length) {               // a bare tap is a dot — the puck gesture
         penBuf.current.push({ pts: raw.map(q => ({ x: q.x, y: q.y })), t0, t1: performance.now() });
         setPenInk(penBuf.current.map(s => s.pts));
@@ -4270,6 +4308,7 @@ export default function DrillAnimator() {
     ops.forEach((o, i) => {
       if (o.op === "player") {
         const np = makePiece("player", { x: o.x, y: o.y }, out);
+        np.color = markColor;         // you drew it in this ink; it IS this colour
         // same convention as picking a whiteboard icon: the symbol names the
         // (auto-named) player, so the tag isn't redundantly repeated — and a
         // drawn X stays the clean default glyph
@@ -4277,7 +4316,9 @@ export default function DrillAnimator() {
         madeId[i] = np.id;
         out.push(np);
       } else if (o.op === "cone") {
-        out.push(makePiece("cone", { x: o.x, y: o.y }, out));
+        const nc = makePiece("cone", { x: o.x, y: o.y }, out);
+        nc.color = markColor;
+        out.push(nc);
       } else if (o.op === "puck") {
         const np = makePiece("puck", { x: o.x, y: o.y }, out);
         np.carrier = idFor(o.on);
@@ -8141,7 +8182,7 @@ export default function DrillAnimator() {
   }
 
   return (
-    <div className={`hd-root${aiPlay || !hasTimeline ? "" : " scrub-on"}${docked ? " dock-open" : ""}`} ref={rootRef}>
+    <div className={`hd-root${penMode && !aiPlay ? " pen-on" : aiPlay || !hasTimeline ? "" : " scrub-on"}${docked ? " dock-open" : ""}`} ref={rootRef}>
       <style>{STYLES}</style>
 
       {/* ---------- the ice, filling the screen ---------- */}
@@ -9025,8 +9066,56 @@ export default function DrillAnimator() {
         </div>
       )}
 
+      {/* ---------- pen palette: takes over the player-bar band while sketching ---------- */}
+      {penMode && !aiPlay && !holdStep && (
+        <div className="hd-pen">
+          <div className="hd-penrow">
+            <button className={`hd-penmode${tool === "pen" ? " on" : ""}`}
+              title={tool === "pen" ? "Drawing — tap to edit pieces" : "Editing — tap to draw"}
+              onClick={() => { flushPen(); setTool(t => (t === "pen" ? "select" : "pen")); setPopup(null); }}>
+              <Icon name={tool === "pen" ? "marker" : "cursor"} size={15} />
+              <span>{tool === "pen" ? "Draw" : "Edit"}</span>
+            </button>
+            <div className="hd-pensep" />
+            {PEN_INKS.map(c => (
+              <button key={c} className={`hd-penswatch${markColor === c && !eraser ? " on" : ""}`}
+                style={{ background: c }} title={`Ink ${c}`}
+                onClick={() => { setMarkColor(c); setEraser(false); }} />
+            ))}
+            <div className="hd-penspacer" />
+            <button className="hd-penbtn" title="Close the pen palette"
+              onClick={() => { flushPen(); setPenMode(false); setEraser(false); setTool("select"); }}>
+              <Icon name="close" size={14} />
+            </button>
+          </div>
+          <div className="hd-penrow">
+            {[["Thin", 0.7], ["Med", 1.1], ["Bold", 1.9]].map(([lbl, w]) => (
+              <button key={lbl} className={`hd-penbtn wide${Math.abs(markWidth - w) < 0.01 ? " on" : ""}`}
+                title={`${lbl} line`} onClick={() => setMarkWidth(w)}>
+                <span className="hd-penwdot" style={{ height: Math.round(w * w * 2.4), background: markColor }} />
+              </button>
+            ))}
+            <div className="hd-pensep" />
+            {[["solid", "Solid"], ["dashed", "Dashed"], ["dotted", "Dotted"], ["wavy", "Wavy"]].map(([s, lbl]) => (
+              <button key={s} className={`hd-penbtn wide${markStyle === s ? " on" : ""}`} title={lbl}
+                onClick={() => setMarkStyle(s)}>
+                <span className={`hd-penstyle ${s}`} style={{ color: markColor }} />
+              </button>
+            ))}
+            <div className="hd-pensep" />
+            <button className={`hd-penbtn${eraser ? " on" : ""}`} title="Eraser — stroke over ink or pieces to remove them"
+              onClick={() => { setEraser(v => !v); if (tool !== "pen") setTool("pen"); }}>
+              <Icon name="eraser" size={15} />
+            </button>
+            <button className="hd-penbtn danger" title="Clear all ink (Undo restores it)" onClick={clearInk}>
+              <Icon name="trash" size={14} />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ---------- player bar: transport + scrubber in one strip ---------- */}
-      {!aiPlay && !holdStep && hasTimeline && (
+      {!penMode && !aiPlay && !holdStep && hasTimeline && (
         <div className="hd-scrub">
           <button className="hd-scrubbtn play" onClick={togglePlay} title={playing ? "Pause" : "Play"}>
             <Icon name={playing ? "pause" : "play"} size={20} /></button>
@@ -9359,7 +9448,7 @@ export default function DrillAnimator() {
             {/* close the sheet on pick — on a phone it covers most of the ice,
                 and the next thing you want to do is draw */}
             <button className={`hd-tool${tool === "pen" ? " on" : ""}`}
-              onClick={() => { resetAnim(); setPlaying(false); setPopup(null); setTool("pen"); setOpenMenu(null); }}>
+              onClick={() => { resetAnim(); setPlaying(false); setPopup(null); setTool("pen"); setPenMode(true); setOpenMenu(null); }}>
               <span className="hd-toolglyph"><Icon name="marker" size={22} /></span><span>Smart pen</span>
             </button>
             {[["square", "□", "Square"], ["circle", "○", "Circle"], ["triangle", "△", "Triangle"]].map(([k, glyph, lbl]) => (
@@ -9376,7 +9465,7 @@ export default function DrillAnimator() {
           {(tool === "marker" || tool === "pen") && (
             <>
               <div className="hd-poprow">
-                {["#ffd447", "#d7263d", "#1f8a4c", "#3a8dff", "#e0731d", "#ffffff", "#14202b"].map(c => (
+                {PEN_INKS.map(c => (
                   <div key={c} className={`hd-swatch${markColor === c ? " on" : ""}`} style={{ background: c }}
                     onClick={() => setMarkColor(c)} />
                 ))}
@@ -9675,8 +9764,9 @@ export default function DrillAnimator() {
           <button className="hd-mini" onClick={discardImport}>Discard</button>
         </div>
       )}
+      {/* toast rides above the player-bar / pen-palette band, not across its controls */}
       {toast && (
-        <div style={{ position: "fixed", left: "50%", bottom: "calc(64px + env(safe-area-inset-bottom))",
+        <div style={{ position: "fixed", left: "50%", bottom: "calc(64px + var(--hd-b) + var(--hd-scrub))",
           transform: "translateX(-50%)", background: "rgba(20,26,32,0.92)", color: "#eaf2f8",
           padding: "6px 14px", borderRadius: 8, fontSize: 13, zIndex: 9999, pointerEvents: "none" }}>{toast}</div>
       )}
