@@ -16,6 +16,7 @@ import { buildLedger, mayHoldOn, mayHoldEntering } from "./possession.js";
 import { classifyPenGroup, SYMBOL_MAX, SYMBOL_MAX_PX } from "./sketch-recognize.js";
 import { newGame, stepGame } from "./ai-game.js";
 import { STYLES } from "./styles.js";
+import { THEME_KEY, THEME_ATTR, THEME_ORDER, resolveTheme, tokens } from "./theme.js";
 
 // Pen inks. These double as PIECE colours — a symbol you draw becomes a player
 // in the ink you drew it with — so they're the team colours plus the classic
@@ -326,6 +327,8 @@ const HALFNS_KEY = "drillboard:half-ns";  // half-ice shown north-south (vertica
 const HALFFLIP_KEY = "drillboard:half-flip";  // half-ice net at the far end (left / top)
 const STRETCH_KEY = "drillboard:stretch-fill";  // full ice stretches to fill the screen
 const PRESS_KEY = "drillboard:pencil-pressure";  // Apple Pencil pressure → line weight
+// THEME_KEY ("drillboard:theme") lives in theme.js — the pre-paint boot script
+// in index.html reads the same constant, and they must not drift.
 
 export default function DrillAnimator() {
   // a shared drill link (#d=<url-safe base64 DSL> — the preview-link format from
@@ -669,6 +672,45 @@ export default function DrillAnimator() {
     try { return localStorage.getItem(STRETCH_KEY) !== "0"; } catch { return true; }
   });
   useEffect(() => { try { localStorage.setItem(STRETCH_KEY, stretchFill ? "1" : "0"); } catch { /* private mode */ } }, [stretchFill]);
+  // Theme: "auto" (follow the phone) | "light" | "dark". The inline boot script
+  // in index.html has already applied a saved override before first paint —
+  // this just keeps the attribute in sync once React owns the state.
+  const [themePref, setThemePref] = useState(() => {
+    try { return localStorage.getItem(THEME_KEY) || "auto"; } catch { return "auto"; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(THEME_KEY, themePref); } catch { /* private mode */ }
+    const el = document.documentElement;
+    // no attribute at all in auto: that's what lets the prefers-color-scheme
+    // media block in the emitted CSS take over
+    if (themePref === "auto") el.removeAttribute(THEME_ATTR);
+    else el.setAttribute(THEME_ATTR, themePref);
+  }, [themePref]);
+  // the OS preference has to be tracked LIVE, not just read once: in auto the
+  // SVG token object below must follow the phone flipping to dark at sunset
+  // while the app is open.
+  const [prefersDark, setPrefersDark] = useState(() => {
+    try { return matchMedia("(prefers-color-scheme: dark)").matches; } catch { return true; }
+  });
+  useEffect(() => {
+    let mq;
+    try { mq = matchMedia("(prefers-color-scheme: dark)"); } catch { return; }
+    const on = e => setPrefersDark(e.matches);
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
+  const themeName = resolveTheme(themePref, prefersDark);
+  const T = tokens(themeName);
+  // Keep the address-bar / task-switcher colour on the resolved theme. iOS only
+  // consults theme-color at LAUNCH, so this is for Safari tabs, Android, and the
+  // next standalone launch; the media-scoped metas in index.html cover the
+  // pre-JS paint and are replaced here once JS has an authoritative answer.
+  useEffect(() => {
+    document.querySelectorAll('meta[name="theme-color"][media]').forEach(m => m.remove());
+    let m = document.querySelector('meta[name="theme-color"]:not([media])');
+    if (!m) { m = document.createElement("meta"); m.name = "theme-color"; document.head.appendChild(m); }
+    m.content = T["surface-app"];
+  }, [T]);
   const effDetail = detailAnim && !whiteboard;
   // whiteboard also drops the shot theatrics: no random miss/post/air rolls
   // (shots bury flat) and no GOAL!/SAVE! splashes — a diagram, not a broadcast
@@ -9593,7 +9635,21 @@ export default function DrillAnimator() {
       {openMenu === "prefs" && (
         <div className="hd-menu tl">
           <div className="hd-mh">App &amp; drill settings</div>
-          <div className="hd-mh" style={{ marginTop: 2, color: "#6b7a8c" }}>Display</div>
+          <div className="hd-mh" style={{ marginTop: 2, color: "var(--db-text-faint)" }}>Display</div>
+          <div className="hd-poprow">
+            <span className="hd-sectitle" style={{ width: "100%" }}>Theme</span>
+            {THEME_ORDER.map(v => (
+              <button key={v} className={`hd-mini${themePref === v ? " on" : ""}`}
+                onClick={() => setThemePref(v)}>
+                {v === "auto" ? "Auto" : v === "light" ? "Light" : "Dark"}
+              </button>
+            ))}
+            <span className="hd-sechint">
+              {themePref === "auto"
+                ? `follows your phone’s appearance — currently ${themeName}`
+                : `pinned to ${themePref}, ignoring your phone’s appearance`}
+            </span>
+          </div>
           <div className="hd-poprow">
             <button className={`hd-mini${realisticShots ? " on" : ""}`}
               onClick={() => setRealisticShots(v => !v)}>{realisticShots ? "✓ Realistic shots" : "Realistic shots"}</button>
