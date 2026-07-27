@@ -12,14 +12,24 @@ export const STYLES = `
         .hd-root { position:fixed; inset:0; background:var(--db-surface-app); color:var(--db-text); overflow:hidden;
           --hd-b: var(--hd-safe-b, min(env(safe-area-inset-bottom, 0px), 34px));
           --hd-scrub: 0px;   /* reserved height for the player bar band (0 when hidden) */
+          /* breathing room between the bottom boards and the player/pen bar.
+             The band used to be exactly the bar's height, which left the rink
+             edge sitting ~4px off the scrubber — they read as one stuck object. */
+          --hd-icegap: 10px;
           --hd-pintop: 10px; /* no floating top dock any more — popups can ride the top edge */
           --hd-dock-w: min(320px, 34vw);   /* width of the docked editing sidebar (desktop) */
           font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
-        .hd-root.scrub-on { --hd-scrub: 48px; }
+        /* Each band = the bar's 4px offset above the menu bar + the bar's REAL
+           rendered height + the clearance. The old 48px assumed .hd-scrub was
+           its stated height:40px, but it isn't border-box — padding and border
+           make it 50px — so the band was 6px SHORT and the bar overlapped the
+           ice. Measured on device widths 430/900/1100: scrub is 50px at all of
+           them; the pen palette is 54px on one row, 96px when it wraps to two. */
+        .hd-root.scrub-on { --hd-scrub: calc(4px + 50px + var(--hd-icegap)); }
         /* the pen palette replaces the player bar: two rows on a narrow phone,
            one once there's width for both groups (landscape, tablet, desktop) */
-        .hd-root.pen-on { --hd-scrub: 104px; }
-        @media (min-width: 700px) { .hd-root.pen-on { --hd-scrub: 60px; } }
+        .hd-root.pen-on { --hd-scrub: calc(4px + 96px + var(--hd-icegap)); }
+        @media (min-width: 700px) { .hd-root.pen-on { --hd-scrub: calc(4px + 54px + var(--hd-icegap)); } }
         /* editing sidebar docked: shrink the ice to the left of it (the stage's
            ResizeObserver re-fits the rink automatically) */
         .hd-root.dock-open .hd-stage { right:calc(env(safe-area-inset-right, 0px) + var(--hd-dock-w)); }
