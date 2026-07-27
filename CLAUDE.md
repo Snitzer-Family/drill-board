@@ -120,3 +120,23 @@ restart so the settings watcher reloads it.
 There is no automated test suite. The build is the gate; the user tests on
 an iPhone 15 (standalone). For risky changes, prefer small commits so the
 watermark + Actions history make bisection trivial.
+
+## Verifying pen / UI changes (browser harness)
+
+The node suite (`node tests/sketch-recognize.mjs`, ~1s, 216 tests) is free —
+run it on every change. The browser suites live outside the repo in
+`/tmp/db-verify` (puppeteer-core, no repo dep) and drive real pointer/touch
+input against the dev server. Run them with the parallel runner, not one at a
+time:
+
+- `node /tmp/db-verify/run.mjs ui` — palette, modes, cursor, convert, extend.
+  Use for UI/markup/CSS changes (~45s).
+- `node /tmp/db-verify/run.mjs recog` — the recognition suites. Use when
+  `sketch-recognize.js` or the capture path changes.
+- `node /tmp/db-verify/run.mjs` — everything. Before a deploy, or after a
+  change that touches both.
+
+Scope the group to what changed; a full sweep on a CSS tweak is waste. But do
+run `ui` on markup changes: the suites select by class/title, and layout
+changes have twice broken them (and once shifted the ice geometry other suites
+draw into).
