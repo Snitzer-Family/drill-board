@@ -211,7 +211,25 @@ function features(strokes) {
   const tail = rs.filter(p =>
     p.x > b.x + 0.3 * b.w && p.x < b.x + 0.8 * b.w &&
     p.y > b.y + 0.38 * b.h && p.y < b.y + 0.68 * b.h).length;
-  return { closure, corners, leftRMS, tail };
+  // how ring-like: spread of the radius about the centroid. Hand circles sit
+  // near 0.03-0.09, D at 0.14, C and triangles above 0.2 — the most reliable
+  // way to know a circle, and it doesn't care where the pen closed the loop.
+  const cx = all.reduce((s, p) => s + p.x, 0) / all.length;
+  const cy = all.reduce((s, p) => s + p.y, 0) / all.length;
+  const rad = all.map(p => Math.hypot(p.x - cx, p.y - cy));
+  const rMean = rad.reduce((a, v) => a + v, 0) / rad.length || 1e-9;
+  const radialCV = Math.sqrt(rad.reduce((a, v) => a + (v - rMean) ** 2, 0) / rad.length) / rMean;
+  // D's real signature: a SPINE. Its leftmost edge sits at the same x at the
+  // top, middle and bottom; a circle curves away at both ends (0.00 vs 0.91).
+  // leftRMS alone let round ink win D over O.
+  const leftAt = (a, z) => {
+    const band = all.filter(p => p.y >= b.y + a * b.h && p.y <= b.y + z * b.h);
+    return band.length ? Math.min(...band.map(p => p.x)) : null;
+  };
+  const lT = leftAt(0, 0.2), lM = leftAt(0.4, 0.6), lB = leftAt(0.8, 1);
+  const spineDrift = lT == null || lM == null || lB == null ? 9
+    : Math.max(Math.abs(lT - lM), Math.abs(lB - lM)) / (b.w || 1e-9);
+  return { closure, corners, leftRMS, tail, radialCV, spineDrift };
 }
 
 // Closure bounds are finger-loose: coaches leave big gaps, and capture
@@ -222,7 +240,7 @@ const GUARDS = {
   O: f => f.closure < 0.52,
   C: f => f.closure > 0.5 && f.tail <= 1,
   G: f => f.tail >= 2,
-  D: f => f.leftRMS < 0.07,
+  D: f => f.leftRMS < 0.07 && f.spineDrift < 0.09,
   "△": f => f.closure < 0.52 && f.corners === 3,
   "□": f => f.closure < 0.52 && f.corners === 4,
 };
@@ -271,6 +289,13 @@ export function recognizeSymbol(strokes) {
   const cloud = normalize(strokes);
   if (!cloud) return null;
   const f = features(strokes);
+  // A ring is the one symbol worth deciding geometrically. $P scores an open
+  // hand-drawn loop poorly (a 310° circle managed only 0.436, losing to D at
+  // 0.561) because the template's points spread over the missing arc — but
+  // "every point the same distance from the middle" is unambiguous, and it
+  // holds however far round the pen got.
+  if (strokes.length === 1 && f.radialCV < 0.11 && f.corners <= 1 && f.closure < 0.52 && f.tail <= 1)
+    return { sym: "O", score: 1 - f.radialCV, second: null };
   const scored = {};
   TEMPLATES.forEach(t => {
     const score = Math.max(0, (2 - greedyMatch(cloud, t.cloud)) / 2);

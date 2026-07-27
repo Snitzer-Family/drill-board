@@ -387,6 +387,24 @@ const kinds = ops => ops.map(o => o.op);
   T('no ink, no bogus routes', kinds(mixed).every(k => k === 'player'), true);
 }
 
+// ---- A REAL finger-drawn circle off a ZOOMED iPhone (2.8x). $P scored it
+//      O:0.436 but D:0.561 — a round loop losing to the letter D, because the
+//      only thing guarding D was "the left edge is straightish", which is true
+//      of a circle over a short span. It now needs a real SPINE (same leftmost
+//      x at top, middle and bottom), and rings are decided geometrically. ----
+{
+  const ZOOM = { pxFtX: 0.0871, pxFtY: 0.0750 };
+  const ring = [[106.53,44.68],[106.8,44.45],[107.06,44.23],[107.32,44.08],[107.58,44],[107.84,43.93],[108.1,43.85],[108.36,43.85],[108.63,43.85],[108.89,43.93],[109.15,44],[109.41,44.15],[109.67,44.3],[109.85,44.53],[110.02,44.75],[110.19,45.05],[110.28,45.35],[110.28,45.65],[110.19,45.95],[110.11,46.25],[109.93,46.55],[109.76,46.78],[109.5,46.93],[109.24,47.08],[108.97,47.23],[108.71,47.23],[108.45,47.3],[108.19,47.3],[107.93,47.23],[107.67,47.23],[107.41,47.15],[107.14,47],[106.88,46.78],[106.62,46.55],[106.45,46.33]]
+    .map(([x, y]) => ({ x: x / ZOOM.pxFtX, y: y / ZOOM.pxFtY }));   // → screen units
+  T('zoomed finger circle is an O', recognizeSymbol([ring])?.sym, 'O');
+  T('...and not a D', recognizeSymbol([ring])?.sym === 'D', false);
+  T('zoomed circle → player', kinds(classifyPenGroup([stroke(ring.map(p => ({
+    x: p.x * ZOOM.pxFtX, y: p.y * ZOOM.pxFtY })))], ZOOM)), ['player']);
+  // the letter D must still be a D — the new spine test is what separates them
+  T('D survives the spine test', recognizeSymbol(drawn(GLYPHS.D, 60, 40, 6, 0.12, 211))?.sym, 'D');
+  T('bowed D still reads D', recognizeSymbol(drawn(GLYPHS.D, 60, 40, 9, 0.25, 223))?.sym, 'D');
+}
+
 // ---- phone scale (pxFt ≈ 0.5: the full 200ft rink spans ~390px, so a finger
 //      X is 20-40 FEET) — the view-scaled gates must keep everything working ----
 {
