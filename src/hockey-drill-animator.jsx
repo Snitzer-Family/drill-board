@@ -9249,9 +9249,16 @@ export default function DrillAnimator() {
         <div className="hd-pen">
           {/* what the PEN does */}
           <div className="hd-pengroup">
+            {/* toggles both ways: tapping it while drawing flips to editing,
+                same as the Edit button — whichever is nearer your thumb */}
             <button className={`hd-pentool${tool === "pen" && !eraser ? " on" : ""}`}
-              title="Draw — sketch symbols, routes and passes"
-              onClick={() => { setEraser(false); setTool("pen"); setPopup(null); }}>
+              title={tool === "pen" && !eraser
+                ? "Drawing — tap to edit pieces" : "Draw — sketch symbols, routes and passes"}
+              onClick={() => {
+                setPopup(null);
+                if (tool === "pen" && !eraser) { flushPen(); setTool("select"); return; }
+                setEraser(false); setTool("pen");
+              }}>
               <Icon name="marker" size={18} /><span>Draw</span>
             </button>
             <button className={`hd-pentool${eraser ? " on" : ""}`}

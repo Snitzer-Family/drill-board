@@ -87,10 +87,13 @@ export const STYLES = `
           background:rgba(23,29,37,.97); border:1px solid #33404f; border-radius:10px;
           box-shadow:0 6px 18px rgba(0,0,0,.5); z-index:46; }
         .hd-penpoptip { font-size:10px; font-weight:700; color:#9fb0c0; }
-        /* vertical range: the modern property first, then the WebKit one iOS needs */
-        .hd-penrange { writing-mode:vertical-rl; direction:rtl;
+        /* Vertical range: the modern property first, then the WebKit one older
+           iOS needs. Selector is deliberately specific — the global
+           input[type=range] rule below outranks a lone class and would pin the
+           height back to 30px. */
+        .hd-penpop input.hd-penrange { writing-mode:vertical-rl; direction:rtl;
           -webkit-appearance:slider-vertical; appearance:slider-vertical;
-          width:26px; height:104px; accent-color:#0f766e; }
+          width:26px; height:150px; accent-color:#0f766e; }
         .hd-penpop.menu { padding:5px; }
         .hd-penopt { display:flex; align-items:center; gap:8px; width:104px; padding:7px 9px;
           border-radius:8px; background:transparent; border:1px solid transparent; color:#dbe4ec;
