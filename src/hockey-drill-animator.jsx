@@ -449,9 +449,19 @@ export default function DrillAnimator() {
   // is simply left alone, so this is safe to hit repeatedly.
   function convertInk() {
     penScale.current = ftPerPx();          // read at the CURRENT zoom
-    const board = piecesRef.current;
+    // Fold any still-buffered strokes in FIRST, in the same pass. Flushing via
+    // setPieces and then sweeping would read the board as it was a moment ago —
+    // the ink lands but the sweep can't see it, so the first tap looked like it
+    // only "smoothed" the strokes and the second did the work.
+    const pending = penBuf.current.slice();
+    penBuf.current = [];
+    clearTimeout(penTimer.current);
+    if (pending.length) setPenInk([]);
+    const board = pending.length
+      ? materializePenOps(piecesRef.current, pending.map(s => ({ op: "mark", pts: s.pts })))
+      : piecesRef.current;
     const marks = board.filter(p => p.kind === "mark" && !p.lock && (p.pts || []).length >= 2);
-    if (!marks.length) { flash("No ink to convert"); return; }
+    if (!marks.length) { if (pending.length) setPieces(board); flash("No ink to convert"); return; }
     const ops = classifyPenGroup(marks.map(m => ({ pts: m.pts })), penCtx(board));
     const consumed = new Set();
     ops.forEach(o => {
@@ -459,8 +469,12 @@ export default function DrillAnimator() {
       (o.srcs || []).forEach(i => marks[i] && consumed.add(marks[i].id));
     });
     const made = ops.filter(o => o.op !== "mark" && o.op !== "drop");
-    if (!made.length && !consumed.size) { flash("Nothing recognised in the ink"); return; }
-    setPieces(ps => materializePenOps(ps.filter(p => !consumed.has(p.id)), made));
+    if (!made.length && !consumed.size) {
+      if (pending.length) setPieces(board);
+      flash("Nothing recognised in the ink");
+      return;
+    }
+    setPieces(materializePenOps(board.filter(p => !consumed.has(p.id)), made));
     const counts = {};
     made.forEach(o => { counts[o.op] = (counts[o.op] || 0) + 1; });
     const parts = Object.entries(counts).map(([k, n]) => `${n} ${n > 1 ? (k === "pass" ? "passes" : k + "s") : k}`);
@@ -8803,24 +8817,20 @@ export default function DrillAnimator() {
                 its own contact point — still shows where and how thick. The
                 ellipse pre-compensates the fill-stretch so it reads round. */}
             {penTip && (() => {
-              // sized in SCREEN terms: the ring tracks the ink's real thickness,
-              // but never shrinks below a few pixels — a feet-based floor would
-              // vanish at full-rink zoom and bloat when zoomed right in
+              // A faint ghost of the nib, not a target: a soft dot the size and
+              // colour of the ink about to be laid down, so it reads as a hint
+              // rather than competing with the drawing. Sized in SCREEN terms —
+              // a feet-based floor would vanish at full-rink zoom and bloat when
+              // zoomed right in. The eraser gets its own reach, in red.
               const ft = n => n * Math.min(penScale.current.x || 0.24, penScale.current.y || 0.24);
-              const r = eraser ? ft(16) : Math.max(penW / 2, ft(7));
-              const hair = ft(5), w = ft(1.2);
+              const r = eraser ? ft(16) : Math.max(penW / 2, ft(6));
               const col = eraser ? "#ff8b8b" : markColor;
-              const tick = (x1, y1, x2, y2) => <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={col} strokeWidth={w} />;
               return (
-                <g pointerEvents="none" opacity={0.9}>
-                  <ellipse cx={penTip.x} cy={penTip.y} rx={r} ry={r * yFix} fill="none"
-                    stroke="#f5fafd" strokeWidth={w * 2.2} />
-                  <ellipse cx={penTip.x} cy={penTip.y} rx={r} ry={r * yFix} fill="none"
-                    stroke={col} strokeWidth={w} />
-                  {tick(penTip.x - r - hair, penTip.y, penTip.x - r, penTip.y)}
-                  {tick(penTip.x + r, penTip.y, penTip.x + r + hair, penTip.y)}
-                  {tick(penTip.x, penTip.y - (r + hair) * yFix, penTip.x, penTip.y - r * yFix)}
-                  {tick(penTip.x, penTip.y + r * yFix, penTip.x, penTip.y + (r + hair) * yFix)}
+                <g pointerEvents="none">
+                  <ellipse cx={penTip.x} cy={penTip.y} rx={r} ry={r * yFix}
+                    fill={eraser ? "none" : col} fillOpacity={0.22}
+                    stroke={col} strokeOpacity={eraser ? 0.5 : 0.35} strokeWidth={ft(1)}
+                    strokeDasharray={eraser ? `${ft(3)} ${ft(3)}` : undefined} />
                 </g>
               );
             })()}
@@ -9232,7 +9242,7 @@ export default function DrillAnimator() {
               title={autoConv ? "Auto-convert: each stroke is read as you draw" : "Manual: strokes stay ink until you tap Convert"}
               onClick={() => setAutoConv(v => !v)}><Icon name="brain" size={15} /></button>
             <button className="hd-penbtn" title="Convert — read the whole drawing now"
-              onClick={() => { flushPen(); convertInk(); }}><Icon name="check" size={15} /></button>
+              onClick={convertInk}><Icon name="check" size={15} /></button>
             <div className="hd-pensep" />
             {PEN_INKS.map(c => (
               <button key={c} className={`hd-penswatch${markColor === c && !eraser ? " on" : ""}`}

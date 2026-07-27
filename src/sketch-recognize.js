@@ -283,16 +283,13 @@ function features(strokes) {
   // near 0.03-0.09, D at 0.14, C and triangles above 0.2 — the most reliable
   // way to know a circle, and it doesn't care where the pen closed the loop.
   const cv = radialCV(all);
-  // sharpest bend along an evenly resampled outline. A square turns ~72° at
-  // its corners and a triangle ~87°, while even a lumpy hand-drawn loop stays
-  // under ~42° because its turning is spread out — this is what tells a
-  // coach's blobby circle apart from a square, where counting RDP corners
-  // can't (RDP degenerates on a closed outline).
-  let maxTurn = 0;
-  for (let i = 1; i < rs.length - 1; i++) {
-    if (rs[i - 1].s !== rs[i].s || rs[i].s !== rs[i + 1].s) continue;   // not across a pen lift
-    maxTurn = Math.max(maxTurn, turnDeg(rs[i - 1], rs[i], rs[i + 1]));
-  }
+  // How many vertices survive fine simplification — a curve needs many, a
+  // polygon collapses to its corners however densely it was sampled. Real
+  // phone circles keep 6-11; an open square keeps exactly 5 and a triangle 4.
+  // This is what separates a coach's lumpy circle from a square. Sharpest-turn
+  // can't: a small circle captured with 10 points reports 95-140° purely
+  // because resampling puts several samples along each chord.
+  const curveVerts = r.length;
   // D's real signature: a SPINE. Its leftmost edge sits at the same x at the
   // top, middle and bottom; a circle curves away at both ends (0.00 vs 0.91).
   // leftRMS alone let round ink win D over O.
@@ -303,7 +300,7 @@ function features(strokes) {
   const lT = leftAt(0, 0.2), lM = leftAt(0.4, 0.6), lB = leftAt(0.8, 1);
   const spineDrift = lT == null || lM == null || lB == null ? 9
     : Math.max(Math.abs(lT - lM), Math.abs(lB - lM)) / (b.w || 1e-9);
-  return { closure, corners, leftRMS, tail, radialCV: cv, spineDrift, maxTurn };
+  return { closure, corners, leftRMS, tail, radialCV: cv, spineDrift, curveVerts };
 }
 
 // Closure bounds are finger-loose: coaches leave big gaps, and capture
@@ -373,8 +370,13 @@ export function recognizeSymbol(strokes) {
     const ring = ringOf(strokes[0]);        // ignores a trailing pen flick
     if (ring) {
       const rf = ring.length === strokes[0].length ? f : features([ring]);
-      // the turn gate keeps squares/triangles out; closure keeps an open C out
-      if (rf.maxTurn < 55 && rf.closure < 0.52 && rf.tail <= 1)
+      // Curve, not polygon: enough vertices to need them (a square collapses to
+      // 5, a triangle to 4) AND few sharp corners (square 4, triangle 3, real
+      // hand circles 1-2). Closure keeps an open C out.
+      // (no G-tail gate here: a G's bar is what ringOf trims off, and the C it
+      // leaves behind is too open to pass the closure test anyway. Small tight
+      // circles DO put points in the tail cell, so gating on it lost them.)
+      if (rf.curveVerts >= 6 && rf.corners <= 2 && rf.closure < 0.52)
         return { sym: "O", score: Math.min(1, circularity(ring)), second: null };
     }
   }

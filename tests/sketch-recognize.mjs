@@ -467,10 +467,14 @@ const kinds = ops => ops.map(o => o.op);
                  y: l.y + (dy / m) * k * 2 + (inward ? -k * 0.6 : 0) });
     return pts;
   };
+  // NB the 5-lobe case is deliberately mild. Cranked up it grows five sharp
+  // corners and is honestly a pentagon, not a circle — real phone circles
+  // measure 1-2 corners (see the captured-strokes block below), so an
+  // exaggerated fixture was testing a shape nobody draws.
   [['round loop + tail', blob(20, 0.02, 6, false)],
    ['4-lobe blob + tail', blob(4, 0.10, 6, false)],
    ['4-lobe blob + inward hook', blob(4, 0.10, 7, true)],
-   ['5-lobe blob + inward hook', blob(5, 0.12, 7, true)],
+   ['5-lobe blob + inward hook', blob(5, 0.06, 7, true)],
    ['squarish blob + inward hook', blob(4, 0.16, 8, true)],
   ].forEach(([lbl, pts]) => T(`${lbl} is an O`, recognizeSymbol([pts])?.sym, 'O'));
 
@@ -509,6 +513,36 @@ const kinds = ops => ops.map(o => o.op);
   T('L is not an X', kinds(classifyPenGroup([line([0, 0], [0, 20]), line([0, 20], [15, 20])])).includes('player'), false);
   T('T-join is not an X', kinds(classifyPenGroup([line([10, 0], [10, 20]), line([10, 10], [25, 10])])).includes('player'), false);
   T('D still reads D', recognizeSymbol(drawn(GLYPHS.D, 60, 40, 6, 0.12, 503))?.sym, 'D');
+}
+
+// ---- NINE REAL CIRCLES off Nate's board (pasted from Copy diagnostics),
+//      drawn small and quick: 16-26px across, captured with only 10-17 points.
+//      Four of nine converted before. They fell to the sharpest-turn gate,
+//      which is meaningless at this sampling — resampling 10 points up to 28
+//      puts several samples along each chord and reports every bend as 95-140°.
+//      A polygon-vs-curve test replaced it: a square collapses to 5 vertices
+//      under fine simplification and a triangle to 4, while these keep 6-11;
+//      corners then separate them outright (square 4, triangle 3, these 1-2). ----
+{
+  const CTX = { pxFtX: 0.179856, pxFtY: 0.144804 };
+  const S = [
+    [[123.74,14.48],[125.72,13.9],[125.9,12.74],[125.36,11.87],[124.82,11.73],[123.38,11.73],[122.3,12.45],[121.76,13.32],[121.58,13.76],[121.76,14.91],[122.48,15.64],[123.38,15.78],[124.82,14.91],[125.36,14.19],[125.72,13.76]],
+    [[124.1,20.56],[125.36,18.97],[124.82,18.68],[124.1,18.53],[123.56,18.53],[122.84,18.82],[121.94,19.69],[121.76,20.71],[122.3,21.58],[122.84,22.01],[124.1,22.3],[124.82,22.16],[125.54,21.58],[125.9,20.85],[126.26,20.13],[126.44,19.69]],
+    [[125.18,28.82],[126.08,28.09],[123.92,27.37],[123.38,27.37],[122.84,27.51],[122.66,28.09],[123.02,28.67],[123.74,29.11],[124.82,29.11],[125.54,28.38],[125.72,27.66]],
+    [[123.38,36.06],[124.64,35.91],[125,34.61],[124.28,33.74],[123.74,33.59],[123.02,33.59],[121.4,34.75],[121.22,35.33],[121.22,35.77],[121.22,36.2],[121.58,36.64],[121.94,36.93],[123.02,37.07],[124.28,36.35],[124.82,35.48]],
+    [[123.56,41.41],[124.82,40.55],[124.1,40.11],[122.84,39.68],[121.58,39.82],[121.22,40.11],[121.04,40.55],[121.04,40.98],[121.04,41.41],[121.4,41.85],[122.3,42.43],[123.56,42.57],[123.92,42.28],[124.46,41.85],[124.64,41.27]],
+    [[123.38,48.36],[124.1,47.79],[123.2,46.48],[122.48,46.19],[121.94,46.19],[121.22,46.34],[120.86,46.63],[120.5,47.06],[120.32,47.93],[121.04,48.8],[121.94,49.38],[123.02,49.23],[123.92,48.22],[124.28,47.64]],
+    [[122.48,56.47],[123.56,54.88],[122.84,54.01],[122.48,53.72],[121.76,53.72],[120.86,54.01],[120.5,55.03],[120.68,55.89],[121.22,56.47],[121.76,56.62],[122.3,56.62],[123.38,55.89],[123.92,55.46]],
+    [[121.76,63.28],[122.66,62.99],[122.48,61.4],[121.76,60.82],[121.04,60.82],[120.5,60.82],[119.96,60.96],[119.6,61.4],[119.42,61.83],[119.24,62.27],[119.6,63.13],[120.68,63.71],[121.94,63.71],[122.48,63.42],[122.84,62.99],[123.02,62.41],[123.02,61.98]],
+    [[120.5,71.1],[121.22,71.1],[121.94,70.81],[122.12,70.09],[121.94,69.65],[120.86,68.93],[120.32,68.93],[119.78,68.93],[119.24,68.93],[121.58,70.09]],
+  ].map(s => s.map(([x, y]) => ({ x, y })));
+  const ops = classifyPenGroup(S.map(pts => stroke(pts)), CTX);
+  const players = ops.filter(o => o.op === "player");
+  T('8 of the 9 real circles convert', players.length, 8);
+  T('...every one of them an O', players.every(o => o.sym === "O"), true);
+  // the ninth is a 10-point scrap that ends by cutting back across itself; it
+  // stays honest ink rather than being forced through
+  T('the scrappiest stays ink', ops.filter(o => o.op === "mark").length, 1);
 }
 
 // ---- phone scale (pxFt ≈ 0.5: the full 200ft rink spans ~390px, so a finger
