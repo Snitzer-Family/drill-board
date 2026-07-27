@@ -1026,6 +1026,15 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
   // Returns eased arc fraction s and normalized speed v (0 at rest, 1 cruising).
   const RAMP_UP = 0.15;   // explosive push-off — short accel ramp
   const RAMP_DOWN = 0.12; // hockey stop — carry speed then bite the ice hard
+  // A hockey stop bites sideways and THEN settles square — the sideways plant is
+  // at its deepest the instant they come to rest, so it has to keep decaying after
+  // the route stops rather than vanishing in one frame. `brake` (0..1) rises over
+  // the deceleration ramp, holds while the edges bite, and relaxes away.
+  const PLANT_HOLD = 0.12, PLANT_RELAX = 0.55;
+  const brakeRelax = t => 1 - smooth01((t - PLANT_HOLD) / PLANT_RELAX);
+  // WHICH edge they plant on comes from the stride phase, so it has to be frozen at
+  // the arrival distance — sampled live it flips sign mid-stop and the body snaps
+  // across. `brakeAt` is that frozen distance; the renderer turns it into a side.
   // returns eased arc fraction s and normalized speed v (0 at rest, 1 at the
   // leg's flat-top cruise) — v is vmax-free, so it maps cleanly to speed class
   function easeLeg(u, a, b) {
@@ -1104,7 +1113,10 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           tan = tIn + wrapDeg(tOut - tIn) * u;
         }
         const f = flip(i);
-        return { ...prev, a: tan + f, aStep: tOut + stepFlip(s), flip: f, v: 0, dist };
+        return { ...prev, a: tan + f, aStep: tOut + stepFlip(s), flip: f, v: 0, dist,
+          // only a real STOP braked the previous leg (exitRest tests s.stop, not a
+          // trigger pause) — relaxing a plant they never took would snap it on
+          brakeAt: dist, brake: i > 0 && (s.stop || 0) > 0 ? brakeRelax(e) : 0 };
       }
       e -= stop;
       const mt = effMove(p, s, i, warp);
@@ -1125,7 +1137,8 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
             const { s: sf, v } = easeLeg(tBefore > 0 ? e / tBefore : 1, entryRest ? RAMP_UP : 0, RAMP_DOWN);
             const arc = zHold.fCross * L * sf;
             const smul = tBefore > 0 ? ((zHold.fCross * L / tBefore) / pace) * v : 0;
-            return { ...atArc(el, L, arc, s, i), v, smul, dist: dist + arc, braking: e / tBefore > 1 - RAMP_DOWN };
+            return { ...atArc(el, L, arc, s, i), v, smul, dist: dist + arc, brakeAt: dist + L,
+              brake: e / tBefore > 1 - RAMP_DOWN ? 1 - v : 0 };
           }
           e -= tBefore;
           const dir = zHold.cy <= 42.5 ? 1 : -1;                   // one-way, toward center ice
@@ -1144,7 +1157,8 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
             const smul = tAfter > 0 ? (((1 - zHold.fCross) * L / tAfter) / pace) * v : 0;
             const off = dyEnd * (1 - sf) * dir;                    // cut in and rejoin the route
             const pos = atArc(el, L, arc, s, i);
-            return { ...pos, y: clampY(pos.y + off), v, smul, dist: dist + arc, braking: exitRest && e / tAfter > 1 - RAMP_DOWN };
+            const br = exitRest && e / tAfter > 1 - RAMP_DOWN;
+            return { ...pos, y: clampY(pos.y + off), v, smul, dist: dist + arc, brakeAt: dist + L, brake: br ? 1 - v : 0 };
           }
           e -= tAfter;
         } catch { return { ...prev, a: 0, aStep: 0, flip: 0, v: 0, dist }; }
@@ -1158,9 +1172,10 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           const aRamp = entryRest ? RAMP_UP : cornerRamp(i - 1);   // ease out of a sharp corner
           const bRamp = exitRest ? RAMP_DOWN : cornerRamp(i);      // ease into the next sharp corner
           const { s: sf, v } = easeLeg(e / mt, aRamp, bRamp);
-          const braking = exitRest && e / mt > 1 - RAMP_DOWN;
+          const braking = exitRest && e / mt > 1 - RAMP_DOWN;   // biting into a stop
           const smul = mt > 0 ? ((L / mt) / pace) * v : 0;
-          return { ...atArc(el, L, L * sf, s, i), v, smul, dist: dist + L * sf, braking };
+          return { ...atArc(el, L, L * sf, s, i), v, smul, dist: dist + L * sf, brakeAt: dist + L,
+            brake: braking ? 1 - v : 0 };
         } catch { return { ...prev, a: 0, aStep: 0, flip: 0, v: 0, dist }; }
       }
       e -= mt;
@@ -1170,7 +1185,8 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
     const last = p.path[p.path.length - 1], li = p.path.length - 1;
     const lp = segEnd(p, li - 1);
     const ta = segTangentAngle(lp, last, 0.98), fl = flip(li);
-    return { x: last.x, y: last.y, a: ta + fl, aStep: ta + stepFlip(last), flip: fl, v: 0, dist };
+    return { x: last.x, y: last.y, a: ta + fl, aStep: ta + stepFlip(last), flip: fl, v: 0, dist,
+      brakeAt: dist, brake: brakeRelax(e) };
   }
 
   function displayPosAt(p, e) {

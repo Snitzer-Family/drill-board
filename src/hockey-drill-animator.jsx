@@ -3283,7 +3283,12 @@ export default function DrillAnimator() {
       let cq = null, cSide = 1, cd = 2.2;
       for (const q of pieces) {
         if (q.kind !== "player" || q.defense) continue;   // (defense never carries; avoids recursion)
-        const raw = displayPosRaw(q);
+        // Match against the ROUTE pose, not displayPosRaw: the puck's own position
+        // comes off that same pose (carriedPuckAt), while displayPosRaw adds the
+        // stride/plant lean. A deep hockey-stop plant swings a leaned blade several
+        // feet, which used to push the carrier past this 2.2ft gate and drop the puck
+        // off the stick for as long as the lean lasted.
+        const raw = displayPosAt(q, animT <= 0 ? 0 : animT * totalTime);
         const side = q.hand === "L" ? -1 : 1;
         const bladeRaw = bladeAtWorld(raw.x, raw.y, raw.a || 0, BLADE_FWD, BLADE_LAT, side);
         const d = Math.hypot(res.x - bladeRaw.x, res.y - bladeRaw.y);
@@ -3340,11 +3345,16 @@ export default function DrillAnimator() {
       const strength = g * g * (3 - 2 * g);               // 0 glide → 1 aggressive
       const phase = (2 * Math.PI * (dp.dist || 0)) / STRIDE_LAMBDA;
       lat += Math.sin(phase) * STRIDE_AMP * strength;
-      // hockey stop: as speed bleeds off, plant the body sideways so the finish
-      // reads like a bite, not a coast
-      const plant = dp.braking ? PLANT_DEG * (1 - dp.v) * (Math.sin(phase) >= 0 ? 1 : -1) : 0;
-      lean += STRIDE_LEAN * strength * Math.cos(phase) + plant;
+      lean += STRIDE_LEAN * strength * Math.cos(phase);
     }
+    // Hockey stop: the body turns sideways into the bite, deepest at the moment they
+    // come to rest, then settles back square — so it has to keep relaxing AFTER the
+    // route stops (dp.brake outlives the speed) and it has to stay on ONE edge the
+    // whole time (dp.brakeAt is the arrival distance, frozen, so the stride phase
+    // can't advance the plant onto the other foot part-way through).
+    if (dp.brake > 0)
+      lean += PLANT_DEG * dp.brake
+        * (Math.sin((2 * Math.PI * (dp.brakeAt || 0)) / STRIDE_LAMBDA) >= 0 ? 1 : -1);
     if (!lat && !fore && !lean) return dp;
     const hd = ((dp.a || 0) * Math.PI) / 180;             // lateral = facing+90
     return {
