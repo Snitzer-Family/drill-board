@@ -17,6 +17,7 @@ import { classifyPenGroup, SYMBOL_MAX, SYMBOL_MAX_PX } from "./sketch-recognize.
 import { newGame, stepGame } from "./ai-game.js";
 import { STYLES } from "./styles.js";
 import { THEME_KEY, THEME_ATTR, THEME_ORDER, resolveTheme, tokens } from "./theme.js";
+import { ThemeCtx } from "./theme-react.jsx";
 
 // Pen inks. These double as PIECE colours — a symbol you draw becomes a player
 // in the ink you drew it with — so they're the team colours plus the classic
@@ -5564,7 +5565,9 @@ export default function DrillAnimator() {
   // crosses the rink's red/blue markings it reads as a clean channel of ice, and
   // because the casing matches the ice, the ink over it keeps its exact colour.
   // Pure vector — no filter raster, no compositing lightening.
-  const caseOf = st => ({ ...st, stroke: "#f5fafd", opacity: 1,
+  // T.ice, not a literal: the casing only reads as a clean channel cut through
+  // the rink markings if it is EXACTLY the ice fill. Two literals would drift.
+  const caseOf = st => ({ ...st, stroke: T.ice, opacity: 1,
     strokeWidth: (st.strokeWidth || 1) * 2.1 });
   function segStroke(p, s, isLast, flat) {
     const W = w => (flat ? w : sw(w)) * lineScale;   // global route line-thickness scale
@@ -7945,7 +7948,7 @@ export default function DrillAnimator() {
     // the ink pass so pass/shot/chip/rim lines stay readable over rink markings
     const W = w => (flat ? w : sw(w)) * lineScale * (casing ? 2.1 : 1);
     const D = d => (flat ? d : sdash(d));
-    const INK = casing ? "#f5fafd" : "#14171a";
+    const INK = casing ? T.ice : T["ice-ink"];
     const ve = flat ? undefined : "non-scaling-stroke";
     // the casing pass runs this whole renderer a second time — it must register
     // its arrival tips in its OWN channel, or the ink pass would count them as
@@ -8084,7 +8087,7 @@ export default function DrillAnimator() {
               {gl && !casing && (() => {
                 const fx = iconXf({ x: land.x, y: land.y, a: 0 });
                 return <g opacity={0.55}>
-                  <PieceIcon p={{ kind: "puck", color: "#14171a" }} pos={{ x: land.x, y: land.y, a: 0 }}
+                  <PieceIcon p={{ kind: "puck", color: T["ice-ink"] }} pos={{ x: land.x, y: land.y, a: 0 }}
                     xf={fx.t} thDeg={fx.th} noShadow hitOff onDown={() => {}} />
                 </g>; })()}
             </g>
@@ -8157,7 +8160,7 @@ export default function DrillAnimator() {
               // ghost puck resting where the chip/rim lands
               const fx = iconXf({ x: L.x1, y: L.y1, a: 0 });
               return <g opacity={0.55}>
-                <PieceIcon p={{ kind: "puck", color: "#14171a" }} pos={{ x: L.x1, y: L.y1, a: 0 }}
+                <PieceIcon p={{ kind: "puck", color: T["ice-ink"] }} pos={{ x: L.x1, y: L.y1, a: 0 }}
                   xf={fx.t} thDeg={fx.th} noShadow hitOff onDown={() => {}} />
               </g>; })()}
           </g>
@@ -8241,17 +8244,17 @@ export default function DrillAnimator() {
                 const a1 = gmMove(sp.x, sp.y, -uy, ux, sep), a2 = gmMove(le.x, le.y, -uy, ux, sep);
                 const b1 = gmMove(sp.x, sp.y, uy, -ux, sep), b2 = gmMove(le.x, le.y, uy, -ux, sep);
                 return <>
-                  <line x1={a1.x} y1={a1.y} x2={a2.x} y2={a2.y} vectorEffect="non-scaling-stroke" stroke="#14171a" strokeWidth={sw(0.55) * lineScale} />
-                  <line x1={b1.x} y1={b1.y} x2={b2.x} y2={b2.y} vectorEffect="non-scaling-stroke" stroke="#14171a" strokeWidth={sw(0.55) * lineScale} />
+                  <line x1={a1.x} y1={a1.y} x2={a2.x} y2={a2.y} vectorEffect="non-scaling-stroke" stroke={T["ice-ink"]} strokeWidth={sw(0.55) * lineScale} />
+                  <line x1={b1.x} y1={b1.y} x2={b2.x} y2={b2.y} vectorEffect="non-scaling-stroke" stroke={T["ice-ink"]} strokeWidth={sw(0.55) * lineScale} />
                 </>;
               })()
             : (() => {
                 const lg = gmMove(ep.x, ep.y, -ux, -uy, 2.9 * z * lineScale);
                 return <line x1={sp.x} y1={sp.y} x2={lg.x} y2={lg.y} vectorEffect="non-scaling-stroke"
-                  stroke="#14171a" strokeWidth={sw(0.55) * lineScale} strokeDasharray={sdash("2.4 1.8")} />;
+                  stroke={T["ice-ink"]} strokeWidth={sw(0.55) * lineScale} strokeDasharray={sdash("2.4 1.8")} />;
               })()}
           <g transform={fx.t}><g transform={`scale(${z * lineScale})`}>
-            <path d="M -3.3 -2.2 L 0 0 L -3.3 2.2" fill="none" stroke="#14171a" strokeWidth={0.95} strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M -3.3 -2.2 L 0 0 L -3.3 2.2" fill="none" stroke={T["ice-ink"]} strokeWidth={0.95} strokeLinecap="round" strokeLinejoin="round" />
           </g></g>
         </g>
       );
@@ -8498,6 +8501,10 @@ export default function DrillAnimator() {
   }
 
   return (
+    // wraps the WHOLE return, so renderLoupe()'s second <RinkMarkings/> subtree
+    // gets the same tokens as the main sheet — if the loupe's ice and the board's
+    // ice ever disagree, a wrong-shade rim shows at the loupe's corners
+    <ThemeCtx.Provider value={T}>
     <div className={`hd-root${penMode && !aiPlay ? " pen-on" : aiPlay || !hasTimeline ? "" : " scrub-on"}${docked ? " dock-open" : ""}${
       tool === "pen" || tool === "marker" ? (eraser && tool === "pen" ? " erase-cursor" : " draw-cursor") : ""}`} ref={rootRef}>
       <style>{STYLES}</style>
@@ -8586,7 +8593,7 @@ export default function DrillAnimator() {
                   );
                 })}
                 {(() => { const fx = iconXf({ x: aiRef.current.puck.x, y: aiRef.current.puck.y }); return (
-                  <g transform={fx.t}><circle cx={0} cy={0} r={1.5} fill="#14171a" stroke="#fff" strokeWidth={0.4} /></g>); })()}
+                  <g transform={fx.t}><circle cx={0} cy={0} r={1.5} fill={T["ice-ink"]} stroke={T.ice} strokeWidth={0.4} /></g>); })()}
                 {aiRef.current.players.map(pl => {
                   const dp = { x: pl.x, y: pl.y, a: pl.a };
                   const fx = iconXf(dp);
@@ -8978,7 +8985,7 @@ export default function DrillAnimator() {
 
             {editing && pieces.map(p =>
               p.kind === "puck" && p.carrier && p.path.length > 0
-                ? hdot(p.x, p.y, 2.1, { key: `rel-${p.id}`, fill: "none", stroke: "#14171a",
+                ? hdot(p.x, p.y, 2.1, { key: `rel-${p.id}`, fill: "none", stroke: T["ice-ink"],
                     strokeWidth: 0.35, strokeDasharray: "0.9 0.7", opacity: 0.6, pointerEvents: "none" })
                 : null
             )}
@@ -9096,9 +9103,9 @@ export default function DrillAnimator() {
               }
               return (
                 <g key="addtarget" pointerEvents="none">
-                  {hdot(pt.x, pt.y, 2.4, { fill: "none", stroke: "#0f766e", strokeWidth: sw(0.55),
+                  {hdot(pt.x, pt.y, 2.4, { fill: "none", stroke: T.accent, strokeWidth: sw(0.55),
                     strokeDasharray: sdash("1.2 1"), vectorEffect: "non-scaling-stroke" })}
-                  {hdot(pt.x, pt.y, 0.45, { fill: "#0f766e" })}
+                  {hdot(pt.x, pt.y, 0.45, { fill: T.accent })}
                 </g>
               );
             })()}
@@ -10180,5 +10187,6 @@ export default function DrillAnimator() {
       )}
       {showDiag && <DiagPanel drillVersion={drillVersion} />}
     </div>
+    </ThemeCtx.Provider>
   );
 }
