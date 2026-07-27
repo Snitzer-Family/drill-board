@@ -15,8 +15,6 @@ import { THEMES, PAIRS, EXEMPT, SHADOW_TOKENS, AUTO_MAP, themeCss } from "../src
 
 let passed = 0, failed = 0, known = 0;
 const KNOWN = new Set([
-  // Removed by C2 — index.html doesn't carry the plugin markers yet.
-  "index.html carries both theme markers",
   // Removed by C3 — styles.js is still all raw literals.
   "styles.js has no raw colour literals",
 ]);
