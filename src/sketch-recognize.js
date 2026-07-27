@@ -229,9 +229,33 @@ function ringOf(pts) {
 // thrown away as ink. Crossing geometry is what a person actually reads.
 // Letters can't sneak in: D's spine and bowl are parallel (they never cross),
 // and V, L and F join at an END of at least one stroke, not mid-span.
+// A pen sets down (or lifts) with a small tick against the stroke's own
+// direction. On a real device X the second leg began with three points
+// travelling straight UP before the diagonal started down-right — 0.7ft of
+// backtrack that shortened the chord and lengthened the path, scoring the leg
+// 0.730 against the 0.82 straightness gate below, so a perfectly good X fell
+// through to ink. Drop leading/trailing points that make negative progress
+// along the chord. A genuine curve is untouched: every step of an arc still
+// advances, so there is nothing to trim.
+function trimFlicks(pts) {
+  let a = 0, b = pts.length;                            // kept range [a, b)
+  const cap = Math.max(1, Math.floor(pts.length * 0.25));
+  for (let pass = 0; pass < 2; pass++) {                // chord shifts once trimmed
+    if (b - a < 3) break;
+    const dx = pts[b - 1].x - pts[a].x, dy = pts[b - 1].y - pts[a].y;
+    const L = Math.hypot(dx, dy);
+    if (L < 1e-9) break;
+    const ux = dx / L, uy = dy / L;
+    const fwd = (p, q) => (q.x - p.x) * ux + (q.y - p.y) * uy;
+    while (b - a > 2 && a < cap && fwd(pts[a], pts[a + 1]) <= 0) a++;
+    while (b - a > 2 && pts.length - b < cap && fwd(pts[b - 2], pts[b - 1]) <= 0) b--;
+  }
+  return a === 0 && b === pts.length ? pts : pts.slice(a, b);
+}
+
 function crossesAsX(strokes) {
   if (strokes.length !== 2) return false;
-  const [A, B] = strokes;
+  const [A, B] = strokes.map(trimFlicks);
   if (A.length < 2 || B.length < 2) return false;
   const a = A[0], b = A[A.length - 1], c = B[0], d = B[B.length - 1];
   const r = { x: b.x - a.x, y: b.y - a.y }, s = { x: d.x - c.x, y: d.y - c.y };

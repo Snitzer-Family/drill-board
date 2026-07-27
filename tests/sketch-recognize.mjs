@@ -603,5 +603,26 @@ const kinds = ops => ops.map(o => o.op);
   // desktop behavior is untouched when pxFt is absent (whole suite above)
 }
 
+// ---- A REAL X off Nate's board (Copy diagnostics) that stayed ink. The two
+//      legs cross cleanly at 78%, but the second one starts with three points
+//      travelling straight UP — the pen setting down and ticking back before
+//      the diagonal gets going. That 0.7ft of backtrack scored the leg 0.730
+//      against the 0.82 straightness gate. Endpoint flicks are now trimmed
+//      before the legs are measured. ----
+{
+  const CTX = { pxFtX: 0.179856, pxFtY: 0.121429 };
+  const S = [
+    [[42.09,39.95],[41.55,40.19],[41.19,40.56],[40.47,41.04],[39.93,41.53],[39.21,42.01],[38.85,42.38],[38.49,42.62],[38.13,42.86],[37.77,42.74]],
+    [[38.31,40.31],[38.31,39.95],[38.31,39.59],[38.67,39.71],[39.03,40.31],[39.21,40.68],[39.57,41.04],[39.93,41.53],[40.47,42.01],[40.83,42.5],[41.01,42.86],[41.37,43.11],[41.73,43.35]],
+  ].map(s => s.map(([x, y]) => ({ x, y })));
+  const ops = classifyPenGroup(S.map(pts => stroke(pts)), CTX);
+  T('real set-down-tick X converts', kinds(ops), ['player']);
+  T('...as an X', ops[0] && ops[0].sym, 'X');
+  // trimming must not straighten curves: every step of an arc still advances
+  // along the chord, so a C has no flick to take and stays out of the X path
+  const c = classifyPenGroup(strokesOf(drawn(GLYPHS.C, 100, 42, 18, 0.6, 71)), { pxFt: 0.5 });
+  T('trimming leaves a C alone', c.every(o => o.sym !== 'X'), true);
+}
+
 console.log(`\n${pass} passed, ${fail} failed  (accept threshold ${ACCEPT})`);
 process.exit(fail ? 1 : 0);
