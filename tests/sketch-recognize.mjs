@@ -259,8 +259,11 @@ const kinds = ops => ops.map(o => o.op);
   const route = poly(p(31, 32, 50, 40, 70, 35), 20);
   const flick = [stroke(poly(p(68, 33.5, 70, 35), 3)), stroke(poly(p(68.4, 36.6, 70, 35), 3))];
   const ops2 = classifyPenGroup([...strokesOf(x), stroke(route), ...flick]);
-  T('separate arrow flick consumed', kinds(ops2), ['player', 'route', 'drop']);
-  T('drop reports its strokes', ops2[2] && ops2[2].srcs.slice().sort(), [3, 4]);
+  // the flick strokes are consumed (as one drop or two — either is fine);
+  // what matters is a player, its route, and NO leftover ink
+  T('separate arrow flick consumed', kinds(ops2).filter(k => k !== 'drop'), ['player', 'route']);
+  T('every flick stroke dropped',
+    ops2.filter(o => o.op === 'drop').flatMap(o => o.srcs).sort(), [3, 4]);
   // the same flick with no route nearby is honest ink
   T('orphan flick stays ink', kinds(classifyPenGroup(flick)), ['mark', 'mark']);
 }
@@ -338,6 +341,50 @@ const kinds = ops => ops.map(o => o.op);
   // a player op still reports FEET, positioned on the drawn ink
   const o = classifyPenGroup([stroke(ring)], IPAD)[0];
   T('op position is in feet', Math.abs(o.x - 98) < 2 && Math.abs(o.y - 66.3) < 2, true);
+}
+
+// ---- A DENSELY FILLED BOARD, the way a coach actually loads the ice: small
+//      symbols (~30px) packed with ~12px gaps. Every one must convert. Before
+//      the grouping rewrite this scored 6 players and 92 ink marks out of 72
+//      symbols — neighbours merged into blobs that failed as a unit, and a
+//      word-size cap could even orphan one leg of an X from the other. ----
+{
+  const IPAD = { pxFtX: 0.168, pxFtY: 0.108 };            // landscape, fill-stretched
+  const toFt = ([x, y]) => ({ x: x * IPAD.pxFtX, y: y * IPAD.pxFtY });   // px → rink feet
+  const dense = (px, n = 20) => {                          // px polyline → captured stroke
+    const out = [];
+    for (let i = 1; i < px.length; i++)
+      for (let k = i === 1 ? 0 : 1; k <= n; k++)
+        out.push([px[i - 1][0] + ((px[i][0] - px[i - 1][0]) * k) / n,
+                  px[i - 1][1] + ((px[i][1] - px[i - 1][1]) * k) / n]);
+    return stroke(out.map(toFt));
+  };
+  const R = 15, PITCH = 42;                                // 30px symbols, 12px gaps
+  const xAt = (cx, cy) => [dense([[cx - R, cy - R], [cx + R, cy + R]]),
+                           dense([[cx + R, cy - R], [cx - R, cy + R]])];
+  const oAt = (cx, cy) => {
+    const p = [];
+    for (let i = 0; i <= 22; i++) {
+      const a = ((-58 + (296 * i) / 22) * Math.PI) / 180;
+      p.push([cx + R * Math.cos(a), cy + R * Math.sin(a)]);
+    }
+    return [dense(p, 2)];
+  };
+  const grid = (make, x0, y0) => {
+    const out = [];
+    for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) out.push(...make(x0 + c * PITCH, y0 + r * PITCH));
+    return out;
+  };
+  const xs = classifyPenGroup(grid(xAt, 300, 200), IPAD);
+  T('9 packed X\'s → 9 players', kinds(xs), Array(9).fill('player'));
+  T('every packed X reads as X', xs.every(o => o.sym === 'X'), true);
+  const os = classifyPenGroup(grid(oAt, 300, 200), IPAD);
+  T('9 packed O\'s → 9 players', kinds(os), Array(9).fill('player'));
+  T('every packed O reads as O', os.every(o => o.sym === 'O'), true);
+  // mixed, drawn in one burst — and no stray becomes a route on a neighbour
+  const mixed = classifyPenGroup([...grid(xAt, 300, 200), ...grid(oAt, 560, 200)], IPAD);
+  T('18 packed symbols, none lost', kinds(mixed).filter(k => k === 'player').length, 18);
+  T('no ink, no bogus routes', kinds(mixed).every(k => k === 'player'), true);
 }
 
 // ---- phone scale (pxFt ≈ 0.5: the full 200ft rink spans ~390px, so a finger

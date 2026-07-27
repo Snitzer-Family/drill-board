@@ -313,6 +313,27 @@ function isDash(pts, diag, maxDiag = 6, minChord = 1) {
   return chord / Math.max(dev, 0.15) > 3;
 }
 
+// distance from point p to segment ab
+function ptSegDist(p, a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const L = dx * dx + dy * dy;
+  if (L < 1e-12) return dist(p, a);
+  let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / L;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+}
+// distance between segments ab and cd (0 when they cross)
+function segSegDist(a, b, c, d) {
+  const r = { x: b.x - a.x, y: b.y - a.y }, s = { x: d.x - c.x, y: d.y - c.y };
+  const den = r.x * s.y - r.y * s.x;
+  if (Math.abs(den) > 1e-12) {
+    const t = ((c.x - a.x) * s.y - (c.y - a.y) * s.x) / den;
+    const u = ((c.x - a.x) * r.y - (c.y - a.y) * r.x) / den;
+    if (t >= 0 && t <= 1 && u >= 0 && u <= 1) return 0;   // they intersect
+  }
+  return Math.min(ptSegDist(a, c, d), ptSegDist(b, c, d), ptSegDist(c, a, b), ptSegDist(d, a, b));
+}
+
 // total-least-squares line through points: mean + principal direction
 function tlsLine(pts) {
   const n = pts.length;
@@ -406,7 +427,9 @@ export function classifyPenGroup(strokes, ctx = {}) {
   // looseness safe)
   const attachR = U(ATTACH_R, 52), passR = U(PASS_R, 55), netR = U(NET_R, 45);
   const dashSpan = U(DASH_SPAN, 60), dashMax = U(6, 45), dashChord = U(1, 6);
-  const dashRms = U(1.5, 8), clusterPad = U(2, 12);
+  // linkR: how close two strokes must come to be read as one symbol. A letter's
+  // strokes touch or cross; separate symbols keep a visible gap.
+  const dashRms = U(1.5, 8), linkR = U(2, 10);
   const flickMax = U(4, 20), flickR = U(3.5, 18), arrowLeg = U(3.5, 18);
   const puckDot = U(1.8, 11), puckDense = U(4, 26), puckOnR = U(PUCK_ON_R, 15);
   const ops = [];
@@ -494,20 +517,40 @@ export function classifyPenGroup(strokes, ctx = {}) {
     flush();
   }
 
-  // ---- symbol clusters from the remaining shorts (bbox union) ----
+  // ---- group the remaining shorts into candidate symbols ----
+  // Proximity is measured between the STROKES, not their padded boxes. A
+  // letter's strokes touch or cross (an X's legs intersect at gap 0), while
+  // neighbouring symbols keep a real gap. Box padding merged whole rows of a
+  // densely drawn board into one blob that then failed as a unit and fell out
+  // as ink — 36 O's and 36 X's yielded 6 players and 92 marks.
   const pool = shorts.filter(s => !consumed.has(s));
-  const clusters = [];
-  pool.forEach(s => {
-    const b = bboxOf(s.pts);
-    const grown = { x: b.x - clusterPad, y: b.y - clusterPad, w: b.w + 2 * clusterPad, h: b.h + 2 * clusterPad };
-    const hit = clusters.filter(c => c.some(e =>
-      grown.x < e.b.x + e.b.w && e.b.x < grown.x + grown.w &&
-      grown.y < e.b.y + e.b.h && e.b.y < grown.y + grown.h));
-    const merged = hit.length ? hit[0] : [];
-    hit.slice(1).forEach(c => { merged.push(...c); clusters.splice(clusters.indexOf(c), 1); });
-    if (!hit.length) clusters.push(merged);
-    merged.push({ s, b });
-  });
+  // segment-to-segment, not point-to-point: a reclaimed ink mark keeps only
+  // its RDP control points, so an X's legs can cross with no two POINTS near
+  // each other — measured as segments they intersect at gap 0
+  const strokeGap = (a, b, r) => {
+    const ba = bboxOf(a), bb = bboxOf(b);
+    if (ba.x - r > bb.x + bb.w || bb.x - r > ba.x + ba.w ||
+        ba.y - r > bb.y + bb.h || bb.y - r > ba.y + ba.h) return Infinity;
+    let m = Infinity;
+    for (let i = 1; i < a.length; i++) for (let j = 1; j < b.length; j++) {
+      const d = segSegDist(a[i - 1], a[i], b[j - 1], b[j]);
+      if (d < m) { m = d; if (m < r) return m; }
+    }
+    return m;
+  };
+  // single-linkage at gap `r`, with a hard cap: a group can never be bigger
+  // than a symbol, so merging can't run away across the ice
+  const groupStrokes = (list, r, cap = symMax) => {
+    const out = [];
+    list.forEach(s => {
+      const hits = out.filter(c => c.some(e => strokeGap(e.pts, s.pts, r) < r));
+      const union = [...hits.flat(), s].map(e => e.pts);
+      if (!hits.length || strokesDiag(union) > cap) { out.push([s]); return; }
+      hits.slice(1).forEach(c => { out.splice(out.indexOf(c), 1); hits[0].push(...c); });
+      hits[0].push(s);
+    });
+    return out;
+  };
 
   // positions emit in FEET; sizes scale per axis (a shape overlay is drawn
   // parametrically from its feet bbox, so it must match the ink on screen)
@@ -528,46 +571,142 @@ export function classifyPenGroup(strokes, ctx = {}) {
   const puckOps = [];
   const unrec = [];       // unrecognized clusters, resolved after routes
   const fallThrough = []; // big strokes out of failed clusters → the long pipeline
+  // Only a genuinely LONG stray becomes a route. At 40px an unrecognized X leg
+  // (42px) turned into a route on whichever player was nearest — silently
+  // wrong, and worse than ink, which the next stroke can still complete.
   const clusterFail = cs => {
-    const bigs = cs.filter(s => s.diag >= U(SYMBOL_MAX, 40));
+    const bigs = cs.filter(s => s.diag >= U(SYMBOL_MAX, 85));
     fallThrough.push(...bigs);
     const rest = cs.filter(s => !bigs.includes(s));
     if (rest.length) unrec.push(rest);
   };
   const idxOf = cs => cs.map(s => s.idx);
-  clusters.forEach(cl => {
-    const cs = cl.map(e => e.s);
-    const pts = cs.map(s => s.pts);
-    if (puckGate(pts, puckDot, puckDense)) {
-      const c = centerOf(cs.flatMap(s => s.ptsFt));
-      puckOps.push({ op: "puck", x: c.x, y: c.y, on: null, srcs: idxOf(cs) });
-      return;
-    }
-    // a sprawl wider than any symbol (crossing routes drawn in one burst)
-    // skips recognition and lets each stroke classify on its own
-    if (cs.length > 1 && strokesDiag(pts) > symMax * 2) { clusterFail(cs); return; }
+  const emitGlyph = (rec, cs) => {
+    const o = { ...glyphOp(rec, cs), srcs: idxOf(cs) };
+    o.op === "player" ? addPlayerOp(o) : addOp(o);
+  };
+  // How does this exact set of strokes read? Returns the symbols found (a
+  // side-by-side whiteboard token like LW counts as one) or null. Pure — the
+  // caller decides which reading wins before anything is emitted.
+  // memoized: weighing readings re-asks about the same stroke sets (a parent
+  // scores each sub-group, then each child re-scores itself), and $P is the
+  // expensive part — this took a 72-stroke burst from 390ms to well under 100
+  const readCache = new Map();
+  const readGroup = cs => {
+    const key = cs.map(s => s.idx).sort((a, b) => a - b).join(",");
+    if (readCache.has(key)) return readCache.get(key);
+    const v = readGroupUncached(cs);
+    readCache.set(key, v);
+    return v;
+  };
+  const readGroupUncached = cs => {
     const glyphs = splitGlyphs(cs);
     if (glyphs.length > 1) {
       const recs = glyphs.map(g => recognizeSymbol(g.map(s => s.pts)));
       if (recs.every(Boolean)) {
         const join = recs.map(r => r.sym).join("");
-        // two glyphs spelling a whiteboard token (LW, RD, CO…) are ONE player;
-        // otherwise each glyph stands alone (two X's drawn near each other)
-        if (glyphs.length === 2 && join.length > 1 && WB_SYMS.includes(join)) {
-          const c = centerOf(cs.flatMap(s => s.ptsFt));
-          addPlayerOp({ op: "player", x: c.x, y: c.y, sym: join, srcs: idxOf(cs) });
-        } else glyphs.forEach((g, i) => {
-          const o = { ...glyphOp(recs[i], g), srcs: idxOf(g) };
-          o.op === "player" ? addPlayerOp(o) : addOp(o);
-        });
+        if (glyphs.length === 2 && join.length > 1 && WB_SYMS.includes(join))
+          return [{ token: join, cs }];
+        return glyphs.map((g, i) => ({ rec: recs[i], cs: g }));
+      }
+    }
+    const rec = recognizeSymbol(cs.map(s => s.pts));
+    return rec ? [{ rec, cs }] : null;
+  };
+  const emitRead = r => {
+    if (r.token) {
+      const c = centerOf(r.cs.flatMap(s => s.ptsFt));
+      addPlayerOp({ op: "player", x: c.x, y: c.y, sym: r.token, srcs: idxOf(r.cs) });
+    } else emitGlyph(r.rec, r.cs);
+  };
+  // Symbols are drawn ONE AT A TIME, so a symbol's strokes are consecutive in
+  // draw order — an X's two legs, then the next X's. When proximity grouping
+  // gets it wrong (dense boards put a neighbour's leg closer than your own),
+  // re-segment the group along that time order instead. Runs are capped at 3
+  // strokes: every symbol fits (F and R are the widest at 3), while two
+  // adjacent X's — 4 legs that would happily score as one big X — cannot.
+  const MAX_RUN = 3;
+  const readByTime = cs => {
+    const seq = cs.slice().sort((a, b) => a.idx - b.idx);
+    const out = [];
+    let i = 0, found = 0;
+    while (i < seq.length) {
+      let hit = null, len = 0;
+      for (let n = Math.min(MAX_RUN, seq.length - i); n >= 1; n--) {
+        const rd = readGroup(seq.slice(i, i + n));
+        if (rd) { hit = rd; len = n; break; }
+      }
+      if (hit) { out.push(...hit); found += hit.length; i += len; }
+      else { out.push({ fail: seq[i] }); i++; }
+    }
+    return found ? { reads: out, count: found } : null;
+  };
+  // Three ways to read a group: as one symbol, split tighter by proximity, or
+  // segmented by draw order. Whichever recovers the most symbols wins; only
+  // ink that survives all three is written off.
+  const takeCluster = (cs, r, depth) => {
+    if (puckGate(cs.map(s => s.pts), puckDot, puckDense)) {
+      const c = centerOf(cs.flatMap(s => s.ptsFt));
+      puckOps.push({ op: "puck", x: c.x, y: c.y, on: null, srcs: idxOf(cs) });
+      return;
+    }
+    const whole = readGroup(cs);
+    const wholeN = whole ? whole.length : 0;
+    if (cs.length > 1 && depth < 4) {
+      const subs = groupStrokes(cs, r / 2);
+      const subN = subs.length > 1
+        ? subs.reduce((n, sub) => n + ((readGroup(sub) || []).length), 0) : -1;
+      const timed = readByTime(cs);
+      const timedN = timed ? timed.count : 0;
+      if (subN >= timedN && subN > wholeN) {
+        subs.forEach(sub => takeCluster(sub, r / 2, depth + 1));
+        return;
+      }
+      if (timed && timedN > wholeN) {
+        timed.reads.forEach(t => (t.fail ? clusterFail([t.fail]) : emitRead(t)));
+        return;
+      }
+      if (!whole) {
+        if (subs.length > 1) { subs.forEach(sub => takeCluster(sub, r / 2, depth + 1)); return; }
+        cs.forEach(s => takeCluster([s], 0, depth + 1));
         return;
       }
     }
-    const rec = recognizeSymbol(pts);
-    if (rec) {
-      const o = { ...glyphOp(rec, cs), srcs: idxOf(cs) };
-      o.op === "player" ? addPlayerOp(o) : addOp(o);
-    } else clusterFail(cs);   // held back: routes, or an arrowhead flick
+    if (whole) { whole.forEach(emitRead); return; }
+    clusterFail(cs);   // held back: routes, or an arrowhead flick
+  };
+  // Two-level grouping, like reading handwriting: a loose "word" pass catches
+  // side-by-side tokens (LW, RD, CO), then a tight pass inside it separates the
+  // individual glyphs. The size cap keeps a word from spanning the ice.
+  const sideBySide = (g1, g2) => {
+    const b1 = bboxOf(g1.flatMap(s => s.pts)), b2 = bboxOf(g2.flatMap(s => s.pts));
+    const [l, r2] = b1.x <= b2.x ? [b1, b2] : [b2, b1];
+    if (l.x + l.w > r2.x + r2.w * 0.5) return false;              // must be beside, not stacked
+    const ov = Math.min(b1.y + b1.h, b2.y + b2.h) - Math.max(b1.y, b2.y);
+    return ov > 0.5 * Math.min(b1.h, b2.h);                       // and share a line
+  };
+  // No size cap on the WORD pass: a cap can fall between a symbol's own
+  // strokes, orphaning a leg that nothing downstream can reunite with its
+  // partner (it cost whole rows of a dense grid). takeCluster re-splits big
+  // groups safely, so letting them form is free; the tight pass inside still
+  // caps each glyph at symbol size.
+  groupStrokes(pool, linkR * 3, Infinity).forEach(word => {
+    const glyphs = groupStrokes(word, linkR);
+    if (glyphs.length === 2 && sideBySide(glyphs[0], glyphs[1])) {
+      const recs = glyphs.map(g => recognizeSymbol(g.map(s => s.pts)));
+      const join = recs.every(Boolean) ? recs.map(r => r.sym).join("") : "";
+      if (join.length > 1 && WB_SYMS.includes(join)) {
+        const cs = glyphs.flat();
+        const c = centerOf(cs.flatMap(s => s.ptsFt));
+        addPlayerOp({ op: "player", x: c.x, y: c.y, sym: join, srcs: idxOf(cs) });
+        return;
+      }
+    }
+    // hand the WHOLE word down, not the pre-split glyphs: takeCluster can then
+    // weigh a proximity split against draw-order segmentation. Splitting first
+    // would lock in a bad grouping — on a dense board a neighbour's stroke can
+    // sit closer than your own, and nothing downstream can recombine them.
+    takeCluster(word, linkR * 2, 0);
   });
 
   // ---- long strokes (plus failed-cluster strays, in draw order):
