@@ -325,6 +325,7 @@ const WBN_KEY = "drillboard:whiteboard-names";    // always-on player name tags 
 const HALFNS_KEY = "drillboard:half-ns";  // half-ice shown north-south (vertical)
 const HALFFLIP_KEY = "drillboard:half-flip";  // half-ice net at the far end (left / top)
 const STRETCH_KEY = "drillboard:stretch-fill";  // full ice stretches to fill the screen
+const PRESS_KEY = "drillboard:pencil-pressure";  // Apple Pencil pressure → line weight
 
 export default function DrillAnimator() {
   // a shared drill link (#d=<url-safe base64 DSL> — the preview-link format from
@@ -531,6 +532,17 @@ export default function DrillAnimator() {
   const STYLUS_STICKY = 300000;       // 5 min of no Pencil → fingers draw again
   const stylusAt = useRef(0);
   const [palmReject, setPalmReject] = useState(true);
+  // Apple Pencil pressure → line weight. A standing preference (persisted like
+  // the other view prefs) because it's a matter of taste, and it governs
+  // RENDERING as well as capture: switching it off flattens ink already drawn
+  // rather than only future strokes. The stored pressure is left untouched, so
+  // turning it back on restores the weighting.
+  const [pencilPress, setPencilPress] = useState(() => {
+    try { return localStorage.getItem(PRESS_KEY) !== "0"; } catch { return true; }
+  });
+  useEffect(() => { try { localStorage.setItem(PRESS_KEY, pencilPress ? "1" : "0"); } catch { /* private mode */ } }, [pencilPress]);
+  const pressRef = useRef(true);
+  pressRef.current = pencilPress;
   // the pen palette takes over the player-bar band while sketching. It stays
   // put when you flip to the item editor, so moving a piece and going back to
   // drawing is one tap instead of a trip through the Add sheet.
@@ -4437,7 +4449,7 @@ export default function DrillAnimator() {
     };
     // Pencil pressure scales the weight around the chosen width: a feather
     // touch lands ~60%, a hard press ~150%. Clamped so ink stays ink.
-    const pressW = press => (press == null ? penW
+    const pressW = press => (press == null || !pressRef.current ? penW
       : Math.max(0.25, Math.min(3.5, penW * (0.6 + 1.1 * Math.min(1, press * 1.6)))));
     const inkMark = (pts, press, note) => {
       // thin the trail, then RDP to control points — both view-scaled so the
@@ -6219,7 +6231,7 @@ export default function DrillAnimator() {
             run drawn at its own width. Per-point widths would mean one element
             per segment — dozens per word — where bands collapse a stroke to a
             handful and still read as a pencil. */}
-        {m.note && m.press && m.press.length === m.pts.length ? pressRuns(m).map((run, i) => (
+        {pencilPress && m.note && m.press && m.press.length === m.pts.length ? pressRuns(m).map((run, i) => (
           <polyline key={`pw${i}`} points={run.pts.map(q => `${clampX(q.x)},${clampY(q.y)}`).join(" ")}
             fill="none" stroke={m.color} strokeWidth={w * run.k} strokeDasharray={dash}
             strokeLinecap="round" strokeLinejoin="round" opacity={0.94}
@@ -9780,6 +9792,10 @@ export default function DrillAnimator() {
                     <span>Apple Pencil</span>
                     <button className={`hd-mini${palmReject ? " on" : ""}`} onClick={() => setPalmReject(v => !v)}>
                       <Icon name={palmReject ? "check" : "close"} size={13} /> Palm rejection
+                    </button>
+                    <button className={`hd-mini${pencilPress ? " on" : ""}`} onClick={() => setPencilPress(v => !v)}
+                      title="Pressure varies line weight — off draws every stroke at the chosen width">
+                      <Icon name={pencilPress ? "check" : "close"} size={13} /> Pressure
                     </button>
                   </div>
                   <div className="hd-poprow">
