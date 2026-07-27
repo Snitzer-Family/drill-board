@@ -190,20 +190,36 @@ function radialCV(pts) {
   return Math.sqrt(rad.reduce((a, v) => a + (v - m) ** 2, 0) / rad.length) / m;
 }
 
-// Coaches finish a circle by flicking the pen outward, and that little tail
-// wrecks the shape: its points sit far off the ring, dropping a clean 0.899 O
-// to 0.199 (unrecognized). So look for the longest leading run that IS a ring
-// and judge that. A C or a G can't be rescued this way — trimming a 240° arc
-// leaves a 240° arc — so the letters stay safe.
+// isoperimetric circularity, 4πA/P² — 1.0 for a circle, 0.79 for a square,
+// 0.60 for a triangle, ~0.3 for a D, 0 for a line. Unlike radial spread it
+// doesn't care that a hand-drawn loop is lumpy, only that it encloses area
+// efficiently — which is what makes a coach's blob read as a circle.
+function circularity(pts) {
+  let a2 = 0, per = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i], q = pts[(i + 1) % pts.length];
+    a2 += p.x * q.y - q.x * p.y;                       // shoelace (closes the ring)
+    per += Math.hypot(q.x - p.x, q.y - p.y);
+  }
+  return per > 0 ? (4 * Math.PI * (Math.abs(a2) / 2)) / (per * per) : 0;
+}
+
+// Coaches finish a circle by flicking the pen, and that tail wrecks the shape:
+// it adds perimeter without area, dropping a clean O to unrecognized. So find
+// the leading run that encloses area most efficiently and judge THAT. Their
+// loops are also lumpy — squarish, 4- or 5-lobed — so circularity is the test
+// rather than radial spread, which those blobs fail (0.15-0.25 vs a 0.11 bar).
+// Letters stay safe: the caller still requires few corners and a closed shape,
+// which excludes squares (4 corners), triangles (3) and an open C.
 function ringOf(pts) {
   const n = pts.length;
   if (n < 8) return null;
   let best = null;
   for (let k = n; k >= Math.max(8, Math.floor(n * 0.55)); k--) {
-    const cv = radialCV(pts.slice(0, k));
-    if (!best || cv < best.cv) best = { cv, k };
+    const c = circularity(pts.slice(0, k));
+    if (!best || c > best.c) best = { c, k };
   }
-  return best && best.cv < 0.11 ? pts.slice(0, best.k) : null;
+  return best && best.c > 0.72 ? pts.slice(0, best.k) : null;
 }
 
 function features(strokes) {
@@ -240,6 +256,16 @@ function features(strokes) {
   // near 0.03-0.09, D at 0.14, C and triangles above 0.2 — the most reliable
   // way to know a circle, and it doesn't care where the pen closed the loop.
   const cv = radialCV(all);
+  // sharpest bend along an evenly resampled outline. A square turns ~72° at
+  // its corners and a triangle ~87°, while even a lumpy hand-drawn loop stays
+  // under ~42° because its turning is spread out — this is what tells a
+  // coach's blobby circle apart from a square, where counting RDP corners
+  // can't (RDP degenerates on a closed outline).
+  let maxTurn = 0;
+  for (let i = 1; i < rs.length - 1; i++) {
+    if (rs[i - 1].s !== rs[i].s || rs[i].s !== rs[i + 1].s) continue;   // not across a pen lift
+    maxTurn = Math.max(maxTurn, turnDeg(rs[i - 1], rs[i], rs[i + 1]));
+  }
   // D's real signature: a SPINE. Its leftmost edge sits at the same x at the
   // top, middle and bottom; a circle curves away at both ends (0.00 vs 0.91).
   // leftRMS alone let round ink win D over O.
@@ -250,7 +276,7 @@ function features(strokes) {
   const lT = leftAt(0, 0.2), lM = leftAt(0.4, 0.6), lB = leftAt(0.8, 1);
   const spineDrift = lT == null || lM == null || lB == null ? 9
     : Math.max(Math.abs(lT - lM), Math.abs(lB - lM)) / (b.w || 1e-9);
-  return { closure, corners, leftRMS, tail, radialCV: cv, spineDrift };
+  return { closure, corners, leftRMS, tail, radialCV: cv, spineDrift, maxTurn };
 }
 
 // Closure bounds are finger-loose: coaches leave big gaps, and capture
@@ -319,8 +345,9 @@ export function recognizeSymbol(strokes) {
     const ring = ringOf(strokes[0]);        // ignores a trailing pen flick
     if (ring) {
       const rf = ring.length === strokes[0].length ? f : features([ring]);
-      if (rf.corners <= 1 && rf.closure < 0.52 && rf.tail <= 1)
-        return { sym: "O", score: 1 - rf.radialCV, second: null };
+      // the turn gate keeps squares/triangles out; closure keeps an open C out
+      if (rf.maxTurn < 55 && rf.closure < 0.52 && rf.tail <= 1)
+        return { sym: "O", score: Math.min(1, circularity(ring)), second: null };
     }
   }
   const scored = {};

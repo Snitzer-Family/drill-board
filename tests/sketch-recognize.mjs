@@ -428,6 +428,40 @@ const kinds = ops => ops.map(o => o.op);
   T('G not swallowed by tail-trim', recognizeSymbol(drawn(GLYPHS.G, 60, 40, 7, 0.12, 311))?.sym, 'G');
 }
 
+// ---- BLOBBY circles: a coach's "circle" is often a squarish 4- or 5-lobed
+//      loop finished with a hook that curls back inward. Radial spread rejects
+//      those (0.15-0.25 against a 0.11 bar), so ring-ness is judged by enclosed
+//      area (isoperimetric circularity) after trimming the tail, and squares /
+//      triangles are held out by the sharpest bend rather than corner counts. ----
+{
+  const blob = (lobes, wobble, tailLen, inward) => {
+    const pts = [], R = 20;
+    for (let i = 0; i <= lobes * 6; i++) {
+      const t = (i / (lobes * 6)) * Math.PI * 2 * 0.92 - 1.0;
+      const k = 1 + wobble * Math.cos(lobes * t);
+      pts.push({ x: 100 + R * k * Math.cos(t), y: 100 + R * k * Math.sin(t) * 0.95 });
+    }
+    const l = pts[pts.length - 1], pv = pts[pts.length - 3];
+    const dx = l.x - pv.x, dy = l.y - pv.y, m = Math.hypot(dx, dy) || 1;
+    for (let k = 1; k <= tailLen; k++)
+      pts.push({ x: l.x + (dx / m) * k * 2 * (inward ? -0.4 : 1) + (inward ? -k * 1.6 : 0),
+                 y: l.y + (dy / m) * k * 2 + (inward ? -k * 0.6 : 0) });
+    return pts;
+  };
+  [['round loop + tail', blob(20, 0.02, 6, false)],
+   ['4-lobe blob + tail', blob(4, 0.10, 6, false)],
+   ['4-lobe blob + inward hook', blob(4, 0.10, 7, true)],
+   ['5-lobe blob + inward hook', blob(5, 0.12, 7, true)],
+   ['squarish blob + inward hook', blob(4, 0.16, 8, true)],
+  ].forEach(([lbl, pts]) => T(`${lbl} is an O`, recognizeSymbol([pts])?.sym, 'O'));
+
+  // …and the shapes that must NOT be swept up by a looser circle test
+  T('square is not an O', recognizeSymbol(drawn(GLYPHS['□'], 60, 40, 6, 0.1, 401))?.sym, '□');
+  T('triangle is not an O', recognizeSymbol(drawn(GLYPHS['△'], 60, 40, 6, 0.1, 409))?.sym, '△');
+  T('C is not an O', recognizeSymbol(drawn(GLYPHS.C, 60, 40, 6, 0.1, 419))?.sym, 'C');
+  T('D is not an O', recognizeSymbol(drawn(GLYPHS.D, 60, 40, 6, 0.1, 421))?.sym, 'D');
+}
+
 // ---- phone scale (pxFt ≈ 0.5: the full 200ft rink spans ~390px, so a finger
 //      X is 20-40 FEET) — the view-scaled gates must keep everything working ----
 {
