@@ -13,6 +13,7 @@ import { ZONES, zoneAt } from "./zones.js";
 import { PieceIcon, Stepper, DiagPanel, Icon, ICONS } from "./icons.jsx";
 import { createTiming, resolveNearest } from "./timing.js";
 import { buildLedger, mayHoldOn, mayHoldEntering } from "./possession.js";
+import { classifyPenGroup } from "./sketch-recognize.js";
 import { newGame, stepGame } from "./ai-game.js";
 import { STYLES } from "./styles.js";
 
@@ -361,6 +362,17 @@ export default function DrillAnimator() {
   const [markEdit, setMarkEdit] = useState(false);   // show draggable control points on the selected mark
   useEffect(() => { setMarkEdit(false); }, [selectedId]);   // leaving a mark exits point-edit mode
   const markerDraw = useRef(false);
+  // smart pen: strokes buffer until a settle pause, then the burst is
+  // recognized locally (sketch-recognize.js) and materialized as real pieces
+  const PEN_SETTLE = 600;             // ms of stillness before a burst commits
+  const penDraw = useRef(false);      // {t0} while a pen stroke is in flight
+  const penBuf = useRef([]);          // settled strokes awaiting commit [{pts,t0,t1}]
+  const penTimer = useRef(0);
+  const [penInk, setPenInk] = useState([]);   // ghost render of the buffer
+  // the settle timer fires from a stale closure — commitPen reads the board
+  // through this ref so the classifier context is always current
+  const piecesRef = useRef(pieces);
+  piecesRef.current = pieces;
   const [openMenu, setOpenMenu] = useState(null); // settings | rinkmenu | tools | text
   const [textDraft, setTextDraft] = useState(DEFAULT_TEXT);
   const [textError, setTextError] = useState("");
@@ -3301,18 +3313,20 @@ export default function DrillAnimator() {
       return { ...p, path: edit(p.path) };
     });
 
-  function nextId(kind) {
+  // `arr` lets the pen materializer allocate against its working array inside
+  // a setPieces reducer, where `pieces` is stale
+  function nextId(kind, arr = pieces) {
     const prefix = kind === "player" ? "P" : kind === "puck" ? "PK" : kind === "net" ? "N"
       : kind === "bumper" ? "B" : kind === "deker" ? "DK" : kind === "passer" ? "PS"
       : kind === "label" ? "L" : kind === "tire" ? "T" : kind === "stick" ? "ST" : kind === "light" ? "LT" : kind === "mark" ? "MK" : "C";
     let n = 1;
-    while (pieces.some(p => p.id === prefix + n)) n++;
+    while (arr.some(p => p.id === prefix + n)) n++;
     return prefix + n;
   }
 
-  function makePiece(kind, pt) {
-    const id = nextId(kind);
-    const colorIdx = pieces.filter(p => p.kind === "player").length % COLORS.length;
+  function makePiece(kind, pt, arr = pieces) {
+    const id = nextId(kind, arr);
+    const colorIdx = arr.filter(p => p.kind === "player").length % COLORS.length;
     return {
       id, kind, x: pt.x, y: pt.y, speed: kind === "player" ? defaultSpeed : 1, hand: "R", sym: "", carrier: null,
       facing: kind === "net" && pt.x >= 100 ? 180 : 0, transfers: [], pickup: null, net: null, holdLine: false, goalie: false, defense: false,
@@ -3931,10 +3945,33 @@ export default function DrillAnimator() {
     svgRef.current.setPointerCapture?.(e.pointerId);
   }
 
+  // start a smart-pen stroke: captured exactly like marker ink, but strokes
+  // buffer until a settle pause, then the burst is recognized into pieces
+  function beginPen(e) {
+    clearTimeout(penTimer.current);   // drawing again keeps the burst open
+    const pt = svgPt(e);
+    drawRaw.current = [pt];
+    setDrawPreview([pt]);
+    penDraw.current = { t0: performance.now() };
+    drag.current = { kind: "drawing", pen: true, touch: e.pointerType !== "mouse" };
+    svgRef.current.setPointerCapture?.(e.pointerId);
+  }
+
   function finishDraw() {
     const raw = drawRaw.current;
     drawRaw.current = [];
     setDrawPreview(null);
+    if (penDraw.current) {            // smart pen: buffer, don't leave the tool
+      const { t0 } = penDraw.current;
+      penDraw.current = false;
+      if (raw.length) {               // a bare tap is a dot — the puck gesture
+        penBuf.current.push({ pts: raw.map(q => ({ x: q.x, y: q.y })), t0, t1: performance.now() });
+        setPenInk(penBuf.current.map(s => s.pts));
+      }
+      clearTimeout(penTimer.current);
+      if (penBuf.current.length) penTimer.current = setTimeout(commitPen, PEN_SETTLE);
+      return;
+    }
     // a light-reaction fork: fit a route from the player's branch point through the
     // drawn trail, and store it (replacing any existing fork of the same colour)
     if (forkTarget.current) {
@@ -4014,6 +4051,84 @@ export default function DrillAnimator() {
     setSelectedId(id);
     setPopup({ type: "piece", id });
   }
+  /* ----- smart pen: settle-commit and materialization ----- */
+
+  // classify the settled burst of pen strokes and materialize the ops as real
+  // pieces — a single setPieces call, so the whole burst is one undo entry
+  // (the 130ms snapshot coalescer sees one document change)
+  function commitPen() {
+    clearTimeout(penTimer.current);
+    const strokes = penBuf.current;
+    penBuf.current = [];
+    setPenInk([]);
+    if (!strokes.length) return;
+    const board = piecesRef.current;
+    const ctx = {
+      players: board.filter(p => p.kind === "player").map(p => ({
+        id: p.id, x: p.x, y: p.y, end: segEnd(p, p.path.length - 1), hasPath: p.path.length > 0,
+      })),
+      nets: board.filter(p => p.kind === "net").map(n => ({ id: n.id, x: n.x, y: n.y })),
+    };
+    const ops = classifyPenGroup(strokes, ctx);
+    setPieces(ps => materializePenOps(ps, ops));
+    const counts = {};
+    ops.forEach(o => { counts[o.op] = (counts[o.op] || 0) + 1; });
+    const parts = Object.entries(counts).filter(([k]) => k !== "mark")
+      .map(([k, n]) => `${n} ${n > 1 ? (k === "pass" ? "passes" : k + "s") : k}`);
+    flash(parts.length ? `Pen: ${parts.join(", ")}` : "Pen: kept as ink");
+  }
+  // force-commit buffered pen ink before the board changes under it (tool
+  // switch, play, menus, a tap with another tool)
+  function flushPen() {
+    if (penBuf.current.length) commitPen();
+  }
+  useEffect(() => { if (tool !== "pen") flushPen(); }, [tool]);
+  useEffect(() => { if (openMenu) flushPen(); }, [openMenu]);
+
+  // turn classifyPenGroup ops into pieces. Runs inside a setPieces reducer:
+  // pure over `out`, ids allocated against the working array, same-burst refs
+  // ({ref:opIdx}) resolved through madeId. Route/pass/shot ops land in phase 4.
+  function materializePenOps(ps, ops) {
+    const out = ps.slice();
+    const madeId = {};                                    // op index → piece id
+    const idFor = ref => (ref ? (ref.id != null ? ref.id : madeId[ref.ref]) : null);
+    const inkMark = pts => {
+      // exact marker-ink treatment: thin the trail, then RDP to control points
+      const trail = pts.filter((q, i) => i === 0 || Math.hypot(q.x - pts[i - 1].x, q.y - pts[i - 1].y) > 1.2);
+      const cps = trail.length > 3 ? rdp(trail, 1.3) : trail;
+      if (cps.length < 2) return;
+      out.push({ id: nextId("mark", out), kind: "mark", pts: cps, x: cps[0].x, y: cps[0].y,
+        color: markColor, width: markWidth, style: markStyle, path: [] });
+    };
+    ops.forEach((o, i) => {
+      if (o.op === "player") {
+        const np = makePiece("player", { x: o.x, y: o.y }, out);
+        // same convention as picking a whiteboard icon: the symbol names the
+        // (auto-named) player, so the tag isn't redundantly repeated — and a
+        // drawn X stays the clean default glyph
+        if (o.sym && o.sym !== "X") np.label = o.sym;
+        madeId[i] = np.id;
+        out.push(np);
+      } else if (o.op === "cone") {
+        out.push(makePiece("cone", { x: o.x, y: o.y }, out));
+      } else if (o.op === "puck") {
+        const np = makePiece("puck", { x: o.x, y: o.y }, out);
+        np.carrier = idFor(o.on);
+        out.push(np);
+      } else if (o.op === "shape") {
+        const pts = shapeMarkPts(o.shape, o.cx, o.cy, o.w, o.h);
+        out.push({ id: nextId("mark", out), kind: "mark", pts, x: pts[0].x, y: pts[0].y,
+          color: markColor, width: markWidth, style: markStyle, path: [] });
+      } else if (o.op === "route") {
+        inkMark(o.raw);               // phase 4 turns these into real paths
+      } else if (o.op === "mark") {
+        inkMark(o.pts);
+      }
+      // pass/shot: wired in phase 4
+    });
+    return out;
+  }
+
   // rotate a mark's points about its centroid (degrees; rink feet are square
   // units, so data-space rotation is geometrically true)
   function rotateMark(id, deg) {
@@ -4048,8 +4163,12 @@ export default function DrillAnimator() {
     if (playing || pinchRef.current) return;
     if (wakeEdit()) return;                    // paused/finished → snap back to start first
     const pt = svgPt(e);
+    // a pointer-down with any other tool closes an open pen burst first, so
+    // draw-an-X-then-drag-something can't race the settle timer
+    if (tool !== "pen") flushPen();
     if (tool === "draw") { setPopup(null); beginDraw(e); return; }
     if (tool === "marker") { setPopup(null); beginMark(e); return; }
+    if (tool === "pen") { setPopup(null); beginPen(e); return; }
     if (tool === "playerpuck") {
       addPlayerWithPuck(pt, false);
       setTool("select");
@@ -7702,6 +7821,7 @@ export default function DrillAnimator() {
       : tool === "draw"
       ? (selected ? `Drawing ${selected.id}'s route — drag across the ice` : "Drag on the ice — creates a player")
       : tool === "marker" ? "Marker — drag on the ice to draw"
+      : tool === "pen" ? "Smart pen — sketch X's, routes & dashed passes; ink becomes pieces"
       : tool !== "select" ? "Tap the ice to place" : null;
 
   const mlbl = { fontSize: 8, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase",
@@ -7711,6 +7831,7 @@ export default function DrillAnimator() {
     color: "#eaf0f6", fontSize: 14, fontWeight: 700, cursor: "pointer" };
 
   const togglePlay = () => {
+    flushPen();                    // buffered pen ink lands before playback
     // starting a FRESH run (from the top OR replaying a finished one) re-rolls playSeed
     // → random reactions / cue timings vary each run. NB: check animT >= 1 too — after a
     // finished run resetAnim() only queues animT=0 (async), so `animT === 0` alone is
@@ -8303,8 +8424,15 @@ export default function DrillAnimator() {
             {renderBranchGhostArrows()}
             {renderRouteNumbers()}
 
+            {/* buffered pen strokes ghost at low opacity until the burst settles
+                and snaps into pieces */}
+            {penInk.map((pts, i) => pts.length > 1 && (
+              <polyline key={`pen${i}`} points={pts.map(q => `${q.x},${q.y}`).join(" ")} fill="none"
+                stroke={markColor} strokeWidth={markWidth} strokeLinecap="round" strokeLinejoin="round"
+                opacity={0.45} pointerEvents="none" />
+            ))}
             {drawPreview && drawPreview.length > 1 && (
-              tool === "marker"
+              tool === "marker" || tool === "pen"
                 ? <polyline points={drawPreview.map(q => `${q.x},${q.y}`).join(" ")} fill="none" stroke={markColor}
                     strokeWidth={markWidth} strokeLinecap="round" strokeLinejoin="round" opacity={0.85} pointerEvents="none" />
                 : <polyline points={drawPreview.map(q => `${q.x},${q.y}`).join(" ")} vectorEffect="non-scaling-stroke"
@@ -9019,6 +9147,10 @@ export default function DrillAnimator() {
               onClick={() => { resetAnim(); setPlaying(false); setPopup(null); setTool("marker"); }}>
               <span className="hd-toolglyph"><Icon name="marker" size={22} /></span><span>Marker</span>
             </button>
+            <button className={`hd-tool${tool === "pen" ? " on" : ""}`}
+              onClick={() => { resetAnim(); setPlaying(false); setPopup(null); setTool("pen"); }}>
+              <span className="hd-toolglyph"><Icon name="marker" size={22} /></span><span>Smart pen</span>
+            </button>
             {[["square", "□", "Square"], ["circle", "○", "Circle"], ["triangle", "△", "Triangle"]].map(([k, glyph, lbl]) => (
               <button key={k} className="hd-tool" onClick={() => { resetAnim(); setPlaying(false); addShapeMark(k); setOpenMenu(null); }}>
                 <span className="hd-toolglyph">{glyph}</span><span>{lbl}</span>
@@ -9028,8 +9160,9 @@ export default function DrillAnimator() {
               <span className="hd-toolglyph"><Icon name="label" size={22} /></span><span>Label</span>
             </button>
           </div>
-          {/* marker style/colour/thickness, shown once the marker is picked */}
-          {tool === "marker" && (
+          {/* marker style/colour/thickness, shown once the marker (or pen —
+              shared settings style its fallback ink) is picked */}
+          {(tool === "marker" || tool === "pen") && (
             <>
               <div className="hd-poprow">
                 {["#ffd447", "#d7263d", "#1f8a4c", "#3a8dff", "#e0731d", "#ffffff", "#14202b"].map(c => (
@@ -9048,7 +9181,9 @@ export default function DrillAnimator() {
                 <input type="range" min={0.5} max={3} step={0.1} value={markWidth} style={{ flex: 1, minWidth: 80 }}
                   onChange={e => setMarkWidth(parseFloat(e.target.value))} />
               </div>
-              <span style={{ fontSize: 11, color: "#8b99a8", padding: "0 2px" }}>drag on the ice to draw; tap a mark to restyle, resize by its corners, or delete</span>
+              <span style={{ fontSize: 11, color: "#8b99a8", padding: "0 2px" }}>{tool === "pen"
+                ? "sketch X's and O's, routes, dashed passes, a dot for the puck — the ink becomes real pieces (unrecognized strokes stay ink)"
+                : "drag on the ice to draw; tap a mark to restyle, resize by its corners, or delete"}</span>
             </>
           )}
           {tool !== "select" && (
