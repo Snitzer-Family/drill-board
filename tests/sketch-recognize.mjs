@@ -624,5 +624,45 @@ const kinds = ops => ops.map(o => o.op);
   T('trimming leaves a C alone', c.every(o => o.sym !== 'X'), true);
 }
 
+// ---- A REAL O off Nate's board (Copy diagnostics) that stayed ink — the
+//      mirror of the X above. Six leading points scribble sideways before the
+//      loop starts, and ringOf only ever trimmed the TRAILING flick: whole
+//      stroke 0.677, best leading run 0.699, both under the 0.72 bar, while
+//      the ring itself scores 0.902. Both ends are trimmed now. ----
+{
+  const CTX = { pxFtX: 0.179856, pxFtY: 0.121429 };
+  const S = [[[54.32,38.01],[54.68,38.01],[55.04,38.01],[54.86,37.64],[54.32,37.64],[53.96,37.64],[53.6,37.76],[53.06,38.01],[52.7,38.37],[52.52,38.74],[52.34,39.22],[52.34,39.83],[52.7,40.31],[53.06,40.31],[53.42,40.31],[53.96,40.31],[54.32,39.95],[54.86,39.59],[55.22,39.22],[55.4,38.86],[55.4,38.49],[55.22,38.13],[54.86,37.89],[54.32,37.89]]]
+    .map(s => s.map(([x, y]) => ({ x, y })));
+  const ops = classifyPenGroup(S.map(pts => stroke(pts)), CTX);
+  T('real lead-flick O converts', kinds(ops), ['player']);
+  T('...as an O', ops[0] && ops[0].sym, 'O');
+  // trimming both ends must not turn open letters into rings
+  T('two-end trim leaves C alone', recognizeSymbol(drawn(GLYPHS.C, 80, 40, 6, 0.12, 61))?.sym, 'C');
+  T('two-end trim leaves G alone', recognizeSymbol(drawn(GLYPHS.G, 80, 40, 6, 0.12, 63))?.sym, 'G');
+  T('two-end trim leaves □ alone', recognizeSymbol(drawn(GLYPHS['□'], 80, 40, 6, 0.12, 67))?.sym, '□');
+  T('two-end trim leaves △ alone', recognizeSymbol(drawn(GLYPHS['△'], 80, 40, 6, 0.12, 69))?.sym, '△');
+}
+
+// ---- A REAL X off Nate's board drawn WITHOUT lifting the pen: down the
+//      first leg, back up the left side, down the second. One stroke, so the
+//      two-stroke crossing test never saw it. The legs do cross mid-span
+//      (t=0.53, u=0.46 at 78%), with the return travel as the middle run. ----
+{
+  const CTX = { pxFtX: 0.179856, pxFtY: 0.121429 };
+  const S = [[[47.12,74.68],[46.4,75.29],[45.86,75.77],[45.14,76.26],[44.6,76.74],[44.06,77.23],[43.53,77.47],[43.17,77.71],[42.81,77.84],[42.45,77.35],[42.45,76.86],[42.45,76.5],[42.45,76.01],[42.63,75.65],[42.63,75.29],[42.99,75.04],[43.53,75.04],[43.88,75.29],[44.42,75.65],[44.96,76.01],[45.32,76.38],[45.86,76.86],[46.22,77.11],[46.76,77.59],[47.12,77.71],[47.48,77.59]]]
+    .map(s => s.map(([x, y]) => ({ x, y })));
+  const ops = classifyPenGroup(S.map(pts => stroke(pts)), CTX);
+  T('real one-stroke X converts', kinds(ops), ['player']);
+  T('...as an X', ops[0] && ops[0].sym, 'X');
+  // the split must not manufacture X's out of other single-stroke glyphs
+  for (const sym of ['O', 'C', 'W', 'L', '△', '□']) {
+    const got = recognizeSymbol(drawn(GLYPHS[sym], 90, 40, 6, 0.12, 73));
+    T(`one-stroke split leaves ${sym} alone`, got && got.sym, sym);
+  }
+  // and plain annotation ink must still stay ink
+  T('vee still → null', recognizeSymbol([poly(p(60, 40, 62.5, 44, 65, 40), 8)]), null);
+  T('s-curve still → null', recognizeSymbol([arcPts(61.5, 41.5, 1.5, 90, 270).concat(arcPts(61.5, 44.5, 1.5, -90, 90))]), null);
+}
+
 console.log(`\n${pass} passed, ${fail} failed  (accept threshold ${ACCEPT})`);
 process.exit(fail ? 1 : 0);

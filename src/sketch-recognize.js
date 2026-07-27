@@ -204,22 +204,42 @@ function circularity(pts) {
   return per > 0 ? (4 * Math.PI * (Math.abs(a2) / 2)) / (per * per) : 0;
 }
 
-// Coaches finish a circle by flicking the pen, and that tail wrecks the shape:
-// it adds perimeter without area, dropping a clean O to unrecognized. So find
-// the leading run that encloses area most efficiently and judge THAT. Their
-// loops are also lumpy — squarish, 4- or 5-lobed — so circularity is the test
-// rather than radial spread, which those blobs fail (0.15-0.25 vs a 0.11 bar).
-// Letters stay safe: the caller still requires few corners and a closed shape,
-// which excludes squares (4 corners), triangles (3) and an open C.
+// Coaches flick the pen at a circle, and that tick wrecks the shape: it adds
+// perimeter without area, dropping a clean O to unrecognized. So find the run
+// that encloses area most efficiently and judge THAT. The flick lands at
+// EITHER end — a real device O opened with six points scribbling sideways
+// before the loop began, scoring 0.677 whole and 0.699 for the best leading
+// run, both under the 0.72 bar, while the ring itself (dropping those six)
+// scores 0.902. Their loops are also lumpy — squarish, 4- or 5-lobed — so
+// circularity is the test rather than radial spread, which those blobs fail
+// (0.15-0.25 vs a 0.11 bar). Letters stay safe: the run must still hold 55% of
+// the stroke, and the caller requires few corners and a closed shape, which
+// excludes squares (4 corners), triangles (3) and an open C.
+// Searching both ends is O(n²) runs, so score each in O(1) off prefix sums
+// rather than re-walking it: a slow finger can leave 240 points on a small
+// circle, and re-measuring every candidate ran 8.8ms on one symbol.
 function ringOf(pts) {
   const n = pts.length;
   if (n < 8) return null;
-  let best = null;
-  for (let k = n; k >= Math.max(8, Math.floor(n * 0.55)); k--) {
-    const c = circularity(pts.slice(0, k));
-    if (!best || c > best.c) best = { c, k };
+  const min = Math.max(8, Math.floor(n * 0.55));
+  const per = new Float64Array(n), cross = new Float64Array(n);   // prefix [0..i)
+  for (let i = 1; i < n; i++) {
+    per[i] = per[i - 1] + dist(pts[i - 1], pts[i]);
+    cross[i] = cross[i - 1] + (pts[i - 1].x * pts[i].y - pts[i].x * pts[i - 1].y);
   }
-  return best && best.c > 0.72 ? pts.slice(0, best.k) : null;
+  let best = null;
+  for (let a = 0; a + min <= n; a++) {
+    for (let k = n; k - a >= min; k--) {
+      const first = pts[a], last = pts[k - 1];
+      const close = dist(last, first);                            // the ring's closing chord
+      const P = per[k - 1] - per[a] + close;
+      if (P <= 0) continue;
+      const A2 = cross[k - 1] - cross[a] + (last.x * first.y - first.x * last.y);
+      const c = (4 * Math.PI * (Math.abs(A2) / 2)) / (P * P);
+      if (!best || c > best.c) best = { c, a, k };
+    }
+  }
+  return best && best.c > 0.72 ? pts.slice(best.a, best.k) : null;
 }
 
 // Two strokes that CROSS near the middle of each, at a decent angle, are an X
@@ -271,6 +291,34 @@ function crossesAsX(strokes) {
   let ang = Math.abs((Math.atan2(den, r.x * s.x + r.y * s.y) * 180) / Math.PI);
   if (ang > 90) ang = 180 - ang;
   return ang >= 30;
+}
+
+// An X drawn WITHOUT lifting the pen: down one leg, back up through the
+// middle, down the other. It arrives as a single stroke, so the two-stroke
+// test above never sees it and it fell through to ink. Split the stroke at its
+// own corners and ask whether the first and last runs cross; the run between
+// them is the return travel, not a leg.
+//
+// Only corners found by rdp are tried, so this can't hunt for a crossing that
+// isn't drawn, and crossesAsX still has to agree. That keeps the closed
+// single-stroke glyphs out on their own merits: a square's opposite sides are
+// parallel (no intersection), a triangle's meet at an endpoint (t/u reject a
+// join), and any pair spanning a curve fails the straightness gate.
+function crossesAsOneStrokeX(pts) {
+  if (pts.length < 6) return false;
+  const b = bboxOf(pts);
+  const simp = rdp(pts, Math.hypot(b.w, b.h) * 0.08);
+  if (simp.length < 4) return false;                    // need two interior corners
+  const at = v => {                                     // simplified vertex → source index
+    let bi = 0, bd = Infinity;
+    pts.forEach((p, i) => { const d = dist(p, v); if (d < bd) { bd = d; bi = i; } });
+    return bi;
+  };
+  const idx = simp.map(at);
+  for (let a = 1; a < idx.length - 2; a++)
+    for (let c = a + 1; c < idx.length - 1; c++)
+      if (crossesAsX([pts.slice(0, idx[a] + 1), pts.slice(idx[c])])) return true;
+  return false;
 }
 
 function features(strokes) {
@@ -403,6 +451,8 @@ export function recognizeSymbol(strokes) {
       if (rf.curveVerts >= 6 && rf.corners <= 2 && rf.closure < 0.52)
         return { sym: "O", score: Math.min(1, circularity(ring)), second: null };
     }
+    // tried after the ring, so a closed loop is judged as an O first
+    if (crossesAsOneStrokeX(strokes[0])) return { sym: "X", score: 0.9, second: null };
   }
   const scored = {};
   TEMPLATES.forEach(t => {
