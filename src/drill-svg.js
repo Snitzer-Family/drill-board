@@ -137,7 +137,7 @@ const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(
 
 // a movable/resizable on-ice text label (standalone piece or a "label"-mode
 // waypoint description). No stretch here, so it's drawn upright at (x, y).
-function labelSvg(x, y, text, size, color) {
+function labelSvg(x, y, text, size, color, st = {}) {
   const lines = String(text || " ").split("\n");
   const fs = 6.5 * (size || 1), lh = fs * 1.16;   // ~6.5 ft tall — matches the app
   const w = Math.max(1, ...lines.map(l => l.length)) * fs * 0.56 + fs * 0.7;
@@ -145,11 +145,22 @@ function labelSvg(x, y, text, size, color) {
   const tspans = lines.map((l, k) =>
     `<tspan x="${f(x)}" y="${f(y + (k - (lines.length - 1) / 2) * lh + fs * 0.34)}">${esc(l || " ")}</tspan>`).join("");
   // a label is a light "sticky note" in BOTH themes — the fill/text are fixed
-  // (not themed), so dark ink never lands on a dark panel in dark mode
+  // (not themed), so dark ink never lands on a dark panel in dark mode.
+  // st = { bg, bgOp, border, borderOp, textOp } mirrors the app's per-label styling.
+  const bgOff = st.bg === "none", bgCol = bgOff ? null : st.bg;
+  const rectFill = bgOff ? `fill="none"` : bgCol
+    ? `fill="${bgCol}" fill-opacity="${f(st.bgOp != null ? st.bgOp : 0.95)}"`
+    : st.bgOp != null ? `fill="#f7fbfd" fill-opacity="${f(st.bgOp)}"` : `fill="#f7fbfd"`;
+  const bdOff = st.border === "none";
+  const rectStroke = bdOff ? `stroke="none" stroke-width="0"` : st.border || st.borderOp != null
+    ? `stroke="${st.border || "#14202b"}" stroke-opacity="${f(st.borderOp != null ? st.borderOp : 0.4)}" stroke-width="0.4"`
+    : `stroke="rgba(20,32,43,0.4)" stroke-width="0.4"`;
+  const halo = bgCol ? `stroke="${bgCol}" stroke-opacity="0.9"` : `stroke="#f7fbfd"`;
+  const tOp = st.textOp != null && st.textOp !== 1 ? ` opacity="${f(st.textOp)}"` : "";
   return `<g><rect x="${f(x - w / 2)}" y="${f(y - h / 2)}" width="${f(w)}" height="${f(h)}" rx="${f(fs * 0.28)}"`
-    + ` fill="#f7fbfd" stroke="rgba(20,32,43,0.4)" stroke-width="0.4"/>`
-    + `<text font-size="${f(fs)}" font-weight="800" text-anchor="middle" fill="${color || "#14202b"}"`
-    + ` font-family="system-ui,sans-serif" paint-order="stroke" stroke="#f7fbfd" stroke-width="${f(fs * 0.06)}">${tspans}</text></g>`;
+    + ` ${rectFill} ${rectStroke}/>`
+    + `<text font-size="${f(fs)}" font-weight="800" text-anchor="middle" fill="${color || "#14202b"}"${tOp}`
+    + ` font-family="system-ui,sans-serif" paint-order="stroke" ${halo} stroke-width="${f(fs * 0.06)}">${tspans}</text></g>`;
 }
 
 const routePoint = (p, idx) => {
@@ -461,7 +472,7 @@ export function drillSvg(dsl, opts = {}) {
   };
   const icons = [...pieces].filter(p => p.kind !== "mark").sort((a, b) => rank(a.kind) - rank(b.kind)).map(p => piece(drawPos(p))).join("");
   // text labels paint on top: standalone label pieces + "label"-mode waypoints
-  const labels = pieces.filter(p => p.kind === "label").map(p => labelSvg(p.x, p.y, p.text, p.size, p.color)).join("")
+  const labels = pieces.filter(p => p.kind === "label").map(p => labelSvg(p.x, p.y, p.text, p.size, p.color, p)).join("")
     + pieces.flatMap(p => (p.path || []).filter(s => s.dmode === "label" && s.desc)
         .map(s => labelSvg(s.x + (s.dox || 0), s.y + (s.doy != null ? s.doy : -5), s.desc, s.dsize, "#14202b"))).join("");
   const wattr = opts.width ? ` width="${opts.width}"` : "";

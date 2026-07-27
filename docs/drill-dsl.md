@@ -124,6 +124,9 @@ Places a piece. `id` is any unique token (e.g. `F1`, `PK1`, `N2`).
 | *bare word* | player | Jersey label (e.g. `F1`) |
 | `"quoted text"` | label | The label's text (spaces and commas allowed) |
 | `size=<n>` | label, net, tire | label: font scale · **net**: `1` NHL / `0.62` mite · **tire**: `1` large / `0.55` small |
+| `bg=none` / `bg=<hex>[:<op>]` | label | Background box: `none` removes it, or a colour (no leading `#` needed) with optional opacity `0.05–1`. Default `f6fbfd:0.95` (the sticky-note paper) — omitted when at the default. |
+| `border=none` / `border=<hex>[:<op>]` | label | Border: `none` removes it, or a colour with optional opacity. Default `14202b:0.35` (faint ink) — omitted when at the default. |
+| `textop=<op>` | label | Text opacity `0.1–1` (default `1`, omitted then). Fades the text and its halo together. |
 | `goalie` | net | A goalie who tracks the puck (pucks also enter only from the front — the sides/back are solid) |
 | `speed=<n>` | player, puck | Pace multiplier (1 = default; players default 1.5) |
 | `hand=L` / `hand=R` | player, stick | Shooting hand — mirrors the player's stick, or flips the on-ice stick prop's blade for a left/right-handed stick |
@@ -233,7 +236,9 @@ A waypoint **description** (`DESC "…"`) can be surfaced three ways via `SHOW`:
   (drag it, or `OFF dx,dy`) and resizable (drag its corner, or `SIZE n`).
 
 Standalone text notes use the `label` **piece** instead:
-`PIECE L1 label 100 40 size=1.2 "Regroup here"`.
+`PIECE L1 label 100 40 size=1.2 "Regroup here"`, styled with
+`bg=`/`border=`/`textop=`, e.g.
+`PIECE L2 label 100 60 #1f4fa3 bg=none textop=0.6 "Neutral zone"`.
 
 ### `BRANCH <player> <ref> [at=<pt>] [<cond>] [<action>[:target]] <segments…>`
 A **conditional route branch** for a player ("multiple routes off one waypoint"): a

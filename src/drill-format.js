@@ -232,6 +232,7 @@ export function parseDrill(text) {
           : kind === "label" ? "#14202b" : kind === "tire" ? "#1c1c1e" : kind === "stick" ? "#20242a" : kind === "light" ? "#2ea043" : "#d7263d";
         let label = kind === "player" ? id : "";
         let text = "", size = 1;                          // label piece: text + font scale
+        let bg = null, bgOp = null, border = null, borderOp = null, textOp = null;   // label styling ("none" | #hex + opacity)
         let speed = 1, hand = "R", sym = "", carrier = null, facing = 0, pickup = null;
         const terminals = [];                                   // uniform list of chain ENDS — each { kind:"shot"|"rim"|"chip", at, ref, by?, net?/aim?/dist? } — so every branch's end is independent
         let net = null, holdLine = false, goalie = false, defense = false, wait = null, group = null, crease = false, lock = false;
@@ -250,6 +251,22 @@ export function parseDrill(text) {
             } else if (key === "size") {
               const n = parseFloat(v);
               if (!isNaN(n) && n > 0) size = n;
+            } else if (key === "bg" || key === "border") {
+              // bg=none | bg=<hex>[:<op>] (same for border=) — label box styling
+              if (/^none$/i.test(v)) { if (key === "bg") bg = "none"; else border = "none"; }
+              else {
+                const [hex, op] = v.split(":");
+                if (/^#?[0-9a-fA-F]{3,6}$/.test(hex)) {
+                  const col = "#" + hex.replace(/^#/, "");
+                  const n = op != null ? parseFloat(op) : NaN;
+                  const clamped = isNaN(n) ? null : Math.max(0.05, Math.min(1, n));
+                  if (key === "bg") { bg = col; bgOp = clamped; }
+                  else { border = col; borderOp = clamped; }
+                }
+              }
+            } else if (key === "textop") {
+              const n = parseFloat(v);
+              if (!isNaN(n)) textOp = Math.max(0.1, Math.min(1, n));
             } else if (key === "hand") hand = v.toUpperCase() === "L" ? "L" : "R";
             else if (key === "sym") sym = unq(v).replace(/_/g, " ").trim().slice(0, 3);  // whiteboard symbol
 
@@ -346,7 +363,7 @@ export function parseDrill(text) {
         const mode = lmode || (rand === false ? "sequence" : "reactive");   // legacy rand=off → sequence
         // a bare net= token targets every shot terminal that didn't carry its own >net
         if (net) terminals.forEach(t => { if (t.kind === "shot" && !t.net) t.net = net; });
-        const p = { id, kind, x, y, color, label, text, size, speed, hand, sym, carrier, facing, transfers, pickup, ...(terminals.length ? { terminals } : {}), net, holdLine, goalie, defense, wait, group, crease, lock, cues, mode, alwaysColor, lightId, forks: [], path: [] };
+        const p = { id, kind, x, y, color, label, text, size, speed, hand, sym, carrier, facing, transfers, pickup, ...(terminals.length ? { terminals } : {}), net, holdLine, goalie, defense, wait, group, crease, lock, cues, mode, alwaysColor, lightId, ...(bg ? { bg } : {}), ...(bgOp != null ? { bgOp } : {}), ...(border ? { border } : {}), ...(borderOp != null ? { borderOp } : {}), ...(textOp != null ? { textOp } : {}), forks: [], path: [] };
         pieces.push(p); byId[id] = p;
       } else if (cmd === "PATH") {
         const id = tok[1];
@@ -518,7 +535,15 @@ export function serializeDrill(rink, pieces, title = "", desc = "", steps = [], 
     if (p.kind === "label") {
       const sz = p.size && p.size !== 1 ? ` size=${f2(p.size)}` : "";
       const lk = p.lock ? " lock" : "";
-      out.push(`PIECE ${p.id} label ${f1(p.x)} ${f1(p.y)} ${p.color}${sz}${lk} ${qesc(p.text || "")}`);
+      // bg=/border=/textop= are omitted at the defaults so old drills round-trip unchanged
+      const bgT = p.bg === "none" ? " bg=none"
+        : (p.bg && p.bg !== "#f6fbfd") || (p.bgOp != null && p.bgOp !== 0.95)
+          ? ` bg=${String(p.bg || "#f6fbfd").replace("#", "")}:${f2(p.bgOp != null ? p.bgOp : 0.95)}` : "";
+      const bdT = p.border === "none" ? " border=none"
+        : (p.border && p.border !== "#14202b") || (p.borderOp != null && p.borderOp !== 0.35)
+          ? ` border=${String(p.border || "#14202b").replace("#", "")}:${f2(p.borderOp != null ? p.borderOp : 0.35)}` : "";
+      const toT = p.textOp != null && p.textOp !== 1 ? ` textop=${f2(p.textOp)}` : "";
+      out.push(`PIECE ${p.id} label ${f1(p.x)} ${f1(p.y)} ${p.color}${sz}${bgT}${bdT}${toT}${lk} ${qesc(p.text || "")}`);
       return;
     }
     if (p.kind === "mark") {
