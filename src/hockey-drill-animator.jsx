@@ -4369,10 +4369,41 @@ export default function DrillAnimator() {
           color: markColor, width: markWidth, style: markStyle, path: [] });
       } else if (o.op === "route") {
         const pi = playerAt(o.to);
-        if (pi < 0 || out[pi].path.length) { inkMark(o.raw); return; }
-        const route = fitRoute({ x: out[pi].x, y: out[pi].y }, o.raw);
+        if (pi < 0) { inkMark(o.raw); return; }
+        const cur = out[pi];
+        const extending = o.extend && cur.path.length > 0;
+        if (!extending && cur.path.length) { inkMark(o.raw); return; }
+        // extending starts from the route's END, so the new legs continue it
+        const from = extending ? segEnd(cur, cur.path.length - 1) : { x: cur.x, y: cur.y };
+        let raw = o.raw;
+        if (extending) {
+          // Drop the dwell right on the tip. Catmull-Rom overshoots when one
+          // leg is far shorter than its neighbour, so a 2ft first step in front
+          // of a 30ft second one bows the seam backwards into a visible hook.
+          // Scaling the trim to the stroke's own reach keeps the legs the same
+          // order of size, which is what actually removes the kink.
+          const last = raw[raw.length - 1];
+          const span = Math.hypot(last.x - from.x, last.y - from.y);
+          const nearTip = Math.min(Math.max(2.4, 0.18 * span), 0.35 * span);
+          let k = 0;
+          while (k < raw.length - 2 && Math.hypot(raw[k].x - from.x, raw[k].y - from.y) < nearTip) k++;
+          raw = raw.slice(k);
+        }
+        const route = fitRoute(from, raw);
         if (!route.length) { inkMark(o.raw); return; }
-        out[pi] = { ...out[pi], path: o.bwd ? route.map(s => ({ ...s, dir: "bwd" })) : route };
+        const legs = o.bwd ? route.map(s => ({ ...s, dir: "bwd" })) : route;
+        if (!extending) { out[pi] = { ...cur, path: legs }; return; }
+        // the old last leg is no longer the end, so its stop mark comes off
+        const kept = cur.path.map((s, i) =>
+          (i === cur.path.length - 1 && s.endStop ? { ...s, endStop: undefined } : s));
+        let path = [...kept, ...legs];
+        // curve meeting curve at the junction gets a shared tangent, the same
+        // smooth join "add a leg" builds — otherwise the seam reads as a kink
+        const j = kept.length - 1;
+        if (j >= 0 && (path[j].type === "C" || path[j].type === "Q")
+          && (path[j + 1].type === "C" || path[j + 1].type === "Q"))
+          path = alignJoint(path, j, "smooth", { x: cur.x, y: cur.y });
+        out[pi] = { ...cur, path };
       } else if (o.op === "pass") {
         const si = playerAt(o.from), ri = playerAt(o.to);
         if (si < 0 || ri < 0) return;
@@ -9135,14 +9166,14 @@ export default function DrillAnimator() {
             {[["Thin", 0.7], ["Med", 1.1], ["Bold", 1.9]].map(([lbl, w]) => (
               <button key={lbl} className={`hd-penbtn wide${Math.abs(markWidth - w) < 0.01 ? " on" : ""}`}
                 title={`${lbl} line`} onClick={() => setMarkWidth(w)}>
-                <span className="hd-penwdot" style={{ height: Math.round(w * w * 2.4), background: markColor }} />
+                <span className="hd-penwdot" style={{ height: Math.round(w * w * 2.4) }} />
               </button>
             ))}
             <div className="hd-pensep" />
             {[["solid", "Solid"], ["dashed", "Dashed"], ["dotted", "Dotted"], ["wavy", "Wavy"]].map(([s, lbl]) => (
               <button key={s} className={`hd-penbtn wide${markStyle === s ? " on" : ""}`} title={lbl}
                 onClick={() => setMarkStyle(s)}>
-                <span className={`hd-penstyle ${s}`} style={{ color: markColor }} />
+                <span className={`hd-penstyle ${s}`} />
               </button>
             ))}
             <div className="hd-pensep" />

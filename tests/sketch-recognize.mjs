@@ -162,6 +162,25 @@ const kinds = ops => ops.map(o => o.op);
   T('smooth route not bwd', smooth[0] && smooth[0].bwd, false);
 }
 
+// ---- a stroke starting at a route's TIP extends that route ----
+{
+  const ctx = { players: [{ id: 'P1', x: 40, y: 40, end: { x: 70, y: 40 }, hasPath: true }] };
+  const ops = classifyPenGroup([stroke(poly(p(71, 41, 95, 55, 120, 50), 20))], ctx);
+  T('stroke from the tip → route', kinds(ops), ['route']);
+  T('...marked as an extension', ops[0].extend, true);
+  T('...bound to that player', ops[0].to, { id: 'P1' });
+  // starting at the player's SPOT instead is not an extension — that player
+  // already has a route, so there is nothing to start
+  const atSpot = classifyPenGroup([stroke(poly(p(41, 41, 60, 70, 90, 75), 20))], ctx);
+  T('stroke from an occupied spot stays ink', kinds(atSpot), ['mark']);
+  // a free player nearer than the tip still wins the stroke
+  const both = { players: [
+    { id: 'P1', x: 40, y: 40, end: { x: 70, y: 40 }, hasPath: true },
+    { id: 'P2', x: 72, y: 44, end: { x: 72, y: 44 }, hasPath: false }] };
+  const near = classifyPenGroup([stroke(poly(p(72, 44, 100, 60, 130, 55), 20))], both);
+  T('nearer free player beats the tip', near[0] && [near[0].to, !!near[0].extend], [{ id: 'P2' }, false]);
+}
+
 // ---- a route with no nearby skater stays ink ----
 {
   const ops = classifyPenGroup([stroke(poly(p(100, 20, 120, 30, 140, 25), 20))]);

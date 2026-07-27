@@ -844,11 +844,18 @@ export function classifyPenGroup(strokes, ctx = {}) {
         if (by) { addOp({ op: "shot", by: by.who, net: net.id, srcs: [s.idx] }); return; }
       }
     }
-    const skater = nearest(pts[0], attachR, roster.filter(e => !e.hasPath), e => ({ x: e.x, y: e.y }));
+    // A stroke can start at a player who has no route yet, or at the TIP of one
+    // that does — starting where a route ends continues it, which is how you
+    // build a path in stages. Whichever anchor is nearer wins.
+    const free = nearest(pts[0], attachR, roster.filter(e => !e.hasPath), e => ({ x: e.x, y: e.y }));
+    const tip = nearest(pts[0], attachR, roster.filter(e => e.hasPath), e => e.end);
+    const dFree = free ? dist(pts[0], { x: free.x, y: free.y }) : Infinity;
+    const dTip = tip ? dist(pts[0], tip.end) : Infinity;
+    const skater = dTip <= dFree ? tip : free;
     if (skater) {
       const shaped = mid || stripArrowhead(pts, arrowLeg);   // screen units
       const raw = shaped.map(toFt);                          // fitRoute works in feet
-      addOp({ op: "route", to: skater.who, raw, bwd: !!mid, srcs: [s.idx] });
+      addOp({ op: "route", to: skater.who, raw, bwd: !!mid, extend: skater === tip, srcs: [s.idx] });
       skater.hasPath = true;
       skater.end = shaped[shaped.length - 1];
       routeEnds.push(skater.end);

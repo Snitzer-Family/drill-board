@@ -61,9 +61,11 @@ export const STYLES = `
         .hd-penswatch { flex:1 1 0; min-width:20px; height:26px; border-radius:7px;
           border:1px solid rgba(255,255,255,.22); cursor:pointer; padding:0; }
         .hd-penswatch.on { outline:2px solid #eaf2f8; outline-offset:1px; }
-        /* thickness preview: a bar whose height is the stroke weight */
-        .hd-penwdot { display:block; width:16px; border-radius:2px; }
-        /* line-style preview drawn with borders in the current ink colour */
+        /* Thickness and style previews follow the BUTTON's colour, never the
+           ink — black ink on a dark bar would make them vanish, and these need
+           to stay readable whatever you're drawing with. */
+        .hd-penwdot { display:block; width:16px; border-radius:2px; background:currentColor; }
+        /* line-style preview drawn with borders in the button's colour */
         .hd-penstyle { display:block; width:18px; height:0; border-top:2.5px solid currentColor; }
         .hd-penstyle.dashed { border-top-style:dashed; }
         .hd-penstyle.dotted { border-top-style:dotted; }
