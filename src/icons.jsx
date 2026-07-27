@@ -1,6 +1,7 @@
 // Piece icons (screen-true frames), stepper control, diagnostics overlay.
 import { useState, useRef, useEffect } from "react";
 import { APP_VERSION, BUILD_STAMP, ICON_SCALE, DSL_VERSION, symOf } from "./constants.js";
+import { useTheme } from "./theme-react.jsx";
 
 /* ---------------- unified action icons ----------------
    One monochrome, stroke-based set drawn on a 24×24 grid in currentColor, so
@@ -151,15 +152,24 @@ export function DiagPanel({ drillVersion }) {
 }
 
 /* ---------------- piece icon ---------------- */
+// Piece artwork is object MATERIAL — a cone is orange, a tire is black — so it
+// stays literal. Only two things here follow the theme: the selection ring,
+// which has to read against whatever ice it lands on, and the puck body.
 
 export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStickDown, swing = 0, noShadow = false, hitOff = false, wb = false, wbCircle = false }) {
+  const T = useTheme();
+  const SEL = T["ice-select"];
   const frame = xf || `translate(${pos.x} ${pos.y}) rotate(${pos.a || 0}) scale(${ICON_SCALE})`;
   let body;
   if (p.kind === "puck")
     body = (
       <g pointerEvents="none">
         {!noShadow && <ellipse cx={0.22} cy={0.58} rx={1.48} ry={1.3} fill="#05080b" opacity={0.22} />}
-        <circle cx={0} cy={0} r={1.3} fill="#14171a" stroke={selected ? "#ffd447" : "#fff"} strokeWidth={0.38} />
+        {/* The puck's STORED colour is a drill-format.js sentinel and has to stay
+            #14171a, but a black puck sits at 1.02:1 on dark ice — invisible. The
+            body renders at --db-ice-ink instead, whose LIGHT value is exactly
+            #14171a: a no-op in light mode, 12.72:1 in dark, DSL untouched. */}
+        <circle cx={0} cy={0} r={1.3} fill={T["ice-ink"]} stroke={selected ? SEL : "#fff"} strokeWidth={0.38} />
       </g>
     );
   else if (p.kind === "net") {
@@ -170,7 +180,7 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
     const CAGE = "M 0 -3.75 L -1.7 -3.75 Q -4.15 -3.75 -4.15 -1.5 L -4.15 1.5 Q -4.15 3.75 -1.7 3.75 L 0 3.75";
     body = (
       <g pointerEvents="none">
-        {selected && <rect x={-4.8} y={-4.5} width={5.4} height={9} rx={1} fill="none" stroke="#ffd447" strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
+        {selected && <rect x={-4.8} y={-4.5} width={5.4} height={9} rx={1} fill="none" stroke={SEL} strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
         {/* a drawn goalie crease: an unfilled arch in front of the mouth (for a
             net placed away from the standard crease). ~6 ft radius (7.5 local). */}
         {p.crease && <path d="M 0 -7.5 A 7.5 7.5 0 0 1 0 7.5" fill="none" stroke="#d7263d" strokeWidth={0.42} opacity={0.85} strokeLinecap="round" />}
@@ -199,7 +209,7 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
     }
     body = (
       <g pointerEvents="none">
-        {selected && <circle cx={0} cy={0} r={3.1} fill="none" stroke="#ffd447" strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
+        {selected && <circle cx={0} cy={0} r={3.1} fill="none" stroke={SEL} strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
         <circle cx={0} cy={0} r={2.0} fill="none" stroke={rub} strokeWidth={1.55} />
         <circle cx={0} cy={0} r={2.78} fill="none" stroke="#000" strokeWidth={0.2} opacity={0.55} />
         <circle cx={0} cy={0} r={1.22} fill="none" stroke="#000" strokeWidth={0.2} opacity={0.55} />
@@ -220,7 +230,7 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
     }
     body = (
       <g pointerEvents="none">
-        {selected && <rect x={-2.55} y={-3.35} width={5.1} height={6.7} rx={0.9} fill="none" stroke="#ffd447" strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
+        {selected && <rect x={-2.55} y={-3.35} width={5.1} height={6.7} rx={0.9} fill="none" stroke={SEL} strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
         {/* the coloured light the screen casts on the ice */}
         <circle cx={0} cy={0} r={3.5} fill={lit} opacity={0.16} />
         {/* tripod legs + centre hub */}
@@ -235,7 +245,7 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
   } else if (p.kind === "cone")
     body = (
       <path d="M 0 -2.4 L 2.2 1.8 L -2.2 1.8 Z"
-        fill={p.color} stroke={selected ? "#ffd447" : "#fff"} strokeWidth={0.35} strokeLinejoin="round" pointerEvents="none" />
+        fill={p.color} stroke={selected ? SEL : "#fff"} strokeWidth={0.35} strokeLinejoin="round" pointerEvents="none" />
     );
   else if (p.kind === "bumper") {
     // solid barrier laid on the ice — a black rectangle; runs along local +x,
@@ -243,7 +253,7 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
     const foam = p.color && p.color !== "#4d6fa6" ? p.color : "#1b1e22";
     body = (
       <g pointerEvents="none">
-        {selected && <rect x={-8.1} y={-1.9} width={16.2} height={3.8} rx={0.9} fill="none" stroke="#ffd447" strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
+        {selected && <rect x={-8.1} y={-1.9} width={16.2} height={3.8} rx={0.9} fill="none" stroke={SEL} strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
         <ellipse cx={0} cy={1.55} rx={7.6} ry={0.7} fill="#0a0f14" opacity={0.22} />
         <rect x={-7.7} y={-1.35} width={15.4} height={2.7} rx={0.45} fill={foam} stroke="#40464e" strokeWidth={0.3} />
         <rect x={-7.7} y={-1.35} width={15.4} height={0.9} rx={0.45} fill="#ffffff" opacity={0.06} />
@@ -256,7 +266,7 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
     const wood = p.color || "#20242a";
     body = (
       <g pointerEvents="none">
-        {selected && <rect x={-6.2} y={-3.0} width={12.6} height={5.6} rx={0.8} fill="none" stroke="#ffd447" strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
+        {selected && <rect x={-6.2} y={-3.0} width={12.6} height={5.6} rx={0.8} fill="none" stroke={SEL} strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
         <ellipse cx={0.5} cy={0.35} rx={6} ry={0.7} fill="#0a0f14" opacity={0.16} />
         {/* butt knob */}
         <rect x={-5.85} y={-0.5} width={0.7} height={1} rx={0.3} fill="#e7ebef" stroke="#9aa2ab" strokeWidth={0.1} />
@@ -279,7 +289,7 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
     const wood = p.color || "#c79a4e";
     body = (
       <g pointerEvents="none">
-        {selected && <rect x={-3.6} y={-2.4} width={7.2} height={4.8} rx={0.8} fill="none" stroke="#ffd447" strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
+        {selected && <rect x={-3.6} y={-2.4} width={7.2} height={4.8} rx={0.8} fill="none" stroke={SEL} strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
         {/* two pegs the stick rests on (with a small ground shadow) */}
         <ellipse cx={-2.25} cy={2.05} rx={1} ry={0.42} fill="#0a0f14" opacity={0.28} />
         <ellipse cx={2.25} cy={2.05} rx={1} ry={0.42} fill="#0a0f14" opacity={0.28} />
@@ -295,7 +305,7 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
     const col = p.color || "#57636f";
     body = (
       <g pointerEvents="none">
-        {selected && <rect x={-2.1} y={-3.1} width={4.4} height={6.2} rx={0.7} fill="none" stroke="#ffd447" strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
+        {selected && <rect x={-2.1} y={-3.1} width={4.4} height={6.2} rx={0.7} fill="none" stroke={SEL} strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
         <rect x={-1.6} y={-2.6} width={3.2} height={5.2} rx={0.5} fill="rgba(210,225,240,0.14)" stroke={col} strokeWidth={0.5} />
         <path d="M -1.6 -1.3 L 1.6 -1.3 M -1.6 1.3 L 1.6 1.3" stroke={col} strokeWidth={0.16} opacity={0.5} />
         <rect x={0.85} y={-2.6} width={0.75} height={5.2} rx={0.3} fill={col} />
@@ -314,7 +324,7 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
     const fs = (sym.length >= 3 ? 3.4 : sym.length === 2 ? 4.5 : 5.6) * (wbCircle ? 0.82 : 1);
     body = (
       <g pointerEvents="none">
-        {selected && <circle cx={0} cy={0} r={4.6} fill="none" stroke="#ffd447" strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
+        {selected && <circle cx={0} cy={0} r={4.6} fill="none" stroke={SEL} strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
         {shapePath ? (
           // shapes are their own enclosure, so the wbCircle disc is skipped;
           // white under-stroke plays the halo role paintOrder gives the text,
@@ -338,7 +348,7 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
     const dark = "#1d2126";
     body = (
       <g pointerEvents="none">
-        {selected && <circle cx={0} cy={0} r={4.6} fill="none" stroke="#ffd447" strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
+        {selected && <circle cx={0} cy={0} r={4.6} fill="none" stroke={SEL} strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
         {/* a soft shadow on the ice for a little depth (skipped mid-jump — the
             sticky ground shadow is drawn separately then) */}
         {!noShadow && <ellipse cx={-0.5} cy={0} rx={3.6} ry={3.9} fill="#0a1016" opacity={0.16} />}

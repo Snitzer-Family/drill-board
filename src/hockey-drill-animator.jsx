@@ -5928,7 +5928,7 @@ export default function DrillAnimator() {
     const rp = routePiece(p, fork);           // fork ? branch-origin route piece : p
     const route = rp.path;
     // colour the fork's handles by its cue colour so overlapping routes stay legible
-    const dotFill = fork || "#ffd447", dotStroke = fork ? "#0b1116" : "#7a5c00";
+    const dotFill = fork || T["ice-select"], dotStroke = fork ? "#0b1116" : "#7a5c00";
     // the selected waypoint = the leg/point popup that's open (tapping the anchor
     // opens a "point" popup, the line a "line" popup — both carry its seg). Its
     // handles show only for it, not every waypoint. A handle being dragged stays
@@ -6039,8 +6039,8 @@ export default function DrillAnimator() {
     const kx = p.x + Math.cos(a) * R, ky = p.y + Math.sin(a) * R * yf;
     return (
       <g>
-        {hd(p.x, p.y, R, { fill: "none", stroke: "#ffd447", strokeWidth: 0.25, strokeDasharray: "1 1", opacity: 0.75, pointerEvents: "none" })}
-        {hd(kx, ky, 1.6, { fill: "#ffd447", stroke: "#7a5c00", strokeWidth: 0.35, pointerEvents: "none" })}
+        {hd(p.x, p.y, R, { fill: "none", stroke: T["ice-select"], strokeWidth: 0.25, strokeDasharray: "1 1", opacity: 0.75, pointerEvents: "none" })}
+        {hd(kx, ky, 1.6, { fill: T["ice-select"], stroke: "#7a5c00", strokeWidth: 0.35, pointerEvents: "none" })}
         {hd(kx, ky, 4.2, { fill: "transparent", style: { cursor: "grab" }, onPointerDown: e => handleDown(e, { kind: "rotate", id: p.id, offset: 0 }) })}
       </g>
     );
@@ -6169,7 +6169,7 @@ export default function DrillAnimator() {
             // selection = a dashed halo OUTSIDE the box, so the label's own
             // border colour/opacity stays visible while it's being edited
             <rect x={-w / 2 - fs * 0.22} y={-h / 2 - fs * 0.22} width={w + fs * 0.44} height={h + fs * 0.44}
-              rx={fs * 0.28 + fs * 0.22} fill="none" stroke="#ffd447" strokeWidth={0.55}
+              rx={fs * 0.28 + fs * 0.22} fill="none" stroke={T["ice-select"]} strokeWidth={0.55}
               strokeDasharray={`${fs * 0.3} ${fs * 0.22}`} pointerEvents="none" />
           )}
           <text textAnchor="middle" fontSize={fs} fontWeight={800} fill={st.color || "#14202b"}
@@ -6184,7 +6184,7 @@ export default function DrillAnimator() {
           {sel && resizeDown && (
             <>
               <rect x={w / 2 - fs * 0.42} y={h / 2 - fs * 0.42} width={fs * 0.84} height={fs * 0.84}
-                rx={fs * 0.15} fill="#ffd447" stroke="#7a5c00" strokeWidth={0.3} pointerEvents="none" />
+                rx={fs * 0.15} fill={T["ice-select"]} stroke="#7a5c00" strokeWidth={0.3} pointerEvents="none" />
               <rect x={w / 2 - fs * 0.7} y={h / 2 - fs * 0.7} width={fs * 1.4} height={fs * 1.4}
                 fill="transparent" style={{ cursor: "nwse-resize" }} onPointerDown={resizeDown} />
             </>
@@ -6325,7 +6325,7 @@ export default function DrillAnimator() {
             pointerEvents={hit ? "none" : undefined} />
         )}
         {m.id === selectedId && (
-          <polyline points={line} fill="none" stroke="#ffd447" strokeWidth={w + 1.1}
+          <polyline points={line} fill="none" stroke={T["ice-select"]} strokeWidth={w + 1.1}
             strokeLinecap="round" strokeLinejoin="round" opacity={0.35} pointerEvents="none" />
         )}
         {hit && editing && !markEdit && (
@@ -6349,9 +6349,9 @@ export default function DrillAnimator() {
             sharp corner (break handle). Tap to toggle, drag to re-shape. */}
         {q.c
           ? <rect x={clampX(q.x) - 1.5} y={clampY(q.y) - 1.5 * yf} width={3} height={3 * yf}
-              fill="#ffd447" stroke="#14171a" strokeWidth={0.35} pointerEvents="none" />
+              fill={T["ice-select"]} stroke="#14171a" strokeWidth={0.35} pointerEvents="none" />
           : hdot(clampX(q.x), clampY(q.y), 1.7, {
-              fill: "#ffd447", stroke: "#14171a", strokeWidth: 0.35, pointerEvents: "none" }, yf)}
+              fill: T["ice-select"], stroke: "#14171a", strokeWidth: 0.35, pointerEvents: "none" }, yf)}
         {/* a larger transparent target so a fingertip can grab the point */}
         {hdot(clampX(q.x), clampY(q.y), 4.5, {
           fill: "transparent", style: { cursor: "grab" },
@@ -6373,13 +6373,13 @@ export default function DrillAnimator() {
     return (
       <g key={`mkrs-${m.id}`}>
         <rect x={x1} y={y1} width={Math.max(0.1, x2 - x1)} height={Math.max(0.1, y2 - y1)}
-          fill="none" stroke="#ffd447" strokeWidth={sw(0.35)} strokeDasharray={sdash("1.6 1.2")}
+          fill="none" stroke={T["ice-select"]} strokeWidth={sw(0.35)} strokeDasharray={sdash("1.6 1.2")}
           vectorEffect="non-scaling-stroke" opacity={0.8} pointerEvents="none" />
         {corners.map(([cx, cy, ax, ay], i) => {
           const down = e => handleDown(e, { kind: "markscale", id: m.id, x0: cx, y0: cy, ax, ay,
             pts0: m.pts.map(q => ({ ...q })) });
           return <g key={`c${i}`}>
-            {hdot(cx, cy, 1.3, { fill: "#ffd447", stroke: "#14202b", strokeWidth: 0.28, pointerEvents: "none" }, yf)}
+            {hdot(cx, cy, 1.3, { fill: T["ice-select"], stroke: "#14202b", strokeWidth: 0.28, pointerEvents: "none" }, yf)}
             {/* generous invisible touch target over the visible dot */}
             {hdot(cx, cy, 3.4, { fill: "transparent", style: { cursor: "grab" }, onPointerDown: down }, yf)}
           </g>;
@@ -6397,9 +6397,9 @@ export default function DrillAnimator() {
               a0: Math.atan2(pt0.y - cy, pt0.x - cx),
               pts0: m.pts.map(q => ({ ...q })) }); };
           return <g key="rot">
-            <line x1={mx} y1={y1} x2={mx} y2={hy} stroke="#ffd447" strokeWidth={sw(0.35)}
+            <line x1={mx} y1={y1} x2={mx} y2={hy} stroke={T["ice-select"]} strokeWidth={sw(0.35)}
               vectorEffect="non-scaling-stroke" opacity={0.8} pointerEvents="none" />
-            {hdot(mx, hy, 1.5, { fill: "#14202b", stroke: "#ffd447", strokeWidth: 0.35, pointerEvents: "none" }, yf)}
+            {hdot(mx, hy, 1.5, { fill: "#14202b", stroke: T["ice-select"], strokeWidth: 0.35, pointerEvents: "none" }, yf)}
             {hdot(mx, hy, 4.2, { fill: "transparent", style: { cursor: "grab" }, onPointerDown: down }, yf)}
           </g>;
         })()}
@@ -8351,7 +8351,7 @@ export default function DrillAnimator() {
           {pieces.map(p => <g key={`ls${p.id}`}>{renderStops(p, 1)}</g>)}
           {drawPreview && drawPreview.length > 1 && (
             <polyline points={drawPreview.map(q => `${q.x},${q.y}`).join(" ")}
-              fill="none" stroke="#ffd447" strokeWidth={0.6} strokeDasharray="1.4 1" opacity={0.9} />
+              fill="none" stroke={T["ice-select"]} strokeWidth={0.6} strokeDasharray="1.4 1" opacity={0.9} />
           )}
           {puckPathNodes(true)}
           {selected && renderHandles(selected, 1)}
@@ -9032,7 +9032,7 @@ export default function DrillAnimator() {
                     strokeWidth={tool === "pen" ? penW : markWidth} strokeLinecap="round" strokeLinejoin="round"
                     opacity={0.9} pointerEvents="none" />
                 : <polyline points={drawPreview.map(q => `${q.x},${q.y}`).join(" ")} vectorEffect="non-scaling-stroke"
-                    fill="none" stroke="#ffd447" strokeWidth={sw(0.6)} strokeDasharray={sdash("1.4 1")} opacity={0.9} />
+                    fill="none" stroke={T["ice-select"]} strokeWidth={sw(0.6)} strokeDasharray={sdash("1.4 1")} opacity={0.9} />
             )}
             </g>
 
