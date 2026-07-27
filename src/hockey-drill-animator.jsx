@@ -13,7 +13,7 @@ import { ZONES, zoneAt } from "./zones.js";
 import { PieceIcon, Stepper, DiagPanel, Icon, ICONS } from "./icons.jsx";
 import { createTiming, resolveNearest } from "./timing.js";
 import { buildLedger, mayHoldOn, mayHoldEntering } from "./possession.js";
-import { classifyPenGroup } from "./sketch-recognize.js";
+import { classifyPenGroup, SYMBOL_MAX } from "./sketch-recognize.js";
 import { newGame, stepGame } from "./ai-game.js";
 import { STYLES } from "./styles.js";
 
@@ -3969,7 +3969,19 @@ export default function DrillAnimator() {
         setPenInk(penBuf.current.map(s => s.pts));
       }
       clearTimeout(penTimer.current);
-      if (penBuf.current.length) penTimer.current = setTimeout(commitPen, PEN_SETTLE);
+      if (penBuf.current.length) {
+        // a long stroke is a route/shot/shape gesture — snap the burst in
+        // right away (any symbols it follows are in the same buffer; players
+        // from earlier bursts are already on the board). Short strokes wait
+        // out the settle pause so multi-stroke letters and dashes can finish.
+        let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+        raw.forEach(q => {
+          if (q.x < x0) x0 = q.x; if (q.y < y0) y0 = q.y;
+          if (q.x > x1) x1 = q.x; if (q.y > y1) y1 = q.y;
+        });
+        if (Math.hypot(x1 - x0, y1 - y0) >= SYMBOL_MAX) commitPen();
+        else penTimer.current = setTimeout(commitPen, PEN_SETTLE);
+      }
       return;
     }
     // a light-reaction fork: fit a route from the player's branch point through the

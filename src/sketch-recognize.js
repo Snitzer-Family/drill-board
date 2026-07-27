@@ -325,6 +325,23 @@ function zigzagMidline(pts) {
     ? { x: (r[i - 1].x + r[i + 1].x) / 2, y: (r[i - 1].y + r[i + 1].y) / 2 } : p);
 }
 
+// coaches habitually finish a route with an arrowhead flick; the doubled-back
+// tail would hook the fitted route, so strip up to two short terminal legs
+// that reverse hard. Routes render their own carats — the drawn arrowhead is
+// redundant the moment the ink materializes.
+function stripArrowhead(pts) {
+  let r = rdp(pts, 1.6);
+  let cut = null;
+  for (let k = 0; k < 2 && r.length > 2; k++) {
+    const a = r[r.length - 3], b = r[r.length - 2], c = r[r.length - 1];
+    if (dist(b, c) < 3.5 && turnDeg(a, b, c) > 100) { r = r.slice(0, -1); cut = b; }
+    else break;
+  }
+  if (!cut) return pts;
+  const i = pts.findIndex(p => p.x === cut.x && p.y === cut.y);  // rdp keeps original points
+  return i > 1 ? pts.slice(0, i + 1) : pts;
+}
+
 // split a cluster into side-by-side glyphs at a clear vertical gap (LW, RD, …)
 function splitGlyphs(cluster) {
   const boxed = cluster.map(s => ({ s, b: bboxOf(s.pts) })).sort((a, b) => a.b.x - b.b.x);
@@ -445,6 +462,7 @@ export function classifyPenGroup(strokes, ctx = {}) {
     return { op: "player", x: c.x, y: c.y, sym: rec.sym };
   };
   const puckOps = [];
+  const unrec = [];       // unrecognized short clusters, resolved after routes
   clusters.forEach(cl => {
     const cs = cl.map(e => e.s);
     const pts = cs.map(s => s.pts);
@@ -474,10 +492,11 @@ export function classifyPenGroup(strokes, ctx = {}) {
     if (rec) {
       const o = glyphOp(rec, cs);
       o.op === "player" ? addPlayerOp(o) : addOp(o);
-    } else leftovers.push(...cs);
+    } else unrec.push(cs);   // held back: might be an arrowhead flick on a route
   });
 
   // ---- long strokes: big closed shape → zigzag → shot → route → ink ----
+  const routeEnds = [];
   longs.forEach(s => {
     const pts = s.pts, last = pts[pts.length - 1];
     if (dist(pts[0], last) / s.diag < 0.3) {
@@ -505,13 +524,25 @@ export function classifyPenGroup(strokes, ctx = {}) {
     }
     const skater = nearest(pts[0], ATTACH_R, roster.filter(e => !e.hasPath), e => ({ x: e.x, y: e.y }));
     if (skater) {
-      const raw = mid || pts;
+      const raw = mid || stripArrowhead(pts);
       addOp({ op: "route", to: skater.who, raw, bwd: !!mid });
       skater.hasPath = true;
       skater.end = raw[raw.length - 1];
+      routeEnds.push(skater.end);
       return;
     }
     leftovers.push(s);
+  });
+
+  // an unrecognized tiny cluster sitting on a fresh route's end is an
+  // arrowhead flick drawn as its own strokes — consume it (the one deliberate
+  // exception to ink-is-never-lost; routes draw their own carats)
+  unrec.forEach(cs => {
+    const all = cs.flatMap(s => s.pts);
+    const c = centerOf(all);
+    const tiny = strokesDiag([all]) < 4;
+    if (tiny && routeEnds.some(e => dist(c, e) < 3.5)) return;
+    leftovers.push(...cs);
   });
 
   // pucks bind to whoever is on their doorstep, now that every player has

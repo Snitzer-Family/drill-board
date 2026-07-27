@@ -246,6 +246,24 @@ const kinds = ops => ops.map(o => o.op);
   T('XX is two players', kinds(ops2), ['player', 'player']);
 }
 
+// ---- arrowheads: an in-stroke flick is stripped off the route's tail, and a
+//      separate tiny flick at a fresh route's end is consumed outright ----
+{
+  const x = drawn(GLYPHS.X, 30, 30, 5, 0.2, 73);
+  const arrowRoute = poly(p(31, 32, 50, 40, 70, 35, 67.5, 33.2), 16);
+  const ops = classifyPenGroup([...strokesOf(x), stroke(arrowRoute)]);
+  T('arrow route kinds', kinds(ops), ['player', 'route']);
+  const end = ops[1] && ops[1].raw[ops[1].raw.length - 1];
+  T('arrowhead stripped from tail', end ? Math.hypot(end.x - 70, end.y - 35) < 1.8 : null, true);
+
+  const route = poly(p(31, 32, 50, 40, 70, 35), 20);
+  const flick = [stroke(poly(p(68, 33.5, 70, 35), 3)), stroke(poly(p(68.4, 36.6, 70, 35), 3))];
+  const ops2 = classifyPenGroup([...strokesOf(x), stroke(route), ...flick]);
+  T('separate arrow flick consumed', kinds(ops2), ['player', 'route']);
+  // the same flick with no route nearby is honest ink
+  T('orphan flick stays ink', kinds(classifyPenGroup(flick)), ['mark', 'mark']);
+}
+
 // ---- small triangle = cone; big circle = zone overlay shape ----
 {
   const ops = classifyPenGroup(strokesOf(drawn(GLYPHS['△'], 100, 42, 4, 0.15, 61)));
