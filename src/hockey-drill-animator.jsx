@@ -591,6 +591,21 @@ export default function DrillAnimator() {
   const piecesRef = useRef(pieces);
   piecesRef.current = pieces;
   const [openMenu, setOpenMenu] = useState(null); // settings | rinkmenu | tools | text
+  // The Add menu hangs off the Add button rather than the screen's right edge.
+  // Corner-pinning reads fine on a phone, where the bar spans the whole width,
+  // but on desktop or landscape the button sits well left of that corner and
+  // the menu opens nowhere near what was tapped. (Must live below openMenu —
+  // reading it from higher up is a temporal-dead-zone crash the build can't see.)
+  const addBtnRef = useRef(null);
+  const [addMenuLeft, setAddMenuLeft] = useState(null);
+  useLayoutEffect(() => {
+    if (openMenu !== "tools") { setAddMenuLeft(null); return; }
+    const r = addBtnRef.current?.getBoundingClientRect();
+    if (!r) return;
+    const W = 230, pad = 10;                     // menu width is fixed in styles.js
+    setAddMenuLeft(Math.round(Math.max(pad,
+      Math.min(window.innerWidth - W - pad, r.left + r.width / 2 - W / 2))));
+  }, [openMenu]);
   const [textDraft, setTextDraft] = useState(DEFAULT_TEXT);
   const [textError, setTextError] = useState("");
   const [textCloseAsk, setTextCloseAsk] = useState(false);  // "unapplied edits" guard on Done
@@ -9483,7 +9498,7 @@ export default function DrillAnimator() {
             : rink === "half" ? `Half ${halfNS ? (halfFlip ? "↑" : "↓") : (halfFlip ? "←" : "→")}`
             : "¼ ice"}</span>
         </button>
-        <button className={`hd-barbtn${tool !== "select" || openMenu === "tools" ? " on" : ""}`} title="Add / draw"
+        <button ref={addBtnRef} className={`hd-barbtn${tool !== "select" || openMenu === "tools" ? " on" : ""}`} title="Add / draw"
           onClick={() => setOpenMenu(m => (m === "tools" ? null : "tools"))}>
           <Icon name="pencil" size={16} /><span className="hd-blbl">Add</span></button>
         <button className={`hd-barbtn${openMenu === "prefs" ? " on" : ""}`} title="Settings"
@@ -9751,7 +9766,7 @@ export default function DrillAnimator() {
       )}
 
       {openMenu === "tools" && (
-        <div className="hd-menu br">
+        <div className="hd-menu br" style={addMenuLeft != null ? { left: addMenuLeft, right: "auto" } : undefined}>
           <button className="hd-item" onClick={() => { resetAnim(); setPlaying(false); setPopup(null); setTool("pen"); setPenMode(true); setOpenMenu(null); }}>
             <Icon name="marker" size={16} /> Smart pen — sketch it
           </button>
