@@ -4455,6 +4455,9 @@ export default function DrillAnimator() {
     e.stopPropagation();
     setOpenMenu(null);
     if (tool === "draw") { setSelectedId(id); setPopup(null); beginDraw(e, id); return; }
+    // pen ink starts on pieces all the time (routes leave players, dashes leave
+    // route ends) — keep sketching, never grab the piece
+    if (tool === "pen") { setPopup(null); beginPen(e); return; }
     if (wakeEdit()) return;
     const pt = svgPt(e);
     // a locked piece is grabbed only to select it (so it can open its popup and
