@@ -214,16 +214,17 @@ function features(strokes) {
   return { closure, corners, leftRMS, tail };
 }
 
-// closure bounds are finger-loose: real coaches leave 30-40% gaps in their
-// rings. O and C overlap in [0.40, 0.45] on purpose — there the $P score
-// ranks them (the sweep angle separates a 290° sloppy O from a 240° C).
+// Closure bounds are finger-loose: coaches leave big gaps, and capture
+// decimation clips the tail of a small ring on top of that (a real 6ft phone
+// ring measured 0.47). Measured bands: sloppy O 0.40-0.50, true C 0.61-0.69 —
+// so O accepts < 0.52, C needs > 0.50, and the overlap is ranked by $P score.
 const GUARDS = {
-  O: f => f.closure < 0.45,
-  C: f => f.closure > 0.4 && f.tail <= 1,
+  O: f => f.closure < 0.52,
+  C: f => f.closure > 0.5 && f.tail <= 1,
   G: f => f.tail >= 2,
   D: f => f.leftRMS < 0.07,
-  "△": f => f.closure < 0.45 && f.corners === 3,
-  "□": f => f.closure < 0.45 && f.corners === 4,
+  "△": f => f.closure < 0.52 && f.corners === 3,
+  "□": f => f.closure < 0.52 && f.corners === 4,
 };
 
 /* ---------------- public API ---------------- */

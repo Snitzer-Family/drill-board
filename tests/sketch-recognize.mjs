@@ -298,6 +298,29 @@ const kinds = ops => ops.map(o => o.op);
   T('merge consumed both', ops2[0] && ops2[0].srcs.slice().sort(), [0, 1]);
 }
 
+// ---- REAL captured strokes, lifted verbatim off a portrait phone board
+//      (window.__pen dump, pxFt 0.236 — the rink rotates, so 200ft spans the
+//      844px height). These carry the app's true capture decimation: points
+//      land ~1.1ft apart, which clips a small ring's tail and inflates its
+//      closure. Synthetic fixtures are too dense to catch that class of bug,
+//      so these stay as the ground truth. ----
+{
+  const P = a => a.map(([x, y]) => ({ x, y }));
+  const CAP = { pxFt: 0.236 };
+  const REAL = {
+    X13: [[[38,25.9],[38.7,26.8],[39.7,27.7],[40.5,28.6],[41.3,29.4],[42.3,30.1],[43,30.9],[43.8,31.8],[44.6,32.7],[45.6,33.6],[46.3,34.4]],[[47.1,25.9],[46.1,26.8],[45.3,27.7],[44.6,28.6],[43.5,29.4],[42.8,30.3],[41.8,31.2],[41,32],[40.3,32.9],[39.2,33.6],[38.5,34.4]]],
+    ring6: [[[61.8,57.5],[62.5,58.4],[63,59.5],[62.8,60.8],[62.3,61.9],[61.3,62.8],[60,63],[58.7,62.8],[57.7,62.1],[57.2,61],[57,59.9],[57.2,58.8],[58,58]]],
+    ring12: [[[103.5,25.1],[104.3,25.9],[105.1,26.8],[105.6,27.9],[105.8,29],[106.1,30.1],[105.8,31.2],[105.6,32.3],[105.1,33.3],[104.3,34.2],[103.3,34.9],[102.3,35.5],[101.3,36],[100,36],[98.7,36],[97.7,35.5],[96.7,34.9],[95.7,34.2],[94.9,33.3],[94.4,32.3],[94.2,31.2],[93.9,30.1],[94.2,29],[94.4,27.9],[94.9,26.8],[95.7,25.9],[96.5,25.1]]],
+    X26: [[[140,20.1],[140.8,20.9],[141.8,21.6],[142.5,22.4],[143.3,23.3],[144.1,24.2],[145.1,24.8],[145.8,25.7],[146.6,26.6],[147.3,27.5],[148.4,28.3],[149.4,29.2],[150.1,30.1],[150.9,30.9],[151.6,31.8],[152.7,32.5],[153.4,33.3],[154.2,34.2],[154.9,35.1],[155.9,36],[157,36.8],[157.7,37.7]],[[158,20.1],[157.2,20.9],[156.2,21.8],[155.4,22.7],[154.4,23.5],[153.4,24.4],[152.7,25.3],[151.9,26.2],[151.1,27],[150.1,27.7],[149.4,28.6],[148.6,29.4],[147.8,30.3],[146.8,31.2],[145.8,32],[145.1,32.9],[144.3,33.8],[143.3,34.7],[142.5,35.5],[141.8,36.4],[140.8,37.3]]],
+  };
+  const real = k => REAL[k].map(s => stroke(P(s)));
+  T('real 13ft X → player', kinds(classifyPenGroup(real('X13'), CAP)), ['player']);
+  T('real 26ft X → player', kinds(classifyPenGroup(real('X26'), CAP)), ['player']);
+  T('real 6ft ring → player O', kinds(classifyPenGroup(real('ring6'), CAP)), ['player']);
+  T('real 6ft ring sym', classifyPenGroup(real('ring6'), CAP)[0].sym, 'O');
+  T('real 12ft ring → player O', kinds(classifyPenGroup(real('ring12'), CAP)), ['player']);
+}
+
 // ---- phone scale (pxFt ≈ 0.5: the full 200ft rink spans ~390px, so a finger
 //      X is 20-40 FEET) — the view-scaled gates must keep everything working ----
 {

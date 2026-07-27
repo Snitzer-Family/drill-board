@@ -371,6 +371,34 @@ export default function DrillAnimator() {
   const penTimer = useRef(0);
   const penScale = useRef(0);         // rink ft per screen px, sampled per burst
   const penMarkAge = useRef(new Map());   // pen-fallback mark id → committed-at ms
+  // Apple Pencil: once a stylus draws, the ice stops listening to skin —
+  // a hand resting on the iPad while sketching is the whole problem. Sticky
+  // (a coach doesn't re-prove the Pencil between strokes) but not permanent,
+  // so putting the Pencil down and using a finger works again after a while.
+  const STYLUS_STICKY = 300000;       // 5 min of no Pencil → fingers draw again
+  const stylusAt = useRef(0);
+  const [palmReject, setPalmReject] = useState(true);
+  const [stylusOn, setStylusOn] = useState(false);   // drives the hint text only
+  // NB the `> 0` guard: performance.now() starts near zero, so without it a
+  // never-touched-by-a-Pencil session would reject fingers for its first 5 min
+  const stylusMode = () =>
+    palmReject && stylusAt.current > 0 && performance.now() - stylusAt.current < STYLUS_STICKY;
+  // true when this pointer is skin that must be ignored on the ice
+  const palmBlocked = e => e.pointerType === "touch" && stylusMode();
+  // a Pencil touching down takes over from anything skin already started
+  function noteStylus(e) {
+    if (e.pointerType !== "pen") return;
+    stylusAt.current = performance.now();
+    if (!stylusOn) setStylusOn(true);
+    const d = drag.current;
+    if (d && d.kind === "drawing" && d.touch) {   // palm landed first — discard it
+      drawRaw.current = [];
+      setDrawPreview(null);
+      markerDraw.current = false;
+      penDraw.current = false;
+      drag.current = null;
+    }
+  }
   const [penInk, setPenInk] = useState([]);   // buffered strokes, rendered like the live one
   const penW = markWidth * 0.55;      // pen ink runs thinner than marker ink
   // the settle timer fires from a stale closure — commitPen reads the board
@@ -3928,7 +3956,7 @@ export default function DrillAnimator() {
       drawTarget.current = forkTarget.current.id;
       drawRaw.current = [pt];
       setDrawPreview([pt]);
-      drag.current = { kind: "drawing", touch: e.pointerType !== "mouse" };
+      drag.current = { kind: "drawing", pid: e.pointerId, touch: e.pointerType === "touch" };
       svgRef.current.setPointerCapture?.(e.pointerId);
       return;
     }
@@ -3947,7 +3975,7 @@ export default function DrillAnimator() {
     drawTarget.current = id;
     drawRaw.current = [pt];
     setDrawPreview([pt]);
-    drag.current = { kind: "drawing", touch: e.pointerType !== "mouse" };
+    drag.current = { kind: "drawing", pid: e.pointerId, touch: e.pointerType === "touch" };
     svgRef.current.setPointerCapture?.(e.pointerId);
   }
 
@@ -3957,7 +3985,7 @@ export default function DrillAnimator() {
     drawRaw.current = [pt];
     setDrawPreview([pt]);
     markerDraw.current = true;
-    drag.current = { kind: "drawing", marker: true, touch: e.pointerType !== "mouse" };
+    drag.current = { kind: "drawing", marker: true, pid: e.pointerId, touch: e.pointerType === "touch" };
     svgRef.current.setPointerCapture?.(e.pointerId);
   }
 
@@ -3970,7 +3998,9 @@ export default function DrillAnimator() {
     drawRaw.current = [pt];
     setDrawPreview([pt]);
     penDraw.current = { t0: performance.now() };
-    drag.current = { kind: "drawing", pen: true, touch: e.pointerType !== "mouse" };
+    // pid locks the stroke to THIS pointer: a palm landing mid-stroke can't
+    // feed it. `touch` (the loupe) is for fingertips only, never a Pencil.
+    drag.current = { kind: "drawing", pen: true, pid: e.pointerId, touch: e.pointerType === "touch" };
     svgRef.current.setPointerCapture?.(e.pointerId);
   }
 
@@ -4123,6 +4153,10 @@ export default function DrillAnimator() {
       pxFt: penScale.current,
     };
     const ops = classifyPenGroup(strokes, ctx);
+    // on-device diagnostic: the last burst's real captured strokes + verdict.
+    // Gesture data can't be reproduced from a screenshot — this is how phone
+    // strokes get lifted into tests/sketch-recognize.mjs as fixtures.
+    if (typeof window !== "undefined") window.__pen = { strokes, ctx, ops };
     const consumed = new Set();
     const finalOps = ops.filter(o => {
       const fromOld = (o.srcs || []).filter(i => i < extras.length);
@@ -4268,6 +4302,8 @@ export default function DrillAnimator() {
   const TAP_DIST = 1.4;
 
   function onSvgDown(e) {
+    noteStylus(e);
+    if (palmBlocked(e)) return;                // Pencil in use — the ice ignores skin
     if (holdStep) { skipHold(); return; }      // presentation hold → a tap on the ice advances early
     setOpenMenu(null);                         // a tap on the ice always closes any open menu
     if (playing || pinchRef.current) return;
@@ -4503,6 +4539,8 @@ export default function DrillAnimator() {
   }
 
   function pieceDown(e, id) {
+    noteStylus(e);
+    if (palmBlocked(e)) { e.stopPropagation(); return; }
     if (playing || pinchRef.current) return;
     e.stopPropagation();
     setOpenMenu(null);
@@ -4638,6 +4676,9 @@ export default function DrillAnimator() {
     // a locked entity was grabbed only to select/open its popup — never moved.
     // Leaving d.moved false lets onSvgUp treat the grab as a tap (opens popup).
     if (d.locked) return;
+    // a stroke belongs to the pointer that started it — a palm (or second
+    // finger) landing mid-stroke must not extend the line
+    if (d.pid != null && e.pointerId !== d.pid) return;
     const pt = svgPt(e);
     if (d.kind === "drawing") {
       const last = drawRaw.current[drawRaw.current.length - 1];
@@ -4802,8 +4843,11 @@ export default function DrillAnimator() {
     });
   }
 
-  function onSvgUp() {
+  function onSvgUp(e) {
     const d = drag.current;
+    // ignore the lift of a pointer that isn't the one driving this drag
+    // (a rejected palm releasing must not end the Pencil's stroke)
+    if (d && d.pid != null && e && e.pointerId != null && e.pointerId !== d.pid) return;
     drag.current = null;
     setLoupe(null);
     if (!d) return;
@@ -7937,7 +7981,9 @@ export default function DrillAnimator() {
       : tool === "draw"
       ? (selected ? `Drawing ${selected.id}'s route — drag across the ice` : "Drag on the ice — creates a player")
       : tool === "marker" ? "Marker — drag on the ice to draw"
-      : tool === "pen" ? "Smart pen — sketch X's, routes & dashed passes; ink becomes pieces"
+      : tool === "pen" ? (stylusOn && stylusMode()
+          ? "Smart pen — Apple Pencil (palm rejection on; fingers ignored on the ice)"
+          : "Smart pen — sketch X's, routes & dashed passes; ink becomes pieces")
       : tool !== "select" ? "Tap the ice to place" : null;
 
   const mlbl = { fontSize: 8, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase",
@@ -9293,6 +9339,14 @@ export default function DrillAnimator() {
                   <button key={s} className={`hd-mini${markStyle === s ? " on" : ""}`} onClick={() => setMarkStyle(s)}>{lbl}</button>
                 ))}
               </div>
+              {tool === "pen" && (
+                <div className="hd-poprow">
+                  <span>Apple Pencil</span>
+                  <button className={`hd-mini${palmReject ? " on" : ""}`} onClick={() => setPalmReject(v => !v)}>
+                    <Icon name={palmReject ? "check" : "close"} size={13} /> Palm rejection
+                  </button>
+                </div>
+              )}
               <div className="hd-poprow">
                 <span>Thickness</span>
                 <input type="range" min={0.5} max={3} step={0.1} value={markWidth} style={{ flex: 1, minWidth: 80 }}
