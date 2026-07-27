@@ -328,6 +328,13 @@ const HALFNS_KEY = "drillboard:half-ns";  // half-ice shown north-south (vertica
 const HALFFLIP_KEY = "drillboard:half-flip";  // half-ice net at the far end (left / top)
 const STRETCH_KEY = "drillboard:stretch-fill";  // full ice stretches to fill the screen
 const PRESS_KEY = "drillboard:pencil-pressure";  // Apple Pencil pressure → line weight
+// Corner-menu anchoring. MENU_W must equal --hd-menu-w in styles.js (asserted by
+// tests/theme-contrast.mjs) — the panel is sized by CSS but centred by JS, so a
+// mismatch silently offsets every menu by half the difference. Below
+// MENU_ANCHOR_MIN the stylesheet stretches the panel instead and JS stands down;
+// it matches the pen palette's breakpoint so a device doesn't change personality
+// between the two.
+const MENU_W = 230, MENU_PAD = 10, MENU_ANCHOR_MIN = 700;
 // THEME_KEY ("drillboard:theme") lives in theme.js — the pre-paint boot script
 // in index.html reads the same constant, and they must not drift.
 
@@ -595,21 +602,37 @@ export default function DrillAnimator() {
   const piecesRef = useRef(pieces);
   piecesRef.current = pieces;
   const [openMenu, setOpenMenu] = useState(null); // settings | rinkmenu | tools | text
-  // The Add menu hangs off the Add button rather than the screen's right edge.
-  // Corner-pinning reads fine on a phone, where the bar spans the whole width,
-  // but on desktop or landscape the button sits well left of that corner and
-  // the menu opens nowhere near what was tapped. (Must live below openMenu —
-  // reading it from higher up is a temporal-dead-zone crash the build can't see.)
-  const addBtnRef = useRef(null);
-  const [addMenuLeft, setAddMenuLeft] = useState(null);
+  // Every corner menu hangs off the button that opens it, rather than off a
+  // screen corner. Corner-pinning reads fine on a phone, where the bar spans the
+  // whole width, but in landscape or on desktop the buttons sit well left of the
+  // corner and the panel opens nowhere near what was tapped — Tune's used to
+  // open under Menu. (Must live below openMenu — reading it from higher up is a
+  // temporal-dead-zone crash the build can't see.)
+  const barBtnRefs = {
+    settings: useRef(null), rinkmenu: useRef(null),
+    tools: useRef(null), prefs: useRef(null),
+  };
+  const [menuLeft, setMenuLeft] = useState(null);
   useLayoutEffect(() => {
-    if (openMenu !== "tools") { setAddMenuLeft(null); return; }
-    const r = addBtnRef.current?.getBoundingClientRect();
-    if (!r) return;
-    const W = 230, pad = 10;                     // menu width is fixed in styles.js
-    setAddMenuLeft(Math.round(Math.max(pad,
-      Math.min(window.innerWidth - W - pad, r.left + r.width / 2 - W / 2))));
+    // Below the breakpoint we write NO inline left: the stylesheet stretches the
+    // panel to the bar's insets instead. Inline styles would outrank that rule.
+    const place = () => {
+      const r = barBtnRefs[openMenu]?.current?.getBoundingClientRect();
+      if (!r || window.innerWidth < MENU_ANCHOR_MIN) { setMenuLeft(null); return; }
+      setMenuLeft(Math.round(Math.max(MENU_PAD,
+        Math.min(window.innerWidth - MENU_W - MENU_PAD, r.left + r.width / 2 - MENU_W / 2))));
+    };
+    place();
+    if (!openMenu) return;
+    // a rotation with a menu open crosses the breakpoint in both directions
+    window.addEventListener("resize", place);
+    window.addEventListener("orientationchange", place);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("orientationchange", place);
+    };
   }, [openMenu]);
+  const menuAnchor = menuLeft != null ? { left: menuLeft, right: "auto" } : undefined;
   const [textDraft, setTextDraft] = useState(DEFAULT_TEXT);
   const [textError, setTextError] = useState("");
   const [textCloseAsk, setTextCloseAsk] = useState(false);  // "unapplied edits" guard on Done
@@ -9541,20 +9564,20 @@ export default function DrillAnimator() {
 
       {/* ---------- bottom menu bar ---------- */}
       <div className="hd-bar">
-        <button className={`hd-barbtn${openMenu === "settings" ? " on" : ""}`} title="Menu"
+        <button ref={barBtnRefs.settings} className={`hd-barbtn${openMenu === "settings" ? " on" : ""}`} title="Menu"
           onClick={() => setOpenMenu(m => (m === "settings" ? null : "settings"))}>
           <Icon name="menu" size={16} /><span className="hd-blbl">Menu</span></button>
-        <button className={`hd-barbtn${openMenu === "rinkmenu" ? " on" : ""}`} title="Rink"
+        <button ref={barBtnRefs.rinkmenu} className={`hd-barbtn${openMenu === "rinkmenu" ? " on" : ""}`} title="Rink"
           onClick={() => setOpenMenu(m => (m === "rinkmenu" ? null : "rinkmenu"))}>
           <Icon name="rink" size={16} />
           <span className="hd-blbl">{rink === "full" ? "Full"
             : rink === "half" ? `Half ${halfNS ? (halfFlip ? "↑" : "↓") : (halfFlip ? "←" : "→")}`
             : "¼ ice"}</span>
         </button>
-        <button ref={addBtnRef} className={`hd-barbtn${tool !== "select" || openMenu === "tools" ? " on" : ""}`} title="Add / draw"
+        <button ref={barBtnRefs.tools} className={`hd-barbtn${tool !== "select" || openMenu === "tools" ? " on" : ""}`} title="Add / draw"
           onClick={() => setOpenMenu(m => (m === "tools" ? null : "tools"))}>
           <Icon name="pencil" size={16} /><span className="hd-blbl">Add</span></button>
-        <button className={`hd-barbtn${openMenu === "prefs" ? " on" : ""}`} title="Settings"
+        <button ref={barBtnRefs.prefs} className={`hd-barbtn${openMenu === "prefs" ? " on" : ""}`} title="Settings"
           onClick={() => setOpenMenu(m => (m === "prefs" ? null : "prefs"))}>
           <Icon name="sliders" size={16} /><span className="hd-blbl">Tune</span></button>
         <button className="hd-barbtn" title="Undo last change" disabled={!undoCount}
@@ -9567,7 +9590,7 @@ export default function DrillAnimator() {
 
       {/* ---------- menus ---------- */}
       {openMenu === "settings" && (
-        <div className="hd-menu tl">
+        <div className="hd-menu" style={menuAnchor}>
           <div className="hd-mh">Drill</div>
           <input className="hd-input" placeholder="Drill name" value={drillTitle}
             onChange={e => setDrillTitle(e.target.value)} />
@@ -9644,7 +9667,7 @@ export default function DrillAnimator() {
       )}
 
       {openMenu === "prefs" && (
-        <div className="hd-menu tl">
+        <div className="hd-menu" style={menuAnchor}>
           <div className="hd-mh">App &amp; drill settings</div>
           <div className="hd-mh" style={{ marginTop: 2, color: "var(--db-text-faint)" }}>Display</div>
           <div className="hd-poprow">
@@ -9815,7 +9838,7 @@ export default function DrillAnimator() {
       )}
 
       {openMenu === "rinkmenu" && (
-        <div className="hd-menu bl">
+        <div className="hd-menu" style={menuAnchor}>
           <div className="hd-mh">Ice surface</div>
           <button className={`hd-item${rink === "full" ? " on" : ""}`}
             onClick={() => { setRink("full"); setOpenMenu(null); }}>Full ice</button>
@@ -9833,7 +9856,7 @@ export default function DrillAnimator() {
       )}
 
       {openMenu === "tools" && (
-        <div className="hd-menu br" style={addMenuLeft != null ? { left: addMenuLeft, right: "auto" } : undefined}>
+        <div className="hd-menu" style={menuAnchor}>
           <button className="hd-item" onClick={() => { resetAnim(); setPlaying(false); setPopup(null); setTool("pen"); setPenMode(true); setOpenMenu(null); }}>
             <Icon name="marker" size={16} /> Smart pen — sketch it
           </button>

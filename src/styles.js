@@ -26,6 +26,10 @@ export const STYLES = `
              plus the 6px row gap. Measured 102px, not the 96px the padding
              arithmetic suggests. */
           --hd-barh2: calc(var(--hd-barh) + 48px);
+          /* corner-menu width. The anchoring JS needs this number too, so it is
+             asserted against MENU_W in hockey-drill-animator.jsx by the tests —
+             if they disagree the menus centre on the wrong spot. */
+          --hd-menu-w: 230px;
           --hd-pintop: 10px; /* no floating top dock any more — popups can ride the top edge */
           --hd-dock-w: min(320px, 34vw);   /* width of the docked editing sidebar (desktop) */
           font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
@@ -228,9 +232,16 @@ export const STYLES = `
            The gradients fade to --db-surface-panel-0, NOT the transparent
            keyword: Safari interpolates that through premultiplied black and
            hazes the fade edge. */
-        .hd-menu { position:absolute; z-index:45; border:1px solid var(--db-border-strong);
+        /* border-box so --hd-menu-w IS the rendered width: with the default
+           content-box the 12px padding and 1px border made a "230px" menu
+           actually 256px, and the JS that centres it on 230 put every panel
+           13px off its button. */
+        .hd-menu { position:absolute; z-index:45; box-sizing:border-box;
+          border:1px solid var(--db-border-strong);
           border-radius:12px; padding:10px 12px; box-shadow:var(--db-fx-shadow-lg);
-          display:flex; flex-direction:column; gap:8px; width:230px; max-height:70vh; overflow-y:auto;
+          bottom:calc(62px + var(--hd-b));
+          left:calc(10px + env(safe-area-inset-left, 0px));
+          display:flex; flex-direction:column; gap:8px; width:var(--hd-menu-w); max-height:70vh; overflow-y:auto;
           scrollbar-width:none; -ms-overflow-style:none;
           background-color:var(--db-surface-panel);
           background-image:
@@ -243,9 +254,20 @@ export const STYLES = `
           background-repeat:no-repeat;
           background-attachment:local, local, scroll, scroll; }
         .hd-menu::-webkit-scrollbar { width:0; height:0; display:none; }
-        .hd-menu.tl { bottom:calc(62px + var(--hd-b)); left:calc(10px + env(safe-area-inset-left)); }
-        .hd-menu.bl { bottom:calc(62px + var(--hd-b)); left:calc(66px + env(safe-area-inset-left)); }
-        .hd-menu.br { bottom:calc(62px + var(--hd-b)); right:calc(10px + env(safe-area-inset-right)); }
+        /* All four corner menus anchor the SAME way — they used to have three
+           different rules plus one JS override, so which button you tapped had
+           no relation to where the panel appeared (Tune's opened under Menu).
+           Wide: the animator measures the button and centres the panel over it
+           (inline left), clamped to the viewport.
+           Narrow: no inline left is written at all, and this rule stretches the
+           panel to the bottom bar's own insets — one position for all four, it
+           can never clip, and the extra width suits the long labels. The
+           breakpoint matches the pen palette's, so a device doesn't change
+           personality between the two. */
+        @media (max-width: 699px) {
+          .hd-menu { left:calc(8px + env(safe-area-inset-left, 0px));
+            right:calc(8px + env(safe-area-inset-right, 0px)); width:auto; }
+        }
         .hd-mh { font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:var(--db-text-muted); }
         .hd-item { display:flex; align-items:center; gap:8px; padding:9px 10px; font-size:14px;
           border:1px solid var(--db-border); background:var(--db-surface-raised); color:var(--db-text-soft); border-radius:8px;

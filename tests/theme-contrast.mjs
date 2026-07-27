@@ -142,6 +142,26 @@ check("index.html carries both theme markers", () => {
     "inline style on <body> outranks every stylesheet and would pin one theme");
 });
 
+// The corner menus are SIZED by CSS and CENTRED by JS, so the two width figures
+// must agree — a mismatch offsets every menu by half the difference, which looks
+// like a vague alignment bug rather than a number being wrong in one place.
+check("menu width agrees between styles.js and the anchoring JS", () => {
+  const css = read("../src/styles.js");
+  const js = read("../src/hockey-drill-animator.jsx");
+  const cssW = /--hd-menu-w:\s*(\d+)px/.exec(css);
+  const jsW = /const MENU_W = (\d+)/.exec(js);
+  assert.ok(cssW, "--hd-menu-w not found in styles.js");
+  assert.ok(jsW, "MENU_W not found in hockey-drill-animator.jsx");
+  assert.equal(jsW[1], cssW[1], `MENU_W=${jsW[1]} but --hd-menu-w=${cssW[1]}px`);
+  // and the stretch breakpoint must match the one the media query uses
+  const cssBp = /@media \(max-width: (\d+)px\) \{\s*\.hd-menu/.exec(css);
+  const jsBp = /MENU_ANCHOR_MIN = (\d+)/.exec(js);
+  assert.ok(cssBp && jsBp, "menu breakpoint not found on both sides");
+  assert.equal(+jsBp[1], +cssBp[1] + 1,
+    `JS anchors at >=${jsBp[1]}px but CSS stretches up to ${cssBp[1]}px — ` +
+    `there is a gap or overlap where both or neither apply`);
+});
+
 // The player bar and the pen palette are alternate contents of the same slot,
 // so they must share one height and both be border-box — otherwise switching
 // tools in landscape jogs the ice, and the reserved band (which is computed
