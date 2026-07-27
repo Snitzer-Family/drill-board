@@ -142,6 +142,30 @@ check("index.html carries both theme markers", () => {
     "inline style on <body> outranks every stylesheet and would pin one theme");
 });
 
+// The player bar and the pen palette are alternate contents of the same slot,
+// so they must share one height and both be border-box — otherwise switching
+// tools in landscape jogs the ice, and the reserved band (which is computed
+// from --hd-barh) silently stops matching what actually renders. Reading these
+// heights off the CSS by hand has been wrong twice, so pin the structure.
+check("the two bottom panels share one border-box height", () => {
+  const css = read("../src/styles.js");
+  const rule = name => {
+    const m = new RegExp(`\\.hd-${name} \\{[^}]*\\}`, "s").exec(css);
+    assert.ok(m, `.hd-${name} rule not found`);
+    return m[0];
+  };
+  for (const [name, prop] of [["scrub", "height"], ["pen", "min-height"]]) {
+    const r = rule(name);
+    assert.match(r, /box-sizing:\s*border-box/,
+      `.hd-${name} must be border-box or its stated height isn't its rendered height`);
+    assert.match(r, new RegExp(`${prop}:\\s*var\\(--hd-barh\\)`),
+      `.hd-${name} must take its ${prop} from --hd-barh, not a literal`);
+  }
+  // and the reserved bands must be derived from the same variables
+  assert.match(css, /\.hd-root\.scrub-on \{ --hd-scrub: calc\(4px \+ var\(--hd-barh\)/);
+  assert.match(css, /\.hd-root\.pen-on \{ --hd-scrub: calc\(4px \+ var\(--hd-barh2\)/);
+});
+
 // A rule that FILLS with the accent must also set the on-accent text colour,
 // or it inherits whatever the base rule had. That was invisible while the app
 // was dark-only — the inherited grey happened to be light — and turned into

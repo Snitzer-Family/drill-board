@@ -16,6 +16,16 @@ export const STYLES = `
              The band used to be exactly the bar's height, which left the rink
              edge sitting ~4px off the scrubber — they read as one stuck object. */
           --hd-icegap: 10px;
+          /* The floating bottom panel height. The player bar and the pen palette
+             are alternate contents of the SAME slot, so they share it and can't
+             drift apart — they used to be 50 and 54, which read as a jump when
+             you switched tools in landscape. Both are border-box, so this is the
+             rendered height, not a content box to add padding to. */
+          --hd-barh: 54px;
+          /* …and wrapped to two rows on a narrow phone: one more 42px control
+             plus the 6px row gap. Measured 102px, not the 96px the padding
+             arithmetic suggests. */
+          --hd-barh2: calc(var(--hd-barh) + 48px);
           --hd-pintop: 10px; /* no floating top dock any more — popups can ride the top edge */
           --hd-dock-w: min(320px, 34vw);   /* width of the docked editing sidebar (desktop) */
           font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
@@ -24,12 +34,14 @@ export const STYLES = `
            its stated height:40px, but it isn't border-box — padding and border
            make it 50px — so the band was 6px SHORT and the bar overlapped the
            ice. Measured on device widths 430/900/1100: scrub is 50px at all of
-           them; the pen palette is 54px on one row, 96px when it wraps to two. */
-        .hd-root.scrub-on { --hd-scrub: calc(4px + 50px + var(--hd-icegap)); }
+           them; the pen palette is 54px on one row, 102px when it wraps to two.
+           Both heights are variables rather than numbers copied out of the
+           rules, because reading them off the CSS has been wrong twice. */
+        .hd-root.scrub-on { --hd-scrub: calc(4px + var(--hd-barh) + var(--hd-icegap)); }
         /* the pen palette replaces the player bar: two rows on a narrow phone,
            one once there's width for both groups (landscape, tablet, desktop) */
-        .hd-root.pen-on { --hd-scrub: calc(4px + 96px + var(--hd-icegap)); }
-        @media (min-width: 700px) { .hd-root.pen-on { --hd-scrub: calc(4px + 54px + var(--hd-icegap)); } }
+        .hd-root.pen-on { --hd-scrub: calc(4px + var(--hd-barh2) + var(--hd-icegap)); }
+        @media (min-width: 700px) { .hd-root.pen-on { --hd-scrub: calc(4px + var(--hd-barh) + var(--hd-icegap)); } }
         /* editing sidebar docked: shrink the ice to the left of it (the stage's
            ResizeObserver re-fits the rink automatically) */
         .hd-root.dock-open .hd-stage { right:calc(env(safe-area-inset-right, 0px) + var(--hd-dock-w)); }
@@ -57,7 +69,8 @@ export const STYLES = `
            menu bar; sits in its own reserved band (--hd-scrub) so it never overlaps
            the ice sheet */
         .hd-scrub { position:absolute; z-index:44; left:8px; right:8px;
-          bottom:calc(54px + var(--hd-b) + 4px); height:40px;
+          bottom:calc(54px + var(--hd-b) + 4px);
+          box-sizing:border-box; height:var(--hd-barh);
           display:flex; align-items:center; gap:6px; padding:4px 8px;
           background:var(--db-fx-glass); border:1px solid var(--db-border); border-radius:12px;
           box-shadow:var(--db-fx-shadow); backdrop-filter:blur(4px); }
@@ -73,8 +86,12 @@ export const STYLES = `
           background:var(--db-brand-red); border-color:var(--db-brand-red);
           color:var(--db-text-on-accent); margin-right:2px; }
         /* ---- pen palette (sits in the player-bar band while sketching) ---- */
+        /* min-height, not height: one row lands exactly on --hd-barh (so it
+           matches the player bar it replaces), and wrapping to two rows is still
+           free to grow */
         .hd-pen { position:absolute; z-index:44; left:8px; right:8px;
           bottom:calc(54px + var(--hd-b) + 4px); display:flex; flex-wrap:wrap;
+          box-sizing:border-box; min-height:var(--hd-barh);
           align-items:center; justify-content:center; gap:6px 4px;
           padding:5px 7px; background:var(--db-fx-glass); border:1px solid var(--db-border);
           border-radius:12px; box-shadow:var(--db-fx-shadow); backdrop-filter:blur(4px); }
