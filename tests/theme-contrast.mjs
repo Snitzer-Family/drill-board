@@ -142,6 +142,17 @@ check("index.html carries both theme markers", () => {
     "inline style on <body> outranks every stylesheet and would pin one theme");
 });
 
+// drill-svg.js's var() fallbacks are what an <img>-loaded SVG actually renders
+// (no host cascade), which is the PNG export and the print sheet. They must come
+// off THEMES.light, not be retyped — a hardcoded fallback is a silent drift that
+// only shows up as a slightly-wrong colour in an exported image.
+check("drill-svg.js takes its var fallbacks from the token table", () => {
+  const src = read("../src/drill-svg.js");
+  const hard = [...src.matchAll(/V\(\s*"[^"]+"\s*,\s*("(#|rgb)[^"]*")\s*\)/g)].map(m => m[1]);
+  assert.deepEqual(hard, [], `hardcoded var() fallbacks in drill-svg.js: ${hard.join(", ")}`);
+  assert.ok(/const L = THEMES\.light/.test(src), "drill-svg.js should resolve fallbacks via THEMES.light");
+});
+
 // This is what actually enforces the 78-values -> one-token-set collapse. Without
 // it the next feature quietly reintroduces a one-off grey.
 check("styles.js has no raw colour literals", () => {

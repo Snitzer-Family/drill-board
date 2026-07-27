@@ -5322,7 +5322,11 @@ export default function DrillAnimator() {
       const canvas = document.createElement("canvas");
       canvas.width = W; canvas.height = H;
       const ctx = canvas.getContext("2d");
-      ctx.fillStyle = "#eef5f9"; ctx.fillRect(0, 0, W, H);         // ice surround (var fallback theme)
+      // Exports are ALWAYS light, whatever the app is set to: an <img>-loaded
+      // SVG gets no host cascade, so drillSvg() renders on its var() fallbacks
+      // — which are THEMES.light. This surround must come from the same table
+      // or the PNG gets a mismatched border around the rink.
+      ctx.fillStyle = tokens("light")["ice-surround"]; ctx.fillRect(0, 0, W, H);
       ctx.drawImage(img, 0, 0, W, H);
       URL.revokeObjectURL(url);
       canvas.toBlob(b => {

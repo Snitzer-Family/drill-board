@@ -3,10 +3,18 @@
 // chips) — using the real boards geometry so rim/chip banks are accurate.
 // Colours use CSS custom properties (with fallbacks) so a host page can theme
 // it; pieces use their own DSL colours.
+//
+// The var names are the app's --db-ice-* tokens, so a host that already has the
+// theme layer needs no mapping. The FALLBACKS are the light theme, taken from
+// theme.js rather than retyped: this SVG is also loaded into an <img> for PNG
+// export, where there is no host cascade at all and only the fallbacks render.
 import { parseDrill } from "./drill-format.js";
 import { evalSeg, wigglePoints } from "./geometry.js";
 import { solidShapes, segCrossesNet } from "./net-collide.js";
 import * as boards from "./boards.js";
+import { THEMES } from "./theme.js";
+
+const L = THEMES.light;
 
 // which of player p's route segments are skated WITH the puck (→ wiggle line):
 // held from where they get it (reception waypoint, or the start if head) to
@@ -182,13 +190,13 @@ const polyPts = pts => pts.map(p => `${f(p.x)},${f(p.y)}`).join(" ");
 /* ------------------------------------------------------------------ */
 /* rink markings (clipped to the rounded boards)                       */
 function rink() {
-  const mk = V("mark", "#cf3346"), mkb = V("mark-blue", "#2f5fb0");
+  const mk = V("db-ice-line-red", L["ice-line-red"]), mkb = V("db-ice-line-blue", L["ice-line-blue"]);
   const dot = (x, y, r = 1, c = mk) => `<circle cx="${x}" cy="${y}" r="${r}" fill="${c}"/>`;
   const fo = (x, y, c) => `<circle cx="${x}" cy="${y}" r="15" fill="none" stroke="${c}" stroke-width="0.45" opacity="0.9"/>`;
   // end-zone circle hash marks: 2' long, ~5'7" apart, outside the circle edge
   const hash = (x, y) => `<path d="M ${x - 2.8} ${y - 17} V ${y - 15} M ${x + 2.8} ${y - 17} V ${y - 15} M ${x - 2.8} ${y + 15} V ${y + 17} M ${x + 2.8} ${y + 15} V ${y + 17}" stroke="${mk}" stroke-width="0.45" opacity="0.9" fill="none"/>`;
   return `
-    <rect x="0.6" y="0.6" width="198.8" height="83.8" rx="28" fill="${V("surface", "#f6fafd")}" stroke="${V("ink", "#14202b")}" stroke-width="1.1"/>
+    <rect x="0.6" y="0.6" width="198.8" height="83.8" rx="28" fill="${V("db-ice", L.ice)}" stroke="${V("db-ice-boards", L["ice-boards"])}" stroke-width="1.1"/>
     <g clip-path="url(#ice)">
       <g stroke-linecap="round">
         <line x1="11" y1="0" x2="11" y2="85" stroke="${mk}" stroke-width="0.45"/>
@@ -263,7 +271,7 @@ function piece(p) {
       + `<circle cx="${f(p.x)}" cy="${f(p.y)}" r="3.4" fill="${p.color}" stroke="#fff" stroke-width="0.5"/>`
       + `<text x="${f(p.x)}" y="${f(p.y) + 1.05}" font-weight="800" font-size="3" text-anchor="middle" fill="#fff">${p.label || ""}</text></g>`;
   if (p.kind === "puck")
-    return `<circle cx="${f(p.x)}" cy="${f(p.y)}" r="1.5" fill="${V("puck", "#14171a")}" stroke="${V("surface", "#fff")}" stroke-width="0.4"/>`;
+    return `<circle cx="${f(p.x)}" cy="${f(p.y)}" r="1.5" fill="${V("db-ice-ink", L["ice-ink"])}" stroke="${V("db-ice", L.ice)}" stroke-width="0.4"/>`;
   if (p.kind === "cone")
     return `<path transform="${rot()}" d="M 0 -2.4 L 2.2 1.8 L -2.2 1.8 Z" fill="${p.color}" stroke="#fff" stroke-width="0.35" stroke-linejoin="round"/>`;
   if (p.kind === "net") {
@@ -334,7 +342,7 @@ function routePath(p, pieces) {
   const dots = p.path.map((s, i) => {
     const n = ev ? ev.get(i) : i + 1;
     if (!n) return "";
-    return `<circle cx="${f(s.x)}" cy="${f(s.y)}" r="2" fill="${V("panel", "#fff")}" stroke="${p.color}" stroke-width="0.5"/>`
+    return `<circle cx="${f(s.x)}" cy="${f(s.y)}" r="2" fill="${V("db-ice", L.ice)}" stroke="${p.color}" stroke-width="0.5"/>`
       + `<text x="${f(s.x)}" y="${f(s.y) + 0.9}" font-size="2.6" font-weight="700" text-anchor="middle" fill="${p.color}">${n}</text>`;
   }).join("");
   return `${lines}${dots}`;
@@ -356,7 +364,7 @@ const offsetPoly = (pts, o) => pts.map((p, i) => {
 const chainLine = (pts, mode) => {
   const rebound = mode === "rebound", blocked = mode === "rebound-x", shot = mode === "shot";
   const dotted = rebound || blocked;
-  const color = blocked ? BLOCKED_COLOR : rebound ? REBOUND_COLOR : V("puck", "#14171a");
+  const color = blocked ? BLOCKED_COLOR : rebound ? REBOUND_COLOR : V("db-ice-ink", L["ice-ink"]);
   const line = trimLine(pts, CHAIN_START[mode] != null ? CHAIN_START[mode] : 3.5, CHAIN_TRIM[mode] != null ? CHAIN_TRIM[mode] : 3.5);
   if (shot) {
     // standard shot notation: two parallel lines + an open caret at the end
@@ -452,9 +460,9 @@ export function drillSvg(dsl, opts = {}) {
   const rank = k => (k === "net" || k === "bumper" || k === "deker" || k === "passer" || k === "tire" || k === "stick" || k === "mark" ? 0 : k === "player" ? 2 : 1);
   const defs = `<defs>
       <clipPath id="ice"><rect x="0.6" y="0.6" width="198.8" height="83.8" rx="28"/></clipPath>
-      <marker id="arrowR" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4" fill="none" stroke="${V("mark", "#cf3346")}" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></marker>
-      <marker id="arrowP" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="${V("puck", "#14171a")}"/></marker>
-      <marker id="arrowS" markerWidth="8" markerHeight="8" refX="5.6" refY="4" orient="auto"><path d="M1.4 1.9 L5.9 4 L1.4 6.1" fill="none" stroke="${V("puck", "#14171a")}" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/></marker>
+      <marker id="arrowR" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4" fill="none" stroke="${V("db-ice-line-red", L["ice-line-red"])}" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></marker>
+      <marker id="arrowP" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="${V("db-ice-ink", L["ice-ink"])}"/></marker>
+      <marker id="arrowS" markerWidth="8" markerHeight="8" refX="5.6" refY="4" orient="auto"><path d="M1.4 1.9 L5.9 4 L1.4 6.1" fill="none" stroke="${V("db-ice-ink", L["ice-ink"])}" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/></marker>
       <marker id="arrowRB" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="${REBOUND_COLOR}"/></marker>
       <marker id="arrowRX" markerWidth="6" markerHeight="6" refX="4.4" refY="3" orient="auto"><path d="M0.4 0.6 L5 3 L0.4 5.4 Z" fill="${BLOCKED_COLOR}"/></marker>
     </defs>`;
