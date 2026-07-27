@@ -9,6 +9,15 @@
 // Geometry vars stay --hd-*; only colour is --db-*.
 
 export const STYLES = `
+        /* Scoped box-sizing reset. The app has no global reset, so by default a
+           padded element's stated width/height is its CONTENT box and it renders
+           bigger than it says. That produced three separate bugs: .hd-scrub said
+           40px and rendered 50 (its reserved band overlapped the ice), the pen
+           palette computed 96px and rendered 102 (same), and .hd-menu said 230px
+           and rendered 256 (the JS centring it on 230 put every panel 13px off
+           its button). Each was found by measuring, never by reading the CSS.
+           Scoped to .hd-root rather than * so nothing outside the app shifts. */
+        .hd-root, .hd-root *, .hd-root *::before, .hd-root *::after { box-sizing:border-box; }
         .hd-root { position:fixed; inset:0; background:var(--db-surface-app); color:var(--db-text); overflow:hidden;
           --hd-b: var(--hd-safe-b, min(env(safe-area-inset-bottom, 0px), 34px));
           --hd-scrub: 0px;   /* reserved height for the player bar band (0 when hidden) */

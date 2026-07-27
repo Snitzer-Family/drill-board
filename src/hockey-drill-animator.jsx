@@ -9604,7 +9604,9 @@ export default function DrillAnimator() {
           <div className="hd-mh">Drill</div>
           <input className="hd-input" placeholder="Drill name" value={drillTitle}
             onChange={e => setDrillTitle(e.target.value)} />
-          <textarea className="hd-input" style={{ minHeight: 46, resize: "vertical", fontFamily: "inherit" }}
+          {/* 62, not 46: under border-box the padding and border are inside the
+              min-height, and 46 would render 16px shorter than it always has */}
+          <textarea className="hd-input" style={{ minHeight: 62, resize: "vertical", fontFamily: "inherit" }}
             placeholder="Description" value={drillDesc} onChange={e => setDrillDesc(e.target.value)} spellCheck={false} />
           <button className="hd-item" onClick={() => setOpenMenu("notes")}><Icon name="note" size={16} /> Notes / writeup{drillNotes.trim() ? " ✓" : ""}<span className="hd-chev"><Icon name="chevronRight" size={14} /></span></button>
           <button className="hd-item" onClick={() => setOpenMenu("inventory")}><Icon name="grid" size={16} /> Inventory / gear<span className="hd-chev"><Icon name="chevronRight" size={14} /></span></button>
