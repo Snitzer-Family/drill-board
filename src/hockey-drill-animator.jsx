@@ -430,6 +430,42 @@ export default function DrillAnimator() {
     flash(`Cleared ${n} ink mark${n > 1 ? "s" : ""} — Undo restores them`);
   };
 
+  // what the classifier needs to know about the board it's reading into
+  const penCtx = board => ({
+    players: board.filter(p => p.kind === "player").map(p => ({
+      id: p.id, x: p.x, y: p.y, end: segEnd(p, p.path.length - 1), hasPath: p.path.length > 0,
+    })),
+    nets: board.filter(p => p.kind === "net").map(n => ({ id: n.id, x: n.x, y: n.y })),
+    pxFtX: penScale.current.x, pxFtY: penScale.current.y,
+  });
+
+  // Read the WHOLE drawing in one pass: every ink mark on the board goes in
+  // together, so symbols spread over many strokes and passes between things
+  // drawn minutes apart are all seen at once. Ink the classifier can't place
+  // is simply left alone, so this is safe to hit repeatedly.
+  function convertInk() {
+    penScale.current = ftPerPx();          // read at the CURRENT zoom
+    const board = piecesRef.current;
+    const marks = board.filter(p => p.kind === "mark" && !p.lock && (p.pts || []).length >= 2);
+    if (!marks.length) { flash("No ink to convert"); return; }
+    const ops = classifyPenGroup(marks.map(m => ({ pts: m.pts })), penCtx(board));
+    const consumed = new Set();
+    ops.forEach(o => {
+      if (o.op === "mark") return;         // stayed ink — the mark is already on the board
+      (o.srcs || []).forEach(i => marks[i] && consumed.add(marks[i].id));
+    });
+    const made = ops.filter(o => o.op !== "mark" && o.op !== "drop");
+    if (!made.length && !consumed.size) { flash("Nothing recognised in the ink"); return; }
+    setPieces(ps => materializePenOps(ps.filter(p => !consumed.has(p.id)), made));
+    const counts = {};
+    made.forEach(o => { counts[o.op] = (counts[o.op] || 0) + 1; });
+    const parts = Object.entries(counts).map(([k, n]) => `${n} ${n > 1 ? (k === "pass" ? "passes" : k + "s") : k}`);
+    const left = marks.length - consumed.size;
+    flash(parts.length
+      ? `Converted ${parts.join(", ")}${left ? ` · ${left} left as ink` : ""}`
+      : "Nothing recognised in the ink");
+  }
+
   // the last pen burst, kept so it can be copied off-device when a symbol
   // won't convert — a screenshot can't show stroke data
   const penLast = useRef(null);
@@ -473,6 +509,11 @@ export default function DrillAnimator() {
   const [eraser, setEraser] = useState(false);
   const eraserRef = useRef(false);          // finishDraw reads it from a stale closure
   eraserRef.current = eraser;
+  // auto: every settled burst is read straight away. Off: strokes stay ink
+  // until Convert reads the whole drawing at once.
+  const [autoConv, setAutoConv] = useState(true);
+  const autoRef = useRef(true);
+  autoRef.current = autoConv;
   const [stylusOn, setStylusOn] = useState(false);   // drives the hint text only
   // NB the `> 0` guard: performance.now() starts near zero, so without it a
   // never-touched-by-a-Pencil session would reject fingers for its first 5 min
@@ -4242,6 +4283,12 @@ export default function DrillAnimator() {
     setPenInk([]);
     if (!fresh.length) return;
     const board = piecesRef.current;
+    // Manual mode: strokes just lay down as ink. Nothing is read until you hit
+    // Convert, which looks at the whole drawing at once.
+    if (!autoRef.current) {
+      setPieces(ps => materializePenOps(ps, fresh.map(s => ({ op: "mark", pts: s.pts }))));
+      return;
+    }
     // recent pen ink the new strokes touch rejoins the burst: a finger takes
     // its time between an X's two strokes, so the first may already have
     // committed as a mark — the crossing stroke completes it. Ops that consume
@@ -4265,13 +4312,7 @@ export default function DrillAnimator() {
           b.x0 - pad < n.x1 && n.x0 - pad < b.x1 && b.y0 - pad < n.y1 && n.y0 - pad < b.y1);
       })());
     const strokes = [...extras.map(m => ({ pts: m.pts })), ...fresh];
-    const ctx = {
-      players: board.filter(p => p.kind === "player").map(p => ({
-        id: p.id, x: p.x, y: p.y, end: segEnd(p, p.path.length - 1), hasPath: p.path.length > 0,
-      })),
-      nets: board.filter(p => p.kind === "net").map(n => ({ id: n.id, x: n.x, y: n.y })),
-      pxFtX: penScale.current.x, pxFtY: penScale.current.y,
-    };
+    const ctx = penCtx(board);
     const ops = classifyPenGroup(strokes, ctx);
     // on-device diagnostic: the last burst's real captured strokes + verdict.
     // Gesture data can't be reproduced from a screenshot — this is how phone
@@ -9150,6 +9191,12 @@ export default function DrillAnimator() {
               <Icon name={tool === "pen" ? "marker" : "cursor"} size={15} />
               <span>{tool === "pen" ? "Draw" : "Edit"}</span>
             </button>
+            <div className="hd-pensep" />
+            <button className={`hd-penbtn${autoConv ? " on" : ""}`}
+              title={autoConv ? "Auto-convert: each stroke is read as you draw" : "Manual: strokes stay ink until you tap Convert"}
+              onClick={() => setAutoConv(v => !v)}><Icon name="brain" size={15} /></button>
+            <button className="hd-penbtn" title="Convert — read the whole drawing now"
+              onClick={() => { flushPen(); convertInk(); }}><Icon name="check" size={15} /></button>
             <div className="hd-pensep" />
             {PEN_INKS.map(c => (
               <button key={c} className={`hd-penswatch${markColor === c && !eraser ? " on" : ""}`}
