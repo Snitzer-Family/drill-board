@@ -20,6 +20,13 @@ export const STYLES = `
           left:env(safe-area-inset-left, 0px); right:env(safe-area-inset-right, 0px);
           bottom:calc(54px + var(--hd-b) + var(--hd-scrub));
           display:flex; align-items:center; justify-content:center; }
+        /* Desktop: the ice shows what the pointer will DO. The !important beats
+           the per-piece grab cursors, which is right — in draw mode nothing on
+           the ice is grabbable anyway. Hotspot sits on the nib / rubbing edge. */
+        .hd-root.draw-cursor .hd-canvas, .hd-root.draw-cursor .hd-canvas * {
+          cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Cpath d='M3.5 20.5l1.1-4 11-11 2.9 2.9-11 11z' fill='%23fff' stroke='%23111' stroke-width='1.5' stroke-linejoin='round'/%3E%3Cpath d='M14.1 6.9l2.9 2.9' stroke='%23111' stroke-width='1.5'/%3E%3C/svg%3E") 3 21, crosshair !important; }
+        .hd-root.erase-cursor .hd-canvas, .hd-root.erase-cursor .hd-canvas * {
+          cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Cpath d='M3.5 16.2l8.3-8.3 6 6-4.3 4.3H6.2z' fill='%23fff' stroke='%23111' stroke-width='1.5' stroke-linejoin='round'/%3E%3Cpath d='M8.6 11.1l6 6' stroke='%23111' stroke-width='1.5'/%3E%3C/svg%3E") 4 17, cell !important; }
         .hd-canvas { position:relative; }
         .hd-canvas svg.hd-ice { width:100%; height:100%; display:block; }
         .hd-stage, .hd-canvas, .hd-canvas svg, .hd-canvas svg * { touch-action:none;

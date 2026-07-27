@@ -375,6 +375,10 @@ export default function DrillAnimator() {
   const penBuf = useRef([]);          // settled strokes awaiting commit [{pts,t0,t1}]
   const penTimer = useRef(0);
   const penScale = useRef({ x: 0, y: 0 });   // rink ft per screen px per axis, per burst
+  // where the nib is, so a reticle can sit under the finger/Pencil showing the
+  // exact footprint about to be laid down (a fingertip hides its own contact
+  // point, and a Pencil tip is finer than the line it draws)
+  const [penTip, setPenTip] = useState(null);
   // ink fidelity in SCREEN terms: capture spacing and the control-point
   // simplifier were fixed rink-feet, so on a big iPad 1.3ft ≈ 12px crushed a
   // drawn circle into a 4-point blob (which then smoothed into a lumpy shape —
@@ -4139,6 +4143,7 @@ export default function DrillAnimator() {
     drawRaw.current = [pt];
     setDrawPreview([pt]);
     penDraw.current = { t0: performance.now() };
+    setPenTip(pt);
     // pid locks the stroke to THIS pointer: a palm landing mid-stroke can't
     // feed it. `touch` (the loupe) is for fingertips only, never a Pencil.
     drag.current = { kind: "drawing", pen: true, pid: e.pointerId, touch: e.pointerType === "touch" };
@@ -4163,6 +4168,7 @@ export default function DrillAnimator() {
     const raw = drawRaw.current;
     drawRaw.current = [];
     setDrawPreview(null);
+    setPenTip(null);
     if (penDraw.current) {            // smart pen: buffer, don't leave the tool
       const { t0 } = penDraw.current;
       penDraw.current = false;
@@ -4888,7 +4894,10 @@ export default function DrillAnimator() {
         drawRaw.current.push(pt);
         setDrawPreview(drawRaw.current.slice());
       }
-      if (d.touch) setLoupe(pt);
+      // the pen shows a footprint reticle instead of the magnifying loupe —
+      // the loupe's offset panel is more distraction than help when sketching
+      if (d.pen) setPenTip(pt);
+      else if (d.touch) setLoupe(pt);
       return;
     }
     if (!d.moved) {
@@ -8297,7 +8306,8 @@ export default function DrillAnimator() {
   }
 
   return (
-    <div className={`hd-root${penMode && !aiPlay ? " pen-on" : aiPlay || !hasTimeline ? "" : " scrub-on"}${docked ? " dock-open" : ""}`} ref={rootRef}>
+    <div className={`hd-root${penMode && !aiPlay ? " pen-on" : aiPlay || !hasTimeline ? "" : " scrub-on"}${docked ? " dock-open" : ""}${
+      tool === "pen" || tool === "marker" ? (eraser && tool === "pen" ? " erase-cursor" : " draw-cursor") : ""}`} ref={rootRef}>
       <style>{STYLES}</style>
 
       {/* ---------- the ice, filling the screen ---------- */}
@@ -8788,6 +8798,32 @@ export default function DrillAnimator() {
             {renderBranchGhostArrows()}
             {renderRouteNumbers()}
 
+            {/* Nib reticle: a ring the exact size of the mark about to be laid
+                down (or of the eraser's reach), so a fingertip — which hides
+                its own contact point — still shows where and how thick. The
+                ellipse pre-compensates the fill-stretch so it reads round. */}
+            {penTip && (() => {
+              // sized in SCREEN terms: the ring tracks the ink's real thickness,
+              // but never shrinks below a few pixels — a feet-based floor would
+              // vanish at full-rink zoom and bloat when zoomed right in
+              const ft = n => n * Math.min(penScale.current.x || 0.24, penScale.current.y || 0.24);
+              const r = eraser ? ft(16) : Math.max(penW / 2, ft(7));
+              const hair = ft(5), w = ft(1.2);
+              const col = eraser ? "#ff8b8b" : markColor;
+              const tick = (x1, y1, x2, y2) => <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={col} strokeWidth={w} />;
+              return (
+                <g pointerEvents="none" opacity={0.9}>
+                  <ellipse cx={penTip.x} cy={penTip.y} rx={r} ry={r * yFix} fill="none"
+                    stroke="#f5fafd" strokeWidth={w * 2.2} />
+                  <ellipse cx={penTip.x} cy={penTip.y} rx={r} ry={r * yFix} fill="none"
+                    stroke={col} strokeWidth={w} />
+                  {tick(penTip.x - r - hair, penTip.y, penTip.x - r, penTip.y)}
+                  {tick(penTip.x + r, penTip.y, penTip.x + r + hair, penTip.y)}
+                  {tick(penTip.x, penTip.y - (r + hair) * yFix, penTip.x, penTip.y - r * yFix)}
+                  {tick(penTip.x, penTip.y + r * yFix, penTip.x, penTip.y + (r + hair) * yFix)}
+                </g>
+              );
+            })()}
             {/* buffered pen strokes render exactly like the live one — the ink
                 reads as one continuous line until the burst snaps into pieces */}
             {penInk.map((pts, i) => pts.length > 1 && (
