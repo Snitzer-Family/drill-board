@@ -87,6 +87,10 @@ export const THEMES = {
     "fx-scrim": "rgba(255,255,255,.94)",
     "fx-shadow": "0 3px 12px rgba(20,32,43,.14)",
     "fx-shadow-lg": "0 8px 24px rgba(20,32,43,.20)",
+    // the scroll-shadow / drop-shadow edge tint, and its zero-alpha partner for
+    // gradient stops. Also NOT `transparent` — same Safari premultiply problem.
+    "fx-edge": "rgba(20,32,43,.16)",
+    "fx-edge-0": "rgba(20,32,43,0)",
   },
 
   dark: {
@@ -136,6 +140,8 @@ export const THEMES = {
     "fx-scrim": "rgba(10,13,17,.96)",
     "fx-shadow": "0 3px 12px rgba(0,0,0,.4)",
     "fx-shadow-lg": "0 8px 24px rgba(0,0,0,.5)",
+    "fx-edge": "rgba(0,0,0,.55)",
+    "fx-edge-0": "rgba(0,0,0,0)",
   },
 };
 
@@ -168,7 +174,9 @@ export const PAIRS = [
   { fg: "danger", bg: "surface-panel", min: 4.5, why: ".hd-err" },
   { fg: "warn", bg: "surface-panel", min: 4.5, why: "step warnings, unapplied-edit notes" },
   { fg: "good", bg: "surface-panel", min: 4.5, why: "goal-odds readout" },
-  { fg: "info", bg: "surface-panel", min: 4.5, why: ".hd-mdprev a, inline code" },
+  { fg: "info", bg: "surface-panel", min: 4.5, why: ".hd-mdprev a" },
+  { fg: "info", bg: "info-bg", min: 4.5, why: ".hd-anchorbtn.wp waypoint chip" },
+  { fg: "danger", bg: "danger-bg", min: 4.5, why: ".hd-anchorbtn.bad broken-anchor chip" },
   { fg: "text-soft", bg: "fx-glass", over: "ice", min: 4.5, why: ".hd-scrub over the ice" },
   { fg: "text-muted", bg: "fx-glass", over: "ice", min: 4.5, why: ".hd-scrubtime" },
   { fg: "text", bg: "fx-scrim", over: "ice", min: 4.5, why: ".hd-sheet overlay text" },

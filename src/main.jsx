@@ -14,12 +14,16 @@ class ErrorBoundary extends React.Component {
     if (!this.state.err) return this.props.children;
     const e = this.state.err;
     const msg = (e && (e.stack || e.message)) || String(e);
-    const btn = { background: "#1c2530", color: "#e8eef5", border: "1px solid #33414f",
+    // This renders OUTSIDE .hd-root, so styles.js never reaches it — but the
+    // tokens are declared on :root by index.html, so var() resolves here and
+    // the crash screen themes along with everything else.
+    const btn = { background: "var(--db-surface-raised)", color: "var(--db-text)",
+      border: "1px solid var(--db-border-strong)",
       borderRadius: 8, padding: "9px 15px", fontSize: 14, cursor: "pointer" };
     return (
-      <div style={{ position: "fixed", inset: 0, background: "#0b0f14", color: "#e8eef5",
+      <div style={{ position: "fixed", inset: 0, background: "var(--db-surface-app)", color: "var(--db-text)",
         font: "13px ui-monospace, monospace", padding: "20px", overflow: "auto", WebkitOverflowScrolling: "touch" }}>
-        <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 10, color: "#ff6b6b" }}>DrillBoard hit an error</div>
+        <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 10, color: "var(--db-danger)" }}>DrillBoard hit an error</div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 }}>
           <button style={btn} onClick={() => this.setState({ err: null })}>Try again</button>
           <button style={btn} onClick={() => { try { localStorage.removeItem("drillboard:autosave"); } catch { /* ignore */ } location.reload(); }}>

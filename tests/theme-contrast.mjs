@@ -14,10 +14,9 @@ import { readFileSync } from "node:fs";
 import { THEMES, PAIRS, EXEMPT, SHADOW_TOKENS, AUTO_MAP, themeCss } from "../src/theme.js";
 
 let passed = 0, failed = 0, known = 0;
-const KNOWN = new Set([
-  // Removed by C3 — styles.js is still all raw literals.
-  "styles.js has no raw colour literals",
-]);
+// Empty is the goal state. Add a check name here only to land a migration in
+// stages; the run FAILS once the entry starts passing, so it can't rot.
+const KNOWN = new Set([]);
 
 const check = (name, fn) => {
   try {
