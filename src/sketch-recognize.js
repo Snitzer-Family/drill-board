@@ -758,8 +758,18 @@ export function classifyPenGroup(strokes, ctx = {}) {
   // Only a genuinely LONG stray becomes a route. At 40px an unrecognized X leg
   // (42px) turned into a route on whichever player was nearest — silently
   // wrong, and worse than ink, which the next stroke can still complete.
+  // …but a stroke that ENDS AT A NET is unambiguous however short it is. A
+  // real 14ft shot from the slot measured only 82px — under that bar — and
+  // became ink with the shot test never reaching it. Nobody draws a letter
+  // that finishes in the crease, and this needs the stroke to be near-straight
+  // AND a net AND a shooter to all resolve, so it can't fire on stray ink.
+  const shotStray = s => {
+    const last = s.pts[s.pts.length - 1];
+    return dist(s.pts[0], last) / pathLen([s.pts]) > 0.85 &&
+      !!netAt(last) && !!sourceAt(s.pts[0]);
+  };
   const clusterFail = cs => {
-    const bigs = cs.filter(s => s.diag >= U(SYMBOL_MAX, 85));
+    const bigs = cs.filter(s => s.diag >= U(SYMBOL_MAX, 85) || shotStray(s));
     fallThrough.push(...bigs);
     const rest = cs.filter(s => !bigs.includes(s));
     if (rest.length) unrec.push(rest);

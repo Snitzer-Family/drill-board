@@ -504,7 +504,11 @@ export default function DrillAnimator() {
       // the board the strokes were read against: without it, "why didn't this
       // become a pass" can't be answered — the answer is usually how far the
       // nearest player was
-      players: (d.ctx.players || []).map(p => [p.id, round(p.x), round(p.y), p.hasPath ? 1 : 0]),
+      // …including where a route ENDS, not just that there is one: a pass or
+      // shot binds to the route end, so "is there a shooter in reach" can't be
+      // read off the player's own position once they have a path
+      players: (d.ctx.players || []).map(p => [p.id, round(p.x), round(p.y),
+        p.hasPath ? 1 : 0, ...(p.hasPath && p.end ? [round(p.end.x), round(p.end.y)] : [])]),
       nets: (d.ctx.nets || []).map(n => [n.id, round(n.x), round(n.y)]),
       ops: d.ops.map(o => ({ op: o.op, sym: o.sym, srcs: o.srcs })),
       strokes: d.strokes.map(s => s.pts.map(p => [round(p.x), round(p.y)])),
