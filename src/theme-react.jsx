@@ -14,3 +14,11 @@ import { THEMES, AUTO_MAP } from "./theme.js";
 // future subtree mounted outside the provider) can't crash on undefined.
 export const ThemeCtx = createContext(THEMES[AUTO_MAP.dark]);
 export const useTheme = () => useContext(ThemeCtx);
+
+// Separate from the token context on purpose: this maps a piece's STORED colour
+// to what the current theme should actually paint, and it's a function, not a
+// token — folding it into ThemeCtx would make useTheme()'s value stop being a
+// plain token table (which the contrast test's key-parity check relies on).
+// Identity by default, so a theme with no lift table changes nothing.
+export const InkCtx = createContext(c => c);
+export const useInk = () => useContext(InkCtx);

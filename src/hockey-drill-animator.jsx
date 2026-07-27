@@ -16,8 +16,8 @@ import { buildLedger, mayHoldOn, mayHoldEntering } from "./possession.js";
 import { classifyPenGroup, SYMBOL_MAX, SYMBOL_MAX_PX } from "./sketch-recognize.js";
 import { newGame, stepGame } from "./ai-game.js";
 import { STYLES } from "./styles.js";
-import { THEME_KEY, THEME_ATTR, THEME_ORDER, resolveTheme, tokens } from "./theme.js";
-import { ThemeCtx } from "./theme-react.jsx";
+import { THEME_KEY, THEME_ATTR, THEME_ORDER, THEME_LABEL, resolveTheme, tokens, teamInk } from "./theme.js";
+import { ThemeCtx, InkCtx } from "./theme-react.jsx";
 
 // Pen inks. These double as PIECE colours — a symbol you draw becomes a player
 // in the ink you drew it with — so they're the team colours plus the classic
@@ -725,6 +725,9 @@ export default function DrillAnimator() {
   }, []);
   const themeName = resolveTheme(themePref, prefersDark);
   const T = tokens(themeName);
+  // stored piece colour -> what this theme paints. Identity for every theme that
+  // declares no lift table, so this is inert unless a scheme opts in.
+  const ink = useMemo(() => (c => teamInk(themeName, c)), [themeName]);
   // Keep the address-bar / task-switcher colour on the resolved theme. iOS only
   // consults theme-color at LAUNCH, so this is for Safari tabs, Android, and the
   // next standalone launch; the media-scoped metas in index.html cover the
@@ -5599,7 +5602,7 @@ export default function DrillAnimator() {
   function segStroke(p, s, isLast, flat) {
     const W = w => (flat ? w : sw(w)) * lineScale;   // global route line-thickness scale
     const D = d => (flat ? d : sdash(d));
-    const base = { stroke: p.color, fill: "none", strokeLinecap: "round", opacity: 0.78,
+    const base = { stroke: ink(p.color), fill: "none", strokeLinecap: "round", opacity: 0.78,
       ...(flat ? {} : { vectorEffect: "non-scaling-stroke" }) };
     if (p.kind !== "puck") return { ...base, strokeWidth: W(0.7) };
     if (s.mode === "pass") return { ...base, strokeWidth: W(0.7), strokeDasharray: D("2.4 1.8") };
@@ -5749,7 +5752,7 @@ export default function DrillAnimator() {
     }
     return <g>{els}</g>;
   }
-  function renderActionMarks(p, bentPts, acts) { return routeActionMarks(p.path, { x: p.x, y: p.y }, acts, p.color, bentPts, ""); }
+  function renderActionMarks(p, bentPts, acts) { return routeActionMarks(p.path, { x: p.x, y: p.y }, acts, ink(p.color), bentPts, ""); }
   // the marks of a GHOST catch waypoint (a led pass's computed mid-curve catch):
   // the same incoming carat + receive badge as a real action circle, slightly
   // ghosted, with NO hit area — the spot is derived from the pass plan, so it
@@ -5769,7 +5772,7 @@ export default function DrillAnimator() {
       const mp0 = gmMove(e.x, e.y, -tx / tl, -ty / tl, actGap);
       const back = arrivalBack("main", mp0.x, mp0.y);
       const mp = back ? gmMove(e.x, e.y, -tx / tl, -ty / tl, actGap + back) : mp0;
-      els.push(routeMark(`lcm-${p.id}-${k}`, mp, ang, false, p.color, GHOST_OP));
+      els.push(routeMark(`lcm-${p.id}-${k}`, mp, ang, false, ink(p.color), GHOST_OP));
       if (!whiteboard) els.push(iconBadge({ x: e.x, y: e.y }, "collect", p.color, `lcb-${p.id}-${k}`, GHOST_OP));
     });
     return els.length ? <g>{els}</g> : null;
@@ -5928,7 +5931,7 @@ export default function DrillAnimator() {
     const tip0 = base ? gmMove(endPt.x, endPt.y, -tx / tl, -ty / tl, base) : endPt;
     const back = arrivalBack("main", tip0.x, tip0.y);
     const pt2 = back ? gmMove(endPt.x, endPt.y, -tx / tl, -ty / tl, base + back) : tip0;
-    return routeMark(`arw-${p.id}`, pt2, ang, branchAtEnd ? false : !!(p.path[n - 1] && p.path[n - 1].endStop), p.color);
+    return routeMark(`arw-${p.id}`, pt2, ang, branchAtEnd ? false : !!(p.path[n - 1] && p.path[n - 1].endStop), ink(p.color));
   }
   // end point + heading (deg) of a route path array that begins at `start`; null
   // if empty or degenerate. Shared by base routes and reaction forks.
@@ -6454,7 +6457,7 @@ export default function DrillAnimator() {
         const off = p.kind === "net" ? 6.5 : p.kind === "player" ? 4.6 : 5;
         const spot = p.kind === "player" ? tagSpotFor(p, off) : { x: p.x, y: p.y + off };
         els.push(p.kind === "player"
-          ? labelNode(`nm-${p.id}`, spot.x, spot.y, p.label, 0.62, { color: p.color }, false, null, null)
+          ? labelNode(`nm-${p.id}`, spot.x, spot.y, p.label, 0.62, { color: ink(p.color) }, false, null, null)
           : labelNode(`nm-${p.id}`, spot.x, spot.y, p.label, 0.5, { color: "#33414f" }, false, null, null));
       }
       (p.path || []).forEach((s, i) => {
@@ -6604,7 +6607,7 @@ export default function DrillAnimator() {
       const pt = segEnd(p, i - 1);
       els.push(
         <g key={`st${p.id}${i}`} opacity={0.9} pointerEvents="none">
-          {hd(pt.x, pt.y, 2, { fill: "#fff", stroke: p.color, strokeWidth: 0.35 })}
+          {hd(pt.x, pt.y, 2, { fill: "#fff", stroke: ink(p.color), strokeWidth: 0.35 })}
           <line x1={pt.x - 0.6} y1={pt.y - 1} x2={pt.x - 0.6} y2={pt.y + 1} stroke={p.color} strokeWidth={0.5} />
           <line x1={pt.x + 0.6} y1={pt.y - 1} x2={pt.x + 0.6} y2={pt.y + 1} stroke={p.color} strokeWidth={0.5} />
         </g>
@@ -8532,6 +8535,7 @@ export default function DrillAnimator() {
     // gets the same tokens as the main sheet — if the loupe's ice and the board's
     // ice ever disagree, a wrong-shade rim shows at the loupe's corners
     <ThemeCtx.Provider value={T}>
+    <InkCtx.Provider value={ink}>
     <div className={`hd-root${penMode && !aiPlay ? " pen-on" : aiPlay || !hasTimeline ? "" : " scrub-on"}${docked ? " dock-open" : ""}${
       tool === "pen" || tool === "marker" ? (eraser && tool === "pen" ? " erase-cursor" : " draw-cursor") : ""}`} ref={rootRef}>
       <style>{STYLES}</style>
@@ -8724,7 +8728,7 @@ export default function DrillAnimator() {
                             waypoints / edit); the transparent hit path below drives
                             the interaction, so the ghost stays pointer-transparent */}
                         {!cas && showRoutes && bent && (
-                          <path d={vD} fill="none" stroke={p.color}
+                          <path d={vD} fill="none" stroke={ink(p.color)}
                             strokeWidth={sw(0.5)} strokeDasharray={sdash("1.4 1.6")}
                             strokeLinecap="round" vectorEffect="non-scaling-stroke"
                             opacity={0.22} pointerEvents="none" />
@@ -8874,7 +8878,7 @@ export default function DrillAnimator() {
                   // sequence / always / possession / link / event) keeps the player's own
                   // colour — it's a decision, not a colour-coded read.
                   const cd = condOf(f);
-                  const routeCol = cd.type === "light" ? (cd.color || f.color) : p.color;
+                  const routeCol = cd.type === "light" ? (cd.color || f.color) : ink(p.color);
                   // same stroke as a base route (segStroke: thickness setting × lineScale,
                   // 0.78 opacity, non-scaling) with the cue colour swapped in; non-chosen
                   // alternatives dim to half the base opacity and keep their dash
@@ -9675,7 +9679,7 @@ export default function DrillAnimator() {
             {THEME_ORDER.map(v => (
               <button key={v} className={`hd-mini${themePref === v ? " on" : ""}`}
                 onClick={() => setThemePref(v)}>
-                {v === "auto" ? "Auto" : v === "light" ? "Light" : "Dark"}
+                {THEME_LABEL[v] || v}
               </button>
             ))}
             <span className="hd-sechint">
@@ -10214,6 +10218,7 @@ export default function DrillAnimator() {
       )}
       {showDiag && <DiagPanel drillVersion={drillVersion} />}
     </div>
+    </InkCtx.Provider>
     </ThemeCtx.Provider>
   );
 }

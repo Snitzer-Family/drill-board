@@ -28,8 +28,7 @@ export const AUTO_MAP = { light: "light", dark: "dark" };
 // left to choose would fight the manual override.
 export const SCHEME = { light: "light", dark: "dark" };
 
-export const THEMES = {
-  light: {
+const LIGHT = {
     /* surfaces — what you put content ON */
     "surface-app": "#e7edf3",
     "surface-bar": "#f4f7fa",
@@ -91,9 +90,9 @@ export const THEMES = {
     // gradient stops. Also NOT `transparent` — same Safari premultiply problem.
     "fx-edge": "rgba(20,32,43,.16)",
     "fx-edge-0": "rgba(20,32,43,0)",
-  },
+};
 
-  dark: {
+const DARK = {
     "surface-app": "#0c1014",
     "surface-bar": "#11161c",
     "surface-panel": "#1a222c",
@@ -142,12 +141,127 @@ export const THEMES = {
     "fx-shadow-lg": "0 8px 24px rgba(0,0,0,.5)",
     "fx-edge": "rgba(0,0,0,.55)",
     "fx-edge-0": "rgba(0,0,0,0)",
-  },
 };
 
-// Order of the Auto/Light/Dark chips in Tune → Display. "auto" is not a theme,
-// it's the absence of an override.
-export const THEME_ORDER = ["auto", "light", "dark"];
+/* =================== PROPOSAL MOCKUPS — evaluation only ===================
+   Three candidate schemes, live so they can be compared on-device. Built by
+   spreading over LIGHT/DARK so they can't fall out of key parity.
+
+   To remove: delete this block, the three entries in THEMES, their THEME_ORDER
+   and THEME_LABEL entries, and TEAM_LIFT below. Nothing else references them.
+
+   Measured facts these are answering (see the contrast test for the method):
+   - ice vs surface-app is 1.04:1 in dark and 1.12:1 in light, so the rink
+     barely separates from the room it sits in;
+   - the six stored team colours were chosen for white ice — on #0d151c, blue
+     (2.37), purple (2.72) and black (1.21) all fail 3:1;
+   - no middle ground exists: a mid-slate sheet drops the worst team colour to
+     1.39:1, and even a faintly tinted #e3ecf3 puts orange under 3.
+   ------------------------------------------------------------------------ */
+
+// 1. "Fresh Sheet" — light. Make the rink the BRIGHTEST surface and drop the
+//    surround, so the sheet reads as lit rather than as another panel.
+const SHEET = {
+  ...LIGHT,
+  "surface-app": "#dde5ec",
+  "surface-bar": "#e9eff5",
+  "surface-raised": "#e4ebf2",
+  text: "#0e1a24",
+  "text-muted": "#55677a",
+  accent: "#10707c",          // frost cyan, hue 186 — clear of team blue at 218
+  focus: "#0b6d66",
+  ice: "#fbfdff",             // 1.25:1 against the room, up from 1.12
+  "ui-select": "#b87e00",     // #c98a00 measured 2.89 on the brighter sheet
+  "ice-select": "#b87e00",
+};
+
+// 2. "Barn" — the arena at night: the room goes properly dark, the sheet stays
+//    lit. Best-measuring option (rink separation 18.8:1, every team colour keeps
+//    its white-ice contrast) but dark mode then doesn't darken the biggest
+//    surface on screen, and a lit rink may glare at a dark arena.
+const BARN = {
+  ...DARK,
+  "surface-app": "#05080b",
+  "surface-bar": "#0a1015",
+  "surface-panel": "#131c26",
+  "surface-panel-0": "rgba(19,28,38,0)",
+  "surface-raised": "#1b2531",
+  "surface-sunken": "#080d12",
+  border: "#26323f",
+  "border-strong": "#364554",
+  "border-hair": "#1a242f",
+  accent: "#147a86",
+  // the glass player bar now composites over a LIT sheet (#3b4148, not the near
+  // black it used to sit on), so its text and rail have to lift with it
+  "text-muted": "#9aaec1",
+  // the rail is squeezed from both sides — light enough to read on the glass
+  // (3.23) but dark enough for its own knob (3.20), which has to go pure white
+  track: "#8292a2",
+  "track-thumb": "#ffffff",
+  // the sheet and everything on it revert to the light treatment
+  ice: "#fbfdff",
+  "ice-line-red": "#d7263d",
+  "ice-line-blue": "#1f4fa3",
+  "ice-crease": "#1f4fa3",
+  // the boards outline is the one thing straddling both worlds — lit sheet
+  // inside, near-black room outside — so it needs 3:1 against BOTH
+  "ice-boards": "#545f69",
+  "ice-dash": "#ffffff",
+  "ice-ink": "#14171a",
+  "ice-select": "#b87e00",
+};
+
+// 3. "Slate" — keeps the dark rink and fixes what sits ON it instead: the sheet
+//    lifts for separation, and team colours get a per-theme RENDERED value (see
+//    TEAM_LIFT) while their stored DSL value never changes.
+const SLATE = {
+  ...DARK,
+  "surface-app": "#04070a",
+  "surface-bar": "#090f15",
+  "surface-panel": "#141d27",
+  "surface-panel-0": "rgba(20,29,39,0)",
+  "surface-raised": "#1c2733",
+  accent: "#137d89",       // 3.08 on the slate sheet, 3.49 on its panel
+  ice: "#1a2836",             // 1.35:1 against the room, up from 1.04
+  "ice-surround": "#1a2836",
+  "ice-line-red": "#ff6472",
+  "ice-line-blue": "#6ba3f0",
+  "ice-crease": "#547399",
+  "ice-boards": "#6a819a",
+  "ice-dash": "#1a2836",
+  "ice-ink": "#d6e2ee",
+};
+
+// Per-theme RENDERED team colours. The stored DSL value is never touched — this
+// is the same trick that rescued the puck: hue and saturation are held and only
+// lightness moves, so a red player still reads red. Keyed by the stored hex.
+// A theme absent here renders team colours exactly as authored.
+export const TEAM_LIFT = {
+  slate: {
+    "#d7263d": "#de475b",   // red     3.71 -> 4.53 on the slate sheet
+    "#1f4fa3": "#457bdc",   // blue    2.37 -> 4.50
+    "#1f8a4c": "#20904f",   // green   4.20 -> 4.51
+    "#e0731d": "#c46519",   // orange  5.82 -> 4.58
+    "#22262b": "#727f90",   // black   1.21 -> 4.52
+    "#7a3fa8": "#9c67c6",   // purple  2.72 -> 4.53
+  },
+};
+// stored colour -> what this theme should actually paint
+export const teamInk = (theme, stored) =>
+  (TEAM_LIFT[theme] && TEAM_LIFT[theme][String(stored).toLowerCase()]) || stored;
+
+/* ================= end proposal mockups ================= */
+
+export const THEMES = { light: LIGHT, dark: DARK, sheet: SHEET, barn: BARN, slate: SLATE };
+
+// Order of the chips in Tune → Display. "auto" is not a theme, it's the absence
+// of an override — only light/dark are reachable from the OS preference, so the
+// proposal schemes are manual-only by construction.
+export const THEME_ORDER = ["auto", "light", "dark", "sheet", "barn", "slate"];
+export const THEME_LABEL = {
+  auto: "Auto", light: "Light", dark: "Dark",
+  sheet: "Sheet", barn: "Barn", slate: "Slate",
+};
 
 // Tokens holding a shadow (not a colour) — the contrast test skips parsing these.
 export const SHADOW_TOKENS = ["fx-shadow", "fx-shadow-lg"];

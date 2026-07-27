@@ -1,7 +1,7 @@
 // Piece icons (screen-true frames), stepper control, diagnostics overlay.
 import { useState, useRef, useEffect } from "react";
 import { APP_VERSION, BUILD_STAMP, ICON_SCALE, DSL_VERSION, symOf } from "./constants.js";
-import { useTheme } from "./theme-react.jsx";
+import { useTheme, useInk } from "./theme-react.jsx";
 
 /* ---------------- unified action icons ----------------
    One monochrome, stroke-based set drawn on a 24×24 grid in currentColor, so
@@ -158,6 +158,7 @@ export function DiagPanel({ drillVersion }) {
 
 export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStickDown, swing = 0, noShadow = false, hitOff = false, wb = false, wbCircle = false }) {
   const T = useTheme();
+  const ink = useInk();
   const SEL = T["ice-select"];
   const frame = xf || `translate(${pos.x} ${pos.y}) rotate(${pos.a || 0}) scale(${ICON_SCALE})`;
   let body;
@@ -245,7 +246,7 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
   } else if (p.kind === "cone")
     body = (
       <path d="M 0 -2.4 L 2.2 1.8 L -2.2 1.8 Z"
-        fill={p.color} stroke={selected ? SEL : "#fff"} strokeWidth={0.35} strokeLinejoin="round" pointerEvents="none" />
+        fill={ink(p.color)} stroke={selected ? SEL : "#fff"} strokeWidth={0.35} strokeLinejoin="round" pointerEvents="none" />
     );
   else if (p.kind === "bumper") {
     // solid barrier laid on the ice — a black rectangle; runs along local +x,
@@ -331,12 +332,12 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
           // and its fill blanks the interior so rink markings don't show through
           <g transform={`rotate(${-thDeg})`} strokeLinejoin="round">
             <path d={shapePath} fill="#fff" stroke="rgba(255,255,255,0.9)" strokeWidth={1.9} />
-            <path d={shapePath} fill="none" stroke={p.color} strokeWidth={0.9} />
+            <path d={shapePath} fill="none" stroke={ink(p.color)} strokeWidth={0.9} />
           </g>
         ) : (<>
-          {wbCircle && <circle cx={0} cy={0} r={3.3} fill="#fff" stroke={p.color} strokeWidth={0.5} />}
+          {wbCircle && <circle cx={0} cy={0} r={3.3} fill="#fff" stroke={ink(p.color)} strokeWidth={0.5} />}
           <text transform={`rotate(${-thDeg})`} textAnchor="middle" dominantBaseline="central"
-            fontSize={fs} fontWeight={900} fill={p.color}
+            fontSize={fs} fontWeight={900} fill={ink(p.color)}
             style={{ userSelect: "none", fontFamily: "system-ui, sans-serif",
               ...(wbCircle ? {} : { paintOrder: "stroke", stroke: "rgba(255,255,255,0.9)", strokeWidth: 0.55 }) }}>
             {sym}
@@ -353,17 +354,17 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
             sticky ground shadow is drawn separately then) */}
         {!noShadow && <ellipse cx={-0.5} cy={0} rx={3.6} ry={3.9} fill="#0a1016" opacity={0.16} />}
         <path d="M 1.3 0 C 1.3 -2.2 0.6 -3.2 -0.5 -3.3 C -2.0 -3.4 -2.8 -2.2 -2.8 -1.1 L -2.8 1.1 C -2.8 2.2 -2.0 3.4 -0.5 3.3 C 0.6 3.2 1.3 2.2 1.3 0 Z"
-          fill={p.color} stroke="#fff" strokeWidth={0.32} />
+          fill={ink(p.color)} stroke="#fff" strokeWidth={0.32} />
         <path d="M -1.5 -3.15 Q -0.55 0 -1.5 3.15" fill="none" stroke="#fff" strokeWidth={0.42} opacity={0.75} />
         <g transform={`${p.hand === "L" ? "scale(1 -1) " : ""}${swing ? `rotate(${swing} 1 0)` : ""}`.trim() || undefined}>
-          <path d="M -0.3 -2.5 C 0.7 -2.3 1.4 -1.4 1.7 -0.5" fill="none" stroke={p.color} strokeWidth={1.05} strokeLinecap="round" />
-          <path d="M -0.3 2.5 C 0.9 2.4 1.9 2.0 2.6 1.5" fill="none" stroke={p.color} strokeWidth={1.05} strokeLinecap="round" />
+          <path d="M -0.3 -2.5 C 0.7 -2.3 1.4 -1.4 1.7 -0.5" fill="none" stroke={ink(p.color)} strokeWidth={1.05} strokeLinecap="round" />
+          <path d="M -0.3 2.5 C 0.9 2.4 1.9 2.0 2.6 1.5" fill="none" stroke={ink(p.color)} strokeWidth={1.05} strokeLinecap="round" />
           <path d="M 1.75 -0.35 L 4.35 2.75" stroke={dark} strokeWidth={0.4} strokeLinecap="round" />
           <path d="M 4.2 2.6 L 5.6 2.45" stroke={dark} strokeWidth={0.8} strokeLinecap="round" />
           <circle cx={1.8} cy={-0.3} r={0.75} fill={dark} />
           <circle cx={2.7} cy={1.55} r={0.75} fill={dark} />
         </g>
-        <circle cx={0.85} cy={0} r={1.55} fill={p.color} />
+        <circle cx={0.85} cy={0} r={1.55} fill={ink(p.color)} />
         <circle cx={0.85} cy={0} r={1.55} fill="#000" opacity={0.45} />
         <path d="M 0.1 -1.0 Q 0.9 -1.5 1.7 -1.0" fill="none" stroke="#fff" strokeWidth={0.22} opacity={0.35} />
         <text x={-1.7} y={0.92} transform={`rotate(${-thDeg} -1.7 0)`}
