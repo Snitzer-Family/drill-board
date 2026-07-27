@@ -1,6 +1,7 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import DrillAnimator from "./hockey-drill-animator.jsx";
+import { stashAutosave } from "./storage.js";
 
 // A render crash used to blank the whole app to the dark background ("black
 // screen") with no way back. This boundary shows the error + a recovery path
@@ -26,9 +27,17 @@ class ErrorBoundary extends React.Component {
         <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 10, color: "var(--db-danger)" }}>DrillBoard hit an error</div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 }}>
           <button style={btn} onClick={() => this.setState({ err: null })}>Try again</button>
-          <button style={btn} onClick={() => { try { localStorage.removeItem("drillboard:autosave"); } catch { /* ignore */ } location.reload(); }}>
+          {/* The board is STASHED, not deleted. It still has to leave the
+              autosave slot — a poisoned board would just re-crash on boot — but
+              this used to be an unrecoverable delete, and it's the button a
+              coach taps at the rink with no idea it costs them the session's
+              work. ☰ → "Restore last board" brings it back. */}
+          <button style={btn} onClick={() => { stashAutosave(); location.reload(); }}>
             Reset drill &amp; reload
           </button>
+          <div style={{ flexBasis: "100%", fontSize: 12, opacity: 0.7 }}>
+            Your board is kept — reopen the app and choose ☰ → Restore last board.
+          </div>
         </div>
         <div style={{ whiteSpace: "pre-wrap", opacity: 0.85 }}>{msg}</div>
       </div>

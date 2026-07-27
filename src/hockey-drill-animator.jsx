@@ -18,6 +18,7 @@ import { newGame, stepGame } from "./ai-game.js";
 import { STYLES } from "./styles.js";
 import { THEME_KEY, THEME_ATTR, THEME_ORDER, THEME_LABEL, resolveTheme, tokens, teamInk } from "./theme.js";
 import { ThemeCtx, InkCtx } from "./theme-react.jsx";
+import { SAVE_KEY, peekBackup, clearBackup } from "./storage.js";
 
 // Pen inks. These double as PIECE colours — a symbol you draw becomes a player
 // in the ink you drew it with — so they're the team colours plus the classic
@@ -320,7 +321,8 @@ function DelayTrigger({ value, onChange, sub, players, actorIds, nameOf }) {
    drag to move; touch drags show a magnifier loupe.
    ============================================================ */
 
-const SAVE_KEY = "drillboard:autosave";   // the whole board, persisted across refreshes
+// SAVE_KEY lives in storage.js: main.jsx's crash boundary needs the same key,
+// and it renders outside this component so it can't reach a const in here.
 const WB_KEY = "drillboard:whiteboard";   // whiteboard-mode view pref, persisted on its own
 const WBC_KEY = "drillboard:whiteboard-circle";   // circled X/O symbols sub-pref
 const WBN_KEY = "drillboard:whiteboard-names";    // always-on player name tags sub-pref
@@ -633,6 +635,10 @@ export default function DrillAnimator() {
     };
   }, [openMenu]);
   const menuAnchor = menuLeft != null ? { left: menuLeft, right: "auto" } : undefined;
+  // A board stashed by the crash boundary's "Reset drill & reload", if any.
+  // Read once at mount: it can only be written by a crash, which reloads the
+  // page anyway, so there is nothing to react to mid-session.
+  const [crashBackup, setCrashBackup] = useState(() => peekBackup());
   const [textDraft, setTextDraft] = useState(DEFAULT_TEXT);
   const [textError, setTextError] = useState("");
   const [textCloseAsk, setTextCloseAsk] = useState(false);  // "unapplied edits" guard on Done
@@ -9610,6 +9616,19 @@ export default function DrillAnimator() {
           <button className="hd-item" onClick={() => { copyMd(); setOpenMenu(null); }}><Icon name="duplicate" size={16} /> Copy markdown</button>
           <button className="hd-item" onClick={() => { previewLink(); setOpenMenu(null); }}><Icon name="share" size={16} /> Share preview link</button>
           <button className="hd-item" onClick={() => fileRef.current?.click()}><Icon name="upload" size={16} /> Load .txt / .md</button>
+          {crashBackup && (
+            <button className="hd-item" onClick={() => {
+              const r = parseDrill(crashBackup);
+              if (r.errors.length) { flash("That saved board can't be read", 3200); return; }
+              // no explicit undo push: the doc-watching effect records a
+              // snapshot whenever pieces/rink/steps change, so a restore is
+              // already as undoable as a file Load
+              applyDrillPreview(r);
+              clearBackup(); setCrashBackup(null);
+              setOpenMenu(null);
+              flash("Board restored", 2600);
+            }}><Icon name="reset" size={16} /> Restore last board</button>
+          )}
           <button className="hd-item" disabled={!!photoBusy} onClick={() => { setOpenMenu(null); photoRef.current?.click(); }}><Icon name="camera" size={16} /> Import from photo…</button>
           <button className="hd-item"
             onClick={() => setShowZones(s => !s)}>

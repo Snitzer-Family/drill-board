@@ -24,7 +24,10 @@ restart so the settings watcher reloads it.
 
 ## Workflow rules (always)
 
-1. **Verify before committing:** run `npm run build` and confirm it passes.
+1. **Verify before committing:** run `npm test` and `npm run build`; both must
+   pass. `npm test` auto-discovers every `tests/*.mjs`, so a new suite is
+   enforced the moment it lands — there is no list to update. CI runs the tests
+   before the build, so a failing suite blocks the deploy.
 2. **Bump the version** on every behavioral change: `APP_VERSION` in
    `src/constants.js`. The build timestamp is injected automatically by
    `vite.config.js` — never hardcode it.
@@ -76,7 +79,15 @@ restart so the settings watcher reloads it.
   — intentionally NOT regulation; yFix prop counter-corrects fill-stretch so
   circles render round)
 - `icons.jsx` — PieceIcon (screen-true matrix frames), Stepper, DiagPanel
-- `styles.js` — ALL CSS, including the hard-won safe-area layout rules
+- `styles.js` — ALL CSS, including the hard-won safe-area layout rules. Colours
+  are `var(--db-*)` tokens only — a raw hex here fails `tests/theme-contrast.mjs`
+- `theme.js` — the colour system: semantic tokens per theme, the CSS emitter,
+  the pre-paint boot script, and the declared contrast pairs. Plain ESM with NO
+  imports so `vite.config.js`, `scripts/*.mjs` and `node tests/*.mjs` can load it
+- `theme-react.jsx` — `useTheme()` (tokens for the SVG, which can't use `var()`
+  in presentation attributes) and `useInk()` (stored piece colour → painted)
+- `storage.js` — autosave key + the crash-recovery stash, shared with `main.jsx`
+  (which renders outside the app and must not hardcode the key)
 - `possession.js` — the possession ledger: pure, condition-aware possession
   stints + loose-puck intervals per puck (branch-choice atom conjunctions prove
   cross-player mutual exclusion); node-testable, no seed/DOM
@@ -117,9 +128,19 @@ restart so the settings watcher reloads it.
 
 ## Testing reality
 
-There is no automated test suite. The build is the gate; the user tests on
-an iPhone 15 (standalone). For risky changes, prefer small commits so the
-watermark + Actions history make bisection trivial.
+`npm test` runs every `tests/*.mjs` (auto-discovered, one process each) and CI
+runs it before the build, so a failing suite blocks the deploy. They cover the
+pure, node-testable cores — possession ledger, drill fit, auto-net, sketch
+recogniser, theme contrast, crash-recovery stash — plus drift guards that pin
+invariants a reader can't verify by eye (no raw hex in `styles.js`, `MENU_W` vs
+`--hd-menu-w`, `drill-svg.js` fallbacks tracking `THEMES.light`).
+
+Nothing covers the rendered UI. That still means an iPhone 15 (standalone) and
+the user's eyes, and it is where the real bugs have been — a stated `height:40px`
+that renders 50, a menu centred on a width it doesn't have. **Measure the DOM in
+a browser rather than reasoning from the CSS**; there is no global box-sizing
+reset, so any padded element lies about its size. For risky changes prefer small
+commits, so the watermark + Actions history make bisection trivial.
 
 ## Verifying pen / UI changes (browser harness)
 
