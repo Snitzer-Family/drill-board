@@ -1,6 +1,6 @@
 // Piece icons (screen-true frames), stepper control, diagnostics overlay.
 import { useState, useRef, useEffect } from "react";
-import { APP_VERSION, BUILD_STAMP, ICON_SCALE, DSL_VERSION } from "./constants.js";
+import { APP_VERSION, BUILD_STAMP, ICON_SCALE, DSL_VERSION, symOf } from "./constants.js";
 
 /* ---------------- unified action icons ----------------
    One monochrome, stroke-based set drawn on a 24×24 grid in currentColor, so
@@ -298,7 +298,7 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
   } else if (wb && p.kind === "player") {
     // whiteboard mode: the classic coach's symbol (X / O / LW / △…) instead of
     // the skater art — flat (no shadow), upright via the label's counter-rotation
-    const sym = (p.sym && p.sym.trim()) || "X";
+    const sym = symOf(p);
     // △ ○ □ draw as real strokes — font glyphs for these are hairline-thin and
     // vary by OS, so they can't match the 900-weight letters
     const shapePath = sym === "△" ? "M 0 -2.9 L 2.75 2.05 L -2.75 2.05 Z"

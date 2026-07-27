@@ -6,7 +6,21 @@ export const COLORS = ["#d7263d", "#1f4fa3", "#1f8a4c", "#e0731d", "#22262b", "#
 export const SPEED = { carry: 1, pass: 7, shot: 10 };
 export const vb = m => VIEWS[m].join(" ");
 
-export const APP_VERSION = "6.17";
+// The coach's whiteboard shorthand — offered both as a player NAME preset and as
+// the whiteboard symbol, so the two read as one vocabulary and translate freely.
+export const WB_SYMS = ["X", "O", "F", "D", "G", "C", "W", "CO", "LW", "RW", "LD", "RD", "△", "○", "□"];
+// What a player actually draws in whiteboard mode: an explicit sym= wins, else
+// the NAME is the symbol — except an auto-assigned P1/P2 id, which falls back to
+// the classic X. Clamped to 3 chars: the DSL doesn't cap label length, only the
+// popup input does, and a long imported name would blow out the glyph.
+export const symOf = p => {
+  const s = (p.sym || "").trim();
+  if (s) return s.slice(0, 3);
+  const l = (p.label || "").trim();
+  return l && !/^P\d+$/.test(l) ? l.slice(0, 3) : "X";
+};
+
+export const APP_VERSION = "6.18";
 // DSL schema version, stamped into every serialized drill (`DSL <n>` header) so
 // production builds can eventually render a drill per the version that wrote it.
 // Bump ONLY on a breaking DSL change (new kinds/modifiers that older builds would

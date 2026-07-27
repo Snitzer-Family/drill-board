@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo, Fragment } from "react";
 import { VIEWS, COLORS, vb, APP_VERSION, ICON_SCALE, ROUTE_START_GAP, BUILD_STAMP, DEFAULT_TEXT, SPEED,
-  SAVE_PROB, MISS_POST, MISS_WIDE, MISS_OVER, SHOT_AIR_PROB, BOUNCE_REST } from "./constants.js";
+  SAVE_PROB, MISS_POST, MISS_WIDE, MISS_OVER, SHOT_AIR_PROB, BOUNCE_REST, WB_SYMS, symOf } from "./constants.js";
 import { parseDrill, serializeDrill, extractDrill, deriveInventory, ensureShotNet } from "./drill-format.js";
 import { prepareImage, drillFromImage, ANTHROPIC_KEY_STORE } from "./drill-vision.js";
 import { drillSvg } from "./drill-svg.js";
@@ -5731,13 +5731,14 @@ export default function DrillAnimator() {
           e => pieceDown(e, p.id),
           canEdit && !p.lock ? e => handleDown(e, { kind: "resize", id: p.id, seg: null, cx: p.x, cy: p.y, size0: p.size || 1 }) : null,
           p.lock && !lockedSelectable));
-      } else if (p.label && (p.kind !== "player" || wbTags)) {
+      } else if (p.label && (p.kind !== "player" || (wbTags && symOf(p) !== p.label))) {
         // a name tag under any named prop/piece. Players normally wear the name
         // on their jersey, but the whiteboard X/O symbols don't — tag them when
         // the pref is on, or while a player popup is open (pass-target picking),
-        // so "pass to P3" is findable on the ice. Player tags rotate around the
-        // symbol to the clearest spot (never on a route/pass line) and read
-        // slightly larger, in the player's own colour.
+        // so "pass to P3" is findable on the ice. Skipped when the symbol already
+        // IS the name (a player named LW draws as LW) — no point saying it twice.
+        // Player tags rotate around the symbol to the clearest spot (never on a
+        // route/pass line) and read slightly larger, in the player's own colour.
         const off = p.kind === "net" ? 6.5 : p.kind === "player" ? 4.6 : 5;
         const spot = p.kind === "player" ? tagSpotFor(p, off) : { x: p.x, y: p.y + off };
         els.push(p.kind === "player"
@@ -6639,12 +6640,22 @@ export default function DrillAnimator() {
                   </div>
                 </div>
               )}
+              {/* the name doubles as the whiteboard symbol, so it's offered from
+                  the same shorthand list — pick LW here and the board reads LW.
+                  A preset clears any explicit sym= so the new name shows through */}
               <div className="hd-field">
                 <div className="hd-sectitle">Name</div>
+                <div className="hd-poprow">
+                  {WB_SYMS.map(s => (
+                    <button key={s} className={`hd-mini${p.label === s ? " on" : ""}`}
+                      onClick={() => updateById(p.id, { label: s, sym: "" })}>{s}</button>
+                  ))}
+                </div>
                 <div className="hd-poprow">
                   <input className="hd-input" style={{ width: 56 }} value={p.label} maxLength={3}
                     onChange={e => updateById(p.id, { label: e.target.value })} />
                 </div>
+                {whiteboard && <div className="hd-sechint">Also the whiteboard symbol, unless one is set below.</div>}
               </div>
               <div className="hd-field">
                 <div className="hd-sectitle">Color</div>
@@ -6669,11 +6680,14 @@ export default function DrillAnimator() {
                 <div className="hd-field">
                   <div className="hd-sectitle">Whiteboard icon</div>
                   <div className="hd-poprow" style={{ flexWrap: "wrap" }}>
+                    {/* Auto = follow the name; the button shows what that resolves to */}
                     <button className={`hd-mini${!(p.sym && p.sym.trim()) ? " on" : ""}`}
-                      onClick={() => updateById(p.id, { sym: "" })}>Auto (X)</button>
-                    {["X", "O", "F", "D", "G", "C", "W", "CO", "LW", "RW", "LD", "RD", "△", "○", "□"].map(s => (
+                      onClick={() => updateById(p.id, { sym: "" })}>Auto ({symOf({ ...p, sym: "" })})</button>
+                    {WB_SYMS.map(s => (
+                      // an icon names the player too while they're still an unnamed
+                      // P1/P2 — otherwise it's an override and the real name stands
                       <button key={s} className={`hd-mini${p.sym === s ? " on" : ""}`}
-                        onClick={() => updateById(p.id, { sym: s })}>{s}</button>
+                        onClick={() => updateById(p.id, /^P\d+$/.test(p.label || "") ? { sym: s, label: s } : { sym: s })}>{s}</button>
                     ))}
                   </div>
                   <div className="hd-poprow">
@@ -9143,7 +9157,7 @@ export default function DrillAnimator() {
           <div className="hd-note">
             Feet: x 0–200, y 0–85. <b>RINK</b> full|half|quarter ·
             <b> PIECE</b> id player|puck|cone|net|bumper|deker|passer|label|tire x y [#color] [label] [speed=1.2] [hand=L] [sym=LW] [on=F1]
-            (<code>sym=</code> is a player&apos;s whiteboard symbol — ≤3 chars, shown instead of the skater when <b>Whiteboard mode</b> is on; <code>△</code>/<code>○</code>/<code>□</code> draw as real shapes; unset defaults to X)
+            (<code>sym=</code> is a player&apos;s whiteboard symbol — ≤3 chars, shown instead of the skater when <b>Whiteboard mode</b> is on; <code>△</code>/<code>○</code>/<code>□</code> draw as real shapes; unset falls back to the player&apos;s name, or X if that&apos;s still the auto id like P1)
             (a <b>bumper</b> is a solid barrier — players skate around it and pucks carom off it; a <b>deker</b> a stickhandling gate, a <b>passer</b> a rebounder box — all take <code>face=deg</code>)
             (a <b>tire</b> is an agility prop — <code>size=1</code> large / <code>size=0.55</code> small; add <code>goalie</code> for a keeper that works the full circle to defend shots at it)
             (a <b>label</b> is a movable/resizable text note: <code>PIECE L1 label 100 40 size=1.2 "Regroup here"</code> —
