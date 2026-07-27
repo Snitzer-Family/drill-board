@@ -458,7 +458,7 @@ export default function DrillAnimator() {
     clearTimeout(penTimer.current);
     if (pending.length) setPenInk([]);
     const board = pending.length
-      ? materializePenOps(piecesRef.current, pending.map(s => ({ op: "mark", pts: s.pts })))
+      ? materializePenOps(piecesRef.current, pending.map(s => ({ op: "mark", pts: s.pts, press: s.press })))
       : piecesRef.current;
     const marks = board.filter(p => p.kind === "mark" && !p.lock && (p.pts || []).length >= 2);
     if (!marks.length) { if (pending.length) setPieces(board); flash("No ink to convert"); return; }
@@ -529,6 +529,7 @@ export default function DrillAnimator() {
   eraserRef.current = eraser;
   // auto: every settled burst is read straight away. Off: strokes stay ink
   // until Convert reads the whole drawing at once.
+  const [penPop, setPenPop] = useState(null);   // "size" | "style" popover, or null
   const [autoConv, setAutoConv] = useState(true);
   const autoRef = useRef(true);
   autoRef.current = autoConv;
@@ -4152,11 +4153,15 @@ export default function DrillAnimator() {
   // buffer until a settle pause, then the burst is recognized into pieces
   function beginPen(e) {
     clearTimeout(penTimer.current);   // drawing again keeps the burst open
+    setPenPop(null);                          // drawing dismisses any open popover
     if (!penBuf.current.length) penScale.current = ftPerPx();   // per-burst view scale
     const pt = svgPt(e);
     drawRaw.current = [pt];
     setDrawPreview([pt]);
-    penDraw.current = { t0: performance.now() };
+    // Apple Pencil reports 0..1 barrel pressure; a finger reports a constant
+    // (0 or 1) and a mouse 0.5, so only a real stylus varies the weight
+    penDraw.current = { t0: performance.now(), press: [], stylus: e.pointerType === "pen" };
+    if (e.pointerType === "pen" && e.pressure > 0) penDraw.current.press.push(e.pressure);
     setPenTip(pt);
     // pid locks the stroke to THIS pointer: a palm landing mid-stroke can't
     // feed it. `touch` (the loupe) is for fingertips only, never a Pencil.
@@ -4184,14 +4189,19 @@ export default function DrillAnimator() {
     setDrawPreview(null);
     setPenTip(null);
     if (penDraw.current) {            // smart pen: buffer, don't leave the tool
-      const { t0 } = penDraw.current;
+      const { t0, press: samples, stylus } = penDraw.current;
+      // one weight per stroke from how hard the Pencil was pressed. Marks carry
+      // a single width, so a within-stroke taper would mean rebuilding ink as
+      // filled outlines — this gives light and heavy strokes without that.
+      const press = stylus && samples.length
+        ? samples.reduce((a, v) => a + v, 0) / samples.length : null;
       penDraw.current = false;
       if (eraserRef.current) {        // eraser: the stroke rubs out, never draws
         if (raw.length) eraseAlong(raw);
         return;
       }
       if (raw.length) {               // a bare tap is a dot — the puck gesture
-        penBuf.current.push({ pts: raw.map(q => ({ x: q.x, y: q.y })), t0, t1: performance.now() });
+        penBuf.current.push({ pts: raw.map(q => ({ x: q.x, y: q.y })), t0, t1: performance.now(), press });
         setPenInk(penBuf.current.map(s => s.pts));
       }
       clearTimeout(penTimer.current);
@@ -4306,7 +4316,7 @@ export default function DrillAnimator() {
     // Manual mode: strokes just lay down as ink. Nothing is read until you hit
     // Convert, which looks at the whole drawing at once.
     if (!autoRef.current) {
-      setPieces(ps => materializePenOps(ps, fresh.map(s => ({ op: "mark", pts: s.pts }))));
+      setPieces(ps => materializePenOps(ps, fresh.map(s => ({ op: "mark", pts: s.pts, press: s.press }))));
       return;
     }
     // recent pen ink the new strokes touch rejoins the burst: a finger takes
@@ -4393,7 +4403,11 @@ export default function DrillAnimator() {
       }
       return pi;
     };
-    const inkMark = pts => {
+    // Pencil pressure scales the weight around the chosen width: a feather
+    // touch lands ~60%, a hard press ~150%. Clamped so ink stays ink.
+    const pressW = press => (press == null ? penW
+      : Math.max(0.25, Math.min(3.5, penW * (0.6 + 1.1 * Math.min(1, press * 1.6)))));
+    const inkMark = (pts, press) => {
       // thin the trail, then RDP to control points — both view-scaled so the
       // stored ink keeps the shape that was actually drawn
       const trail = pts.filter((q, i) => i === 0 || Math.hypot(q.x - pts[i - 1].x, q.y - pts[i - 1].y) > inkStepFt());
@@ -4404,7 +4418,7 @@ export default function DrillAnimator() {
       const id = nextId("mark", out);
       penMarkAge.current.set(id, performance.now());
       out.push({ id, kind: "mark", pts: cps, x: cps[0].x, y: cps[0].y,
-        color: markColor, width: penW, style: markStyle, path: [] });
+        color: markColor, width: pressW(press), style: markStyle, path: [] });
     };
     ops.forEach((o, i) => {
       if (o.op === "player") {
@@ -4486,7 +4500,7 @@ export default function DrillAnimator() {
           ...(o.net ? { net: o.net } : {}),
         }] };
       } else if (o.op === "mark") {
-        inkMark(o.pts);
+        inkMark(o.pts, o.press);
       }
     });
     return out;
@@ -4910,7 +4924,10 @@ export default function DrillAnimator() {
       }
       // the pen shows a footprint reticle instead of the magnifying loupe —
       // the loupe's offset panel is more distraction than help when sketching
-      if (d.pen) setPenTip(pt);
+      if (d.pen) {
+        setPenTip(pt);
+        if (penDraw.current?.stylus && e.pressure > 0) penDraw.current.press.push(e.pressure);
+      }
       else if (d.touch) setLoupe(pt);
       return;
     }
@@ -6768,9 +6785,9 @@ export default function DrillAnimator() {
       body = (
         <>
           {/* same order as the main Add/draw palette so both grids build one
-              muscle memory; Draw-a-route leads here too */}
-          <button className="hd-item" onClick={() => { setPopup(null); resetAnim(); setPlaying(false); setTool("draw"); }}>
-            <Icon name="pencil" size={16} /> Draw a route
+              muscle memory; the pen leads here too */}
+          <button className="hd-item" onClick={() => { setPopup(null); resetAnim(); setPlaying(false); setTool("pen"); setPenMode(true); }}>
+            <Icon name="marker" size={16} /> Smart pen — sketch it
           </button>
           <div className="hd-toolgrid compact">
             <button className="hd-tool" {...hov("player")} onClick={() => addPieceAt("player", popup.pt)}>{toolImg("player", whiteboard, wbCircle)}<span>Player</span></button>
@@ -9222,7 +9239,7 @@ export default function DrillAnimator() {
       {editing && !openMenu && !popup && tool === "select" &&
         pieces.every(p => p.kind === "net") && (
         <div className="hd-emptyhint">
-          Tap <b>Add</b> below to place players, then <b>Draw a route</b> to animate them.
+          Tap <b>Add</b> below to place players, or grab the <b>Smart pen</b> and sketch the drill.
           <span className="hd-ehsub">Quick add: double-tap anywhere on the ice</span>
         </div>
       )}
@@ -9230,52 +9247,85 @@ export default function DrillAnimator() {
       {/* ---------- pen palette: takes over the player-bar band while sketching ---------- */}
       {penMode && !aiPlay && !holdStep && (
         <div className="hd-pen">
-          <div className="hd-penrow">
-            <button className={`hd-penmode${tool === "pen" ? " on" : ""}`}
-              title={tool === "pen" ? "Drawing — tap to edit pieces" : "Editing — tap to draw"}
-              onClick={() => { flushPen(); setTool(t => (t === "pen" ? "select" : "pen")); setPopup(null); }}>
-              <Icon name={tool === "pen" ? "marker" : "cursor"} size={15} />
-              <span>{tool === "pen" ? "Draw" : "Edit"}</span>
+          {/* what the PEN does */}
+          <div className="hd-pengroup">
+            <button className={`hd-pentool${tool === "pen" && !eraser ? " on" : ""}`}
+              title="Draw — sketch symbols, routes and passes"
+              onClick={() => { setEraser(false); setTool("pen"); setPopup(null); }}>
+              <Icon name="marker" size={18} /><span>Draw</span>
+            </button>
+            <button className={`hd-pentool${eraser ? " on" : ""}`}
+              title="Erase — stroke over ink, routes or pieces to remove them"
+              onClick={() => { setEraser(true); if (tool !== "pen") setTool("pen"); }}>
+              <Icon name="eraser" size={18} /><span>Erase</span>
             </button>
             <div className="hd-pensep" />
-            <button className={`hd-penbtn${autoConv ? " on" : ""}`}
-              title={autoConv ? "Auto-convert: each stroke is read as you draw" : "Manual: strokes stay ink until you tap Convert"}
-              onClick={() => setAutoConv(v => !v)}><Icon name="brain" size={15} /></button>
-            <button className="hd-penbtn" title="Convert — read the whole drawing now"
-              onClick={convertInk}><Icon name="check" size={15} /></button>
+            <div className="hd-peninks" title="Ink colour — also the colour of any piece you draw">
+              {PEN_INKS.map(c => (
+                <button key={c} className={`hd-penswatch${markColor === c && !eraser ? " on" : ""}`}
+                  style={{ background: c }} title={`Ink ${c}`}
+                  onClick={() => { setMarkColor(c); setEraser(false); }} />
+              ))}
+            </div>
             <div className="hd-pensep" />
-            {PEN_INKS.map(c => (
-              <button key={c} className={`hd-penswatch${markColor === c && !eraser ? " on" : ""}`}
-                style={{ background: c }} title={`Ink ${c}`}
-                onClick={() => { setMarkColor(c); setEraser(false); }} />
-            ))}
-            <div className="hd-penspacer" />
-            <button className="hd-penbtn" title="Close the pen palette"
-              onClick={() => { flushPen(); setPenMode(false); setEraser(false); setTool("select"); }}>
-              <Icon name="close" size={14} />
-            </button>
+            {/* size: a vertical slider that springs from its own button */}
+            <div className="hd-penwrap">
+              <button className={`hd-pentool${penPop === "size" ? " on" : ""}`} title="Line thickness"
+                onClick={() => setPenPop(v => (v === "size" ? null : "size"))}>
+                <span className="hd-penwdot" style={{ height: Math.max(2, Math.round(markWidth * markWidth * 2.4)) }} />
+                <span>Size</span>
+              </button>
+              {penPop === "size" && (
+                <div className="hd-penpop">
+                  <span className="hd-penpoptip">{markWidth.toFixed(1)}</span>
+                  <input className="hd-penrange" type="range" min={0.4} max={3} step={0.1} value={markWidth}
+                    onChange={e => setMarkWidth(parseFloat(e.target.value))} />
+                </div>
+              )}
+            </div>
+            {/* style: the four line kinds, stacked above their button */}
+            <div className="hd-penwrap">
+              <button className={`hd-pentool${penPop === "style" ? " on" : ""}`} title="Line style"
+                onClick={() => setPenPop(v => (v === "style" ? null : "style"))}>
+                <span className={`hd-penstyle ${markStyle}`} /><span>Style</span>
+              </button>
+              {penPop === "style" && (
+                <div className="hd-penpop menu">
+                  {[["solid", "Solid"], ["dashed", "Dashed"], ["dotted", "Dotted"], ["wavy", "Wavy"]].map(([s, lbl]) => (
+                    <button key={s} className={`hd-penopt${markStyle === s ? " on" : ""}`} title={`${lbl} line`}
+                      onClick={() => { setMarkStyle(s); setPenPop(null); }}>
+                      <span className={`hd-penstyle ${s}`} /><span>{lbl}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
-          <div className="hd-penrow">
-            {[["Thin", 0.7], ["Med", 1.1], ["Bold", 1.9]].map(([lbl, w]) => (
-              <button key={lbl} className={`hd-penbtn wide${Math.abs(markWidth - w) < 0.01 ? " on" : ""}`}
-                title={`${lbl} line`} onClick={() => setMarkWidth(w)}>
-                <span className="hd-penwdot" style={{ height: Math.round(w * w * 2.4) }} />
-              </button>
-            ))}
-            <div className="hd-pensep" />
-            {[["solid", "Solid"], ["dashed", "Dashed"], ["dotted", "Dotted"], ["wavy", "Wavy"]].map(([s, lbl]) => (
-              <button key={s} className={`hd-penbtn wide${markStyle === s ? " on" : ""}`} title={lbl}
-                onClick={() => setMarkStyle(s)}>
-                <span className={`hd-penstyle ${s}`} />
-              </button>
-            ))}
-            <div className="hd-pensep" />
-            <button className={`hd-penbtn${eraser ? " on" : ""}`} title="Eraser — stroke over ink or pieces to remove them"
-              onClick={() => { setEraser(v => !v); if (tool !== "pen") setTool("pen"); }}>
-              <Icon name="eraser" size={15} />
+
+          <div className="hd-penspacer" />
+
+          {/* what happens to the BOARD */}
+          <div className="hd-pengroup">
+            <button className={`hd-pentool${tool !== "pen" ? " on" : ""}`}
+              title={tool === "pen" ? "Switch to editing pieces" : "Editing pieces — tap to draw again"}
+              onClick={() => { flushPen(); setTool(t => (t === "pen" ? "select" : "pen")); setPopup(null); }}>
+              <Icon name="cursor" size={18} /><span>Edit</span>
             </button>
-            <button className="hd-penbtn danger" title="Clear all ink (Undo restores it)" onClick={clearInk}>
-              <Icon name="trash" size={14} />
+            <button className="hd-pentool" title="Convert — read the whole drawing now" onClick={convertInk}>
+              <Icon name="wand" size={18} /><span>Convert</span>
+            </button>
+            <button className={`hd-pentool${autoConv ? " on" : ""}`}
+              title={autoConv ? "Auto: every stroke is read as you draw" : "Manual: ink stays ink until you tap Convert"}
+              onClick={() => setAutoConv(v => !v)}>
+              <Icon name="brain" size={18} /><span>Auto</span>
+            </button>
+            <button className="hd-pentool danger" title="Clear all ink (Undo restores it)" onClick={clearInk}>
+              <Icon name="trash" size={17} /><span>Clear</span>
+            </button>
+            <div className="hd-pensep" />
+            <button className="hd-pentool" title="Close the pen palette"
+              onClick={() => { flushPen(); setPenMode(false); setEraser(false); setTool("select"); }}>
+              <Icon name="close" size={17} /><span>Done</span>
             </button>
           </div>
         </div>
@@ -9586,8 +9636,8 @@ export default function DrillAnimator() {
 
       {openMenu === "tools" && (
         <div className="hd-menu br">
-          <button className="hd-item" onClick={() => { resetAnim(); setPlaying(false); setPopup(null); setTool("draw"); setOpenMenu(null); }}>
-            <Icon name="pencil" size={16} /> Draw a route
+          <button className="hd-item" onClick={() => { resetAnim(); setPlaying(false); setPopup(null); setTool("pen"); setPenMode(true); setOpenMenu(null); }}>
+            <Icon name="marker" size={16} /> Smart pen — sketch it
           </button>
           <div className="hd-mh">Main items</div>
           <div className="hd-toolgrid">

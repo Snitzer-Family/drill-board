@@ -33,6 +33,8 @@ const ICONS = {
   restore: <><path d="M4.5 8.5H9V4" /><path d="M19.5 8.5H15V4" /><path d="M4.5 15.5H9V20" /><path d="M19.5 15.5H15V20" /></>,
   // freehand marker: a pen over a wavy stroke
   marker: <><path d="M15.5 4.2l4.3 4.3L11 17.3l-4.3.9.9-4.3z" /><path d="M13.4 6.3l4.3 4.3" /><path d="M3 21c1.4-2 2.8-2 4.2 0" /></>,
+  // magic wand + sparkles: turn the ink into real pieces
+  wand: <><path d="M4 20L14.5 9.5" /><path d="M17.2 3.2l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9z" /><path d="M8.6 4.4l.6 1.4 1.4.6-1.4.6-.6 1.4-.6-1.4L6.6 6.4l1.4-.6z" /><path d="M19.4 14.2l.5 1.2 1.2.5-1.2.5-.5 1.2-.5-1.2-1.2-.5 1.2-.5z" /></>,
   // eraser block skewed over the line it wipes
   eraser: <><path d="M8.6 19.5H20" /><path d="M14.2 4.6l5.2 5.2-8 8H6.2l-2.6-2.6z" /><path d="M10.4 8.4l5.2 5.2" /></>,
   // arrow pointer = the regular item editor

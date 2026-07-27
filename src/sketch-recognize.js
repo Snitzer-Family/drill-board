@@ -575,7 +575,8 @@ export function classifyPenGroup(strokes, ctx = {}) {
   // things that must stay in drill space: route fitting and fallback ink
   const S = strokes.map((s, idx) => {
     const pts = s.pts.map(toU);
-    return { pts, ptsFt: s.pts, idx, diag: strokesDiag([pts]) };
+    // press rides along untouched: it only matters if the stroke ends as ink
+    return { pts, ptsFt: s.pts, press: s.press, idx, diag: strokesDiag([pts]) };
   });
   const shorts = S.filter(s => s.diag < symMax);
   const longs = S.filter(s => s.diag >= symMax);
@@ -898,6 +899,6 @@ export function classifyPenGroup(strokes, ctx = {}) {
     leftovers.push(...g.strokes);
   });
 
-  leftovers.forEach(s => addOp({ op: "mark", pts: s.ptsFt, srcs: [s.idx] }));
+  leftovers.forEach(s => addOp({ op: "mark", pts: s.ptsFt, press: s.press, srcs: [s.idx] }));
   return ops;
 }

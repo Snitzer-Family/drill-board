@@ -8,8 +8,10 @@ export const STYLES = `
           --hd-dock-w: min(320px, 34vw);   /* width of the docked editing sidebar (desktop) */
           font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
         .hd-root.scrub-on { --hd-scrub: 48px; }
-        /* the pen palette replaces the player bar and needs two rows */
-        .hd-root.pen-on { --hd-scrub: 84px; }
+        /* the pen palette replaces the player bar: two rows on a narrow phone,
+           one once there's width for both groups (landscape, tablet, desktop) */
+        .hd-root.pen-on { --hd-scrub: 104px; }
+        @media (min-width: 700px) { .hd-root.pen-on { --hd-scrub: 60px; } }
         /* editing sidebar docked: shrink the ice to the left of it (the stage's
            ResizeObserver re-fits the rink automatically) */
         .hd-root.dock-open .hd-stage { right:calc(env(safe-area-inset-right, 0px) + var(--hd-dock-w)); }
@@ -49,25 +51,57 @@ export const STYLES = `
           background:#d7263d; border-color:#d7263d; color:#fff; margin-right:2px; }
         /* ---- pen palette (sits in the player-bar band while sketching) ---- */
         .hd-pen { position:absolute; z-index:44; left:8px; right:8px;
-          bottom:calc(54px + var(--hd-b) + 4px); display:flex; flex-direction:column; gap:4px;
+          bottom:calc(54px + var(--hd-b) + 4px); display:flex; flex-wrap:wrap;
+          align-items:center; justify-content:center; gap:6px 4px;
           padding:5px 7px; background:rgba(23,29,37,.90); border:1px solid #2c3846;
           border-radius:12px; box-shadow:0 3px 12px rgba(0,0,0,.4); backdrop-filter:blur(4px); }
-        .hd-penrow { display:flex; align-items:center; gap:5px; }
-        .hd-pensep { flex:none; width:1px; height:20px; background:#33404f; margin:0 2px; }
+        /* two groups — the pen's own settings, then what happens to the board.
+           They sit on one line wherever there's room (landscape, tablet, desktop)
+           and wrap to two on a narrow portrait phone. */
+        .hd-pengroup { display:flex; align-items:center; gap:4px; flex-wrap:nowrap; }
+        .hd-pensep { flex:none; width:1px; height:26px; background:#33404f; margin:0 3px; }
         .hd-penspacer { flex:1 1 auto; min-width:0; }
-        .hd-penbtn { flex:none; width:30px; height:30px; border-radius:8px; background:#1b232c;
-          border:1px solid #33404f; color:#dbe4ec; display:flex; align-items:center;
-          justify-content:center; cursor:pointer; padding:0; }
-        .hd-penbtn.wide { flex:1 1 0; min-width:26px; }
-        .hd-penbtn.on { background:#0f766e; border-color:#0f766e; color:#fff; }
-        .hd-penbtn.danger { color:#ff8b8b; }
-        .hd-penmode { flex:none; display:flex; align-items:center; gap:5px; height:30px;
-          padding:0 10px; border-radius:8px; background:#1b232c; border:1px solid #33404f;
-          color:#dbe4ec; font-size:12px; font-weight:700; cursor:pointer; }
-        .hd-penmode.on { background:#0f766e; border-color:#0f766e; color:#fff; }
-        .hd-penswatch { flex:1 1 0; min-width:20px; height:26px; border-radius:7px;
-          border:1px solid rgba(255,255,255,.22); cursor:pointer; padding:0; }
-        .hd-penswatch.on { outline:2px solid #eaf2f8; outline-offset:1px; }
+        /* labelled tool: icon over a caption, like the bottom bar */
+        .hd-pentool { flex:none; min-width:44px; height:42px; padding:3px 5px 2px;
+          display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px;
+          border-radius:9px; background:#1b232c; border:1px solid #33404f; color:#dbe4ec;
+          cursor:pointer; font-size:8.5px; font-weight:700; letter-spacing:.03em;
+          text-transform:uppercase; line-height:1; }
+        .hd-pentool > span:last-child { opacity:.75; }
+        .hd-pentool.on { background:#0f766e; border-color:#0f766e; color:#fff; }
+        .hd-pentool.on > span:last-child { opacity:1; }
+        .hd-pentool.danger { color:#ff8b8b; }
+        /* a narrow phone can't fit the drawing group at full size — tighten it
+           rather than let the row overflow and clip the first button */
+        @media (max-width: 480px) {
+          .hd-pen { gap:6px 3px; padding:5px 5px; }
+          .hd-pentool { min-width:40px; padding:3px 3px 2px; }
+          .hd-penswatch { width:20px; height:20px; }
+          .hd-peninks { gap:3px; }
+          .hd-pensep { margin:0 1px; }
+        }
+        /* size / style popovers spring upward from their own button */
+        .hd-penwrap { position:relative; display:flex; }
+        .hd-penpop { position:absolute; bottom:calc(100% + 6px); left:50%; transform:translateX(-50%);
+          display:flex; flex-direction:column; align-items:center; gap:4px; padding:8px 6px;
+          background:rgba(23,29,37,.97); border:1px solid #33404f; border-radius:10px;
+          box-shadow:0 6px 18px rgba(0,0,0,.5); z-index:46; }
+        .hd-penpoptip { font-size:10px; font-weight:700; color:#9fb0c0; }
+        /* vertical range: the modern property first, then the WebKit one iOS needs */
+        .hd-penrange { writing-mode:vertical-rl; direction:rtl;
+          -webkit-appearance:slider-vertical; appearance:slider-vertical;
+          width:26px; height:104px; accent-color:#0f766e; }
+        .hd-penpop.menu { padding:5px; }
+        .hd-penopt { display:flex; align-items:center; gap:8px; width:104px; padding:7px 9px;
+          border-radius:8px; background:transparent; border:1px solid transparent; color:#dbe4ec;
+          font-size:11px; font-weight:600; cursor:pointer; text-align:left; }
+        .hd-penopt.on { background:#0f766e; border-color:#0f766e; color:#fff; }
+        .hd-penopt .hd-penstyle { flex:none; }
+        /* inks as round chips, matching the swatches used elsewhere */
+        .hd-peninks { display:flex; align-items:center; gap:4px; }
+        .hd-penswatch { flex:none; width:22px; height:22px; border-radius:50%;
+          border:1px solid rgba(255,255,255,.25); cursor:pointer; padding:0; }
+        .hd-penswatch.on { outline:2px solid #eaf2f8; outline-offset:2px; }
         /* Thickness and style previews follow the BUTTON's colour, never the
            ink — black ink on a dark bar would make them vanish, and these need
            to stay readable whatever you're drawing with. */
