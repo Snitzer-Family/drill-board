@@ -11,7 +11,7 @@
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { THEMES, PAIRS, EXEMPT, SHADOW_TOKENS, AUTO_MAP, themeCss } from "../src/theme.js";
+import { THEMES, PAIRS, EXEMPT, NON_COLOR_TOKENS, AUTO_MAP, themeCss } from "../src/theme.js";
 
 let passed = 0, failed = 0, known = 0;
 // Empty is the goal state. Add a check name here only to land a migration in
@@ -91,8 +91,8 @@ for (const theme of Object.keys(THEMES)) {
 
   check(`${theme}: every value parses`, () => {
     for (const [k, v] of Object.entries(THEMES[theme])) {
-      if (SHADOW_TOKENS.includes(k)) {
-        assert.match(v, /\d+px/, `${k} should look like a shadow, got "${v}"`);
+      if (NON_COLOR_TOKENS.includes(k)) {
+        assert.match(v, /\d|\)/, `${k} should be a shadow or filter value, got "${v}"`);
         continue;
       }
       assert.ok(parseHex(v) || parseRgba(v), `${k} is not a colour: "${v}"`);

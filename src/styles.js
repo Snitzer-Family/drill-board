@@ -394,6 +394,42 @@ export const STYLES = `
           .hd-preso.placing { gap:8px; }
           .hd-preso-tab { height:30px; font-size:13px; }
         }
+        /* Pointer feedback. Gated on (hover: hover) and (pointer: fine) — NOT
+           just a width breakpoint. iOS synthesises a hover on tap and leaves it
+           stuck on the last-tapped control until you tap elsewhere, so an
+           ungated :hover would leave buttons lit on the bench phone, which is
+           the primary platform.
+
+           One filter covers every control whatever it's filled with — default
+           chip, accent-filled .on state, danger text, a raw colour swatch —
+           because a background-colour hover would need a variant per fill. The
+           filter's DIRECTION flips per theme (--db-fx-hover): on a light UI
+           "lighter" is invisible, so light darkens and dark lightens.
+
+           This sits before :active deliberately: same specificity, so source
+           order decides, and a press should beat a hover. */
+        @media (hover: hover) and (pointer: fine) {
+          .hd-barbtn:hover:not(:disabled), .hd-scrubbtn:hover:not(:disabled),
+          .hd-item:hover:not(:disabled), .hd-mini:hover:not(:disabled),
+          .hd-btn:hover:not(:disabled), .hd-stepper button:hover:not(:disabled),
+          .hd-x:hover:not(:disabled), .hd-anchorbtn:hover:not(:disabled),
+          .hd-select:hover:not(:disabled), .hd-tool:hover:not(:disabled),
+          .hd-pentool:hover:not(:disabled), .hd-penopt:hover:not(:disabled),
+          .hd-penswitch:hover, .hd-preso-btn:hover, .hd-preso-tab:hover,
+          .hd-resize-h:hover::before, .hd-resize-c:hover::after {
+            filter:var(--db-fx-hover); }
+          /* colour chips say what they are, so tinting them would misrepresent
+             the swatch you're about to pick — grow instead */
+          .hd-swatch:hover, .hd-penswatch:hover { transform:scale(1.14); }
+          .hd-swatch, .hd-penswatch { transition:transform .12s ease; }
+          /* fields read better with a firmer edge than a wash */
+          .hd-input:hover, .hd-ta:hover, .hd-secinput:hover, .hd-select:hover {
+            border-color:var(--db-border-strong); }
+          /* the row is the target, but the switch is what changes — nudge it too */
+          .hd-item:hover .hd-sw { filter:var(--db-fx-hover); }
+          /* not a button, but it IS draggable */
+          .hd-pophead:hover { filter:var(--db-fx-hover); }
+        }
         /* pressed feedback — every tappable control confirms the touch itself,
            not just its end state (bench use: gloves, glances) */
         .hd-barbtn:active, .hd-scrubbtn:active:not(:disabled), .hd-item:active,

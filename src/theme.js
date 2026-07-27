@@ -90,6 +90,11 @@ const LIGHT = {
     // gradient stops. Also NOT `transparent` — same Safari premultiply problem.
     "fx-edge": "rgba(20,32,43,.16)",
     "fx-edge-0": "rgba(20,32,43,0)",
+    // Hover is a FILTER, not a colour, so one rule covers every control whatever
+    // it's filled with — default chip, accent-filled .on state, danger text, a
+    // raw colour swatch. The direction has to flip per theme: on a light UI
+    // "lighter" is invisible, so light darkens and dark lightens.
+    "fx-hover": "brightness(0.955)",
 };
 
 const DARK = {
@@ -141,6 +146,7 @@ const DARK = {
     "fx-shadow-lg": "0 8px 24px rgba(0,0,0,.5)",
     "fx-edge": "rgba(0,0,0,.55)",
     "fx-edge-0": "rgba(0,0,0,0)",
+    "fx-hover": "brightness(1.18)",
 };
 
 /* =================== PROPOSAL MOCKUPS — evaluation only ===================
@@ -263,8 +269,9 @@ export const THEME_LABEL = {
   sheet: "Sheet", barn: "Barn", slate: "Slate",
 };
 
-// Tokens holding a shadow (not a colour) — the contrast test skips parsing these.
-export const SHADOW_TOKENS = ["fx-shadow", "fx-shadow-lg"];
+// Tokens that aren't colours — box-shadow values and the hover filter. The
+// contrast test skips parsing these rather than failing on them.
+export const NON_COLOR_TOKENS = ["fx-shadow", "fx-shadow-lg", "fx-hover"];
 
 /* ------------------------------------------------------------------ */
 /* pairings the contrast test asserts                                  */
