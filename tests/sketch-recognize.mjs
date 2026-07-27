@@ -545,6 +545,38 @@ const kinds = ops => ops.map(o => o.op);
   T('the scrappiest stays ink', ops.filter(o => o.op === "mark").length, 1);
 }
 
+// ---- A REAL dashed pass off Nate's board (Copy diagnostics). Five short
+//      dashes marching between two players became five ink marks. The dash
+//      detection was fine — the endpoints just had to land within 55px of a
+//      player, and nobody draws the dashes right up to the icons, so a normal
+//      gap put them out of reach. Endpoints now search much further. ----
+{
+  const CTX = { pxFtX: 0.179856, pxFtY: 0.121429 };
+  const S = [
+    [[153.42,38.49],[153.06,38.86],[152.88,39.34],[152.7,39.71]],
+    [[151.62,41.04],[151.26,41.53],[151.08,42.01]],
+    [[150,43.47],[150,43.84],[149.82,44.2],[149.64,44.56],[149.46,44.93]],
+    [[148.74,45.9],[148.74,46.26],[148.38,46.39],[148.2,46.87],[147.84,47.24]],
+    [[146.94,49.06],[146.58,49.54],[146.4,49.91],[146.22,50.27],[145.86,50.64],[145.68,51]],
+  ].map(s => stroke(s.map(([x, y]) => ({ x, y }))));
+  const A = { x: 153.42, y: 38.49 }, B = { x: 145.68, y: 51 };
+  // players sat this many screen px beyond each end of the drawn line
+  const withGap = g => {
+    const ux = (B.x - A.x) / CTX.pxFtX, uy = (B.y - A.y) / CTX.pxFtY;
+    const L = Math.hypot(ux, uy);
+    const p1 = { x: A.x - (ux / L) * g * CTX.pxFtX, y: A.y - (uy / L) * g * CTX.pxFtY };
+    const p2 = { x: B.x + (ux / L) * g * CTX.pxFtX, y: B.y + (uy / L) * g * CTX.pxFtY };
+    return classifyPenGroup(S, { ...CTX, players: [
+      { id: 'P1', x: p1.x, y: p1.y, end: p1, hasPath: false },
+      { id: 'P2', x: p2.x, y: p2.y, end: p2, hasPath: false }] });
+  };
+  [0, 40, 80, 120].forEach(g =>
+    T(`real dashes reach players ${g}px past the ends`, kinds(withGap(g)), ['pass']));
+  T('real dashes point the right way', withGap(40)[0].from, { id: 'P1' });
+  // with nobody in reach it must stay honest ink, not invent a pass
+  T('dashes with no players stay ink', kinds(classifyPenGroup(S, CTX)), Array(5).fill('mark'));
+}
+
 // ---- phone scale (pxFt ≈ 0.5: the full 200ft rink spans ~390px, so a finger
 //      X is 20-40 FEET) — the view-scaled gates must keep everything working ----
 {

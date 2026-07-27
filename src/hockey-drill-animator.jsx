@@ -383,8 +383,13 @@ export default function DrillAnimator() {
   // simplifier were fixed rink-feet, so on a big iPad 1.3ft ≈ 12px crushed a
   // drawn circle into a 4-point blob (which then smoothed into a lumpy shape —
   // the "mangling"). Both now track the view, with a feet floor for safety.
-  const inkStepFt = () => Math.max(0.25, 2.5 * Math.min(penScale.current.x || 1.1, penScale.current.y || 1.1));
-  const inkEpsFt = () => Math.max(0.3, 4 * Math.min(penScale.current.x || 1.3, penScale.current.y || 1.3));
+  // Note ink is handwriting: it keeps far more of what was drawn. The sampling
+  // and simplification that suit a swooping route destroy small letters — a 4px
+  // tolerance is wider than the strokes of the letters themselves.
+  const inkStepFt = note => Math.max(note ? 0.1 : 0.25,
+    (note ? 1 : 2.5) * Math.min(penScale.current.x || 1.1, penScale.current.y || 1.1));
+  const inkEpsFt = note => Math.max(note ? 0.12 : 0.3,
+    (note ? 0.8 : 4) * Math.min(penScale.current.x || 1.3, penScale.current.y || 1.3));
   const symbolMaxPx = () => (penScale.current.x > 0 ? SYMBOL_MAX_PX : SYMBOL_MAX);
   // erase everything an eraser stroke passes through: ink by its drawn points,
   // pieces by their spot. Runs through scrubRefs so deleting a player also
@@ -460,7 +465,8 @@ export default function DrillAnimator() {
     const board = pending.length
       ? materializePenOps(piecesRef.current, pending.map(s => ({ op: "mark", pts: s.pts, press: s.press })))
       : piecesRef.current;
-    const marks = board.filter(p => p.kind === "mark" && !p.lock && (p.pts || []).length >= 2);
+    // note ink and locked ink are deliberately off-limits to the sweep
+    const marks = board.filter(p => p.kind === "mark" && !p.lock && !p.note && (p.pts || []).length >= 2);
     if (!marks.length) { if (pending.length) setPieces(board); flash("No ink to convert"); return; }
     const ops = classifyPenGroup(marks.map(m => ({ pts: m.pts })), penCtx(board));
     const consumed = new Set();
@@ -494,6 +500,11 @@ export default function DrillAnimator() {
     const txt = JSON.stringify({
       v: APP_VERSION, pxFtX: round(d.ctx.pxFtX * 10000) / 10000, pxFtY: round(d.ctx.pxFtY * 10000) / 10000,
       screen: [Math.round(window.innerWidth), Math.round(window.innerHeight)],
+      // the board the strokes were read against: without it, "why didn't this
+      // become a pass" can't be answered — the answer is usually how far the
+      // nearest player was
+      players: (d.ctx.players || []).map(p => [p.id, round(p.x), round(p.y), p.hasPath ? 1 : 0]),
+      nets: (d.ctx.nets || []).map(n => [n.id, round(n.x), round(n.y)]),
       ops: d.ops.map(o => ({ op: o.op, sym: o.sym, srcs: o.srcs })),
       strokes: d.strokes.map(s => s.pts.map(p => [round(p.x), round(p.y)])),
     });
@@ -529,6 +540,13 @@ export default function DrillAnimator() {
   eraserRef.current = eraser;
   // auto: every settled burst is read straight away. Off: strokes stay ink
   // until Convert reads the whole drawing at once.
+  // Note mode: ink that opts out of recognition for good. Strokes skip the
+  // classifier and are stamped note=true, which Convert then steps over — so a
+  // scribbled reminder survives both auto and manual conversion. Still ordinary
+  // ink otherwise: selectable, restylable, erasable.
+  const [noteMode, setNoteMode] = useState(false);
+  const noteRef = useRef(false);
+  noteRef.current = noteMode;
   const [penPop, setPenPop] = useState(null);   // "size" | "style" popover, or null
   const [autoConv, setAutoConv] = useState(true);
   const autoRef = useRef(true);
@@ -4156,6 +4174,10 @@ export default function DrillAnimator() {
     setPenPop(null);                          // drawing dismisses any open popover
     if (!penBuf.current.length) penScale.current = ftPerPx();   // per-burst view scale
     const pt = svgPt(e);
+    // pressure rides ON the point so it survives thinning and RDP — those keep
+    // the original objects, so whatever is left still knows how hard it was
+    // pressed. Note ink uses it to vary weight along the stroke.
+    if (e.pointerType === "pen" && e.pressure > 0) pt.p = e.pressure;
     drawRaw.current = [pt];
     setDrawPreview([pt]);
     // Apple Pencil reports 0..1 barrel pressure; a finger reports a constant
@@ -4201,7 +4223,10 @@ export default function DrillAnimator() {
         return;
       }
       if (raw.length) {               // a bare tap is a dot — the puck gesture
-        penBuf.current.push({ pts: raw.map(q => ({ x: q.x, y: q.y })), t0, t1: performance.now(), press });
+        // keep each point's own pressure — rebuilding as bare {x,y} here was
+        // silently throwing away what note ink needs to vary its weight
+        penBuf.current.push({ t0, t1: performance.now(), press,
+          pts: raw.map(q => (q.p != null ? { x: q.x, y: q.y, p: q.p } : { x: q.x, y: q.y })) });
         setPenInk(penBuf.current.map(s => s.pts));
       }
       clearTimeout(penTimer.current);
@@ -4252,7 +4277,9 @@ export default function DrillAnimator() {
       const pts = trail.length > 3 ? rdp(trail, 1.3) : trail;
       if (pts.length < 2) return;
       const id = nextId("mark");
-      setPieces(ps => [...ps, { id, kind: "mark", pts, x: pts[0].x, y: pts[0].y,
+      // the Marker is the annotation tool by definition — its ink is never
+      // something the pen's converter should reinterpret
+      setPieces(ps => [...ps, { id, kind: "mark", pts, x: pts[0].x, y: pts[0].y, note: true,
         color: markColor, width: markWidth, style: markStyle, path: [] }]);
       return;
     }
@@ -4313,6 +4340,11 @@ export default function DrillAnimator() {
     setPenInk([]);
     if (!fresh.length) return;
     const board = piecesRef.current;
+    // Note mode: never read, now or later — the ink is the point.
+    if (noteRef.current) {
+      setPieces(ps => materializePenOps(ps, fresh.map(s => ({ op: "mark", pts: s.pts, press: s.press, note: true }))));
+      return;
+    }
     // Manual mode: strokes just lay down as ink. Nothing is read until you hit
     // Convert, which looks at the whole drawing at once.
     if (!autoRef.current) {
@@ -4407,17 +4439,21 @@ export default function DrillAnimator() {
     // touch lands ~60%, a hard press ~150%. Clamped so ink stays ink.
     const pressW = press => (press == null ? penW
       : Math.max(0.25, Math.min(3.5, penW * (0.6 + 1.1 * Math.min(1, press * 1.6)))));
-    const inkMark = (pts, press) => {
+    const inkMark = (pts, press, note) => {
       // thin the trail, then RDP to control points — both view-scaled so the
       // stored ink keeps the shape that was actually drawn
-      const trail = pts.filter((q, i) => i === 0 || Math.hypot(q.x - pts[i - 1].x, q.y - pts[i - 1].y) > inkStepFt());
-      const cps = trail.length > 3 ? rdp(trail, inkEpsFt()) : trail;
+      const trail = pts.filter((q, i) => i === 0 || Math.hypot(q.x - pts[i - 1].x, q.y - pts[i - 1].y) > inkStepFt(note));
+      const cps = trail.length > 3 ? rdp(trail, inkEpsFt(note)) : trail;
       if (cps.length < 2) return;
       // pen fallback ink lands at the pen's thin width, not the marker's;
       // its age makes it reclaimable by a later completing stroke
       const id = nextId("mark", out);
       penMarkAge.current.set(id, performance.now());
-      out.push({ id, kind: "mark", pts: cps, x: cps[0].x, y: cps[0].y,
+      // note ink keeps the per-point pressure so the line can thicken and thin
+      // along its length the way a pencil does; other ink takes one weight
+      const pp = note ? cps.map(q => (q.p != null ? Math.round(q.p * 100) / 100 : null)) : null;
+      out.push({ id, kind: "mark", pts: cps, x: cps[0].x, y: cps[0].y, ...(note ? { note: true } : {}),
+        ...(pp && pp.some(v => v != null) ? { press: pp } : {}),
         color: markColor, width: pressW(press), style: markStyle, path: [] });
     };
     ops.forEach((o, i) => {
@@ -4500,7 +4536,7 @@ export default function DrillAnimator() {
           ...(o.net ? { net: o.net } : {}),
         }] };
       } else if (o.op === "mark") {
-        inkMark(o.pts, o.press);
+        inkMark(o.pts, o.press, o.note);
       }
     });
     return out;
@@ -4918,7 +4954,8 @@ export default function DrillAnimator() {
     const pt = svgPt(e);
     if (d.kind === "drawing") {
       const last = drawRaw.current[drawRaw.current.length - 1];
-      if (Math.hypot(pt.x - last.x, pt.y - last.y) > (d.pen ? inkStepFt() : 1.1)) {
+      if (Math.hypot(pt.x - last.x, pt.y - last.y) > (d.pen ? inkStepFt(noteRef.current) : 1.1)) {
+        if (e.pointerType === "pen" && e.pressure > 0) pt.p = e.pressure;
         drawRaw.current.push(pt);
         setDrawPreview(drawRaw.current.slice());
       }
@@ -6137,9 +6174,32 @@ export default function DrillAnimator() {
     runs.forEach((run, ri) => { const sm = smoothRun(run); out.push(...(ri ? sm.slice(1) : sm)); });
     return out;
   };
+  // split a pressure-carrying note stroke into contiguous runs of similar
+  // weight. Bands are coarse on purpose: 4 levels read as a pencil while
+  // keeping the element count per stroke in single figures.
+  function pressRuns(m) {
+    const band = p => {
+      const v = p == null ? 0.5 : Math.max(0, Math.min(1, p));
+      return Math.min(3, Math.floor(v * 4));                 // 0..3
+    };
+    const k = [0.62, 0.85, 1.1, 1.42];                       // weight per band
+    const runs = [];
+    for (let i = 0; i < m.pts.length; i++) {
+      const b = band(m.press[i]);
+      const last = runs[runs.length - 1];
+      if (last && last.b === b) last.pts.push(m.pts[i]);
+      // carry the previous point into the new run so the runs stay joined
+      else runs.push({ b, k: k[b], pts: i ? [m.pts[i - 1], m.pts[i]] : [m.pts[i]] });
+    }
+    return runs.filter(r => r.pts.length > 1);
+  }
+
   function renderMark(m, hit) {
     if (!m.pts || m.pts.length < 2) return null;
-    const base = markCurve(m.pts);
+    // Handwriting is drawn, not fitted: note ink renders through its own points
+    // rather than a Catmull-Rom curve, which would round the corners off every
+    // letter and bow the straight strokes.
+    const base = m.note ? m.pts : markCurve(m.pts);
     const pts = m.style === "wavy" ? wavyPts(base, Math.max(0.5, m.width * 0.9), 2.8) : base;
     const w = m.width || 1.1;
     const dash = m.style === "dashed" ? `${(w * 2.6).toFixed(2)} ${(w * 1.9).toFixed(2)}`
@@ -6155,9 +6215,20 @@ export default function DrillAnimator() {
             The halo was there to lift broad marker strokes off the rink dots,
             but it reads as a white outline on anything heavier than a hairline
             — including bold pen strokes and hard Pencil pressure. */}
-        <polyline points={line} fill="none" stroke={m.color} strokeWidth={w} strokeDasharray={dash}
-          strokeLinecap="round" strokeLinejoin="round" opacity={0.94}
-          pointerEvents={hit ? "none" : undefined} />
+        {/* A pencil-weighted note: pressure quantised into a few bands and each
+            run drawn at its own width. Per-point widths would mean one element
+            per segment — dozens per word — where bands collapse a stroke to a
+            handful and still read as a pencil. */}
+        {m.note && m.press && m.press.length === m.pts.length ? pressRuns(m).map((run, i) => (
+          <polyline key={`pw${i}`} points={run.pts.map(q => `${clampX(q.x)},${clampY(q.y)}`).join(" ")}
+            fill="none" stroke={m.color} strokeWidth={w * run.k} strokeDasharray={dash}
+            strokeLinecap="round" strokeLinejoin="round" opacity={0.94}
+            pointerEvents={hit ? "none" : undefined} />
+        )) : (
+          <polyline points={line} fill="none" stroke={m.color} strokeWidth={w} strokeDasharray={dash}
+            strokeLinecap="round" strokeLinejoin="round" opacity={0.94}
+            pointerEvents={hit ? "none" : undefined} />
+        )}
         {m.id === selectedId && (
           <polyline points={line} fill="none" stroke="#ffd447" strokeWidth={w + 1.1}
             strokeLinecap="round" strokeLinejoin="round" opacity={0.35} pointerEvents="none" />
@@ -9260,12 +9331,18 @@ export default function DrillAnimator() {
               <span className="hd-penswopt draw"><Icon name="marker" size={17} /><span>Draw</span></span>
               <span className="hd-penswopt edit"><Icon name="cursor" size={17} /><span>Edit</span></span>
             </button>
+            <button className={`hd-pentool${noteMode ? " on" : ""}`}
+              title={noteMode ? "Note ink — never converted; tap for normal ink"
+                : "Note — scribbles and text that the converter leaves alone"}
+              onClick={() => { setNoteMode(v => !v); setEraser(false); if (tool !== "pen") setTool("pen"); }}>
+              <Icon name="note" size={18} /><span>Note</span>
+            </button>
             {/* a toggle, not a one-way latch — with Draw folded into the mode
                 switch, this is the only way back to inking */}
             <button className={`hd-pentool${eraser ? " on" : ""}`}
               title={eraser ? "Erasing — tap to ink again"
                 : "Erase — stroke over ink, routes or pieces to remove them"}
-              onClick={() => { setEraser(v => !v); if (tool !== "pen") setTool("pen"); }}>
+              onClick={() => { setEraser(v => !v); setNoteMode(false); if (tool !== "pen") setTool("pen"); }}>
               <Icon name="eraser" size={18} /><span>Erase</span>
             </button>
             <div className="hd-pensep" />

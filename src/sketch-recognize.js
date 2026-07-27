@@ -890,11 +890,19 @@ export function classifyPenGroup(strokes, ctx = {}) {
   });
 
   // ---- dashed lines resolve last, when every skater's end is known ----
+  // Their endpoints get a far longer reach than a route's start. Three or more
+  // collinear marching dashes are not something anyone draws by accident, so
+  // the only question left is WHICH players they run between — and nobody draws
+  // the dashes right up to the icons. At the old 55px a line that stopped a
+  // comfortable gap short of its players silently fell back to ink.
+  const dashEndR = U(16, 130);
+  const reachAt = (pt, skip) => nearest(pt, dashEndR, roster.filter(e => e !== skip),
+    e => (e.hasPath ? e.end : { x: e.x, y: e.y }));
   dashGroups.forEach(g => {
-    const src = sourceAt(g.a);
-    const net = netAt(g.b);
+    const src = reachAt(g.a, null);
+    const net = nearest(g.b, dashEndR, nets, n => toU(n));
     if (src && net) { addOp({ op: "shot", by: src.who, net: net.id, srcs: idxOf(g.strokes) }); return; }
-    const tgt = spotAt(g.b, passR, src);
+    const tgt = reachAt(g.b, src);
     if (src && tgt) { addOp({ op: "pass", from: src.who, to: tgt.who, recvAt: -1, srcs: idxOf(g.strokes) }); return; }
     leftovers.push(...g.strokes);
   });

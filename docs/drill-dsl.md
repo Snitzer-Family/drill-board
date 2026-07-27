@@ -446,7 +446,7 @@ ITEM whistle count=1 "Whistle"
 
 ## Marker annotations
 
-`MARK <id> <color> <width> <style> [fill=<hex>[:<opacity>]] x1,y1 x2,y2 …`
+`MARK <id> <color> <width> <style> [lock] [note] [fill=<hex>[:<opacity>]] [press=<v>;<v>;…] x1,y1 x2,y2 …`
 draws a freehand ink line on the ice (not part of the drill logic). `style` is
 `solid` · `dashed` · `dotted` · `wavy` (may be omitted — defaults to `solid`;
 the app always writes it back); `width` is in feet. The optional
@@ -456,5 +456,22 @@ and the preset square/circle/triangle shape markers. The optional
 **`corners=<i>;<j>;…`** flags points (0-based) as **sharp corners**: the
 smoothing breaks there instead of rounding through, so straight-sided shapes
 keep crisp vertices. In the app: *Edit points* → tap a point to toggle sharp
-(square node) ↔ smooth (round node), matching route waypoint kinds. In the app: **☰ tools → Marker**, pick a colour /
+(square node) ↔ smooth (round node), matching route waypoint kinds.
+
+The bare **`note`** flag marks the ink as an annotation the Smart pen's
+converter must leave alone — a scribbled reminder or handwritten text survives
+both auto-convert and a manual *Convert* sweep. It is ordinary ink in every
+other way (selectable, restylable, erasable); only recognition skips it. All
+Marker-tool ink is written with it, and the pen's **Note** button draws it.
+The separate bare **`lock`** flag is stronger: a locked mark can't be selected,
+dragged or erased either.
+
+**`press=<v>;<v>;…`** carries Apple Pencil barrel pressure (0..1, one value per
+point, empty for points drawn without a stylus) so note ink thickens and thins
+along its length like a pencil. Note ink is also sampled finely and rendered
+through its own points rather than a fitted curve, so handwriting stays legible
+— the simplification that suits a swooping route is wider than the strokes of
+small letters.
+
+In the app: **☰ tools → Marker**, pick a colour /
 style / thickness, then drag on the ice. Tap a mark to restyle or delete it.

@@ -427,6 +427,10 @@ export function parseDrill(text) {
         // a bare `lock` flag may sit among the trailing tokens; coords are pure
         // numbers (the tokenizer splits on commas), so it never collides with them
         const mlock = rest.some(t => t.toLowerCase() === "lock");
+        // `note` = annotation ink the smart pen's converter leaves alone, so a
+        // scribbled reminder survives Convert. Unlike `lock` it stays fully
+        // selectable and erasable — it opts out of recognition, nothing else.
+        const mnote = rest.some(t => t.toLowerCase() === "note");
         // optional independent area fill: fill=<hex>[:<opacity 0..1>] — non-
         // numeric, so older readers drop it harmlessly via the isNaN filter
         const mfTok = rest.find(t => /^fill=/i.test(t));
@@ -443,11 +447,19 @@ export function parseDrill(text) {
         // optional sharp-corner point indices: corners=i;j;k — the curve
         // BREAKS at these points instead of smoothing through them (older
         // readers drop the token harmlessly via the isNaN filter)
+        // per-point stylus pressure for note ink: press=<v>;<v>;… one per point
+        // (2dp, 0..1). Older readers drop the token via the isNaN filter.
+        const mpTok = rest.find(t => /^press=/i.test(t));
+        const mpress = mpTok
+          ? mpTok.slice(6).split(";").map(v => (v === "" ? null : parseFloat(v)))
+          : null;
         const mcTok = rest.find(t => /^corners=/i.test(t));
         if (mcTok) mcTok.slice(8).split(";").forEach(s => { const i = parseInt(s, 10); if (pts[i]) pts[i].c = true; });
         if (mid && pts.length >= 2) {
           const m = { id: mid, kind: "mark", color: mcol, width: mw, style: ["dashed", "dotted", "wavy"].includes(mst) ? mst : "solid",
-            ...(mlock ? { lock: true } : {}), ...(mfill ? { fill: mfill, fillOp: mfillOp } : {}), x: pts[0].x, y: pts[0].y, pts, path: [] };
+            ...(mlock ? { lock: true } : {}), ...(mnote ? { note: true } : {}),
+            ...(mpress && mpress.length === pts.length ? { press: mpress } : {}),
+            ...(mfill ? { fill: mfill, fillOp: mfillOp } : {}), x: pts[0].x, y: pts[0].y, pts, path: [] };
           pieces.push(m); byId[mid] = m;
         }
       } else if (cmd === "STEP") {
@@ -548,10 +560,13 @@ export function serializeDrill(rink, pieces, title = "", desc = "", steps = [], 
     }
     if (p.kind === "mark") {
       const lk = p.lock ? " lock" : "";
+      const nt = p.note ? " note" : "";
       const fl = p.fill ? ` fill=${String(p.fill).replace("#", "")}:${f2(p.fillOp != null ? p.fillOp : 0.25)}` : "";
       const cIdx = (p.pts || []).map((q, i) => (q.c ? i : -1)).filter(i => i >= 0);
       const cr = cIdx.length ? ` corners=${cIdx.join(";")}` : "";
-      out.push(`MARK ${p.id} ${p.color} ${f2(p.width || 1.1)} ${p.style || "solid"}${lk}${fl}${cr} ${(p.pts || []).map(q => `${f1(q.x)},${f1(q.y)}`).join(" ")}`);
+      const pr = Array.isArray(p.press) && p.press.length === (p.pts || []).length
+        ? ` press=${p.press.map(v => (v == null ? "" : f2(v))).join(";")}` : "";
+      out.push(`MARK ${p.id} ${p.color} ${f2(p.width || 1.1)} ${p.style || "solid"}${lk}${nt}${fl}${cr}${pr} ${(p.pts || []).map(q => `${f1(q.x)},${f1(q.y)}`).join(" ")}`);
       return;
     }
     const lbl = p.label ? " " + String(p.label).replace(/[\s,]+/g, "_") : "";
