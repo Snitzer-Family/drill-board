@@ -9249,21 +9249,25 @@ export default function DrillAnimator() {
         <div className="hd-pen">
           {/* what the PEN does */}
           <div className="hd-pengroup">
-            {/* toggles both ways: tapping it while drawing flips to editing,
-                same as the Edit button — whichever is nearer your thumb */}
-            <button className={`hd-pentool${tool === "pen" && !eraser ? " on" : ""}`}
-              title={tool === "pen" && !eraser
-                ? "Drawing — tap to edit pieces" : "Draw — sketch symbols, routes and passes"}
+            {/* one switch for the two modes: the knob slides to whichever side
+                is live, and a tap anywhere on it flips */}
+            <button className={`hd-penswitch ${tool === "pen" ? "draw" : "edit"}`}
+              title={tool === "pen" ? "Draw mode — tap to edit pieces" : "Edit mode — tap to draw"}
               onClick={() => {
                 setPopup(null);
-                if (tool === "pen" && !eraser) { flushPen(); setTool("select"); return; }
-                setEraser(false); setTool("pen");
+                if (tool === "pen") { flushPen(); setTool("select"); return; }
+                setTool("pen");
               }}>
-              <Icon name="marker" size={18} /><span>Draw</span>
+              <span className="hd-penswknob" />
+              <span className="hd-penswopt draw"><Icon name="marker" size={17} /><span>Draw</span></span>
+              <span className="hd-penswopt edit"><Icon name="cursor" size={17} /><span>Edit</span></span>
             </button>
+            {/* a toggle, not a one-way latch — with Draw folded into the mode
+                switch, this is the only way back to inking */}
             <button className={`hd-pentool${eraser ? " on" : ""}`}
-              title="Erase — stroke over ink, routes or pieces to remove them"
-              onClick={() => { setEraser(true); if (tool !== "pen") setTool("pen"); }}>
+              title={eraser ? "Erasing — tap to ink again"
+                : "Erase — stroke over ink, routes or pieces to remove them"}
+              onClick={() => { setEraser(v => !v); if (tool !== "pen") setTool("pen"); }}>
               <Icon name="eraser" size={18} /><span>Erase</span>
             </button>
             <div className="hd-pensep" />
@@ -9313,11 +9317,6 @@ export default function DrillAnimator() {
 
           {/* what happens to the BOARD */}
           <div className="hd-pengroup">
-            <button className={`hd-pentool${tool !== "pen" ? " on" : ""}`}
-              title={tool === "pen" ? "Switch to editing pieces" : "Editing pieces — tap to draw again"}
-              onClick={() => { flushPen(); setTool(t => (t === "pen" ? "select" : "pen")); setPopup(null); }}>
-              <Icon name="cursor" size={18} /><span>Edit</span>
-            </button>
             <button className="hd-pentool" title="Convert — read the whole drawing now" onClick={convertInk}>
               <Icon name="wand" size={18} /><span>Convert</span>
             </button>

@@ -61,6 +61,23 @@ export const STYLES = `
         .hd-pengroup { display:flex; align-items:center; gap:4px; flex-wrap:nowrap; }
         .hd-pensep { flex:none; width:1px; height:26px; background:#33404f; margin:0 3px; }
         .hd-penspacer { flex:1 1 auto; min-width:0; }
+        /* Draw|Edit as ONE switch: a knob slides to the live half and a tap
+           anywhere flips it. --sw keeps the knob's travel tied to the half
+           width, so the narrow-screen sizing below needs no second rule. */
+        .hd-penswitch { --sw:48px; position:relative; flex:none; display:flex; height:42px;
+          padding:3px; border-radius:10px; background:#141b23; border:1px solid #33404f;
+          cursor:pointer; }
+        .hd-penswknob { position:absolute; top:3px; bottom:3px; left:3px; width:var(--sw);
+          border-radius:8px; background:#0f766e; transition:transform .16s ease; }
+        .hd-penswitch.edit .hd-penswknob { transform:translateX(var(--sw)); }
+        .hd-penswopt { position:relative; z-index:1; width:var(--sw); display:flex;
+          flex-direction:column; align-items:center; justify-content:center; gap:3px;
+          padding:4px 2px; color:#8ea0b2; font-size:8.5px; font-weight:700; letter-spacing:.03em;
+          text-transform:uppercase; line-height:1; }
+        /* Match on the option's OWN class, never its position: the knob is also
+           a span, so :nth-of-type counted it and lit the wrong half. */
+        .hd-penswitch.draw .hd-penswopt.draw,
+        .hd-penswitch.edit .hd-penswopt.edit { color:#fff; }
         /* labelled tool: icon over a caption, like the bottom bar */
         .hd-pentool { flex:none; min-width:44px; height:42px; padding:3px 5px 2px;
           display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px;
@@ -76,6 +93,7 @@ export const STYLES = `
         @media (max-width: 480px) {
           .hd-pen { gap:6px 3px; padding:5px 5px; }
           .hd-pentool { min-width:40px; padding:3px 3px 2px; }
+          .hd-penswitch { --sw:40px; }
           .hd-penswatch { width:20px; height:20px; }
           .hd-peninks { gap:3px; }
           .hd-pensep { margin:0 1px; }
