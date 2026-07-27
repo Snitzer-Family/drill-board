@@ -462,6 +462,36 @@ const kinds = ops => ops.map(o => o.op);
   T('D is not an O', recognizeSymbol(drawn(GLYPHS.D, 60, 40, 6, 0.1, 421))?.sym, 'D');
 }
 
+// ---- REAL X's off Nate's phone (pasted from the pen's Copy-diagnostics
+//      button). Three X's drawn one at a time at 3x zoom on a 1.60-aspect
+//      view; $P scored them 0.213 / 0.617 / 0.293 against a 0.55 bar, so two
+//      of three were thrown away — one leg even became a route on a
+//      neighbouring player. Hand-drawn X's have unequal legs, curved starts
+//      and an off-centre crossing, which template matching punishes; crossing
+//      geometry is what a person actually reads. ----
+{
+  const CTX = { pxFtX: 0.11554, pxFtY: 0.072095 };
+  const S = [
+    [[143.21,74.67],[143.91,75.44],[144.95,76.2],[146.22,76.97],[147.33,77.67],[148.18,78.18],[148.53,78.39]],
+    [[142.94,78.22],[142.63,77.55],[142.63,77],[142.9,76.47],[143.64,75.92],[144.68,75.32],[146.02,74.71],[147.45,74.14],[148.57,73.61]],
+    [[133.2,74.79],[133.85,75.12],[134.78,75.65],[135.93,76.3],[137.24,77],[138.32,77.62],[139.09,78.15],[139.28,78.34]],
+    [[134.08,78.46],[134.12,77.45],[134.55,77.02],[135.28,76.56],[136.28,76.11],[137.4,75.65],[138.44,75.27],[138.82,75.1]],
+    [[135.86,68.23],[135.93,68.49],[136.51,69.12],[137.59,69.98],[138.82,70.99],[139.98,72],[140.67,72.67]],
+    [[135.97,73.1],[136.01,72.46],[136.36,71.85],[137.36,70.92],[138.67,69.91],[140.13,68.99],[141.56,68.25],[142.75,67.72],[143.17,67.58]],
+  ].map(s => s.map(([x, y]) => ({ x, y })));
+  const ops = classifyPenGroup(S.map(pts => stroke(pts)), CTX);
+  T('all 3 real phone X\'s convert', kinds(ops), ['player', 'player', 'player']);
+  T('...and every one reads X', ops.every(o => o.sym === 'X'), true);
+  // the joins that must NOT be read as a crossing: V and L meet at an END,
+  // F's bar starts ON the spine, D's spine and bowl never cross
+  const line = (a, b, n = 12) => stroke(Array.from({ length: n + 1 }, (_, i) =>
+    ({ x: a[0] + ((b[0] - a[0]) * i) / n, y: a[1] + ((b[1] - a[1]) * i) / n })));
+  T('V is not an X', kinds(classifyPenGroup([line([0, 0], [10, 20]), line([10, 20], [20, 0])])).includes('player'), false);
+  T('L is not an X', kinds(classifyPenGroup([line([0, 0], [0, 20]), line([0, 20], [15, 20])])).includes('player'), false);
+  T('T-join is not an X', kinds(classifyPenGroup([line([10, 0], [10, 20]), line([10, 10], [25, 10])])).includes('player'), false);
+  T('D still reads D', recognizeSymbol(drawn(GLYPHS.D, 60, 40, 6, 0.12, 503))?.sym, 'D');
+}
+
 // ---- phone scale (pxFt ≈ 0.5: the full 200ft rink spans ~390px, so a finger
 //      X is 20-40 FEET) — the view-scaled gates must keep everything working ----
 {

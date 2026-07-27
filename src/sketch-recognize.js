@@ -222,6 +222,33 @@ function ringOf(pts) {
   return best && best.c > 0.72 ? pts.slice(0, best.k) : null;
 }
 
+// Two strokes that CROSS near the middle of each, at a decent angle, are an X
+// — whatever the template says. Real X's are drawn with unequal legs, curved
+// starts and an off-centre crossing, which $P punishes hard: three off a
+// phone scored 0.213, 0.293 and 0.617 against a 0.55 bar, so two of three were
+// thrown away as ink. Crossing geometry is what a person actually reads.
+// Letters can't sneak in: D's spine and bowl are parallel (they never cross),
+// and V, L and F join at an END of at least one stroke, not mid-span.
+function crossesAsX(strokes) {
+  if (strokes.length !== 2) return false;
+  const [A, B] = strokes;
+  if (A.length < 2 || B.length < 2) return false;
+  const a = A[0], b = A[A.length - 1], c = B[0], d = B[B.length - 1];
+  const r = { x: b.x - a.x, y: b.y - a.y }, s = { x: d.x - c.x, y: d.y - c.y };
+  const lr = Math.hypot(r.x, r.y), ls = Math.hypot(s.x, s.y);
+  if (lr < 1e-6 || ls < 1e-6) return false;
+  if (Math.min(lr, ls) / Math.max(lr, ls) < 0.45) return false;      // comparable legs
+  if (lr / pathLen([A]) < 0.82 || ls / pathLen([B]) < 0.82) return false;   // each near-straight
+  const den = r.x * s.y - r.y * s.x;
+  if (Math.abs(den) < 1e-9) return false;                            // parallel
+  const t = ((c.x - a.x) * s.y - (c.y - a.y) * s.x) / den;
+  const u = ((c.x - a.x) * r.y - (c.y - a.y) * r.x) / den;
+  if (t < 0.2 || t > 0.8 || u < 0.2 || u > 0.8) return false;        // crossing, not joining
+  let ang = Math.abs((Math.atan2(den, r.x * s.x + r.y * s.y) * 180) / Math.PI);
+  if (ang > 90) ang = 180 - ang;
+  return ang >= 30;
+}
+
 function features(strokes) {
   const all = strokes.flat();
   const b = bboxOf(all);
@@ -341,6 +368,7 @@ export function recognizeSymbol(strokes) {
   // 0.561) because the template's points spread over the missing arc — but
   // "every point the same distance from the middle" is unambiguous, and it
   // holds however far round the pen got.
+  if (crossesAsX(strokes)) return { sym: "X", score: 0.95, second: null };
   if (strokes.length === 1) {
     const ring = ringOf(strokes[0]);        // ignores a trailing pen flick
     if (ring) {
