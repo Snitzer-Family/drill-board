@@ -377,6 +377,34 @@ export default function DrillAnimator() {
   const inkStepFt = () => Math.max(0.25, 2.5 * Math.min(penScale.current.x || 1.1, penScale.current.y || 1.1));
   const inkEpsFt = () => Math.max(0.3, 4 * Math.min(penScale.current.x || 1.3, penScale.current.y || 1.3));
   const symbolMaxPx = () => (penScale.current.x > 0 ? SYMBOL_MAX_PX : SYMBOL_MAX);
+  // the last pen burst, kept so it can be copied off-device when a symbol
+  // won't convert — a screenshot can't show stroke data
+  const penLast = useRef(null);
+  function copyPenDiag() {
+    const d = penLast.current;
+    if (!d) { flash("Draw something with the pen first"); return; }
+    const round = v => Math.round(v * 100) / 100;
+    const txt = JSON.stringify({
+      v: APP_VERSION, pxFtX: round(d.ctx.pxFtX * 10000) / 10000, pxFtY: round(d.ctx.pxFtY * 10000) / 10000,
+      screen: [Math.round(window.innerWidth), Math.round(window.innerHeight)],
+      ops: d.ops.map(o => ({ op: o.op, sym: o.sym, srcs: o.srcs })),
+      strokes: d.strokes.map(s => s.pts.map(p => [round(p.x), round(p.y)])),
+    });
+    // best-effort on BOTH paths: the async clipboard API can hang forever when
+    // the document isn't focused, so never gate the feedback on its promise
+    let ok = false;
+    const ta = document.createElement("textarea");
+    ta.value = txt;
+    ta.style.cssText = "position:fixed;top:-1000px;left:0;opacity:0";
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, txt.length);      // iOS needs the explicit range
+    try { ok = document.execCommand("copy"); } catch { /* fall through */ }
+    ta.remove();
+    try { navigator.clipboard?.writeText?.(txt); } catch { /* best effort */ }
+    flash(ok ? "Pen diagnostics copied — paste them to Claude"
+      : "Copied (if the paste is empty, screenshot this instead)");
+  }
   const penMarkAge = useRef(new Map());   // pen-fallback mark id → committed-at ms
   // Apple Pencil: once a stylus draws, the ice stops listening to skin —
   // a hand resting on the iPad while sketching is the whole problem. Sticky
@@ -4169,7 +4197,10 @@ export default function DrillAnimator() {
     const ops = classifyPenGroup(strokes, ctx);
     // on-device diagnostic: the last burst's real captured strokes + verdict.
     // Gesture data can't be reproduced from a screenshot — this is how phone
-    // strokes get lifted into tests/sketch-recognize.mjs as fixtures.
+    // strokes get lifted into tests/sketch-recognize.mjs as fixtures, either
+    // by the headless harness (window.__pen) or by the user, via the pen
+    // popout's "Copy diagnostics" button.
+    penLast.current = { strokes, ctx, ops };
     if (typeof window !== "undefined") window.__pen = { strokes, ctx, ops };
     const consumed = new Set();
     const finalOps = ops.filter(o => {
@@ -9357,12 +9388,18 @@ export default function DrillAnimator() {
                 ))}
               </div>
               {tool === "pen" && (
-                <div className="hd-poprow">
-                  <span>Apple Pencil</span>
-                  <button className={`hd-mini${palmReject ? " on" : ""}`} onClick={() => setPalmReject(v => !v)}>
-                    <Icon name={palmReject ? "check" : "close"} size={13} /> Palm rejection
-                  </button>
-                </div>
+                <>
+                  <div className="hd-poprow">
+                    <span>Apple Pencil</span>
+                    <button className={`hd-mini${palmReject ? " on" : ""}`} onClick={() => setPalmReject(v => !v)}>
+                      <Icon name={palmReject ? "check" : "close"} size={13} /> Palm rejection
+                    </button>
+                  </div>
+                  <div className="hd-poprow">
+                    <span>Won't convert?</span>
+                    <button className="hd-mini" onClick={copyPenDiag}>Copy diagnostics</button>
+                  </div>
+                </>
               )}
               <div className="hd-poprow">
                 <span>Thickness</span>
