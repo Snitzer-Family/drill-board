@@ -212,7 +212,8 @@ is the piece's starting spot (so `shoot=0` / `chip=0` releases before skating).
 | Modifier | Meaning |
 |---|---|
 | `CARRY` / `PASS` / `SHOT` | Puck speed class for a puck's own route leg |
-| `FWD` / `BWD` | Skate forward / backward |
+| `FWD` / `BWD` | Skate forward / backward. Per **leg** in the file (forward is the default, so only `BWD` is ever written) — but in the app it is *sticky*: toggling *Skate direction* at a waypoint carries the change through every following leg, and into the branches that continue from them, until a later waypoint is toggled back. |
+| `TURN left\|right\|player\|puck` | On a leg that **reverses** the skate direction: which way the player sweeps through the 180° pivot. `left`/`right` are literal shoulders; `player` opens toward the nearest other player; `puck` (the default, so it is only written when it isn't `puck`) opens toward whichever puck is on a player's stick at that moment. With nothing to read, they open toward mid-ice. Set via *Turn toward* on the waypoint popup, which only appears at a waypoint that actually changes direction. |
 | `STOP <n>` | Pause `n` seconds at the start of this leg (*Delay trigger → Timer*) |
 | `WAIT <player> <pt>` | Pause at the start of this leg until `<player>` **reaches** point `<pt>`. In the app: *Delay trigger → Waypoint* on the waypoint popup. |
 | `WACT <player> <pt>` | Pause at the start of this leg until `<player>` **releases the puck** (pass/chip/rim/shot) at point `<pt>` (`0` = at any of their actions). In the app: *Delay trigger → Action*. |

@@ -53,6 +53,15 @@ const DRIB_FORE = 0.55 * ICON_SCALE;       // fore-aft cradle (ft)
 const DRIB_LAT = 0.8 * ICON_SCALE;         // lateral sweep (ft)
 const DRIB_SWING = 7;                       // matching stick sweep (deg)
 
+// A forward↔backward transition is a PIVOT, not a teleport: the skater sweeps
+// through 180° over this long, centred on the waypoint where the direction
+// changes (or standing in place, if they pause there).
+const PIVOT_SEC = 0.4;
+const CENTRE_Y = 42.5;                                            // mid-ice, the default thing to open toward
+const stepFlip = s => (s && s.dir === "bwd" ? 180 : 0);           // the old instant flip
+const smooth01 = u => (u <= 0 ? 0 : u >= 1 ? 1 : u * u * (3 - 2 * u));
+const wrapDeg = d => ((d % 360) + 540) % 360 - 180;               // → (-180, 180]
+
 export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, realisticShots = true, detail = true, odds }) {
   // tunable shot odds (0..1), falling back to the constant defaults; `bounce` is
   // the fraction of speed a missed puck keeps when it caroms off a board or post
@@ -101,6 +110,30 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
   // "playerId/segIndex", so it flows through the same machinery as a fixed stop.
   let currentTrigPause = {};
   const trigPauseOf = (p, i) => currentTrigPause[p.id + "/" + i] || 0;
+  // pivot windows: pieceId -> { path, byIdx: Map(boundary i -> { from, to, t0, t1, sign }) },
+  // where boundary i is the waypoint between legs i and i+1 and t0/t1 are ROUTE-LOCAL
+  // seconds. Resolving a window's sweep direction needs the other pieces' positions,
+  // which means calling back into the position machinery — `pivotResolving` makes
+  // that re-entrant pass fall back to the old instant flip, so it can't recurse.
+  let currentPivots = {};
+  let pivotResolving = false;
+
+  // the flip (deg) to add to leg i's tangent at route-local elapsed `eLoc` — the
+  // stepped 0/180 outside a pivot, a smooth sweep through one
+  function flipAt(p, i, eLoc) {
+    const base = stepFlip(p.path[i]);
+    if (pivotResolving) return base;
+    const pv = currentPivots[p.id];
+    // identity check: callers sometimes pass the RAW piece for a branching player,
+    // whose leg indices don't line up with the effective path the windows were built on
+    if (!pv || pv.path !== p.path) return base;
+    const blend = w => w.from + w.sign * 180 * smooth01(w.t1 > w.t0 ? (eLoc - w.t0) / (w.t1 - w.t0) : 1);
+    const wIn = pv.byIdx.get(i - 1);            // the pivot into this leg, still finishing
+    if (wIn && eLoc < wIn.t1) return blend(wIn);
+    const wOut = pv.byIdx.get(i);               // the pivot out of this leg, already starting
+    if (wOut && eLoc > wOut.t0) return blend(wOut);
+    return base;
+  }
 
   function routeTimeW(p, warp, upto = Infinity) {
     let t = startWaitOf(p);
@@ -115,7 +148,9 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
   // so it stickhandles. Display-only — planning geometry keeps using bladeAt.
   function carriedPuckAt(car, e, warp) {
     const te = Math.min(e, routeTimeW(car, warp));
-    const base = bladeAt(car, te, warp);
+    // display blade: the puck has to stay ON the stick as the body pivots, or it
+    // detaches for the whole turn (displayPos re-matches carrier by proximity)
+    const base = bladeAt(car, te, warp, true);
     const rad = ((routePosAt(car, te, warp).a || 0) * Math.PI) / 180;
     const side = car.hand === "L" ? -1 : 1;
     const ph = e * DRIB_W;
@@ -125,9 +160,12 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
     return { x: clampX(base.x + Math.cos(rad) * fore - Math.sin(rad) * lat),
              y: clampY(base.y + Math.sin(rad) * fore + Math.cos(rad) * lat), a: 0 };
   }
-  function bladeAt(pl, e, warp) {
+  // `disp` picks the display heading (pivot-smoothed); everything that PLANS puck
+  // geometry leaves it off and rides the stepped heading, so a pivot can never
+  // move a launch point — and therefore never change a flight time.
+  function bladeAt(pl, e, warp, disp = false) {
     const cp = routePosAt(pl, e, warp);
-    const rad = ((cp.a || 0) * Math.PI) / 180;
+    const rad = (((disp ? cp.a : cp.aStep) || 0) * Math.PI) / 180;
     const side = pl.hand === "L" ? -1 : 1;
     const lx = 4.9 * ICON_SCALE, ly = 2.55 * ICON_SCALE * side;
     return {
@@ -143,7 +181,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
     // trajectories, rest spots) — a cached plan from the other mode must not be
     // reused, or toggling e.g. Whiteboard replays a stale realistic miss
     if (pc.key === pieces && pc.pace === pace && pc.sig === lenSig && pc.seed === seed
-      && pc.real === realisticShots && pc.det === detail && pc.odds === odds) { currentHolds = pc.holds || {}; currentStartWait = pc.startWait || {}; currentTrigPause = pc.trigPause || {}; return pc; }
+      && pc.real === realisticShots && pc.det === detail && pc.odds === odds) { currentHolds = pc.holds || {}; currentStartWait = pc.startWait || {}; currentTrigPause = pc.trigPause || {}; currentPivots = pc.pivots || {}; return pc; }
     const warp = {};
     const plans = {};
     const rel = {};
@@ -290,7 +328,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
       // shows (facing for a stationary player, the movement/tangent for a route
       // player), so a chip goes the way they're pointed
       const chipHeading = (p, t, aim) => {
-        const deg = aim != null ? aim : routePosAt(p, t, warp).a || 0;   // explicit aim overrides facing
+        const deg = aim != null ? aim : routePosAt(p, t, warp).aStep || 0;   // explicit aim overrides facing
         const a = (deg * Math.PI) / 180;
         return { x: Math.cos(a), y: Math.sin(a) };
       };
@@ -739,6 +777,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
     planCache.current = { key: pieces, pace, sig: lenSig, seed, real: realisticShots, det: detail, odds,
       warp, plans, rel, holds: {}, startWait: sw, trigPause: tp };
     currentHolds = {};
+    currentPivots = {};
 
     // blue-line entry holds: a "hold=line" player waits at their last neutral
     // waypoint until the puck first crosses into the zone they are entering.
@@ -807,7 +846,92 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
     });
     currentHolds = holds;
     planCache.current.holds = holds;
+    currentPivots = buildPivots(warp, plans);
+    planCache.current.pivots = currentPivots;
     return planCache.current;
+  }
+
+  // Where does a pivoting skater end up looking? Left/right are literal shoulders;
+  // otherwise they open toward the nearest other player, or (the default) toward
+  // whichever puck is on someone's stick — a loose puck or a corner pile is not
+  // something you turn to watch. With nothing to read, they open to mid-ice.
+  function pivotSign(p, i, from, tAbs, warp, plans) {
+    const want = p.path[i + 1].turn || "puck";
+    if (want === "left") return -1;
+    if (want === "right") return 1;
+    const px = p.path[i].x, py = p.path[i].y;
+    const h0 = segTangentAngle(segEnd(p, i - 1), p.path[i], 0.98) + from;   // heading before the sweep
+    let tx = null, ty = null, best = Infinity;
+    for (const q of pieces) {
+      if (q.id === p.id) continue;
+      if (want === "player") { if (q.kind !== "player") continue; }
+      else {
+        if (q.kind !== "puck") continue;
+        const pl = plans[q.id];
+        if (!pl) continue;
+        let leg = pl.legs[0];
+        for (const L of pl.legs) { if (tAbs >= L.t0) leg = L; else break; }
+        // a puck is "on a stick" only while it RIDES a carrier — in flight, loose, or
+        // sitting in a pile it isn't something you turn to watch, and a player doesn't
+        // turn to look at the puck they are carrying themselves
+        if (!leg || leg.type !== "ride" || leg.id === p.id) continue;
+        if (!pieces.some(c => c.id === leg.id && c.kind === "player")) continue;
+      }
+      const d = displayPosAt(q, tAbs);
+      const dd = Math.hypot(d.x - px, d.y - py);
+      if (dd > 0.5 && dd < best) { best = dd; tx = d.x; ty = d.y; }
+    }
+    if (tx == null) { tx = px; ty = CENTRE_Y; }                 // nothing to read — open to mid-ice
+    if (Math.hypot(tx - px, ty - py) < 1) return 1;
+    const rel = wrapDeg((Math.atan2(ty - py, tx - px) * 180) / Math.PI - h0);
+    return rel >= 0 ? 1 : -1;                                   // sweep the front THROUGH that bearing
+  }
+
+  // one pivot window per waypoint where the skate direction changes
+  function buildPivots(warp, plans) {
+    const out = {};
+    const lists = [];
+    for (const p of pieces) {
+      if (p.kind !== "player" || !p.path || p.path.length < 2) continue;
+      const sw = startWaitOf(p);
+      const list = [];
+      for (let i = 0; i < p.path.length - 1; i++) {
+        const from = stepFlip(p.path[i]), to = stepFlip(p.path[i + 1]);
+        if (from === to) continue;
+        const tc = routeTimeW(p, warp, i) - sw;                 // route-local arrival at waypoint i
+        const pause = (p.path[i + 1].stop || 0) + trigPauseOf(p, i + 1);
+        let t0, t1;
+        if (pause > 0.05) {                                    // they stop here — pivot standing still
+          const w = Math.min(PIVOT_SEC, pause);
+          t0 = tc + (pause - w) / 2; t1 = t0 + w;
+        } else {                                               // straddle the waypoint, clamped so a
+          const inT = effMove(p, p.path[i], i, warp);          // very short leg isn't swallowed whole
+          const outT = effMove(p, p.path[i + 1], i + 1, warp);
+          t0 = tc - Math.min(PIVOT_SEC / 2, 0.4 * inT);
+          t1 = tc + Math.min(PIVOT_SEC / 2, 0.4 * outT);
+        }
+        list.push({ i, from, to, tc, tAbs: tc + sw, t0, t1, sign: 1 });
+      }
+      if (!list.length) continue;
+      for (let k = 1; k < list.length; k++) {                   // back-to-back flips must not overlap
+        if (list[k].t0 < list[k - 1].t1) {
+          const m = (list[k - 1].tc + list[k].tc) / 2;
+          list[k - 1].t1 = Math.min(list[k - 1].t1, m);
+          list[k].t0 = Math.max(list[k].t0, m);
+        }
+      }
+      lists.push([p, list]);
+      out[p.id] = { path: p.path, byIdx: new Map(list.map(w => [w.i, w])) };
+    }
+    // sampling the rest of the ice re-enters routePosAt; the guard keeps that pass
+    // on the stepped flip, so it bottoms out immediately (and positions don't
+    // depend on the flip anyway — only a puck riding a blade shifts slightly)
+    pivotResolving = true;
+    try {
+      for (const [p, list] of lists)
+        for (const w of list) w.sign = pivotSign(p, w.i, w.from, w.tAbs, warp, plans);
+    } finally { pivotResolving = false; }
+    return out;
   }
 
   function pieceTime(p) {
@@ -845,9 +969,13 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
   // position/heading along a piece's own route at elapsed e (warp-aware).
   // Also returns v (normalized speed) and dist (feet travelled) for stride FX.
   function routePosAt(p, e, warp) {
-    const flip = s => (s.dir === "bwd" ? 180 : 0);
-    if (!p.path.length) return { x: p.x, y: p.y, a: p.facing || 0, v: 0, dist: 0 };
+    if (!p.path.length) return { x: p.x, y: p.y, a: p.facing || 0, aStep: p.facing || 0, flip: 0, v: 0, dist: 0 };
     e -= startWaitOf(p);   // hold at the start until the trigger fires (e<=0 → start pose below)
+    // `a` is the DISPLAY heading — smoothed through a fwd↔bwd pivot; `aStep` keeps
+    // the old instant flip, and everything that plans puck geometry (blade spots,
+    // chip headings) stays on it so no pivot can move a launch point or a leg time.
+    const eLoc = e;
+    const flip = i => flipAt(p, i, eLoc);
     // Sharp interior corners get a speed dip (carve the turn) so the skater
     // decelerates in and accelerates out instead of pivoting at full speed.
     const dirN = (dx, dy) => { const m = Math.hypot(dx, dy) || 1; return [dx / m, dy / m]; };
@@ -868,11 +996,11 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
       return Math.max(0, Math.min(1, (ang - 22) / (120 - 22))) * 0.2;
     };
     if (e <= 0) {
-      const s0 = p.path[0];
-      return { x: p.x, y: p.y, a: segTangentAngle({ x: p.x, y: p.y }, s0, 0.02) + flip(s0), v: 0, dist: 0 };
+      const s0 = p.path[0], t0 = segTangentAngle({ x: p.x, y: p.y }, s0, 0.02), f0 = flip(0);
+      return { x: p.x, y: p.y, a: t0 + f0, aStep: t0 + stepFlip(s0), flip: f0, v: 0, dist: 0 };
     }
     // position + heading at arc-length `arc` along segment element el
-    const atArc = (el, L, arc, s) => {
+    const atArc = (el, L, arc, s, i) => {
       const pt = el.getPointAtLength(arc);
       const q = el.getPointAtLength(Math.min(L, arc + 0.6));
       let a;
@@ -882,14 +1010,29 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
       } else {
         a = (Math.atan2(q.y - pt.y, q.x - pt.x) * 180) / Math.PI;
       }
-      return { x: pt.x, y: pt.y, a: a + flip(s) };
+      const f = flip(i);
+      return { x: pt.x, y: pt.y, a: a + f, aStep: a + stepFlip(s), flip: f };
     };
     let prev = { x: p.x, y: p.y };
     let dist = 0;
     for (let i = 0; i < p.path.length; i++) {
       const s = p.path[i];
       const stop = (s.stop || 0) + trigPauseOf(p, i);
-      if (e < stop) return { ...prev, a: segTangentAngle(prev, s, 0.02) + flip(s), v: 0, dist };
+      if (e < stop) {
+        // pausing at a waypoint: the tangent jumps to the next leg's the instant they
+        // arrive, so a pivot taken standing still swings the tangent across too
+        const tOut = segTangentAngle(prev, s, 0.02);
+        let tan = tOut;
+        const pvw = i > 0 && !pivotResolving && currentPivots[p.id]?.path === p.path
+          ? currentPivots[p.id].byIdx.get(i - 1) : null;
+        if (pvw && eLoc < pvw.t1) {
+          const tIn = segTangentAngle(legStart(i - 1), p.path[i - 1], 0.98);
+          const u = smooth01(pvw.t1 > pvw.t0 ? (eLoc - pvw.t0) / (pvw.t1 - pvw.t0) : 1);
+          tan = tIn + wrapDeg(tOut - tIn) * u;
+        }
+        const f = flip(i);
+        return { ...prev, a: tan + f, aStep: tOut + stepFlip(s), flip: f, v: 0, dist };
+      }
       e -= stop;
       const mt = effMove(p, s, i, warp);
       const el = segRefs.current[`${p.id}/${i}`];
@@ -909,7 +1052,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
             const { s: sf, v } = easeLeg(tBefore > 0 ? e / tBefore : 1, entryRest ? RAMP_UP : 0, RAMP_DOWN);
             const arc = zHold.fCross * L * sf;
             const smul = tBefore > 0 ? ((zHold.fCross * L / tBefore) / pace) * v : 0;
-            return { ...atArc(el, L, arc, s), v, smul, dist: dist + arc, braking: e / tBefore > 1 - RAMP_DOWN };
+            return { ...atArc(el, L, arc, s, i), v, smul, dist: dist + arc, braking: e / tBefore > 1 - RAMP_DOWN };
           }
           e -= tBefore;
           const dir = zHold.cy <= 42.5 ? 1 : -1;                   // one-way, toward center ice
@@ -918,7 +1061,8 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           if (e < zHold.dur) {
             // hold on the line, slowly gliding toward the middle
             const dy = Math.min(DRIFT_MAX, DRIFT_RATE * e) * dir;
-            return { x: zHold.cx, y: clampY(zHold.cy + dy), a: dir > 0 ? 90 : -90, v: 0, dist: dist + zHold.fCross * L };
+            const ha = dir > 0 ? 90 : -90;   // the hold's own pose wins over any pivot
+            return { x: zHold.cx, y: clampY(zHold.cy + dy), a: ha, aStep: ha, flip: 0, v: 0, dist: dist + zHold.fCross * L };
           }
           e -= zHold.dur;
           if (e < tAfter) {
@@ -926,11 +1070,11 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
             const arc = zHold.fCross * L + (1 - zHold.fCross) * L * sf;
             const smul = tAfter > 0 ? (((1 - zHold.fCross) * L / tAfter) / pace) * v : 0;
             const off = dyEnd * (1 - sf) * dir;                    // cut in and rejoin the route
-            const pos = atArc(el, L, arc, s);
+            const pos = atArc(el, L, arc, s, i);
             return { ...pos, y: clampY(pos.y + off), v, smul, dist: dist + arc, braking: exitRest && e / tAfter > 1 - RAMP_DOWN };
           }
           e -= tAfter;
-        } catch { return { ...prev, a: 0, v: 0, dist }; }
+        } catch { return { ...prev, a: 0, aStep: 0, flip: 0, v: 0, dist }; }
         dist += L;
         prev = { x: s.x, y: s.y };
         continue;
@@ -943,16 +1087,17 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           const { s: sf, v } = easeLeg(e / mt, aRamp, bRamp);
           const braking = exitRest && e / mt > 1 - RAMP_DOWN;
           const smul = mt > 0 ? ((L / mt) / pace) * v : 0;
-          return { ...atArc(el, L, L * sf, s), v, smul, dist: dist + L * sf, braking };
-        } catch { return { ...prev, a: 0, v: 0, dist }; }
+          return { ...atArc(el, L, L * sf, s, i), v, smul, dist: dist + L * sf, braking };
+        } catch { return { ...prev, a: 0, aStep: 0, flip: 0, v: 0, dist }; }
       }
       e -= mt;
       dist += L;
       prev = { x: s.x, y: s.y };
     }
-    const last = p.path[p.path.length - 1];
-    const lp = segEnd(p, p.path.length - 2);
-    return { x: last.x, y: last.y, a: segTangentAngle(lp, last, 0.98) + flip(last), v: 0, dist };
+    const last = p.path[p.path.length - 1], li = p.path.length - 1;
+    const lp = segEnd(p, li - 1);
+    const ta = segTangentAngle(lp, last, 0.98), fl = flip(li);
+    return { x: last.x, y: last.y, a: ta + fl, aStep: ta + stepFlip(last), flip: fl, v: 0, dist };
   }
 
   function displayPosAt(p, e) {

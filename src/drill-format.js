@@ -61,14 +61,14 @@ export function extractDrill(text) {
 function parseSegments(tok, j, unq) {
   const segs = [];
   let mode = "carry", dir = "fwd", stop = 0, rate = 1, name = null, waitOn = null, jump = false, join = null, endStop = false, lock = false;
-  let dsc = null, dmode = null, dsize = null, dox = null, doy = null;
+  let dsc = null, dmode = null, dsize = null, dox = null, doy = null, turn = null;
   const num = () => { const v = parseFloat(tok[j++]); if (isNaN(v)) throw new Error("bad number in PATH"); return v; };
   const push = seg => {
     segs.push({ ...seg, mode, dir, stop, rate, ...(name ? { name } : {}), ...(waitOn ? { waitOn } : {}), ...(jump ? { jump: true } : {}),
       ...(join ? { join } : {}), ...(endStop ? { endStop: true } : {}), ...(lock ? { lock: true } : {}), ...(dsc ? { desc: dsc } : {}), ...(dmode ? { dmode } : {}), ...(dsize != null ? { dsize } : {}),
-      ...(dox != null ? { dox, doy } : {}) });
+      ...(dox != null ? { dox, doy } : {}), ...(turn ? { turn } : {}) });
     mode = "carry"; dir = "fwd"; stop = 0; rate = 1; name = null; waitOn = null; jump = false; join = null; endStop = false; lock = false;
-    dsc = null; dmode = null; dsize = null; dox = null; doy = null;
+    dsc = null; dmode = null; dsize = null; dox = null; doy = null; turn = null;
   };
   while (j < tok.length) {
     const t = tok[j++].toUpperCase();
@@ -88,10 +88,12 @@ function parseSegments(tok, j, unq) {
     if (t === "SHOW") { const m = (tok[j++] || "").toLowerCase(); dmode = ["auto", "preso", "label"].includes(m) ? m : null; continue; }
     if (t === "SIZE") { dsize = Math.max(0.2, num()); continue; }
     if (t === "OFF") { dox = num(); doy = num(); continue; }            // label offset from the waypoint
+    // which way the skater sweeps when this leg reverses their direction
+    if (t === "TURN") { const v = (tok[j++] || "").toLowerCase(); turn = ["left", "right", "player", "puck"].includes(v) ? v : null; continue; }
     if (t === "L") push({ type: "L", x: num(), y: num() });
     else if (t === "Q") push({ type: "Q", cx: num(), cy: num(), x: num(), y: num() });
     else if (t === "C") push({ type: "C", c1x: num(), c1y: num(), c2x: num(), c2y: num(), x: num(), y: num() });
-    else throw new Error(`unknown token "${t}" (use L Q C, PASS SHOT CARRY, FWD BWD, STOP n, RATE n)`);
+    else throw new Error(`unknown token "${t}" (use L Q C, PASS SHOT CARRY, FWD BWD, TURN d, STOP n, RATE n)`);
   }
   return segs;
 }
@@ -523,6 +525,7 @@ function segToStr(s) {
     : `WAIT ${s.waitOn.on} ${(s.waitOn.at ?? 0) + 1} `;
   if (s.rate && s.rate !== 1) pre += `RATE ${f2(s.rate)} `;
   if (s.dir === "bwd") pre += "BWD ";
+  if (s.turn && s.turn !== "puck") pre += `TURN ${s.turn} `;   // "puck" is the default sweep
   if (s.mode && s.mode !== "carry") pre += s.mode.toUpperCase() + " ";
   if (s.type === "L") return `${pre}L ${f1(s.x)},${f1(s.y)}`;
   if (s.type === "Q") return `${pre}Q ${f1(s.cx)},${f1(s.cy)} ${f1(s.x)},${f1(s.y)}`;

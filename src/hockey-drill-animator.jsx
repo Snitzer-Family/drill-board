@@ -6,6 +6,7 @@ import { prepareImage, drillFromImage, ANTHROPIC_KEY_STORE } from "./drill-visio
 import { drillSvg } from "./drill-svg.js";
 import { mdEscape, mdInline, mdBlock } from "./md.js";
 import { clampX, clampY, segEnd, segD, nearestT, splitSeg, zigzagPoints, wigglePoints, wigglePoly, zigzagPoly, convertSeg, fitRoute, evalSeg, rdp, catmullToBezier, alignJoint, mirrorJoint, translateJointHandles, trimSegStart, trimSegEnd, trimPolyStart, trimPolyEnd, gapPolyAt } from "./geometry.js";
+import { dirOf, dirAtWaypoint, spreadDir } from "./route-dir.js";
 import * as boards from "./boards.js";
 import { netShapes, bumperShapes, solidShapes, detourRoute, segCrossesNet } from "./net-collide.js";
 import { RinkMarkings } from "./rink.jsx";
@@ -278,6 +279,7 @@ function DelayTrigger({ value, onChange, sub, players, actorIds, nameOf }) {
    Modifier words BEFORE a segment apply to that segment only:
      PASS / SHOT / CARRY   puck speed class (3x / 6x / 1x)
      BWD / FWD             skating direction (BWD draws zigzag)
+     TURN left|right|player|puck   which way they pivot when the direction reverses
      STOP <sec>            hold at this leg's START point
      WAIT <player> <pt>    hold until that player REACHES <pt>
      WACT <player> <pt>    hold until that player RELEASES the puck at <pt> (0 = any action)
@@ -2474,6 +2476,18 @@ export default function DrillAnimator() {
     }
     return branchPoint(p);
   }
+  // the skate direction a branch inherits: a branch runs in parallel with the leg
+  // after its departure waypoint, so it picks that sibling leg up (or, off the very
+  // end of a route, the last leg the player skated)
+  function forkEntryDir(p, ref) {
+    const parts = forkParts(ref);
+    const self = forkAt(p, ref);
+    const parentSegs = parts.length <= 1 ? p.path
+      : (forkAt(p, parts.slice(0, -1).join("/"))?.path || []);
+    if (!parentSegs || !parentSegs.length) return "fwd";
+    const at = self && self.at != null ? Math.min(self.at, parentSegs.length - 1) : parentSegs.length - 1;
+    return dirAtWaypoint(parentSegs, Math.min(at + 1, parentSegs.length - 1));
+  }
   // a synthetic "route piece" whose path is a fork and whose origin is where it
   // forks from, so the base-route editing math (segEnd/convertSeg/splitSeg) is reused
   function forkPiece(p, ref) {
@@ -2924,6 +2938,8 @@ export default function DrillAnimator() {
       if (p.id !== id) return p;
       const forks = ensureForkAt(p.forks, ref, c => ({ color: c, action: "skate", forks: [], path: [] }));
       const o = forkOriginPoint({ ...p, forks }, ref);
+      // a branch's first leg picks up the direction the player was already skating
+      const entry = forkEntryDir({ ...p, forks }, ref);
       return { ...p, forks: mapForkAt(forks, ref, f => {
         const rp = { ...p, x: o.x, y: o.y, path: f.path };
         const n = rp.path.length;
@@ -2932,7 +2948,8 @@ export default function DrillAnimator() {
         let dx = prev.x - before.x, dy = prev.y - before.y;
         const m = Math.hypot(dx, dy);
         if (m < 0.5) { dx = 22; dy = 0; } else { dx = (dx / m) * 22; dy = (dy / m) * 22; }
-        const seg = convertSeg({ type, x: clampX(prev.x + dx), y: clampY(prev.y + dy) }, prev);
+        const seg = { ...convertSeg({ type, x: clampX(prev.x + dx), y: clampY(prev.y + dy) }, prev),
+          dir: n ? dirAtWaypoint(rp.path, n - 1) : entry };
         return { ...f, path: [...f.path, seg] };
       }) };
     });
@@ -3214,7 +3231,10 @@ export default function DrillAnimator() {
       if (rd) {
         const f = rd.origLen > 0 ? (res.dist || 0) / rd.origLen : 0;
         const s = samplePoly(rd.pts, f);
-        x = s.x; y = s.y; a = p.path.some(sg => sg.dir === "bwd") ? res.a : s.a;
+        // follow the detour's own tangent, but keep whatever the route says the body
+        // is doing — backwards, or partway through a pivot (a per-route "any leg is
+        // bwd" boolean can't express the middle of a turn)
+        x = s.x; y = s.y; a = s.a + (res.flip || 0);
       }
       const side = p.hand === "L" ? -1 : 1;
       const others = [];                                   // other skaters (for shield + push)
@@ -3562,6 +3582,24 @@ export default function DrillAnimator() {
       return { ...p, path: edit(p.path) };
     });
 
+  // Skate direction is sticky: setting a leg carries the change through every
+  // following leg that still reads the old direction — and into the branches that
+  // continue from those waypoints — stopping wherever the user flipped it back.
+  // spreadDir returns a whole rewritten subtree, so the fork case only needs
+  // mapForkAt to graft it back onto the spine.
+  const setSegDir = (id, i, dir, fork = null) =>
+    update(p => {
+      if (p.id !== id) return p;
+      if (!fork) {
+        const r = spreadDir(p.path, p.forks, i, dir);
+        return r.changed ? { ...p, path: r.path, forks: r.forks } : p;
+      }
+      return { ...p, forks: mapForkAt(p.forks, fork, f => {
+        const r = spreadDir(f.path, f.forks, i, dir);
+        return r.changed ? { ...f, path: r.path, forks: r.forks } : f;
+      }) };
+    });
+
   // `arr` lets the pen materializer allocate against its working array inside
   // a setPieces reducer, where `pieces` is stale
   function nextId(kind, arr = pieces) {
@@ -3608,7 +3646,9 @@ export default function DrillAnimator() {
       let dx = prev.x - before.x, dy = prev.y - before.y;
       const m = Math.hypot(dx, dy);
       if (m < 0.5) { dx = 22; dy = 0; } else { dx = (dx / m) * 22; dy = (dy / m) * 22; }
-      const seg = convertSeg({ type, x: clampX(prev.x + dx), y: clampY(prev.y + dy) }, prev);
+      // a new leg keeps skating the way the one before it did (direction is sticky)
+      const seg = { ...convertSeg({ type, x: clampX(prev.x + dx), y: clampY(prev.y + dy) }, prev),
+        dir: dirAtWaypoint(rp.path, n - 1) };
       // extending curve → curve: make the shared waypoint a smooth join so the new
       // leg continues the heading instead of kinking off with wild split handles
       const build = arr => {
@@ -4282,8 +4322,11 @@ export default function DrillAnimator() {
       if (raw.length < 3) return;
       setPieces(ps => ps.map(p => {
         if (p.id !== id) return p;
-        const route = fitRoute(forkOriginPoint(p, ref), raw);
-        if (!route.length) return p;
+        const fit = fitRoute(forkOriginPoint(p, ref), raw);
+        if (!fit.length) return p;
+        // the branch keeps skating whichever way the player arrived at the split
+        const entry = forkEntryDir(p, ref);
+        const route = entry === "fwd" ? fit : fit.map(s => ({ ...s, dir: entry }));
         const prev = forkAt(p, ref);   // redraw keeps the action + nested reactions
         const forks = ensureForkAt(p.forks, ref, c => ({ color: c, action: "skate", forks: [], path: [] }));
         return { ...p, forks: mapForkAt(forks, ref, f => ({
@@ -4529,7 +4572,10 @@ export default function DrillAnimator() {
         }
         const route = fitRoute(from, raw);
         if (!route.length) { inkMark(o.raw); return; }
-        const legs = o.bwd ? route.map(s => ({ ...s, dir: "bwd" })) : route;
+        // the zigzag gesture says backwards outright; without it an EXTENSION keeps
+        // skating the way the route already was (direction is sticky downstream)
+        const dir = o.bwd ? "bwd" : (extending ? dirAtWaypoint(cur.path, cur.path.length - 1) : "fwd");
+        const legs = dir === "fwd" ? route : route.map(s => ({ ...s, dir }));
         if (!extending) { out[pi] = { ...cur, path: legs }; return; }
         // the old last leg is no longer the end, so its stop mark comes off
         const kept = cur.path.map((s, i) =>
@@ -7273,11 +7319,12 @@ export default function DrillAnimator() {
                 <div className="hd-field">
                   <div className="hd-sectitle">Skate direction</div>
                   <div className="hd-poprow">
-                    <button className={`hd-mini${(p.path[0].dir || "fwd") === "fwd" ? " on" : ""}`}
-                      onClick={() => updateSeg(p.id, 0, { dir: "fwd" })}>Forwards</button>
-                    <button className={`hd-mini${p.path[0].dir === "bwd" ? " on" : ""}`}
-                      onClick={() => updateSeg(p.id, 0, { dir: "bwd" })}>Backwards</button>
+                    <button className={`hd-mini${dirOf(p.path[0]) === "fwd" ? " on" : ""}`}
+                      onClick={() => setSegDir(p.id, 0, "fwd")}>Forwards</button>
+                    <button className={`hd-mini${dirOf(p.path[0]) === "bwd" ? " on" : ""}`}
+                      onClick={() => setSegDir(p.id, 0, "bwd")}>Backwards</button>
                   </div>
+                  <div className="hd-sechint">Applies from here on, until you change it at a later point.</div>
                 </div>
               )}
               {/* the name doubles as the whiteboard symbol, so it's offered from
@@ -7703,11 +7750,28 @@ export default function DrillAnimator() {
                 <div className="hd-field">
                   <div className="hd-sectitle">Skate direction</div>
                   <div className="hd-poprow">
-                    <button className={`hd-mini${(next.dir || "fwd") === "fwd" ? " on" : ""}`}
-                      onClick={() => uSeg(i + 1, { dir: "fwd" })}>Forwards</button>
-                    <button className={`hd-mini${next.dir === "bwd" ? " on" : ""}`}
-                      onClick={() => uSeg(i + 1, { dir: "bwd" })}>Backwards</button>
+                    <button className={`hd-mini${dirOf(next) === "fwd" ? " on" : ""}`}
+                      onClick={() => setSegDir(p.id, i + 1, "fwd", fork)}>Forwards</button>
+                    <button className={`hd-mini${dirOf(next) === "bwd" ? " on" : ""}`}
+                      onClick={() => setSegDir(p.id, i + 1, "bwd", fork)}>Backwards</button>
                   </div>
+                  <div className="hd-sechint">Applies from here on, until you change it at a later point.</div>
+                  {/* the player pivots here, so which shoulder they open over is a
+                      real choice — by default they turn to face the puck in play */}
+                  {dirOf(next) !== dirOf(s) && (
+                    <>
+                      <div className="hd-sectitle" style={{ marginTop: 6 }}>Turn toward</div>
+                      <div className="hd-poprow">
+                        {[["left", "Left", "pivots over their left shoulder"],
+                          ["right", "Right", "pivots over their right shoulder"],
+                          ["player", "Player", "turns toward the nearest other player"],
+                          ["puck", "Puck", "turns toward the puck on a player's stick"]].map(([k, lbl, tip]) => (
+                          <button key={k} className={`hd-mini${(next.turn || "puck") === k ? " on" : ""}`}
+                            title={`${lbl} — ${tip}`} onClick={() => uSeg(i + 1, { turn: k })}>{lbl}</button>
+                        ))}
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
               {p.kind === "puck" && (
