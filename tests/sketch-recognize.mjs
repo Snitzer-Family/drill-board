@@ -321,6 +321,25 @@ const kinds = ops => ops.map(o => o.op);
   T('real 12ft ring → player O', kinds(classifyPenGroup(real('ring12'), CAP)), ['player']);
 }
 
+// ---- THE FILL-STRETCH CASE: a real Apple Pencil circle off an iPad, drawn
+//      perfectly round on screen but captured as a 10.4ft × 6.4ft ellipse
+//      because the rink is stretched to fill the viewport. Analyzed in raw
+//      feet it scores O:0.365 (a reject — this shipped broken through v6.25);
+//      in screen units it scores 0.792. ----
+{
+  const IPAD = { pxFtX: 0.168, pxFtY: 0.103 };
+  const ring = [[100.6,63.1],[101.7,63.4],[102.3,64.4],[103.2,65.2],[103.1,66.3],[102.7,67.4],[101.9,68.3],[100.8,68.6],[99.8,69.2],[98.6,69.4],[97.5,69.3],[96.3,69.2],[95.1,68.9],[94.3,68.2],[93.3,67.5],[92.8,66.5],[93,65.3],[93.4,64.3],[94.4,63.7],[95.4,63]]
+    .map(([x, y]) => ({ x, y }));
+  T('stretched Pencil ring → player', kinds(classifyPenGroup([stroke(ring)], IPAD)), ['player']);
+  T('stretched Pencil ring is an O', classifyPenGroup([stroke(ring)], IPAD)[0].sym, 'O');
+  // the same ink WITHOUT aspect info stays unrecognized — proof the fix is the
+  // screen-space analysis and not a loosened threshold
+  T('same ink, no view scale → ink', kinds(classifyPenGroup([stroke(ring)])), ['mark']);
+  // a player op still reports FEET, positioned on the drawn ink
+  const o = classifyPenGroup([stroke(ring)], IPAD)[0];
+  T('op position is in feet', Math.abs(o.x - 98) < 2 && Math.abs(o.y - 66.3) < 2, true);
+}
+
 // ---- phone scale (pxFt ≈ 0.5: the full 200ft rink spans ~390px, so a finger
 //      X is 20-40 FEET) — the view-scaled gates must keep everything working ----
 {

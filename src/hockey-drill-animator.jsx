@@ -13,7 +13,7 @@ import { ZONES, zoneAt } from "./zones.js";
 import { PieceIcon, Stepper, DiagPanel, Icon, ICONS } from "./icons.jsx";
 import { createTiming, resolveNearest } from "./timing.js";
 import { buildLedger, mayHoldOn, mayHoldEntering } from "./possession.js";
-import { classifyPenGroup, symbolMaxFor } from "./sketch-recognize.js";
+import { classifyPenGroup, SYMBOL_MAX, SYMBOL_MAX_PX } from "./sketch-recognize.js";
 import { newGame, stepGame } from "./ai-game.js";
 import { STYLES } from "./styles.js";
 
@@ -369,7 +369,14 @@ export default function DrillAnimator() {
   const penDraw = useRef(false);      // {t0} while a pen stroke is in flight
   const penBuf = useRef([]);          // settled strokes awaiting commit [{pts,t0,t1}]
   const penTimer = useRef(0);
-  const penScale = useRef(0);         // rink ft per screen px, sampled per burst
+  const penScale = useRef({ x: 0, y: 0 });   // rink ft per screen px per axis, per burst
+  // ink fidelity in SCREEN terms: capture spacing and the control-point
+  // simplifier were fixed rink-feet, so on a big iPad 1.3ft ≈ 12px crushed a
+  // drawn circle into a 4-point blob (which then smoothed into a lumpy shape —
+  // the "mangling"). Both now track the view, with a feet floor for safety.
+  const inkStepFt = () => Math.max(0.25, 2.5 * Math.min(penScale.current.x || 1.1, penScale.current.y || 1.1));
+  const inkEpsFt = () => Math.max(0.3, 4 * Math.min(penScale.current.x || 1.3, penScale.current.y || 1.3));
+  const symbolMaxPx = () => (penScale.current.x > 0 ? SYMBOL_MAX_PX : SYMBOL_MAX);
   const penMarkAge = useRef(new Map());   // pen-fallback mark id → committed-at ms
   // Apple Pencil: once a stylus draws, the ice stops listening to skin —
   // a hand resting on the iPad while sketching is the whole problem. Sticky
@@ -3238,16 +3245,21 @@ export default function DrillAnimator() {
     return { x: clampX(q.x), y: clampY(q.y) };
   }
   const svgPt = evt => svgPtXY(evt.clientX, evt.clientY);
-  // rink feet per screen pixel at the current view/zoom — the pen's gesture
-  // gates scale with it (a finger draws the same PIXELS at any zoom). Probe
-  // both screen axes as DISTANCES: portrait rotates the rink (screen-x moves
-  // rink-y) and fill-stretch scales the axes unevenly.
+  // Rink feet per screen pixel, PER RINK AXIS — the pen interprets ink in
+  // screen space, so it needs both: zoom sets the magnitude and the cosmetic
+  // fill-stretch makes x and y differ (that difference is what turned a round
+  // Pencil circle into an unrecognizable ellipse before v6.26). Probing 100px
+  // along each SCREEN axis and taking the per-rink-axis spans covers portrait
+  // too, where the rink is rotated and screen-x moves rink-y.
   function ftPerPx() {
     const r = svgRef.current?.getBoundingClientRect?.();
-    if (!r || !r.width) return 0;
+    if (!r || !r.width) return { x: 0, y: 0 };
     const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
     const [a, b, c, d] = [svgPtXY(cx - 50, cy), svgPtXY(cx + 50, cy), svgPtXY(cx, cy - 50), svgPtXY(cx, cy + 50)];
-    return (Math.hypot(b.x - a.x, b.y - a.y) + Math.hypot(d.x - c.x, d.y - c.y)) / 200;
+    // each rink axis moves under exactly one screen axis (0° or 90° rotation)
+    const fxx = Math.abs(b.x - a.x) / 100, fxy = Math.abs(d.x - c.x) / 100;
+    const fyx = Math.abs(b.y - a.y) / 100, fyy = Math.abs(d.y - c.y) / 100;
+    return { x: Math.max(fxx, fxy), y: Math.max(fyx, fyy) };
   }
 
   /* ----- edits ----- */
@@ -4026,7 +4038,9 @@ export default function DrillAnimator() {
           if (q.x < x0) x0 = q.x; if (q.y < y0) y0 = q.y;
           if (q.x > x1) x1 = q.x; if (q.y > y1) y1 = q.y;
         });
-        if (Math.hypot(x1 - x0, y1 - y0) >= symbolMaxFor(penScale.current)) commitPen();
+        // "is this a long stroke?" in SCREEN pixels, like the classifier
+        const sx = penScale.current.x || 1, sy = penScale.current.y || 1;
+        if (Math.hypot((x1 - x0) / sx, (y1 - y0) / sy) >= symbolMaxPx()) commitPen();
         else penTimer.current = setTimeout(commitPen, PEN_SETTLE);
       }
       return;
@@ -4127,7 +4141,7 @@ export default function DrillAnimator() {
     // committed as a mark — the crossing stroke completes it. Ops that consume
     // an old mark delete it; ink that stays ink stays untouched on the board.
     const now = performance.now();
-    const pad = Math.max(3, 15 * penScale.current);
+    const pad = Math.max(3, 15 * Math.min(penScale.current.x || 0.2, penScale.current.y || 0.2));
     const bb = pts => {
       let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
       pts.forEach(q => {
@@ -4150,7 +4164,7 @@ export default function DrillAnimator() {
         id: p.id, x: p.x, y: p.y, end: segEnd(p, p.path.length - 1), hasPath: p.path.length > 0,
       })),
       nets: board.filter(p => p.kind === "net").map(n => ({ id: n.id, x: n.x, y: n.y })),
-      pxFt: penScale.current,
+      pxFtX: penScale.current.x, pxFtY: penScale.current.y,
     };
     const ops = classifyPenGroup(strokes, ctx);
     // on-device diagnostic: the last burst's real captured strokes + verdict.
@@ -4210,9 +4224,10 @@ export default function DrillAnimator() {
       return pi;
     };
     const inkMark = pts => {
-      // exact marker-ink treatment: thin the trail, then RDP to control points
-      const trail = pts.filter((q, i) => i === 0 || Math.hypot(q.x - pts[i - 1].x, q.y - pts[i - 1].y) > 1.2);
-      const cps = trail.length > 3 ? rdp(trail, 1.3) : trail;
+      // thin the trail, then RDP to control points — both view-scaled so the
+      // stored ink keeps the shape that was actually drawn
+      const trail = pts.filter((q, i) => i === 0 || Math.hypot(q.x - pts[i - 1].x, q.y - pts[i - 1].y) > inkStepFt());
+      const cps = trail.length > 3 ? rdp(trail, inkEpsFt()) : trail;
       if (cps.length < 2) return;
       // pen fallback ink lands at the pen's thin width, not the marker's;
       // its age makes it reclaimable by a later completing stroke
@@ -4682,7 +4697,7 @@ export default function DrillAnimator() {
     const pt = svgPt(e);
     if (d.kind === "drawing") {
       const last = drawRaw.current[drawRaw.current.length - 1];
-      if (Math.hypot(pt.x - last.x, pt.y - last.y) > 1.1) {
+      if (Math.hypot(pt.x - last.x, pt.y - last.y) > (d.pen ? inkStepFt() : 1.1)) {
         drawRaw.current.push(pt);
         setDrawPreview(drawRaw.current.slice());
       }

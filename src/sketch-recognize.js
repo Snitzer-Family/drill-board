@@ -230,19 +230,27 @@ const GUARDS = {
 /* ---------------- public API ---------------- */
 
 // Pre-recognizer gate: tiny ink (a dot) or a small dense scribble is a puck,
-// whatever its nominal shape. pxFt scales "tiny" to the view (see symbolMaxFor).
-export function puckGate(strokes, pxFt = 0) {
+// whatever its nominal shape. Thresholds are in the caller's analysis units.
+export function puckGate(strokes, dot = 1.8, dense = 4) {
   const dg = strokesDiag(strokes);
-  if (dg < Math.max(1.8, 10 * pxFt)) return true;
-  return dg < Math.max(4, 22 * pxFt) && pathLen(strokes) / (dg || 1e-9) > 4;
+  if (dg < dot) return true;
+  return dg < dense && pathLen(strokes) / (dg || 1e-9) > 4;
 }
 
-// A gesture's size in FEET depends entirely on zoom — a finger draws the same
-// PIXELS whether the viewport spans 200ft (phone, full rink) or 30ft (zoomed).
-// So every size gate blends a rink-feet floor with a screen-pixel target via
-// pxFt = rink feet per screen pixel (0 → the desktop-tuned floors). Drill DATA
-// stays pure rink feet; only the INTERPRETATION of ink is screen-aware.
-export const symbolMaxFor = pxFt => Math.max(SYMBOL_MAX, 130 * (pxFt || 0));
+// ---- screen space vs rink feet ----
+// A gesture's size in FEET depends on zoom, and its SHAPE in feet depends on
+// the rink's cosmetic fill-stretch: the ice is scaled unevenly to fill the
+// viewport, so a screen-round O arrives as a squashed ellipse in feet (a real
+// iPad capture measured 10.4ft × 6.4ft for a round Pencil circle, scoring
+// 0.365 — a reject — until the aspect was undone, which lifted it to 0.792).
+// So the classifier does ALL of its geometry in SCREEN units: strokes are
+// divided by the per-axis feet-per-pixel before anything is measured, and
+// positions convert back to feet on the way out. Rink markings solve the same
+// stretch with yFix and icons with iconXf — this is the pen's version.
+// Every threshold below is therefore a plain pixel count when the view scale
+// is known, falling back to a rink-feet floor when it isn't (node tests).
+export const SYMBOL_MAX_PX = 130;
+export const symbolMaxFor = pxFt => Math.max(SYMBOL_MAX, SYMBOL_MAX_PX * (pxFt || 0));
 
 // Tuning window for the node harness: every sym's best score + the guard
 // features, so threshold changes are argued from numbers, not vibes.
@@ -381,31 +389,40 @@ function splitGlyphs(cluster) {
 // consumes strokes without materializing anything (arrowhead flicks).
 export function classifyPenGroup(strokes, ctx = {}) {
   const players = ctx.players || [], nets = ctx.nets || [];
-  // view-scaled gesture gates (ctx.pxFt = rink feet per screen pixel)
-  const pxFt = ctx.pxFt || 0;
-  const sc = (baseFt, px) => Math.max(baseFt, px * pxFt);
-  const symMax = symbolMaxFor(pxFt);       // single-stroke symbol / cluster cap
-  const overlayMin = sc(8, 110);           // ring diag above this is a zone overlay, not a player O
-  const coneMax = sc(CONE_MAX, 60);
+  // Work in SCREEN units whenever the view scale is known (see the note above
+  // SYMBOL_MAX_PX): feet ÷ per-axis feet-per-pixel undoes both zoom AND the
+  // rink's fill-stretch, so a screen-round O is round here too.
+  const fx = ctx.pxFtX || ctx.pxFt || 0, fy = ctx.pxFtY || ctx.pxFt || 0;
+  const scaled = fx > 0 && fy > 0;
+  const toU = p => (scaled ? { x: p.x / fx, y: p.y / fy } : p);
+  const toFt = p => (scaled ? { x: p.x * fx, y: p.y * fy } : p);
+  // threshold selector: a true pixel count when scaled, else the feet floor
+  const U = (ft, px) => (scaled ? px : ft);
+  const symMax = U(SYMBOL_MAX, SYMBOL_MAX_PX);   // symbol / cluster size cap
+  const overlayMin = U(8, 110);            // ring bigger than this is a zone overlay, not a player O
+  const coneMax = U(CONE_MAX, 60);
   // association radii get generous px targets — fingertip starts land 40-50px
   // off the icon they mean (nearest-wins and the free-player filter keep the
   // looseness safe)
-  const attachR = sc(ATTACH_R, 52), passR = sc(PASS_R, 55), netR = sc(NET_R, 45);
-  const dashSpan = sc(DASH_SPAN, 60), dashMax = sc(6, 45), dashChord = sc(1, 6);
-  const dashRms = sc(1.5, 8), clusterPad = sc(2, 12);
-  const flickMax = sc(4, 20), flickR = sc(3.5, 18), arrowLeg = sc(3.5, 18);
+  const attachR = U(ATTACH_R, 52), passR = U(PASS_R, 55), netR = U(NET_R, 45);
+  const dashSpan = U(DASH_SPAN, 60), dashMax = U(6, 45), dashChord = U(1, 6);
+  const dashRms = U(1.5, 8), clusterPad = U(2, 12);
+  const flickMax = U(4, 20), flickR = U(3.5, 18), arrowLeg = U(3.5, 18);
+  const puckDot = U(1.8, 11), puckDense = U(4, 26), puckOnR = U(PUCK_ON_R, 15);
   const ops = [];
   const leftovers = [];   // strokes that fell through → mark ops, in draw order
 
   // roster = everything a route/pass/shot can bind to; grows as player ops land
   const roster = players.map(p => ({
-    who: { id: p.id }, x: p.x, y: p.y,
-    end: p.end || { x: p.x, y: p.y }, hasPath: !!p.hasPath,
+    who: { id: p.id }, ...toU(p),
+    end: toU(p.end || { x: p.x, y: p.y }), hasPath: !!p.hasPath,
   }));
   const addOp = op => { ops.push(op); return ops.length - 1; };
   const addPlayerOp = op => {
     const i = addOp(op);
-    roster.push({ who: { ref: i }, x: op.x, y: op.y, end: { x: op.x, y: op.y }, hasPath: false });
+    // the op carries FEET (it's drill data); the roster is screen units
+    const u = toU({ x: op.x, y: op.y });
+    roster.push({ who: { ref: i }, x: u.x, y: u.y, end: { x: u.x, y: u.y }, hasPath: false });
     return i;
   };
   const nearest = (pt, r, list, at) => {
@@ -420,9 +437,14 @@ export function classifyPenGroup(strokes, ctx = {}) {
   // binds at their spot
   const sourceAt = pt => nearest(pt, passR, roster, e => e.hasPath ? e.end : { x: e.x, y: e.y });
   const spotAt = (pt, r, skip) => nearest(pt, r, roster.filter(e => e !== skip), e => ({ x: e.x, y: e.y }));
-  const netAt = pt => nearest(pt, netR, nets, n => ({ x: n.x, y: n.y }));
+  const netAt = pt => nearest(pt, netR, nets, n => toU(n));
 
-  const S = strokes.map((s, idx) => ({ pts: s.pts, idx, diag: strokesDiag([s.pts]) }));
+  // pts = screen units (all geometry); ptsFt = the original feet, kept for the
+  // things that must stay in drill space: route fitting and fallback ink
+  const S = strokes.map((s, idx) => {
+    const pts = s.pts.map(toU);
+    return { pts, ptsFt: s.pts, idx, diag: strokesDiag([pts]) };
+  });
   const shorts = S.filter(s => s.diag < symMax);
   const longs = S.filter(s => s.diag >= symMax);
 
@@ -487,12 +509,15 @@ export function classifyPenGroup(strokes, ctx = {}) {
     merged.push({ s, b });
   });
 
+  // positions emit in FEET; sizes scale per axis (a shape overlay is drawn
+  // parametrically from its feet bbox, so it must match the ink on screen)
   const glyphOp = (rec, strokesOf) => {
+    const allFt = strokesOf.flatMap(s => s.ptsFt);
     const all = strokesOf.flatMap(s => s.pts);
-    const c = centerOf(all);
+    const c = centerOf(allFt);
     const dg = strokesDiag([all]);
     const asShape = shape => {
-      const b = bboxOf(all);
+      const b = bboxOf(allFt);
       return { op: "shape", shape, cx: b.x + b.w / 2, cy: b.y + b.h / 2, w: b.w, h: b.h };
     };
     if (rec.sym === "△") return dg <= coneMax ? { op: "cone", x: c.x, y: c.y } : asShape("triangle");
@@ -504,7 +529,7 @@ export function classifyPenGroup(strokes, ctx = {}) {
   const unrec = [];       // unrecognized clusters, resolved after routes
   const fallThrough = []; // big strokes out of failed clusters → the long pipeline
   const clusterFail = cs => {
-    const bigs = cs.filter(s => s.diag >= SYMBOL_MAX && s.diag >= sc(SYMBOL_MAX, 40));
+    const bigs = cs.filter(s => s.diag >= U(SYMBOL_MAX, 40));
     fallThrough.push(...bigs);
     const rest = cs.filter(s => !bigs.includes(s));
     if (rest.length) unrec.push(rest);
@@ -513,8 +538,8 @@ export function classifyPenGroup(strokes, ctx = {}) {
   clusters.forEach(cl => {
     const cs = cl.map(e => e.s);
     const pts = cs.map(s => s.pts);
-    if (puckGate(pts, pxFt)) {
-      const c = centerOf(pts.flat());
+    if (puckGate(pts, puckDot, puckDense)) {
+      const c = centerOf(cs.flatMap(s => s.ptsFt));
       puckOps.push({ op: "puck", x: c.x, y: c.y, on: null, srcs: idxOf(cs) });
       return;
     }
@@ -529,7 +554,7 @@ export function classifyPenGroup(strokes, ctx = {}) {
         // two glyphs spelling a whiteboard token (LW, RD, CO…) are ONE player;
         // otherwise each glyph stands alone (two X's drawn near each other)
         if (glyphs.length === 2 && join.length > 1 && WB_SYMS.includes(join)) {
-          const c = centerOf(pts.flat());
+          const c = centerOf(cs.flatMap(s => s.ptsFt));
           addPlayerOp({ op: "player", x: c.x, y: c.y, sym: join, srcs: idxOf(cs) });
         } else glyphs.forEach((g, i) => {
           const o = { ...glyphOp(recs[i], g), srcs: idxOf(g) };
@@ -554,10 +579,10 @@ export function classifyPenGroup(strokes, ctx = {}) {
       const rec = recognizeSymbol([pts]);
       if (rec && ["O", "□", "△"].includes(rec.sym)) {
         if (rec.sym === "△" && s.diag < coneMax) {
-          const c = centerOf(pts);
+          const c = centerOf(s.ptsFt);
           addOp({ op: "cone", x: c.x, y: c.y, srcs: [s.idx] });
         } else {
-          const b = bboxOf(pts);
+          const b = bboxOf(s.ptsFt);
           const shape = rec.sym === "O" ? "circle" : rec.sym === "□" ? "square" : "triangle";
           addOp({ op: "shape", shape, cx: b.x + b.w / 2, cy: b.y + b.h / 2, w: b.w, h: b.h, srcs: [s.idx] });
         }
@@ -575,10 +600,11 @@ export function classifyPenGroup(strokes, ctx = {}) {
     }
     const skater = nearest(pts[0], attachR, roster.filter(e => !e.hasPath), e => ({ x: e.x, y: e.y }));
     if (skater) {
-      const raw = mid || stripArrowhead(pts, arrowLeg);
+      const shaped = mid || stripArrowhead(pts, arrowLeg);   // screen units
+      const raw = shaped.map(toFt);                          // fitRoute works in feet
       addOp({ op: "route", to: skater.who, raw, bwd: !!mid, srcs: [s.idx] });
       skater.hasPath = true;
-      skater.end = raw[raw.length - 1];
+      skater.end = shaped[shaped.length - 1];
       routeEnds.push(skater.end);
       return;
     }
@@ -603,7 +629,7 @@ export function classifyPenGroup(strokes, ctx = {}) {
   // landed — and they must precede pass/shot ops, whose materialization would
   // otherwise conjure a duplicate puck for the same carrier
   puckOps.forEach(o => {
-    const on = spotAt({ x: o.x, y: o.y }, sc(PUCK_ON_R, 15), null);
+    const on = spotAt(toU(o), puckOnR, null);
     ops.push({ ...o, on: on ? on.who : null });
   });
 
@@ -617,6 +643,6 @@ export function classifyPenGroup(strokes, ctx = {}) {
     leftovers.push(...g.strokes);
   });
 
-  leftovers.forEach(s => addOp({ op: "mark", pts: s.pts, srcs: [s.idx] }));
+  leftovers.forEach(s => addOp({ op: "mark", pts: s.ptsFt, srcs: [s.idx] }));
   return ops;
 }
