@@ -65,7 +65,7 @@ export const STYLES = `
         .hd-scrubbtn { flex:none; width:32px; height:32px; border-radius:9px; background:var(--db-surface-raised);
           border:1px solid var(--db-border-strong); color:var(--db-text-soft); display:flex; align-items:center;
           justify-content:center; cursor:pointer; }
-        .hd-scrubbtn.on { background:var(--db-accent); border-color:var(--db-accent); }
+        .hd-scrubbtn.on { background:var(--db-accent); border-color:var(--db-accent); color:var(--db-text-on-accent); }
         .hd-scrubbtn:disabled { opacity:.4; cursor:default; }
         /* the play button is the one piece of chrome wearing a DOMAIN colour —
            hockey red — so it keeps its own token rather than the accent */
@@ -191,7 +191,7 @@ export const STYLES = `
           border:1px solid var(--db-border-strong); color:var(--db-text-soft); font-size:17px; display:flex;
           flex-direction:column; gap:2px; align-items:center; justify-content:center;
           cursor:pointer; flex:none; }
-        .hd-barbtn.on { background:var(--db-accent); border-color:var(--db-accent); }
+        .hd-barbtn.on { background:var(--db-accent); border-color:var(--db-accent); color:var(--db-text-on-accent); }
         .hd-barbtn small { font-size:10px; font-weight:800; letter-spacing:.05em; }
         /* caption under each bar icon — tooltips don't exist on touch */
         .hd-blbl { font-size:8.5px; font-weight:700; letter-spacing:.05em; line-height:1;

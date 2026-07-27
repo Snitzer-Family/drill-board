@@ -142,6 +142,32 @@ check("index.html carries both theme markers", () => {
     "inline style on <body> outranks every stylesheet and would pin one theme");
 });
 
+// A rule that FILLS with the accent must also set the on-accent text colour,
+// or it inherits whatever the base rule had. That was invisible while the app
+// was dark-only — the inherited grey happened to be light — and turned into
+// dark-on-teal the moment a light theme existed. Pair contrast can't catch
+// this: both tokens are individually fine, the rule just never opts in.
+const ACCENT_FILL_NO_TEXT = new Set([
+  ".hd-penswknob",   // the sliding knob; its label lives on .hd-penswopt
+  ".hd-sw.on",       // switch track, no text at all
+]);
+check("every accent-filled rule sets the on-accent text colour", () => {
+  const css = read("../src/styles.js");
+  const offenders = [];
+  for (const block of css.split("}")) {
+    const i = block.indexOf("{");
+    if (i < 0) continue;
+    const sel = block.slice(0, i).replace(/\/\*[\s\S]*?\*\//g, "").trim().split("\n").pop().trim();
+    const body = block.slice(i + 1);
+    if (!/background:\s*var\(--db-accent\)/.test(body)) continue;
+    if (/color:\s*var\(--db-text-on-accent\)/.test(body)) continue;
+    if (ACCENT_FILL_NO_TEXT.has(sel)) continue;
+    offenders.push(sel);
+  }
+  assert.deepEqual(offenders, [],
+    `accent-filled but inheriting their text colour: ${offenders.join(", ")}`);
+});
+
 // drill-svg.js's var() fallbacks are what an <img>-loaded SVG actually renders
 // (no host cascade), which is the PNG export and the print sheet. They must come
 // off THEMES.light, not be retyped — a hardcoded fallback is a silent drift that
