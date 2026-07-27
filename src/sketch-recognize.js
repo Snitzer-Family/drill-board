@@ -149,6 +149,10 @@ const P = (...xy) => {
 const RAW_TEMPLATES = [
   { sym: "X", strokes: [P(0, 0, 1, 1), P(1, 0, 0, 1)] },
   { sym: "O", strokes: [arc(0.5, 0.5, 0.5, -90, 270, 16)] },
+  // finger rings rarely close — open-ring variants down to a 290° sweep (the
+  // closure guard, not the template, is what keeps true 240° C's out of O)
+  { sym: "O", strokes: [arc(0.5, 0.5, 0.5, -75, 255, 16)] },
+  { sym: "O", strokes: [arc(0.5, 0.5, 0.5, -55, 235, 14)] },
   { sym: "C", strokes: [arc(0.5, 0.5, 0.5, 60, 300, 12)] },
   { sym: "G", strokes: [arc(0.5, 0.5, 0.5, 60, 300, 12), P(0.95, 0.7, 0.95, 0.55, 0.55, 0.55)] },
   { sym: "D", strokes: [P(0.15, 0, 0.15, 1), P(0.15, 0, 0.6, 0.04, 0.9, 0.3, 0.9, 0.7, 0.6, 0.96, 0.15, 1)] },
@@ -210,13 +214,16 @@ function features(strokes) {
   return { closure, corners, leftRMS, tail };
 }
 
+// closure bounds are finger-loose: real coaches leave 30-40% gaps in their
+// rings. O and C overlap in [0.40, 0.45] on purpose — there the $P score
+// ranks them (the sweep angle separates a 290° sloppy O from a 240° C).
 const GUARDS = {
-  O: f => f.closure < 0.3,
-  C: f => f.closure > 0.35 && f.tail <= 1,
+  O: f => f.closure < 0.45,
+  C: f => f.closure > 0.4 && f.tail <= 1,
   G: f => f.tail >= 2,
   D: f => f.leftRMS < 0.07,
-  "△": f => f.closure < 0.35 && f.corners === 3,
-  "□": f => f.closure < 0.35 && f.corners === 4,
+  "△": f => f.closure < 0.45 && f.corners === 3,
+  "□": f => f.closure < 0.45 && f.corners === 4,
 };
 
 /* ---------------- public API ---------------- */
@@ -365,16 +372,19 @@ function splitGlyphs(cluster) {
 }
 
 // strokes: [{ pts:[{x,y}…], t0?, t1? }] in draw order, rink feet.
-// ctx: { players:[{id,x,y,end?,hasPath?}], nets:[{id,x,y}] } — the board today.
+// ctx: { players:[{id,x,y,end?,hasPath?}], nets:[{id,x,y}], pxFt? } — the board today.
 // Returns the op list documented in the header; refs ({ref:i}) point at player
-// ops created earlier in the same list.
+// ops created earlier in the same list. Every op carries srcs: the indexes of
+// the input strokes it consumed (the app uses this to reclaim previously
+// committed ink that a later stroke completes into a symbol). An op:"drop"
+// consumes strokes without materializing anything (arrowhead flicks).
 export function classifyPenGroup(strokes, ctx = {}) {
   const players = ctx.players || [], nets = ctx.nets || [];
   // view-scaled gesture gates (ctx.pxFt = rink feet per screen pixel)
   const pxFt = ctx.pxFt || 0;
   const sc = (baseFt, px) => Math.max(baseFt, px * pxFt);
   const symMax = symbolMaxFor(pxFt);       // single-stroke symbol / cluster cap
-  const overlayMin = sc(8, 45);            // closed ring above this is a zone overlay, not a player O
+  const overlayMin = sc(8, 110);           // ring diag above this is a zone overlay, not a player O
   const coneMax = sc(CONE_MAX, 60);
   // association radii get generous px targets — fingertip starts land 40-50px
   // off the icon they mean (nearest-wins and the free-player filter keep the
@@ -498,12 +508,13 @@ export function classifyPenGroup(strokes, ctx = {}) {
     const rest = cs.filter(s => !bigs.includes(s));
     if (rest.length) unrec.push(rest);
   };
+  const idxOf = cs => cs.map(s => s.idx);
   clusters.forEach(cl => {
     const cs = cl.map(e => e.s);
     const pts = cs.map(s => s.pts);
     if (puckGate(pts, pxFt)) {
       const c = centerOf(pts.flat());
-      puckOps.push({ op: "puck", x: c.x, y: c.y, on: null });
+      puckOps.push({ op: "puck", x: c.x, y: c.y, on: null, srcs: idxOf(cs) });
       return;
     }
     // a sprawl wider than any symbol (crossing routes drawn in one burst)
@@ -518,9 +529,9 @@ export function classifyPenGroup(strokes, ctx = {}) {
         // otherwise each glyph stands alone (two X's drawn near each other)
         if (glyphs.length === 2 && join.length > 1 && WB_SYMS.includes(join)) {
           const c = centerOf(pts.flat());
-          addPlayerOp({ op: "player", x: c.x, y: c.y, sym: join });
+          addPlayerOp({ op: "player", x: c.x, y: c.y, sym: join, srcs: idxOf(cs) });
         } else glyphs.forEach((g, i) => {
-          const o = glyphOp(recs[i], g);
+          const o = { ...glyphOp(recs[i], g), srcs: idxOf(g) };
           o.op === "player" ? addPlayerOp(o) : addOp(o);
         });
         return;
@@ -528,7 +539,7 @@ export function classifyPenGroup(strokes, ctx = {}) {
     }
     const rec = recognizeSymbol(pts);
     if (rec) {
-      const o = glyphOp(rec, cs);
+      const o = { ...glyphOp(rec, cs), srcs: idxOf(cs) };
       o.op === "player" ? addPlayerOp(o) : addOp(o);
     } else clusterFail(cs);   // held back: routes, or an arrowhead flick
   });
@@ -543,11 +554,11 @@ export function classifyPenGroup(strokes, ctx = {}) {
       if (rec && ["O", "□", "△"].includes(rec.sym)) {
         if (rec.sym === "△" && s.diag < coneMax) {
           const c = centerOf(pts);
-          addOp({ op: "cone", x: c.x, y: c.y });
+          addOp({ op: "cone", x: c.x, y: c.y, srcs: [s.idx] });
         } else {
           const b = bboxOf(pts);
           const shape = rec.sym === "O" ? "circle" : rec.sym === "□" ? "square" : "triangle";
-          addOp({ op: "shape", shape, cx: b.x + b.w / 2, cy: b.y + b.h / 2, w: b.w, h: b.h });
+          addOp({ op: "shape", shape, cx: b.x + b.w / 2, cy: b.y + b.h / 2, w: b.w, h: b.h, srcs: [s.idx] });
         }
         return;
       }
@@ -558,13 +569,13 @@ export function classifyPenGroup(strokes, ctx = {}) {
       const net = netAt(last);
       if (net && dist(pts[0], last) / pathLen([pts]) > 0.85) {
         const by = sourceAt(pts[0]);
-        if (by) { addOp({ op: "shot", by: by.who, net: net.id }); return; }
+        if (by) { addOp({ op: "shot", by: by.who, net: net.id, srcs: [s.idx] }); return; }
       }
     }
     const skater = nearest(pts[0], attachR, roster.filter(e => !e.hasPath), e => ({ x: e.x, y: e.y }));
     if (skater) {
       const raw = mid || stripArrowhead(pts, arrowLeg);
-      addOp({ op: "route", to: skater.who, raw, bwd: !!mid });
+      addOp({ op: "route", to: skater.who, raw, bwd: !!mid, srcs: [s.idx] });
       skater.hasPath = true;
       skater.end = raw[raw.length - 1];
       routeEnds.push(skater.end);
@@ -580,7 +591,10 @@ export function classifyPenGroup(strokes, ctx = {}) {
     const all = cs.flatMap(s => s.pts);
     const c = centerOf(all);
     const tiny = strokesDiag([all]) < flickMax;
-    if (tiny && routeEnds.some(e => dist(c, e) < flickR)) return;
+    if (tiny && routeEnds.some(e => dist(c, e) < flickR)) {
+      addOp({ op: "drop", srcs: idxOf(cs) });   // consumed, nothing materializes
+      return;
+    }
     leftovers.push(...cs);
   });
 
@@ -596,12 +610,12 @@ export function classifyPenGroup(strokes, ctx = {}) {
   dashGroups.forEach(g => {
     const src = sourceAt(g.a);
     const net = netAt(g.b);
-    if (src && net) { addOp({ op: "shot", by: src.who, net: net.id }); return; }
-    const tgt = spotAt(g.b, PASS_R, src);
-    if (src && tgt) { addOp({ op: "pass", from: src.who, to: tgt.who, recvAt: -1 }); return; }
+    if (src && net) { addOp({ op: "shot", by: src.who, net: net.id, srcs: idxOf(g.strokes) }); return; }
+    const tgt = spotAt(g.b, passR, src);
+    if (src && tgt) { addOp({ op: "pass", from: src.who, to: tgt.who, recvAt: -1, srcs: idxOf(g.strokes) }); return; }
     leftovers.push(...g.strokes);
   });
 
-  leftovers.forEach(s => addOp({ op: "mark", pts: s.pts }));
+  leftovers.forEach(s => addOp({ op: "mark", pts: s.pts, srcs: [s.idx] }));
   return ops;
 }

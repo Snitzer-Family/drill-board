@@ -259,7 +259,8 @@ const kinds = ops => ops.map(o => o.op);
   const route = poly(p(31, 32, 50, 40, 70, 35), 20);
   const flick = [stroke(poly(p(68, 33.5, 70, 35), 3)), stroke(poly(p(68.4, 36.6, 70, 35), 3))];
   const ops2 = classifyPenGroup([...strokesOf(x), stroke(route), ...flick]);
-  T('separate arrow flick consumed', kinds(ops2), ['player', 'route']);
+  T('separate arrow flick consumed', kinds(ops2), ['player', 'route', 'drop']);
+  T('drop reports its strokes', ops2[2] && ops2[2].srcs.slice().sort(), [3, 4]);
   // the same flick with no route nearby is honest ink
   T('orphan flick stays ink', kinds(classifyPenGroup(flick)), ['mark', 'mark']);
 }
@@ -271,6 +272,30 @@ const kinds = ops => ops.map(o => o.op);
   const big = classifyPenGroup(strokesOf(drawn(GLYPHS.O, 100, 42, 18, 0.5, 67)));
   T('big ○ → shape', kinds(big), ['shape']);
   T('big ○ is a circle', big[0] && big[0].shape, 'circle');
+}
+
+// ---- finger-sloppy rings: a 290° open loop (35-40% gap) is still an O ----
+{
+  const sloppy = [arcPts(0.5, 0.5, 0.5, -55, 235, 22)];
+  T('open ring @5ft is O', recognizeSymbol(drawn(sloppy, 60, 40, 5, 0.15, 101))?.sym, 'O');
+  const ops = classifyPenGroup(strokesOf(drawn(sloppy, 100, 42, 18, 0.6, 103)), { pxFt: 0.5 });
+  T('phone open ring is a player O', kinds(ops), ['player']);
+  // a true C (240° sweep) still reads C, not O
+  T('C survives looser guards', recognizeSymbol(drawn(GLYPHS.C, 60, 40, 5, 0.15, 107))?.sym, 'C');
+}
+
+// ---- srcs: every op reports the input strokes it consumed, and a sparse
+//      RDP'd leg (a reclaimed ink mark) still completes an X ----
+{
+  const x = drawn(GLYPHS.X, 30, 30, 5, 0.2, 109);
+  const ops = classifyPenGroup(strokesOf(x));
+  T('X srcs', ops[0] && ops[0].srcs.slice().sort(), [0, 1]);
+  // leg 1 as a bare 2-point control-point line (what a committed mark keeps
+  // after RDP), leg 2 freshly drawn
+  const sparse = [{ x: 27.5, y: 27.5 }, { x: 32.5, y: 32.5 }];
+  const ops2 = classifyPenGroup([stroke(sparse), ...strokesOf([x[1]])]);
+  T('sparse mark + fresh stroke = X', kinds(ops2), ['player']);
+  T('merge consumed both', ops2[0] && ops2[0].srcs.slice().sort(), [0, 1]);
 }
 
 // ---- phone scale (pxFt ≈ 0.5: the full 200ft rink spans ~390px, so a finger

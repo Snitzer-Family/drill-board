@@ -364,11 +364,13 @@ export default function DrillAnimator() {
   const markerDraw = useRef(false);
   // smart pen: strokes buffer until a settle pause, then the burst is
   // recognized locally (sketch-recognize.js) and materialized as real pieces
-  const PEN_SETTLE = 600;             // ms of stillness before a burst commits
+  const PEN_SETTLE = 1000;            // ms of stillness before a burst commits
+                                      // (a finger takes a beat between an X's strokes)
   const penDraw = useRef(false);      // {t0} while a pen stroke is in flight
   const penBuf = useRef([]);          // settled strokes awaiting commit [{pts,t0,t1}]
   const penTimer = useRef(0);
   const penScale = useRef(0);         // rink ft per screen px, sampled per burst
+  const penMarkAge = useRef(new Map());   // pen-fallback mark id → committed-at ms
   const [penInk, setPenInk] = useState([]);   // buffered strokes, rendered like the live one
   const penW = markWidth * 0.55;      // pen ink runs thinner than marker ink
   // the settle timer fires from a stale closure — commitPen reads the board
@@ -4085,22 +4087,52 @@ export default function DrillAnimator() {
   // (the 130ms snapshot coalescer sees one document change)
   function commitPen() {
     clearTimeout(penTimer.current);
-    const strokes = penBuf.current;
+    const fresh = penBuf.current;
     penBuf.current = [];
     setPenInk([]);
-    if (!strokes.length) return;
+    if (!fresh.length) return;
     const board = piecesRef.current;
+    // recent pen ink the new strokes touch rejoins the burst: a finger takes
+    // its time between an X's two strokes, so the first may already have
+    // committed as a mark — the crossing stroke completes it. Ops that consume
+    // an old mark delete it; ink that stays ink stays untouched on the board.
+    const now = performance.now();
+    const pad = Math.max(3, 15 * penScale.current);
+    const bb = pts => {
+      let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+      pts.forEach(q => {
+        if (q.x < x0) x0 = q.x; if (q.y < y0) y0 = q.y;
+        if (q.x > x1) x1 = q.x; if (q.y > y1) y1 = q.y;
+      });
+      return { x0, y0, x1, y1 };
+    };
+    const freshBoxes = fresh.map(s => bb(s.pts));
+    const extras = board.filter(p => p.kind === "mark"
+      && now - (penMarkAge.current.get(p.id) ?? Infinity) < 30000
+      && (() => {
+        const b = bb(p.pts);
+        return freshBoxes.some(n =>
+          b.x0 - pad < n.x1 && n.x0 - pad < b.x1 && b.y0 - pad < n.y1 && n.y0 - pad < b.y1);
+      })());
+    const strokes = [...extras.map(m => ({ pts: m.pts })), ...fresh];
     const ctx = {
       players: board.filter(p => p.kind === "player").map(p => ({
         id: p.id, x: p.x, y: p.y, end: segEnd(p, p.path.length - 1), hasPath: p.path.length > 0,
       })),
       nets: board.filter(p => p.kind === "net").map(n => ({ id: n.id, x: n.x, y: n.y })),
+      pxFt: penScale.current,
     };
-    ctx.pxFt = penScale.current;
     const ops = classifyPenGroup(strokes, ctx);
-    setPieces(ps => materializePenOps(ps, ops));
+    const consumed = new Set();
+    const finalOps = ops.filter(o => {
+      const fromOld = (o.srcs || []).filter(i => i < extras.length);
+      if (o.op === "mark" && fromOld.length) return false;   // still ink — already on the board
+      fromOld.forEach(i => consumed.add(extras[i].id));
+      return o.op !== "drop";
+    });
+    setPieces(ps => materializePenOps(ps.filter(p => !consumed.has(p.id)), finalOps));
     const counts = {};
-    ops.forEach(o => { counts[o.op] = (counts[o.op] || 0) + 1; });
+    finalOps.forEach(o => { counts[o.op] = (counts[o.op] || 0) + 1; });
     const parts = Object.entries(counts).filter(([k]) => k !== "mark")
       .map(([k, n]) => `${n} ${n > 1 ? (k === "pass" ? "passes" : k + "s") : k}`);
     flash(parts.length ? `Pen: ${parts.join(", ")}` : "Pen: kept as ink");
@@ -4148,8 +4180,11 @@ export default function DrillAnimator() {
       const trail = pts.filter((q, i) => i === 0 || Math.hypot(q.x - pts[i - 1].x, q.y - pts[i - 1].y) > 1.2);
       const cps = trail.length > 3 ? rdp(trail, 1.3) : trail;
       if (cps.length < 2) return;
-      // pen fallback ink lands at the pen's thin width, not the marker's
-      out.push({ id: nextId("mark", out), kind: "mark", pts: cps, x: cps[0].x, y: cps[0].y,
+      // pen fallback ink lands at the pen's thin width, not the marker's;
+      // its age makes it reclaimable by a later completing stroke
+      const id = nextId("mark", out);
+      penMarkAge.current.set(id, performance.now());
+      out.push({ id, kind: "mark", pts: cps, x: cps[0].x, y: cps[0].y,
         color: markColor, width: penW, style: markStyle, path: [] });
     };
     ops.forEach((o, i) => {
