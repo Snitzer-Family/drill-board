@@ -17,6 +17,7 @@
 // route purely because of the SYMBOL_MAX size gate.
 
 import { rdp } from "./geometry.js";
+import { WB_SYMS } from "./constants.js";
 
 const N = 32;                   // $P resample count
 export const SYMBOL_MAX = 8;    // ft bbox diagonal — bigger strokes are routes, never symbols
@@ -257,4 +258,278 @@ export function recognizeSymbol(strokes) {
     .sort((a, b) => b[1] - a[1]);
   if (!ranked.length || ranked[0][1] < ACCEPT) return null;
   return { sym: ranked[0][0], score: ranked[0][1], second: ranked[1] ? ranked[1][0] : null };
+}
+
+/* ================ pen-group classification ================ */
+// A settled burst of pen strokes → drill ops. Association radii in rink feet:
+
+const ATTACH_R = 6;  // a route's start must be this close to its skater
+const PASS_R = 8;    // dash/shot endpoints resolve to players within this
+const NET_R = 6;     // ink ending this close to a net is aimed at it
+const CONE_MAX = 12; // a triangle bigger than this is a zone overlay, not a cone
+const DASH_SPAN = 10;   // a dashed line spans at least this end to end
+const PUCK_ON_R = 3; // a puck this close to a player starts on their stick
+
+const centerOf = pts => {
+  const b = bboxOf(pts);
+  return { x: b.x + b.w / 2, y: b.y + b.h / 2 };
+};
+
+// dash-likeness: an elongated flick — long chord, little sideways wander
+function isDash(pts, diag) {
+  if (pts.length < 2 || diag >= 6) return false;
+  const a = pts[0], b = pts[pts.length - 1];
+  const chord = dist(a, b);
+  if (chord < 1) return false;
+  const dx = b.x - a.x, dy = b.y - a.y, len = chord;
+  let dev = 0;
+  pts.forEach(p => {
+    const d = Math.abs(dy * p.x - dx * p.y + b.x * a.y - b.y * a.x) / len;
+    if (d > dev) dev = d;
+  });
+  return chord / Math.max(dev, 0.15) > 3;
+}
+
+// total-least-squares line through points: mean + principal direction
+function tlsLine(pts) {
+  const n = pts.length;
+  const mx = pts.reduce((s, p) => s + p.x, 0) / n, my = pts.reduce((s, p) => s + p.y, 0) / n;
+  let sxx = 0, sxy = 0, syy = 0;
+  pts.forEach(p => { const dx = p.x - mx, dy = p.y - my; sxx += dx * dx; sxy += dx * dy; syy += dy * dy; });
+  const a = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+  const dir = { x: Math.cos(a), y: Math.sin(a) };
+  const along = p => (p.x - mx) * dir.x + (p.y - my) * dir.y;
+  const perp = p => Math.abs(-(p.x - mx) * dir.y + (p.y - my) * dir.x);
+  return { mx, my, dir, along, perp };
+}
+
+// zigzag = backward-skating shorthand: ≥4 sharp apexes with (near-)alternating
+// turn directions that still make real headway. Returns the apex-midpoint
+// midline (the skater's actual lane) or null.
+function zigzagMidline(pts) {
+  const r = rdp(pts, 1.6);
+  if (r.length < 6) return null;
+  const apexes = [];
+  for (let i = 1; i < r.length - 1; i++) {
+    if (turnDeg(r[i - 1], r[i], r[i + 1]) < 55) continue;
+    const cross = (r[i].x - r[i - 1].x) * (r[i + 1].y - r[i].y) - (r[i].y - r[i - 1].y) * (r[i + 1].x - r[i].x);
+    apexes.push({ i, sign: Math.sign(cross) });
+  }
+  let flips = 0;
+  for (let i = 1; i < apexes.length; i++) if (apexes[i].sign !== apexes[i - 1].sign) flips++;
+  const plen = pathLen([r]);
+  if (apexes.length < 4 || flips < 3 || flips < apexes.length - 2 ||
+      dist(r[0], r[r.length - 1]) < 0.5 * plen) return null;
+  const apexAt = new Set(apexes.map(a => a.i));
+  return r.map((p, i) => apexAt.has(i)
+    ? { x: (r[i - 1].x + r[i + 1].x) / 2, y: (r[i - 1].y + r[i + 1].y) / 2 } : p);
+}
+
+// split a cluster into side-by-side glyphs at a clear vertical gap (LW, RD, …)
+function splitGlyphs(cluster) {
+  const boxed = cluster.map(s => ({ s, b: bboxOf(s.pts) })).sort((a, b) => a.b.x - b.b.x);
+  const whole = bboxOf(cluster.flatMap(s => s.pts));
+  const gapMin = Math.max(0.15 * whole.w, 0.8);
+  const glyphs = [[boxed[0]]];
+  let maxX = boxed[0].b.x + boxed[0].b.w;
+  for (let i = 1; i < boxed.length; i++) {
+    if (boxed[i].b.x - maxX > gapMin) glyphs.push([boxed[i]]);
+    else glyphs[glyphs.length - 1].push(boxed[i]);
+    maxX = Math.max(maxX, boxed[i].b.x + boxed[i].b.w);
+  }
+  return glyphs.map(g => g.map(e => e.s));
+}
+
+// strokes: [{ pts:[{x,y}…], t0?, t1? }] in draw order, rink feet.
+// ctx: { players:[{id,x,y,end?,hasPath?}], nets:[{id,x,y}] } — the board today.
+// Returns the op list documented in the header; refs ({ref:i}) point at player
+// ops created earlier in the same list.
+export function classifyPenGroup(strokes, ctx = {}) {
+  const players = ctx.players || [], nets = ctx.nets || [];
+  const ops = [];
+  const leftovers = [];   // strokes that fell through → mark ops, in draw order
+
+  // roster = everything a route/pass/shot can bind to; grows as player ops land
+  const roster = players.map(p => ({
+    who: { id: p.id }, x: p.x, y: p.y,
+    end: p.end || { x: p.x, y: p.y }, hasPath: !!p.hasPath,
+  }));
+  const addOp = op => { ops.push(op); return ops.length - 1; };
+  const addPlayerOp = op => {
+    const i = addOp(op);
+    roster.push({ who: { ref: i }, x: op.x, y: op.y, end: { x: op.x, y: op.y }, hasPath: false });
+    return i;
+  };
+  const nearest = (pt, r, list, at) => {
+    let best = null, bd = r;
+    list.forEach(e => {
+      const q = at(e), d = dist(pt, q);
+      if (d < bd) { bd = d; best = e; }
+    });
+    return best;
+  };
+  // a pass/shot releases from wherever its player ends up; a receiver/skater
+  // binds at their spot
+  const sourceAt = pt => nearest(pt, PASS_R, roster, e => e.hasPath ? e.end : { x: e.x, y: e.y });
+  const spotAt = (pt, r, skip) => nearest(pt, r, roster.filter(e => e !== skip), e => ({ x: e.x, y: e.y }));
+  const netAt = pt => nearest(pt, NET_R, nets, n => ({ x: n.x, y: n.y }));
+
+  const S = strokes.map(s => ({ pts: s.pts, diag: strokesDiag([s.pts]) }));
+  const shorts = S.filter(s => s.diag < SYMBOL_MAX);
+  const longs = S.filter(s => s.diag >= SYMBOL_MAX);
+
+  // ---- dash-groups out of the shorts first: a dashed line's dashes sit close
+  // together and would otherwise cluster into a bogus "symbol"; collinearity
+  // is the disambiguator ----
+  const dashGroups = [];
+  const consumed = new Set();
+  {
+    let run = [];
+    const flush = () => {
+      if (run.length >= 3) {
+        const mids = run.map(s => centerOf(s.pts));
+        const L = tlsLine(mids);
+        const rms = Math.sqrt(mids.reduce((s, p) => s + L.perp(p) ** 2, 0) / mids.length);
+        const all = run.flatMap(s => s.pts);
+        let tMin = Infinity, tMax = -Infinity;
+        all.forEach(p => { const t = L.along(p); if (t < tMin) tMin = t; if (t > tMax) tMax = t; });
+        // real dashes march along the line one after another; the strokes of a
+        // small X (or letter) are just as elongated and collinear-of-midpoint,
+        // but their projections pile on top of each other — reject those
+        const iv = run.map(s => {
+          let lo = Infinity, hi = -Infinity;
+          s.pts.forEach(p => { const t = L.along(p); if (t < lo) lo = t; if (t > hi) hi = t; });
+          return { lo, hi, c: (lo + hi) / 2 };
+        });
+        const dirSign = Math.sign(iv[iv.length - 1].c - iv[0].c) || 1;
+        const marching = iv.every((b, i) => {
+          if (!i) return true;
+          const a = iv[i - 1];
+          if ((b.c - a.c) * dirSign <= 0) return false;
+          const overlap = Math.min(a.hi, b.hi) - Math.max(a.lo, b.lo);
+          return overlap <= 0.4 * Math.min(a.hi - a.lo, b.hi - b.lo);
+        });
+        if (rms < 1.5 && tMax - tMin > DASH_SPAN && marching) {
+          let a = { x: L.mx + L.dir.x * tMin, y: L.my + L.dir.y * tMin };
+          let b = { x: L.mx + L.dir.x * tMax, y: L.my + L.dir.y * tMax };
+          // drawing order sets direction: the first dash sits at the start
+          if (Math.abs(L.along(mids[0]) - tMax) < Math.abs(L.along(mids[0]) - tMin)) [a, b] = [b, a];
+          dashGroups.push({ a, b, strokes: run });
+          run.forEach(s => consumed.add(s));
+        }
+      }
+      run = [];
+    };
+    shorts.forEach(s => { if (isDash(s.pts, s.diag)) run.push(s); else flush(); });
+    flush();
+  }
+
+  // ---- symbol clusters from the remaining shorts (bbox union, 2ft slack) ----
+  const pool = shorts.filter(s => !consumed.has(s));
+  const clusters = [];
+  pool.forEach(s => {
+    const b = bboxOf(s.pts);
+    const grown = { x: b.x - 2, y: b.y - 2, w: b.w + 4, h: b.h + 4 };
+    const hit = clusters.filter(c => c.some(e =>
+      grown.x < e.b.x + e.b.w && e.b.x < grown.x + grown.w &&
+      grown.y < e.b.y + e.b.h && e.b.y < grown.y + grown.h));
+    const merged = hit.length ? hit[0] : [];
+    hit.slice(1).forEach(c => { merged.push(...c); clusters.splice(clusters.indexOf(c), 1); });
+    if (!hit.length) clusters.push(merged);
+    merged.push({ s, b });
+  });
+
+  const glyphOp = (rec, strokesOf) => {
+    const c = centerOf(strokesOf.flatMap(s => s.pts));
+    if (rec.sym === "△") return { op: "cone", x: c.x, y: c.y };
+    return { op: "player", x: c.x, y: c.y, sym: rec.sym };
+  };
+  const puckOps = [];
+  clusters.forEach(cl => {
+    const cs = cl.map(e => e.s);
+    const pts = cs.map(s => s.pts);
+    if (puckGate(pts)) {
+      const c = centerOf(pts.flat());
+      puckOps.push({ op: "puck", x: c.x, y: c.y, on: null });
+      return;
+    }
+    const glyphs = splitGlyphs(cs);
+    if (glyphs.length > 1) {
+      const recs = glyphs.map(g => recognizeSymbol(g.map(s => s.pts)));
+      if (recs.every(Boolean)) {
+        const join = recs.map(r => r.sym).join("");
+        // two glyphs spelling a whiteboard token (LW, RD, CO…) are ONE player;
+        // otherwise each glyph stands alone (two X's drawn near each other)
+        if (glyphs.length === 2 && join.length > 1 && WB_SYMS.includes(join)) {
+          const c = centerOf(pts.flat());
+          addPlayerOp({ op: "player", x: c.x, y: c.y, sym: join });
+        } else glyphs.forEach((g, i) => {
+          const o = glyphOp(recs[i], g);
+          o.op === "player" ? addPlayerOp(o) : addOp(o);
+        });
+        return;
+      }
+    }
+    const rec = recognizeSymbol(pts);
+    if (rec) {
+      const o = glyphOp(rec, cs);
+      o.op === "player" ? addPlayerOp(o) : addOp(o);
+    } else leftovers.push(...cs);
+  });
+
+  // ---- long strokes: big closed shape → zigzag → shot → route → ink ----
+  longs.forEach(s => {
+    const pts = s.pts, last = pts[pts.length - 1];
+    if (dist(pts[0], last) / s.diag < 0.3) {
+      const rec = recognizeSymbol([pts]);
+      if (rec && ["O", "□", "△"].includes(rec.sym)) {
+        if (rec.sym === "△" && s.diag < CONE_MAX) {
+          const c = centerOf(pts);
+          addOp({ op: "cone", x: c.x, y: c.y });
+        } else {
+          const b = bboxOf(pts);
+          const shape = rec.sym === "O" ? "circle" : rec.sym === "□" ? "square" : "triangle";
+          addOp({ op: "shape", shape, cx: b.x + b.w / 2, cy: b.y + b.h / 2, w: b.w, h: b.h });
+        }
+        return;
+      }
+    }
+    const mid = zigzagMidline(pts);
+    if (!mid) {
+      // a near-straight solo stroke into the net is a shot, not a skate
+      const net = netAt(last);
+      if (net && dist(pts[0], last) / pathLen([pts]) > 0.85) {
+        const by = sourceAt(pts[0]);
+        if (by) { addOp({ op: "shot", by: by.who, net: net.id }); return; }
+      }
+    }
+    const skater = nearest(pts[0], ATTACH_R, roster.filter(e => !e.hasPath), e => ({ x: e.x, y: e.y }));
+    if (skater) {
+      const raw = mid || pts;
+      addOp({ op: "route", to: skater.who, raw, bwd: !!mid });
+      skater.hasPath = true;
+      skater.end = raw[raw.length - 1];
+      return;
+    }
+    leftovers.push(s);
+  });
+
+  // ---- dashed lines resolve last, when every skater's end is known ----
+  dashGroups.forEach(g => {
+    const src = sourceAt(g.a);
+    const net = netAt(g.b);
+    if (src && net) { addOp({ op: "shot", by: src.who, net: net.id }); return; }
+    const tgt = spotAt(g.b, PASS_R, src);
+    if (src && tgt) { addOp({ op: "pass", from: src.who, to: tgt.who, recvAt: -1 }); return; }
+    leftovers.push(...g.strokes);
+  });
+
+  // pucks bind to whoever is on their doorstep (players may have landed after)
+  puckOps.forEach(o => {
+    const on = spotAt({ x: o.x, y: o.y }, PUCK_ON_R, null);
+    ops.push({ ...o, on: on ? on.who : null });
+  });
+
+  leftovers.forEach(s => addOp({ op: "mark", pts: s.pts }));
+  return ops;
 }

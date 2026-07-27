@@ -1,4 +1,4 @@
-import { recognizeSymbol, puckGate, ACCEPT } from '../src/sketch-recognize.js';
+import { recognizeSymbol, puckGate, classifyPenGroup, ACCEPT } from '../src/sketch-recognize.js';
 
 let pass = 0, fail = 0;
 const T = (name, got, want) => {
@@ -131,6 +131,114 @@ const GLYPHS = {
   T('dense scribble is puck', puckGate([scr]), true);
   T('a 5ft F is not a puck', puckGate(place(GLYPHS.F, 60, 40, 5)), false);
   T('a 5ft O is not a puck', puckGate(place(GLYPHS.O, 60, 40, 5)), false);
+}
+
+/* ================ classifyPenGroup ================ */
+
+const stroke = pts => ({ pts });
+const strokesOf = unitOrPlaced => unitOrPlaced.map(stroke);
+const kinds = ops => ops.map(o => o.op);
+
+// ---- a lone X becomes a player; its trailing long stroke becomes its route ----
+{
+  const x = drawn(GLYPHS.X, 30, 30, 5, 0.2, 41);
+  const route = poly(p(31, 32, 50, 40, 70, 35), 20);
+  const ops = classifyPenGroup([...strokesOf(x), stroke(route)]);
+  T('X+route kinds', kinds(ops), ['player', 'route']);
+  T('X+route sym', ops[0].sym, 'X');
+  T('X+route ref wiring', ops[1].to, { ref: 0 });
+  T('X+route fwd', ops[1].bwd, false);
+}
+
+// ---- zigzag long stroke = backward skating; smooth long stroke is not ----
+{
+  const zig = [];
+  for (let i = 0; i <= 6; i++) zig.push({ x: 40 + i * 5, y: 40 + (i % 2 ? 4 : -4) });
+  const ops = classifyPenGroup([stroke(poly(zig, 6))], { players: [{ id: 'P1', x: 40, y: 40 }] });
+  T('zigzag → bwd route', kinds(ops), ['route']);
+  T('zigzag bwd flag', ops[0].bwd, true);
+  const smooth = classifyPenGroup([stroke(poly(p(40, 40, 55, 34, 70, 44), 20))],
+    { players: [{ id: 'P1', x: 40, y: 40 }] });
+  T('smooth route not bwd', smooth[0] && smooth[0].bwd, false);
+}
+
+// ---- a route with no nearby skater stays ink ----
+{
+  const ops = classifyPenGroup([stroke(poly(p(100, 20, 120, 30, 140, 25), 20))]);
+  T('orphan route → mark', kinds(ops), ['mark']);
+}
+
+// ---- dashed line between two players = a pass; direction follows draw order ----
+{
+  const dashes = [];
+  for (let i = 0; i < 4; i++) dashes.push(stroke(poly(p(62 + i * 4, 41 + i, 64.5 + i * 4, 41.6 + i), 4)));
+  const ctx = { players: [{ id: 'P1', x: 60, y: 40 }, { id: 'P2', x: 80, y: 46 }] };
+  const ops = classifyPenGroup(dashes, ctx);
+  T('dashes → pass', kinds(ops), ['pass']);
+  T('pass from P1', ops[0] && ops[0].from, { id: 'P1' });
+  T('pass to P2', ops[0] && ops[0].to, { id: 'P2' });
+  // same dashes with nobody around stay ink
+  T('orphan dashes → marks', kinds(classifyPenGroup(dashes)), ['mark', 'mark', 'mark', 'mark']);
+}
+
+// ---- a pass releases from the END of the passer's freshly drawn route ----
+{
+  const x = drawn(GLYPHS.X, 30, 30, 5, 0.2, 43);
+  const route = poly(p(31, 32, 45, 40, 60, 40), 20);
+  const dashes = [];
+  for (let i = 0; i < 4; i++) dashes.push(stroke(poly(p(62 + i * 4, 41, 64.5 + i * 4, 41), 4)));
+  const ctx = { players: [{ id: 'P9', x: 80, y: 42 }] };
+  const ops = classifyPenGroup([...strokesOf(x), stroke(route), ...dashes], ctx);
+  T('X+route+pass kinds', kinds(ops), ['player', 'route', 'pass']);
+  T('pass from the drawn X', ops[2] && ops[2].from, { ref: 0 });
+  T('pass to ctx receiver', ops[2] && ops[2].to, { id: 'P9' });
+}
+
+// ---- straight solo stroke into the net = shot; net-bound dashes too ----
+{
+  const ctx = { players: [{ id: 'P1', x: 150, y: 40 }], nets: [{ id: 'N1', x: 189, y: 42.5 }] };
+  const ops = classifyPenGroup([stroke(poly(p(151, 40, 187, 42), 20))], ctx);
+  T('stroke into net → shot', kinds(ops), ['shot']);
+  T('shot by P1 at N1', ops[0] && [ops[0].by, ops[0].net], [{ id: 'P1' }, 'N1']);
+  const dashes = [];
+  for (let i = 0; i < 4; i++) dashes.push(stroke(poly(p(152 + i * 9, 40.5 + i * 0.5, 157 + i * 9, 40.8 + i * 0.5), 4)));
+  T('dashed shot', kinds(classifyPenGroup(dashes, ctx)), ['shot']);
+  // a curvy drive to the net is a route, not a shot
+  const curvy = poly(p(151, 40, 160, 25, 175, 30, 186, 41), 24);
+  T('curvy drive → route', kinds(classifyPenGroup([stroke(curvy)], ctx)), ['route']);
+}
+
+// ---- tiny scribble on a player = puck on their stick ----
+{
+  const rnd = lcg(47);
+  const scr = [];
+  for (let i = 0; i < 30; i++) scr.push({ x: 60.7 + (rnd() * 2 - 1) * 0.7, y: 40.5 + (rnd() * 2 - 1) * 0.7 });
+  const ops = classifyPenGroup([stroke(scr)], { players: [{ id: 'P1', x: 60, y: 40 }] });
+  T('scribble → puck', kinds(ops), ['puck']);
+  T('puck on P1', ops[0] && ops[0].on, { id: 'P1' });
+  const far = classifyPenGroup([stroke(scr.map(q => ({ x: q.x + 20, y: q.y })))],
+    { players: [{ id: 'P1', x: 60, y: 40 }] });
+  T('loose puck has no carrier', far[0] && far[0].on, null);
+}
+
+// ---- glyph split: L + W side by side is ONE player "LW"; X X is two ----
+{
+  const lw = [...place(GLYPHS.L, 60, 40, 5), ...place(GLYPHS.W, 66, 40, 5)];
+  const ops = classifyPenGroup(strokesOf(jitter(lw, 0.15, lcg(53))));
+  T('LW is one player', kinds(ops), ['player']);
+  T('LW sym', ops[0] && ops[0].sym, 'LW');
+  const xx = [...place(GLYPHS.X, 60, 40, 4), ...place(GLYPHS.X, 68, 40, 4)];
+  const ops2 = classifyPenGroup(strokesOf(jitter(xx, 0.15, lcg(59))));
+  T('XX is two players', kinds(ops2), ['player', 'player']);
+}
+
+// ---- small triangle = cone; big circle = zone overlay shape ----
+{
+  const ops = classifyPenGroup(strokesOf(drawn(GLYPHS['△'], 100, 42, 4, 0.15, 61)));
+  T('small △ → cone', kinds(ops), ['cone']);
+  const big = classifyPenGroup(strokesOf(drawn(GLYPHS.O, 100, 42, 18, 0.5, 67)));
+  T('big ○ → shape', kinds(big), ['shape']);
+  T('big ○ is a circle', big[0] && big[0].shape, 'circle');
 }
 
 console.log(`\n${pass} passed, ${fail} failed  (accept threshold ${ACCEPT})`);
