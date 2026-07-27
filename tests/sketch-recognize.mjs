@@ -273,5 +273,31 @@ const kinds = ops => ops.map(o => o.op);
   T('big ○ is a circle', big[0] && big[0].shape, 'circle');
 }
 
+// ---- phone scale (pxFt ≈ 0.5: the full 200ft rink spans ~390px, so a finger
+//      X is 20-40 FEET) — the view-scaled gates must keep everything working ----
+{
+  const PHONE = { pxFt: 0.5 };
+  // a 25ft X converts (this exact case shipped broken in v6.19-6.22)
+  const bigX = drawn(GLYPHS.X, 60, 40, 25, 0.8, 83);
+  const ops = classifyPenGroup(strokesOf(bigX), PHONE);
+  T('phone: 25ft X is a player', kinds(ops), ['player']);
+  T('phone: 25ft X sym', ops[0] && ops[0].sym, 'X');
+  // X + a 70ft route off it, one burst
+  const route = poly(p(65, 45, 100, 60, 140, 50), 30);
+  const ops2 = classifyPenGroup([...strokesOf(bigX), stroke(route)], PHONE);
+  T('phone: X + route', kinds(ops2), ['player', 'route']);
+  T('phone: route ref', ops2[1] && ops2[1].to, { ref: 0 });
+  // a phone-sized dashed pass (7ft dashes spanning ~38ft)
+  const dashes = [];
+  for (let i = 0; i < 4; i++) dashes.push(stroke(poly(p(65 + i * 10, 41, 72 + i * 10, 41.5), 5)));
+  const ctx = { ...PHONE, players: [{ id: 'P1', x: 60, y: 40 }, { id: 'P2', x: 108, y: 44 }] };
+  T('phone: dashed pass', kinds(classifyPenGroup(dashes, ctx)), ['pass']);
+  // a 15ft ring is still a player O; a 40ft ring is a zone overlay
+  T('phone: 15ft O is a player', kinds(classifyPenGroup(strokesOf(drawn(GLYPHS.O, 100, 42, 15, 0.5, 89)), PHONE)), ['player']);
+  const big = classifyPenGroup(strokesOf(drawn(GLYPHS.O, 100, 42, 40, 1, 97)), PHONE);
+  T('phone: 40ft O is an overlay', kinds(big), ['shape']);
+  // desktop behavior is untouched when pxFt is absent (whole suite above)
+}
+
 console.log(`\n${pass} passed, ${fail} failed  (accept threshold ${ACCEPT})`);
 process.exit(fail ? 1 : 0);

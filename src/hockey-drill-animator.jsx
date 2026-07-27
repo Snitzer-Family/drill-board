@@ -13,7 +13,7 @@ import { ZONES, zoneAt } from "./zones.js";
 import { PieceIcon, Stepper, DiagPanel, Icon, ICONS } from "./icons.jsx";
 import { createTiming, resolveNearest } from "./timing.js";
 import { buildLedger, mayHoldOn, mayHoldEntering } from "./possession.js";
-import { classifyPenGroup, SYMBOL_MAX } from "./sketch-recognize.js";
+import { classifyPenGroup, symbolMaxFor } from "./sketch-recognize.js";
 import { newGame, stepGame } from "./ai-game.js";
 import { STYLES } from "./styles.js";
 
@@ -368,7 +368,9 @@ export default function DrillAnimator() {
   const penDraw = useRef(false);      // {t0} while a pen stroke is in flight
   const penBuf = useRef([]);          // settled strokes awaiting commit [{pts,t0,t1}]
   const penTimer = useRef(0);
-  const [penInk, setPenInk] = useState([]);   // ghost render of the buffer
+  const penScale = useRef(0);         // rink ft per screen px, sampled per burst
+  const [penInk, setPenInk] = useState([]);   // buffered strokes, rendered like the live one
+  const penW = markWidth * 0.55;      // pen ink runs thinner than marker ink
   // the settle timer fires from a stale closure — commitPen reads the board
   // through this ref so the classifier context is always current
   const piecesRef = useRef(pieces);
@@ -3194,16 +3196,28 @@ export default function DrillAnimator() {
   }
 
   /* ----- coords ----- */
-  function svgPt(evt) {
+  function svgPtXY(cx, cy) {
     const svg = svgRef.current;
     const pt = svg.createSVGPoint();
-    pt.x = evt.clientX; pt.y = evt.clientY;
+    pt.x = cx; pt.y = cy;
     // the scene <g> carries the orientation transform, so its CTM
     // maps client pixels straight into rink feet either way
     const m = (sceneRef.current || svg).getScreenCTM();
     if (!m) return { x: 0, y: 0 };
     const q = pt.matrixTransform(m.inverse());
     return { x: clampX(q.x), y: clampY(q.y) };
+  }
+  const svgPt = evt => svgPtXY(evt.clientX, evt.clientY);
+  // rink feet per screen pixel at the current view/zoom — the pen's gesture
+  // gates scale with it (a finger draws the same PIXELS at any zoom). Probe
+  // both screen axes as DISTANCES: portrait rotates the rink (screen-x moves
+  // rink-y) and fill-stretch scales the axes unevenly.
+  function ftPerPx() {
+    const r = svgRef.current?.getBoundingClientRect?.();
+    if (!r || !r.width) return 0;
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    const [a, b, c, d] = [svgPtXY(cx - 50, cy), svgPtXY(cx + 50, cy), svgPtXY(cx, cy - 50), svgPtXY(cx, cy + 50)];
+    return (Math.hypot(b.x - a.x, b.y - a.y) + Math.hypot(d.x - c.x, d.y - c.y)) / 200;
   }
 
   /* ----- edits ----- */
@@ -3949,6 +3963,7 @@ export default function DrillAnimator() {
   // buffer until a settle pause, then the burst is recognized into pieces
   function beginPen(e) {
     clearTimeout(penTimer.current);   // drawing again keeps the burst open
+    if (!penBuf.current.length) penScale.current = ftPerPx();   // per-burst view scale
     const pt = svgPt(e);
     drawRaw.current = [pt];
     setDrawPreview([pt]);
@@ -3979,7 +3994,7 @@ export default function DrillAnimator() {
           if (q.x < x0) x0 = q.x; if (q.y < y0) y0 = q.y;
           if (q.x > x1) x1 = q.x; if (q.y > y1) y1 = q.y;
         });
-        if (Math.hypot(x1 - x0, y1 - y0) >= SYMBOL_MAX) commitPen();
+        if (Math.hypot(x1 - x0, y1 - y0) >= symbolMaxFor(penScale.current)) commitPen();
         else penTimer.current = setTimeout(commitPen, PEN_SETTLE);
       }
       return;
@@ -4081,6 +4096,7 @@ export default function DrillAnimator() {
       })),
       nets: board.filter(p => p.kind === "net").map(n => ({ id: n.id, x: n.x, y: n.y })),
     };
+    ctx.pxFt = penScale.current;
     const ops = classifyPenGroup(strokes, ctx);
     setPieces(ps => materializePenOps(ps, ops));
     const counts = {};
@@ -4132,8 +4148,9 @@ export default function DrillAnimator() {
       const trail = pts.filter((q, i) => i === 0 || Math.hypot(q.x - pts[i - 1].x, q.y - pts[i - 1].y) > 1.2);
       const cps = trail.length > 3 ? rdp(trail, 1.3) : trail;
       if (cps.length < 2) return;
+      // pen fallback ink lands at the pen's thin width, not the marker's
       out.push({ id: nextId("mark", out), kind: "mark", pts: cps, x: cps[0].x, y: cps[0].y,
-        color: markColor, width: markWidth, style: markStyle, path: [] });
+        color: markColor, width: penW, style: markStyle, path: [] });
     };
     ops.forEach((o, i) => {
       if (o.op === "player") {
@@ -5813,9 +5830,12 @@ export default function DrillAnimator() {
           <polygon points={line} fill={m.fill} fillOpacity={m.fillOp != null ? m.fillOp : 0.25}
             stroke="none" pointerEvents="none" />
         )}
-        {/* ice-coloured casing keeps marker ink readable over dots/circles */}
-        <polyline points={line} fill="none" stroke="#f5fafd" strokeWidth={w * 2.1} strokeDasharray={dash}
-          strokeLinecap="round" strokeLinejoin="round" pointerEvents="none" />
+        {/* ice-coloured casing keeps broad marker ink readable over dots/circles;
+            fine pen-weight lines (< 0.75ft) stay bare */}
+        {w >= 0.75 && (
+          <polyline points={line} fill="none" stroke="#f5fafd" strokeWidth={w * 2.1} strokeDasharray={dash}
+            strokeLinecap="round" strokeLinejoin="round" pointerEvents="none" />
+        )}
         <polyline points={line} fill="none" stroke={m.color} strokeWidth={w} strokeDasharray={dash}
           strokeLinecap="round" strokeLinejoin="round" opacity={0.94}
           pointerEvents={hit ? "none" : undefined} />
@@ -8485,17 +8505,18 @@ export default function DrillAnimator() {
             {renderBranchGhostArrows()}
             {renderRouteNumbers()}
 
-            {/* buffered pen strokes ghost at low opacity until the burst settles
-                and snaps into pieces */}
+            {/* buffered pen strokes render exactly like the live one — the ink
+                reads as one continuous line until the burst snaps into pieces */}
             {penInk.map((pts, i) => pts.length > 1 && (
               <polyline key={`pen${i}`} points={pts.map(q => `${q.x},${q.y}`).join(" ")} fill="none"
-                stroke={markColor} strokeWidth={markWidth} strokeLinecap="round" strokeLinejoin="round"
-                opacity={0.45} pointerEvents="none" />
+                stroke={markColor} strokeWidth={penW} strokeLinecap="round" strokeLinejoin="round"
+                opacity={0.9} pointerEvents="none" />
             ))}
             {drawPreview && drawPreview.length > 1 && (
               tool === "marker" || tool === "pen"
                 ? <polyline points={drawPreview.map(q => `${q.x},${q.y}`).join(" ")} fill="none" stroke={markColor}
-                    strokeWidth={markWidth} strokeLinecap="round" strokeLinejoin="round" opacity={0.85} pointerEvents="none" />
+                    strokeWidth={tool === "pen" ? penW : markWidth} strokeLinecap="round" strokeLinejoin="round"
+                    opacity={0.9} pointerEvents="none" />
                 : <polyline points={drawPreview.map(q => `${q.x},${q.y}`).join(" ")} vectorEffect="non-scaling-stroke"
                     fill="none" stroke="#ffd447" strokeWidth={sw(0.6)} strokeDasharray={sdash("1.4 1")} opacity={0.9} />
             )}

@@ -222,12 +222,19 @@ const GUARDS = {
 /* ---------------- public API ---------------- */
 
 // Pre-recognizer gate: tiny ink (a dot) or a small dense scribble is a puck,
-// whatever its nominal shape.
-export function puckGate(strokes) {
+// whatever its nominal shape. pxFt scales "tiny" to the view (see symbolMaxFor).
+export function puckGate(strokes, pxFt = 0) {
   const dg = strokesDiag(strokes);
-  if (dg < 1.8) return true;
-  return dg < 4 && pathLen(strokes) / (dg || 1e-9) > 4;
+  if (dg < Math.max(1.8, 10 * pxFt)) return true;
+  return dg < Math.max(4, 22 * pxFt) && pathLen(strokes) / (dg || 1e-9) > 4;
 }
+
+// A gesture's size in FEET depends entirely on zoom — a finger draws the same
+// PIXELS whether the viewport spans 200ft (phone, full rink) or 30ft (zoomed).
+// So every size gate blends a rink-feet floor with a screen-pixel target via
+// pxFt = rink feet per screen pixel (0 → the desktop-tuned floors). Drill DATA
+// stays pure rink feet; only the INTERPRETATION of ink is screen-aware.
+export const symbolMaxFor = pxFt => Math.max(SYMBOL_MAX, 130 * (pxFt || 0));
 
 // Tuning window for the node harness: every sym's best score + the guard
 // features, so threshold changes are argued from numbers, not vibes.
@@ -276,11 +283,11 @@ const centerOf = pts => {
 };
 
 // dash-likeness: an elongated flick — long chord, little sideways wander
-function isDash(pts, diag) {
-  if (pts.length < 2 || diag >= 6) return false;
+function isDash(pts, diag, maxDiag = 6, minChord = 1) {
+  if (pts.length < 2 || diag >= maxDiag) return false;
   const a = pts[0], b = pts[pts.length - 1];
   const chord = dist(a, b);
-  if (chord < 1) return false;
+  if (chord < minChord) return false;
   const dx = b.x - a.x, dy = b.y - a.y, len = chord;
   let dev = 0;
   pts.forEach(p => {
@@ -329,12 +336,12 @@ function zigzagMidline(pts) {
 // tail would hook the fitted route, so strip up to two short terminal legs
 // that reverse hard. Routes render their own carats — the drawn arrowhead is
 // redundant the moment the ink materializes.
-function stripArrowhead(pts) {
+function stripArrowhead(pts, legMax = 3.5) {
   let r = rdp(pts, 1.6);
   let cut = null;
   for (let k = 0; k < 2 && r.length > 2; k++) {
     const a = r[r.length - 3], b = r[r.length - 2], c = r[r.length - 1];
-    if (dist(b, c) < 3.5 && turnDeg(a, b, c) > 100) { r = r.slice(0, -1); cut = b; }
+    if (dist(b, c) < legMax && turnDeg(a, b, c) > 100) { r = r.slice(0, -1); cut = b; }
     else break;
   }
   if (!cut) return pts;
@@ -363,6 +370,19 @@ function splitGlyphs(cluster) {
 // ops created earlier in the same list.
 export function classifyPenGroup(strokes, ctx = {}) {
   const players = ctx.players || [], nets = ctx.nets || [];
+  // view-scaled gesture gates (ctx.pxFt = rink feet per screen pixel)
+  const pxFt = ctx.pxFt || 0;
+  const sc = (baseFt, px) => Math.max(baseFt, px * pxFt);
+  const symMax = symbolMaxFor(pxFt);       // single-stroke symbol / cluster cap
+  const overlayMin = sc(8, 45);            // closed ring above this is a zone overlay, not a player O
+  const coneMax = sc(CONE_MAX, 60);
+  // association radii get generous px targets — fingertip starts land 40-50px
+  // off the icon they mean (nearest-wins and the free-player filter keep the
+  // looseness safe)
+  const attachR = sc(ATTACH_R, 52), passR = sc(PASS_R, 55), netR = sc(NET_R, 45);
+  const dashSpan = sc(DASH_SPAN, 60), dashMax = sc(6, 45), dashChord = sc(1, 6);
+  const dashRms = sc(1.5, 8), clusterPad = sc(2, 12);
+  const flickMax = sc(4, 20), flickR = sc(3.5, 18), arrowLeg = sc(3.5, 18);
   const ops = [];
   const leftovers = [];   // strokes that fell through → mark ops, in draw order
 
@@ -387,13 +407,13 @@ export function classifyPenGroup(strokes, ctx = {}) {
   };
   // a pass/shot releases from wherever its player ends up; a receiver/skater
   // binds at their spot
-  const sourceAt = pt => nearest(pt, PASS_R, roster, e => e.hasPath ? e.end : { x: e.x, y: e.y });
+  const sourceAt = pt => nearest(pt, passR, roster, e => e.hasPath ? e.end : { x: e.x, y: e.y });
   const spotAt = (pt, r, skip) => nearest(pt, r, roster.filter(e => e !== skip), e => ({ x: e.x, y: e.y }));
-  const netAt = pt => nearest(pt, NET_R, nets, n => ({ x: n.x, y: n.y }));
+  const netAt = pt => nearest(pt, netR, nets, n => ({ x: n.x, y: n.y }));
 
-  const S = strokes.map(s => ({ pts: s.pts, diag: strokesDiag([s.pts]) }));
-  const shorts = S.filter(s => s.diag < SYMBOL_MAX);
-  const longs = S.filter(s => s.diag >= SYMBOL_MAX);
+  const S = strokes.map((s, idx) => ({ pts: s.pts, idx, diag: strokesDiag([s.pts]) }));
+  const shorts = S.filter(s => s.diag < symMax);
+  const longs = S.filter(s => s.diag >= symMax);
 
   // ---- dash-groups out of the shorts first: a dashed line's dashes sit close
   // together and would otherwise cluster into a bogus "symbol"; collinearity
@@ -426,7 +446,7 @@ export function classifyPenGroup(strokes, ctx = {}) {
           const overlap = Math.min(a.hi, b.hi) - Math.max(a.lo, b.lo);
           return overlap <= 0.4 * Math.min(a.hi - a.lo, b.hi - b.lo);
         });
-        if (rms < 1.5 && tMax - tMin > DASH_SPAN && marching) {
+        if (rms < dashRms && tMax - tMin > dashSpan && marching) {
           let a = { x: L.mx + L.dir.x * tMin, y: L.my + L.dir.y * tMin };
           let b = { x: L.mx + L.dir.x * tMax, y: L.my + L.dir.y * tMax };
           // drawing order sets direction: the first dash sits at the start
@@ -437,16 +457,16 @@ export function classifyPenGroup(strokes, ctx = {}) {
       }
       run = [];
     };
-    shorts.forEach(s => { if (isDash(s.pts, s.diag)) run.push(s); else flush(); });
+    shorts.forEach(s => { if (isDash(s.pts, s.diag, dashMax, dashChord)) run.push(s); else flush(); });
     flush();
   }
 
-  // ---- symbol clusters from the remaining shorts (bbox union, 2ft slack) ----
+  // ---- symbol clusters from the remaining shorts (bbox union) ----
   const pool = shorts.filter(s => !consumed.has(s));
   const clusters = [];
   pool.forEach(s => {
     const b = bboxOf(s.pts);
-    const grown = { x: b.x - 2, y: b.y - 2, w: b.w + 4, h: b.h + 4 };
+    const grown = { x: b.x - clusterPad, y: b.y - clusterPad, w: b.w + 2 * clusterPad, h: b.h + 2 * clusterPad };
     const hit = clusters.filter(c => c.some(e =>
       grown.x < e.b.x + e.b.w && e.b.x < grown.x + grown.w &&
       grown.y < e.b.y + e.b.h && e.b.y < grown.y + grown.h));
@@ -457,20 +477,38 @@ export function classifyPenGroup(strokes, ctx = {}) {
   });
 
   const glyphOp = (rec, strokesOf) => {
-    const c = centerOf(strokesOf.flatMap(s => s.pts));
-    if (rec.sym === "△") return { op: "cone", x: c.x, y: c.y };
+    const all = strokesOf.flatMap(s => s.pts);
+    const c = centerOf(all);
+    const dg = strokesDiag([all]);
+    const asShape = shape => {
+      const b = bboxOf(all);
+      return { op: "shape", shape, cx: b.x + b.w / 2, cy: b.y + b.h / 2, w: b.w, h: b.h };
+    };
+    if (rec.sym === "△") return dg <= coneMax ? { op: "cone", x: c.x, y: c.y } : asShape("triangle");
+    if ((rec.sym === "O" || rec.sym === "□") && dg >= overlayMin)
+      return asShape(rec.sym === "O" ? "circle" : "square");
     return { op: "player", x: c.x, y: c.y, sym: rec.sym };
   };
   const puckOps = [];
-  const unrec = [];       // unrecognized short clusters, resolved after routes
+  const unrec = [];       // unrecognized clusters, resolved after routes
+  const fallThrough = []; // big strokes out of failed clusters → the long pipeline
+  const clusterFail = cs => {
+    const bigs = cs.filter(s => s.diag >= SYMBOL_MAX && s.diag >= sc(SYMBOL_MAX, 40));
+    fallThrough.push(...bigs);
+    const rest = cs.filter(s => !bigs.includes(s));
+    if (rest.length) unrec.push(rest);
+  };
   clusters.forEach(cl => {
     const cs = cl.map(e => e.s);
     const pts = cs.map(s => s.pts);
-    if (puckGate(pts)) {
+    if (puckGate(pts, pxFt)) {
       const c = centerOf(pts.flat());
       puckOps.push({ op: "puck", x: c.x, y: c.y, on: null });
       return;
     }
+    // a sprawl wider than any symbol (crossing routes drawn in one burst)
+    // skips recognition and lets each stroke classify on its own
+    if (cs.length > 1 && strokesDiag(pts) > symMax * 2) { clusterFail(cs); return; }
     const glyphs = splitGlyphs(cs);
     if (glyphs.length > 1) {
       const recs = glyphs.map(g => recognizeSymbol(g.map(s => s.pts)));
@@ -492,17 +530,18 @@ export function classifyPenGroup(strokes, ctx = {}) {
     if (rec) {
       const o = glyphOp(rec, cs);
       o.op === "player" ? addPlayerOp(o) : addOp(o);
-    } else unrec.push(cs);   // held back: might be an arrowhead flick on a route
+    } else clusterFail(cs);   // held back: routes, or an arrowhead flick
   });
 
-  // ---- long strokes: big closed shape → zigzag → shot → route → ink ----
+  // ---- long strokes (plus failed-cluster strays, in draw order):
+  //      big closed shape → zigzag → shot → route → ink ----
   const routeEnds = [];
-  longs.forEach(s => {
+  [...longs, ...fallThrough].sort((a, b) => a.idx - b.idx).forEach(s => {
     const pts = s.pts, last = pts[pts.length - 1];
     if (dist(pts[0], last) / s.diag < 0.3) {
       const rec = recognizeSymbol([pts]);
       if (rec && ["O", "□", "△"].includes(rec.sym)) {
-        if (rec.sym === "△" && s.diag < CONE_MAX) {
+        if (rec.sym === "△" && s.diag < coneMax) {
           const c = centerOf(pts);
           addOp({ op: "cone", x: c.x, y: c.y });
         } else {
@@ -522,9 +561,9 @@ export function classifyPenGroup(strokes, ctx = {}) {
         if (by) { addOp({ op: "shot", by: by.who, net: net.id }); return; }
       }
     }
-    const skater = nearest(pts[0], ATTACH_R, roster.filter(e => !e.hasPath), e => ({ x: e.x, y: e.y }));
+    const skater = nearest(pts[0], attachR, roster.filter(e => !e.hasPath), e => ({ x: e.x, y: e.y }));
     if (skater) {
-      const raw = mid || stripArrowhead(pts);
+      const raw = mid || stripArrowhead(pts, arrowLeg);
       addOp({ op: "route", to: skater.who, raw, bwd: !!mid });
       skater.hasPath = true;
       skater.end = raw[raw.length - 1];
@@ -540,8 +579,8 @@ export function classifyPenGroup(strokes, ctx = {}) {
   unrec.forEach(cs => {
     const all = cs.flatMap(s => s.pts);
     const c = centerOf(all);
-    const tiny = strokesDiag([all]) < 4;
-    if (tiny && routeEnds.some(e => dist(c, e) < 3.5)) return;
+    const tiny = strokesDiag([all]) < flickMax;
+    if (tiny && routeEnds.some(e => dist(c, e) < flickR)) return;
     leftovers.push(...cs);
   });
 
@@ -549,7 +588,7 @@ export function classifyPenGroup(strokes, ctx = {}) {
   // landed — and they must precede pass/shot ops, whose materialization would
   // otherwise conjure a duplicate puck for the same carrier
   puckOps.forEach(o => {
-    const on = spotAt({ x: o.x, y: o.y }, PUCK_ON_R, null);
+    const on = spotAt({ x: o.x, y: o.y }, sc(PUCK_ON_R, 15), null);
     ops.push({ ...o, on: on ? on.who : null });
   });
 
