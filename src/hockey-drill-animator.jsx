@@ -385,16 +385,42 @@ export default function DrillAnimator() {
   // erase everything an eraser stroke passes through: ink by its drawn points,
   // pieces by their spot. Runs through scrubRefs so deleting a player also
   // unpicks any puck chain that referenced it.
+  // a route as a polyline, so the eraser can hit the LINE and not just the icon
+  const routePolyline = p => {
+    const out = [{ x: p.x, y: p.y }];
+    let prev = { x: p.x, y: p.y };
+    (p.path || []).forEach(s => {
+      for (let k = 1; k <= 8; k++) out.push(evalSeg(prev, s, k / 8));
+      prev = { x: s.x, y: s.y };
+    });
+    return out;
+  };
   function eraseAlong(raw) {
     const R = Math.max(2.5, 16 * Math.min(penScale.current.x || 0.2, penScale.current.y || 0.2));
     const near = (x, y) => raw.some(q => Math.hypot(q.x - x, q.y - y) < R);
-    const hit = piecesRef.current.filter(p => p.lock ? false
-      : p.kind === "mark" ? (p.pts || []).some(q => near(q.x, q.y))
-      : near(p.x, p.y));
-    if (!hit.length) return false;
+    const live = piecesRef.current.filter(p => !p.lock);
+    // cross a piece → the piece goes; cross only its route line → just the route
+    const hit = live.filter(p => p.kind === "mark" ? (p.pts || []).some(q => near(q.x, q.y)) : near(p.x, p.y));
     const ids = new Set(hit.map(p => p.id));
-    setPieces(ps => { let list = ps.filter(q => !ids.has(q.id)); for (const id of ids) list = scrubRefs(list, id); return list; });
-    flash(`Erased ${ids.size} item${ids.size > 1 ? "s" : ""}`);
+    const routed = live.filter(p => p.kind === "player" && p.path.length && !ids.has(p.id)
+      && routePolyline(p).some(q => near(q.x, q.y)));
+    if (!ids.size && !routed.length) return false;
+    // dropping every waypoint re-pins each pass/shot back to the player's spot,
+    // exactly as deleting them one at a time from the popup would
+    routed.forEach(p => { for (let i = p.path.length - 1; i >= 0; i--) stepsOnDelete(p.id, i); });
+    setPieces(ps => {
+      let list = ps.filter(q => !ids.has(q.id));
+      for (const id of ids) list = scrubRefs(list, id);
+      routed.forEach(p => {
+        for (let i = p.path.length - 1; i >= 0; i--) list = shiftActionWaypoints(list, p.id, i + 1, -1);
+        list = list.map(q => (q.id === p.id ? { ...q, path: [] } : q));
+      });
+      return list;
+    });
+    const bits = [];
+    if (ids.size) bits.push(`${ids.size} item${ids.size > 1 ? "s" : ""}`);
+    if (routed.length) bits.push(`${routed.length} route${routed.length > 1 ? "s" : ""}`);
+    flash(`Erased ${bits.join(" + ")}`);
     return true;
   }
   const clearInk = () => {
@@ -4078,6 +4104,20 @@ export default function DrillAnimator() {
     svgRef.current.setPointerCapture?.(e.pointerId);
   }
 
+  // In draw mode the ice is a canvas: players, routes, handles and ink are not
+  // selectable or draggable, so a stroke that starts on one just draws. Flip to
+  // Edit on the pen palette to grab things again. Also the single place skin is
+  // turned away while an Apple Pencil is in use, whatever it lands on.
+  function penPassThrough(e) {
+    noteStylus(e);
+    if (palmBlocked(e)) { e.stopPropagation(); return true; }
+    if (tool !== "pen") return false;
+    e.stopPropagation();
+    setPopup(null);
+    beginPen(e);
+    return true;
+  }
+
   function finishDraw() {
     const raw = drawRaw.current;
     drawRaw.current = [];
@@ -4626,8 +4666,7 @@ export default function DrillAnimator() {
   }
 
   function pieceDown(e, id) {
-    noteStylus(e);
-    if (palmBlocked(e)) { e.stopPropagation(); return; }
+    if (penPassThrough(e)) return;
     if (playing || pinchRef.current) return;
     e.stopPropagation();
     setOpenMenu(null);
@@ -4669,6 +4708,7 @@ export default function DrillAnimator() {
   }
 
   function markPtDown(e, id, idx) {
+    if (penPassThrough(e)) return;
     if (playing || pinchRef.current) return;
     e.stopPropagation();
     if (wakeEdit()) return;
@@ -4703,6 +4743,7 @@ export default function DrillAnimator() {
     return best;
   }
   function lineDown(e, id, segIdx, fork = null) {
+    if (penPassThrough(e)) return;
     if (playing || pinchRef.current) return;
     e.stopPropagation();
     setOpenMenu(null);
@@ -4723,6 +4764,7 @@ export default function DrillAnimator() {
   }
 
   function handleDown(e, payload) {
+    if (penPassThrough(e)) return;
     if (!editing || pinchRef.current) return;
     e.stopPropagation();
     if (wakeEdit()) return;
@@ -4744,6 +4786,7 @@ export default function DrillAnimator() {
   // own angular offset from the body is subtracted so the blade tracks
   // the pointer exactly instead of jumping on grab
   function stickDown(e, p) {
+    if (penPassThrough(e)) return;
     if (playing || pinchRef.current) return;
     if (wakeEdit()) return;
     e.stopPropagation();
