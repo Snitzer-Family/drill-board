@@ -6189,20 +6189,43 @@ export default function DrillAnimator() {
   // split a pressure-carrying note stroke into contiguous runs of similar
   // weight. Bands are coarse on purpose: 4 levels read as a pencil while
   // keeping the element count per stroke in single figures.
+  // A note stroke's weight, as pieces small enough that the changes read as a
+  // taper rather than a staircase. Quantising pressure into bands doesn't work:
+  // captured points sit far apart, so consecutive points can differ by a third
+  // of the width no matter how fine the bands are. Instead each segment is
+  // subdivided until neighbouring pieces differ by only a few percent, then
+  // near-equal neighbours are merged back so flat stretches stay cheap. Cost
+  // tracks how much the pressure actually moves, not the stroke's length.
+  const PRESS_STEP = 0.05;                 // most a neighbouring piece may differ
   function pressRuns(m) {
-    const band = p => {
-      const v = p == null ? 0.5 : Math.max(0, Math.min(1, p));
-      return Math.min(3, Math.floor(v * 4));                 // 0..3
+    const n = m.pts.length;
+    // raw stylus pressure is jittery; smooth it before it drives anything
+    const raw = m.press.map(v => (v == null ? 0.5 : Math.max(0, Math.min(1, v))));
+    const kAt = i => {
+      let s = 0, c = 0;
+      for (let j = Math.max(0, i - 2); j <= Math.min(n - 1, i + 2); j++) { s += raw[j]; c++; }
+      return 0.55 + (s / c) * 0.95;        // 0.55x … 1.50x of the chosen width
     };
-    const k = [0.62, 0.85, 1.1, 1.42];                       // weight per band
-    const runs = [];
-    for (let i = 0; i < m.pts.length; i++) {
-      const b = band(m.press[i]);
-      const last = runs[runs.length - 1];
-      if (last && last.b === b) last.pts.push(m.pts[i]);
-      // carry the previous point into the new run so the runs stay joined
-      else runs.push({ b, k: k[b], pts: i ? [m.pts[i - 1], m.pts[i]] : [m.pts[i]] });
+    const parts = [];
+    for (let i = 1; i < n; i++) {
+      const a = m.pts[i - 1], b = m.pts[i];
+      const k0 = kAt(i - 1), k1 = kAt(i);
+      const steps = Math.max(1, Math.min(8,
+        Math.ceil(Math.abs(k1 - k0) / (PRESS_STEP * Math.max(k0, k1)))));
+      for (let s = 0; s < steps; s++) {
+        const t0 = s / steps, t1 = (s + 1) / steps;
+        const at = t => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+        parts.push({ k: k0 + (k1 - k0) * ((t0 + t1) / 2), pts: [at(t0), at(t1)] });
+      }
     }
+    // merge neighbours of near-equal weight into one polyline
+    const runs = [];
+    parts.forEach(part => {
+      const last = runs[runs.length - 1];
+      if (last && Math.abs(part.k - last.k) / Math.max(part.k, last.k) < PRESS_STEP / 2) {
+        last.pts.push(part.pts[1]);
+      } else runs.push({ k: part.k, pts: part.pts.slice() });
+    });
     return runs.filter(r => r.pts.length > 1);
   }
 
