@@ -597,8 +597,12 @@ export default function DrillAnimator() {
   // own centre.
   const tagSpotFor = (p, off) => {
     const len = Math.max(1, String(p.label || "").length);
-    const hw = 0.62 * (1.8 + 1.26 * len);      // empirical half-extents of the
-    const hh = 1.7;                            // rendered tag at size 0.62
+    // empirical half-extents of the rendered tag at size 0.62, in geometric-mean
+    // feet — converted per-axis, because the tag is screen-true while the ice is
+    // fill-stretched (on a stretched device its rink-ft footprint grows on the
+    // squeezed axis; calibrating on one aspect under-measures on another)
+    const hw = (0.62 * (1.8 + 1.26 * len)) / gmSar;
+    const hh = 1.7 * gmSar;
     const angles = [90, 135, 45, 180, 0, 225, 315, 270];
     let best = null;
     for (const deg of angles) {
@@ -615,7 +619,7 @@ export default function DrillAnimator() {
         for (const t of pts) d = Math.min(d, distToSeg(t.x, t.y, s1, s2));
         if (d < 0.4) break;
       }
-      if (d >= 1.4) return c;
+      if (d >= 1.6) return c;
       if (!best || d > best.d) best = { x: c.x, y: c.y, d };
     }
     return best || { x: p.x, y: p.y + off };
@@ -3003,14 +3007,23 @@ export default function DrillAnimator() {
       return { ...res, x, y, a };
     }
     // a carried puck sits on its carrier's blade tip (so it stays on the stick
-    // through the detour + shield, instead of clipping the net)
+    // through the detour + shield, instead of clipping the net). The carrier is
+    // the CLOSEST blade within reach — never the first player in piece order,
+    // whose raw (undetoured) route may sweep right through another carrier's
+    // spot and steal the puck for a few frames as they pass by.
     if (p.kind === "puck") {
+      let cq = null, cSide = 1, cd = 2.2;
       for (const q of pieces) {
         if (q.kind !== "player" || q.defense) continue;   // (defense never carries; avoids recursion)
         const raw = displayPosRaw(q);
         const side = q.hand === "L" ? -1 : 1;
         const bladeRaw = bladeAtWorld(raw.x, raw.y, raw.a || 0, BLADE_FWD, BLADE_LAT, side);
-        if (Math.hypot(res.x - bladeRaw.x, res.y - bladeRaw.y) < 2.2) {   // this puck is on q's blade
+        const d = Math.hypot(res.x - bladeRaw.x, res.y - bladeRaw.y);
+        if (d < cd) { cd = d; cq = q; cSide = side; }
+      }
+      {
+        const q = cq, side = cSide;
+        if (q) {   // this puck is on q's blade
           const qd = displayPos(q);                                       // shielded carrier
           // whiteboard: no stick to ride, so tuck the puck right up against the
           // symbol (just clear of the glyph) instead of out at the blade tip
