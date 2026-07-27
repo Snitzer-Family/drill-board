@@ -123,5 +123,39 @@ BRANCH P1 2ea043 at=2 BWD L 60,50 BWD L 80,50`;
   T('round-trip: survives serialize', [S(again.path), again.path[1].turn, S(again.forks[0].path)], ['fbbf', 'left', 'bb']);
 }
 
+// ---- "open up" survives the round-trip on every delivery form ----
+{
+  const src = `DSL 9
+RINK full
+PIECE N1 net 11 42.5
+PIECE P1 player 20 20 #2ea043 P1
+PATH P1 L 60,20
+PIECE P2 player 80 40 #e5342b P2
+PATH P2 L 120,40
+PIECE P3 player 20 70 #1f4fa3 P3
+PATH P3 L 60,70
+PIECE P4 player 80 78 #d7263d P4
+PATH P4 L 120,78
+PIECE P5 player 150 20 #7a4fd6 P5
+PATH P5 L 170,30
+PIECE PK1 puck 18 20 #111 on=P1 pass=1:P2@1!+
+PIECE PK2 puck 18 70 #111 on=P3 rim=1:P4@1~40+
+PIECE PK3 puck 168 30 #111 pickup=P5@1*+`;
+  const { pieces, errors } = parseDrill(src);
+  T('open: parses', errors, []);
+  const g = id => pieces.find(q => q.id === id);
+  T('open: on a pass (with sauce)', [g('PK1').transfers[0].open, g('PK1').transfers[0].sauce], [true, true]);
+  T('open: on a rim handoff (after the aim)', [g('PK2').transfers[0].open, g('PK2').transfers[0].aim], [true, 40]);
+  T('open: on a nearest pickup', [g('PK3').pickup.open, g('PK3').pickup.nearest], [true, true]);
+  const out = serializeDrill('full', pieces);
+  T('open: serializes as a trailing +', [/pass=1:P2@1!\+/.test(out), /~40\+/.test(out), /pickup=P5@1\*\+/.test(out)], [true, true, true]);
+  const again = parseDrill(out).pieces;
+  const h = id => again.find(q => q.id === id);
+  T('open: survives serialize', [h('PK1').transfers[0].open, h('PK2').transfers[0].open, h('PK3').pickup.open], [true, true, true]);
+  // and a drill WITHOUT it must still round-trip byte-identically
+  const plain = src.replace(/\+/g, '');
+  T('open: absent stays absent', serializeDrill('full', parseDrill(plain).pieces).includes('+'), false);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

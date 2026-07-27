@@ -57,6 +57,11 @@ const DRIB_SWING = 7;                       // matching stick sweep (deg)
 // through 180° over this long, centred on the waypoint where the direction
 // changes (or standing in place, if they pause there).
 const PIVOT_SEC = 0.4;
+// Opening up: a receiver whose pass would arrive on the backhand turns to face
+// where the puck is coming from, takes it on the forehand, then squares back up
+// and skates on. Times are relative to the catch.
+const OPEN_IN = 0.7, OPEN_SET = 0.15, OPEN_HELD = 0.2, OPEN_OUT = 0.45;
+const OPEN_BACK_FT = 15;   // how far back down the puck's path counts as "where it came from"
 const CENTRE_Y = 42.5;                                            // mid-ice, the default thing to open toward
 const stepFlip = s => (s && s.dir === "bwd" ? 180 : 0);           // the old instant flip
 const smooth01 = u => (u <= 0 ? 0 : u >= 1 ? 1 : u * u * (3 - 2 * u));
@@ -113,16 +118,41 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
   // pivot windows: pieceId -> { path, byIdx: Map(boundary i -> { from, to, t0, t1, sign }) },
   // where boundary i is the waypoint between legs i and i+1 and t0/t1 are ROUTE-LOCAL
   // seconds. Resolving a window's sweep direction needs the other pieces' positions,
-  // which means calling back into the position machinery — `pivotResolving` makes
+  // which means calling back into the position machinery — `planPhase` makes
   // that re-entrant pass fall back to the old instant flip, so it can't recurse.
   let currentPivots = {};
-  let pivotResolving = false;
+  // open-up windows: playerId -> [{ t0, t1, t2, t3, deg }] in ROUTE-LOCAL seconds —
+  // the receiver turns to face where the puck is coming from, holds it through the
+  // catch, then squares back up. Display-only, like the pivot.
+  let currentOpens = {};
+  // true while the plan is still being solved (and while pivot signs sample the
+  // rest of the ice). Every display-only smoothing below reads this and stands
+  // down, so nothing the renderer does can feed back into a leg time.
+  let planPhase = false;
+
+  // how far the body is turned out of its route heading by an open-up, at
+  // route-local elapsed `eLoc` (0 outside a window)
+  function openAt(p, eLoc) {
+    if (planPhase) return 0;
+    const list = currentOpens[p.id];
+    if (!list) return 0;
+    let best = 0;
+    for (const w of list) {
+      if (eLoc <= w.t0 || eLoc >= w.t3) continue;
+      const k = eLoc < w.t1 ? smooth01((eLoc - w.t0) / (w.t1 - w.t0))
+        : eLoc <= w.t2 ? 1
+        : 1 - smooth01((eLoc - w.t2) / (w.t3 - w.t2));
+      const v = w.deg * k;
+      if (Math.abs(v) > Math.abs(best)) best = v;
+    }
+    return best;
+  }
 
   // the flip (deg) to add to leg i's tangent at route-local elapsed `eLoc` — the
   // stepped 0/180 outside a pivot, a smooth sweep through one
   function flipAt(p, i, eLoc) {
     const base = stepFlip(p.path[i]);
-    if (pivotResolving) return base;
+    if (planPhase) return base;
     const pv = currentPivots[p.id];
     // identity check: callers sometimes pass the RAW piece for a branching player,
     // whose leg indices don't line up with the effective path the windows were built on
@@ -181,7 +211,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
     // trajectories, rest spots) — a cached plan from the other mode must not be
     // reused, or toggling e.g. Whiteboard replays a stale realistic miss
     if (pc.key === pieces && pc.pace === pace && pc.sig === lenSig && pc.seed === seed
-      && pc.real === realisticShots && pc.det === detail && pc.odds === odds) { currentHolds = pc.holds || {}; currentStartWait = pc.startWait || {}; currentTrigPause = pc.trigPause || {}; currentPivots = pc.pivots || {}; return pc; }
+      && pc.real === realisticShots && pc.det === detail && pc.odds === odds) { currentHolds = pc.holds || {}; currentStartWait = pc.startWait || {}; currentTrigPause = pc.trigPause || {}; currentPivots = pc.pivots || {}; currentOpens = pc.opens || {}; return pc; }
     const warp = {};
     const plans = {};
     const rel = {};
@@ -375,7 +405,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
         if (!pl.path.length && pieces.some(q => q.kind === "puck" && q.carrier === pk.pickup.to)) seq++;
         tPick += seq * 1.6;
         legs.push({ type: "free", t0: 0 });
-        legs.push({ type: "ride", id: pl.id, t0: tPick, catch: true });
+        legs.push({ type: "ride", id: pl.id, t0: tPick, catch: true, ...(pk.pickup.open ? { open: true } : {}) });
         cur = pl;
         tBase = tPick;
       } else return;
@@ -650,7 +680,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           // reaches its collect waypoint (pick it up like a rebound)
           const gatherT = gj >= 0 ? Math.max(r.t, routeTimeW(rec, warp, gj)) : r.t;
           if (gatherT > r.t + 1e-3) legs.push({ type: "rest", x: r.end.x, y: r.end.y, t0: r.t });
-          legs.push({ type: "ride", id: rec.id, t0: gatherT, catch: true });
+          legs.push({ type: "ride", id: rec.id, t0: gatherT, catch: true, ...(tr.open ? { open: true } : {}) });
           cur = rec; tBase = gatherT; return;
         }
         if (tr.kind === "shot") {                             // (may rebound to the shooter)
@@ -665,7 +695,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           doShot(tr.at, aim, tr.net != null ? tr.net : null);  // this rebound shot's own net (independent of the terminal)
           if (chainBlocked) return;                      // rebound died at the net — no collect
           const tGather = gi >= 0 ? Math.max(tBase, routeTimeW(rec, warp, gi)) : tBase;
-          legs.push({ type: "ride", id: rec.id, t0: tGather, catch: true });
+          legs.push({ type: "ride", id: rec.id, t0: tGather, catch: true, ...(tr.open ? { open: true } : {}) });
           cur = rec;
           tBase = tGather;
           return;
@@ -726,7 +756,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
         // a flat pass that would cut through a bumper lifts over it automatically
         const sauce = !!tr.sauce || (bumpSh.length > 0 && segCrossesNet(launch, target, bumpSh));
         legs.push({ type: "fly", by: byId, x0: launch.x, y0: launch.y, x1: target.x, y1: target.y, t0: launchT, t1: tArr, sauce });
-        legs.push({ type: "ride", id: rec.id, t0: tArr, catch: true });
+        legs.push({ type: "ride", id: rec.id, t0: tArr, catch: true, ...(tr.open ? { open: true } : {}) });
         // the carrier's own release (a `via` bounces off a passer first, so the
         // carrier lets go earlier, at launch0T)
         newEvents.push({ by: cur.id, at: tr.at, t: tr.via ? launch0T : launchT, kind: "pass" });
@@ -778,6 +808,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
       warp, plans, rel, holds: {}, startWait: sw, trigPause: tp };
     currentHolds = {};
     currentPivots = {};
+    currentOpens = {};
 
     // blue-line entry holds: a "hold=line" player waits at their last neutral
     // waypoint until the puck first crosses into the zone they are entering.
@@ -848,7 +879,49 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
     planCache.current.holds = holds;
     currentPivots = buildPivots(warp, plans);
     planCache.current.pivots = currentPivots;
+    currentOpens = buildOpens(warp, plans);
+    planCache.current.opens = currentOpens;
     return planCache.current;
+  }
+
+  // Opening up. At every catch flagged `open`, the receiver turns to face where the
+  // puck is coming FROM — walked back down the puck's own planned legs until it is
+  // OPEN_BACK_FT away, so a pass points at the passer, a rim back along the boards,
+  // a rebound at the net, and a puck already lying there points at itself (no turn).
+  // Display-only: the flight was planned off the stepped heading and stays that way,
+  // so opening up cannot move a leg time.
+  function buildOpens(warp, plans) {
+    const out = {};
+    planPhase = true;
+    try {
+      for (const pk of pieces) {
+        const pl = plans[pk.id];
+        if (!pl) continue;
+        pl.legs.forEach((leg, k) => {
+          if (leg.type !== "ride" || !leg.open) return;
+          const rec = pieces.find(q => q.id === leg.id && q.kind === "player");
+          if (!rec || !rec.path.length) return;
+          const here = routePosAt(rec, leg.t0, warp);
+          let sx = null, sy = null;
+          for (let j = k - 1; j >= 0; j--) {
+            const L = pl.legs[j];
+            const px = L.type === "rest" ? L.x : L.x0, py = L.type === "rest" ? L.y : L.y0;
+            if (px == null || py == null) break;
+            sx = px; sy = py;
+            if (Math.hypot(px - here.x, py - here.y) >= OPEN_BACK_FT) break;
+          }
+          if (sx == null || Math.hypot(sx - here.x, sy - here.y) < 1) return;
+          let deg = wrapDeg((Math.atan2(sy - here.y, sx - here.x) * 180) / Math.PI - (here.aStep || 0));
+          if (Math.abs(deg) < 1) return;                    // already looking right at it
+          // dead astern is a coin flip — open over the shoulder that presents the forehand
+          if (Math.abs(deg) > 179) deg = 180 * (rec.hand === "L" ? -1 : 1);
+          const t = leg.t0 - startWaitOf(rec);              // route-local, to match routePosAt
+          (out[rec.id] = out[rec.id] || []).push({ t0: t - OPEN_IN - OPEN_SET, t1: t - OPEN_SET,
+            t2: t + OPEN_HELD, t3: t + OPEN_HELD + OPEN_OUT, deg });
+        });
+      }
+    } finally { planPhase = false; }
+    return out;
   }
 
   // Where does a pivoting skater end up looking? Left/right are literal shoulders;
@@ -926,11 +999,11 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
     // sampling the rest of the ice re-enters routePosAt; the guard keeps that pass
     // on the stepped flip, so it bottoms out immediately (and positions don't
     // depend on the flip anyway — only a puck riding a blade shifts slightly)
-    pivotResolving = true;
+    planPhase = true;
     try {
       for (const [p, list] of lists)
         for (const w of list) w.sign = pivotSign(p, w.i, w.from, w.tAbs, warp, plans);
-    } finally { pivotResolving = false; }
+    } finally { planPhase = false; }
     return out;
   }
 
@@ -975,7 +1048,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
     // the old instant flip, and everything that plans puck geometry (blade spots,
     // chip headings) stays on it so no pivot can move a launch point or a leg time.
     const eLoc = e;
-    const flip = i => flipAt(p, i, eLoc);
+    const flip = i => flipAt(p, i, eLoc) + openAt(p, eLoc);
     // Sharp interior corners get a speed dip (carve the turn) so the skater
     // decelerates in and accelerates out instead of pivoting at full speed.
     const dirN = (dx, dy) => { const m = Math.hypot(dx, dy) || 1; return [dx / m, dy / m]; };
@@ -1023,7 +1096,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
         // arrive, so a pivot taken standing still swings the tangent across too
         const tOut = segTangentAngle(prev, s, 0.02);
         let tan = tOut;
-        const pvw = i > 0 && !pivotResolving && currentPivots[p.id]?.path === p.path
+        const pvw = i > 0 && !planPhase && currentPivots[p.id]?.path === p.path
           ? currentPivots[p.id].byIdx.get(i - 1) : null;
         if (pvw && eLoc < pvw.t1) {
           const tIn = segTangentAngle(legStart(i - 1), p.path[i - 1], 0.98);
@@ -1107,11 +1180,29 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
       if (pl) {
         const relT = rel[p.id];
         if (p.path.length && e >= relT) return routePosAt(p, e - relT, warp);
-        let leg = pl.legs[0];
-        for (const L of pl.legs) { if (e >= L.t0) leg = L; else break; }
+        let leg = pl.legs[0], li = 0;
+        for (let k = 0; k < pl.legs.length; k++) { if (e >= pl.legs[k].t0) { leg = pl.legs[k]; li = k; } else break; }
+        // A catch was planned against the receiver's STEPPED heading, but a body
+        // mid-pivot or opened up has carried the stick away from that spot — so the
+        // last stretch of the delivery steers onto where the blade actually is.
+        // Only engages when the two headings differ, so ordinary drills are untouched.
+        const catchPull = tEnd => {
+          const nx = pl.legs[li + 1];
+          if (planPhase || !nx || nx.type !== "ride" || !nx.catch) return null;
+          const car = pieces.find(q => q.id === nx.id && q.kind === "player");
+          if (!car || !car.path.length) return null;
+          const cp = routePosAt(car, tEnd, warp);
+          if (Math.abs(wrapDeg((cp.a || 0) - (cp.aStep || 0))) < 0.5) return null;
+          return bladeAt(car, tEnd, warp, true);
+        };
+        const pull = (x, y, ex, ey, w) => {
+          const b = w > 0 ? catchPull(pl.legs[li + 1].t0) : null;
+          return b ? { x: x + (b.x - ex) * w, y: y + (b.y - ey) * w, a: 0 } : { x, y, a: 0 };
+        };
         if (leg.type === "fly" && e < leg.t1) {
           const k = Math.max(0, Math.min(1, (e - leg.t0) / Math.max(0.001, leg.t1 - leg.t0)));
-          return { x: leg.x0 + (leg.x1 - leg.x0) * k, y: leg.y0 + (leg.y1 - leg.y0) * k, a: 0 };
+          return pull(leg.x0 + (leg.x1 - leg.x0) * k, leg.y0 + (leg.y1 - leg.y0) * k,
+            leg.x1, leg.y1, smooth01((k - 0.65) / 0.35));
         }
         if (leg.type === "skid" && e < leg.t1) {
           const u = Math.max(0, Math.min(1, (e - leg.t0) / Math.max(0.001, leg.t1 - leg.t0)));
@@ -1119,8 +1210,16 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           return { x: leg.x0 + (leg.x1 - leg.x0) * k, y: leg.y0 + (leg.y1 - leg.y0) * k, a: 0 };
         }
         if (leg.type === "free") return routePosAt(p, e, warp);
-        if (leg.type === "fly" || leg.type === "skid") return { x: leg.x1, y: leg.y1, a: 0 };
-        if (leg.type === "rest") return { x: leg.x, y: leg.y, a: 0 };
+        if (leg.type === "fly" || leg.type === "skid") {
+          const nx = pl.legs[li + 1];
+          return pull(leg.x1, leg.y1, leg.x1, leg.y1,
+            nx ? smooth01((e - (nx.t0 - OPEN_OUT)) / OPEN_OUT) : 0);
+        }
+        if (leg.type === "rest") {
+          const nx = pl.legs[li + 1];   // sat there waiting to be gathered
+          return pull(leg.x, leg.y, leg.x, leg.y,
+            nx ? smooth01((e - (nx.t0 - OPEN_OUT)) / OPEN_OUT) : 0);
+        }
         const car = pieces.find(q => q.id === leg.id);
         if (car) return carriedPuckAt(car, e, warp);
         return { x: p.x, y: p.y, a: 0 };

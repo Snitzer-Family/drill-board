@@ -6673,6 +6673,33 @@ export default function DrillAnimator() {
       );
     };
 
+    // The receiver's side of a delivery. "Open up" is the coach's term for turning
+    // to face where the puck is coming from so it arrives on the forehand instead of
+    // reaching back onto the backhand — a right shot down the left wing taking a pass
+    // from behind on their right, or a left shot down the right wing from their left.
+    // The flag rides the same transfer the passer's step edits (or the pickup, for a
+    // loose puck), so it round-trips as a trailing `+` in the DSL.
+    const gainSubRows = (p, i, st) => {
+      const pk = st.pk;
+      if (!pk) return null;
+      const pick = st.role === "pickup";
+      const tr = pick ? (pk.pickup || {}) : (pk.transfers || [])[st.stage] || {};
+      const isOpen = !!tr.open;
+      const doOpen = () => update(q => q.id !== pk.id ? q
+        : pick ? { ...q, pickup: { ...q.pickup, open: !isOpen } }
+        : { ...q, transfers: (q.transfers || []).map((x, s) => s === st.stage ? { ...x, open: !isOpen } : x) });
+      return (
+        <>
+          <div className="hd-poprow">
+            <button className={`hd-mini${isOpen ? " on" : ""}`} onClick={doOpen}>
+              <Icon name={isOpen ? "check" : "rotateCw"} size={14} /> Open up
+            </button>
+          </div>
+          <div className="hd-sechint">Turns to face the puck and takes it on the forehand, then pivots forward.</div>
+        </>
+      );
+    };
+
     const ActionSteps = (p, i, fork = null) => {
       const steps = stepsAt(p, i, fork);
       // at the START spot (i<0): if a puck the player is carrying here is passed
@@ -6926,6 +6953,7 @@ export default function DrillAnimator() {
                 </div>
                 {st.warn && <div className="hd-poprow"><span style={{ fontSize: 10.5, color: "#c98a2b" }}>⚠ {st.warn}</span></div>}
                 {t === "pass" && passSubRows(p, i, st)}
+                {isGain(t) && gainSubRows(p, i, st)}
                 {(t === "chip" || t === "rim") && <div className="hd-poprow"><span style={{ fontSize: 10.5, color: "#8b99a8" }}>drag the on-ice handle to aim &amp; set distance</span></div>}
               </div>
             );
