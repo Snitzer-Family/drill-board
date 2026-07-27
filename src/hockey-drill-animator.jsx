@@ -6151,12 +6151,10 @@ export default function DrillAnimator() {
           <polygon points={line} fill={m.fill} fillOpacity={m.fillOp != null ? m.fillOp : 0.25}
             stroke="none" pointerEvents="none" />
         )}
-        {/* ice-coloured casing keeps broad marker ink readable over dots/circles;
-            fine pen-weight lines (< 0.75ft) stay bare */}
-        {w >= 0.75 && (
-          <polyline points={line} fill="none" stroke="#f5fafd" strokeWidth={w * 2.1} strokeDasharray={dash}
-            strokeLinecap="round" strokeLinejoin="round" pointerEvents="none" />
-        )}
+        {/* No ice-coloured casing: ink draws as the bare line it was drawn as.
+            The halo was there to lift broad marker strokes off the rink dots,
+            but it reads as a white outline on anything heavier than a hairline
+            — including bold pen strokes and hard Pencil pressure. */}
         <polyline points={line} fill="none" stroke={m.color} strokeWidth={w} strokeDasharray={dash}
           strokeLinecap="round" strokeLinejoin="round" opacity={0.94}
           pointerEvents={hit ? "none" : undefined} />

@@ -64,6 +64,11 @@ export const STYLES = `
         /* Draw|Edit as ONE switch: a knob slides to the live half and a tap
            anywhere flips it. --sw keeps the knob's travel tied to the half
            width, so the narrow-screen sizing below needs no second rule. */
+        /* border-box throughout: the app has no global reset, so with the
+           default content-box each half measured --sw PLUS its padding while
+           the knob only travelled --sw — it stopped short of the second half
+           and dragged the icons off centre. */
+        .hd-penswitch, .hd-penswknob, .hd-penswopt { box-sizing:border-box; }
         .hd-penswitch { --sw:48px; position:relative; flex:none; display:flex; height:42px;
           padding:3px; border-radius:10px; background:#141b23; border:1px solid #33404f;
           cursor:pointer; }
