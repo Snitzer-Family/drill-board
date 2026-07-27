@@ -4087,11 +4087,34 @@ export default function DrillAnimator() {
 
   // turn classifyPenGroup ops into pieces. Runs inside a setPieces reducer:
   // pure over `out`, ids allocated against the working array, same-burst refs
-  // ({ref:opIdx}) resolved through madeId. Route/pass/shot ops land in phase 4.
+  // ({ref:opIdx}) resolved through madeId. The classifier orders ops so every
+  // player lands before the route/pass/shot that references them.
   function materializePenOps(ps, ops) {
     const out = ps.slice();
     const madeId = {};                                    // op index → piece id
     const idFor = ref => (ref ? (ref.id != null ? ref.id : madeId[ref.ref]) : null);
+    const playerAt = ref => {
+      const id = idFor(ref);
+      return out.findIndex(q => q.id === id && q.kind === "player");
+    };
+    // the puck this player currently ends the drill holding (chain tail, not
+    // yet spent) — same resolution doReceiveFrom uses, pure over `out`; a
+    // holder without one gets a fresh puck conjured on their stick
+    const heldOrConjured = pid => {
+      const src = out.find(q => q.id === pid);
+      let pi = out.findIndex(q => {
+        if (q.kind !== "puck" || (q.terminals || []).length) return false;
+        const chain = puckChain(q);
+        return chain.length && chain[chain.length - 1] === pid;
+      });
+      if (pi < 0) {
+        const np = makePiece("puck", { x: src.x, y: src.y }, out);
+        np.carrier = pid;
+        out.push(np);
+        pi = out.length - 1;
+      }
+      return pi;
+    };
     const inkMark = pts => {
       // exact marker-ink treatment: thin the trail, then RDP to control points
       const trail = pts.filter((q, i) => i === 0 || Math.hypot(q.x - pts[i - 1].x, q.y - pts[i - 1].y) > 1.2);
@@ -4120,11 +4143,34 @@ export default function DrillAnimator() {
         out.push({ id: nextId("mark", out), kind: "mark", pts, x: pts[0].x, y: pts[0].y,
           color: markColor, width: markWidth, style: markStyle, path: [] });
       } else if (o.op === "route") {
-        inkMark(o.raw);               // phase 4 turns these into real paths
+        const pi = playerAt(o.to);
+        if (pi < 0 || out[pi].path.length) { inkMark(o.raw); return; }
+        const route = fitRoute({ x: out[pi].x, y: out[pi].y }, o.raw);
+        if (!route.length) { inkMark(o.raw); return; }
+        out[pi] = { ...out[pi], path: o.bwd ? route.map(s => ({ ...s, dir: "bwd" })) : route };
+      } else if (o.op === "pass") {
+        const si = playerAt(o.from), ri = playerAt(o.to);
+        if (si < 0 || ri < 0) return;
+        const src = out[si];
+        const pi = heldOrConjured(src.id);
+        // recvAt -1 = caught at the receiver's spot (doReceiveFrom's `null`)
+        out[pi] = { ...out[pi], transfers: [...(out[pi].transfers || []), {
+          at: src.path.length ? src.path.length - 1 : -1, to: out[ri].id,
+          recvAt: o.recvAt != null && o.recvAt >= 0 ? o.recvAt : null, kind: "pass", by: src.id,
+        }] };
+      } else if (o.op === "shot") {
+        const si = playerAt(o.by);
+        if (si < 0) return;
+        const sh = out[si];
+        const pi = heldOrConjured(sh.id);
+        // shooter pinned like addTerminal does — the actor must not drift
+        out[pi] = { ...out[pi], terminals: [...(out[pi].terminals || []), {
+          kind: "shot", at: sh.path.length ? sh.path.length - 1 : -1, ref: "", by: sh.id,
+          ...(o.net ? { net: o.net } : {}),
+        }] };
       } else if (o.op === "mark") {
         inkMark(o.pts);
       }
-      // pass/shot: wired in phase 4
     });
     return out;
   }

@@ -514,6 +514,14 @@ export function classifyPenGroup(strokes, ctx = {}) {
     leftovers.push(s);
   });
 
+  // pucks bind to whoever is on their doorstep, now that every player has
+  // landed — and they must precede pass/shot ops, whose materialization would
+  // otherwise conjure a duplicate puck for the same carrier
+  puckOps.forEach(o => {
+    const on = spotAt({ x: o.x, y: o.y }, PUCK_ON_R, null);
+    ops.push({ ...o, on: on ? on.who : null });
+  });
+
   // ---- dashed lines resolve last, when every skater's end is known ----
   dashGroups.forEach(g => {
     const src = sourceAt(g.a);
@@ -522,12 +530,6 @@ export function classifyPenGroup(strokes, ctx = {}) {
     const tgt = spotAt(g.b, PASS_R, src);
     if (src && tgt) { addOp({ op: "pass", from: src.who, to: tgt.who, recvAt: -1 }); return; }
     leftovers.push(...g.strokes);
-  });
-
-  // pucks bind to whoever is on their doorstep (players may have landed after)
-  puckOps.forEach(o => {
-    const on = spotAt({ x: o.x, y: o.y }, PUCK_ON_R, null);
-    ops.push({ ...o, on: on ? on.who : null });
   });
 
   leftovers.forEach(s => addOp({ op: "mark", pts: s.pts }));

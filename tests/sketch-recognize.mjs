@@ -221,6 +221,20 @@ const kinds = ops => ops.map(o => o.op);
   T('loose puck has no carrier', far[0] && far[0].on, null);
 }
 
+// ---- a puck dot + a dashed pass in one burst: the puck op must precede the
+//      pass op, so materialization threads ONE puck through the pass ----
+{
+  const rnd = lcg(71);
+  const dot = [];
+  for (let i = 0; i < 20; i++) dot.push({ x: 60.5 + (rnd() * 2 - 1) * 0.6, y: 40.4 + (rnd() * 2 - 1) * 0.6 });
+  const dashes = [];
+  for (let i = 0; i < 4; i++) dashes.push(stroke(poly(p(62 + i * 4, 41, 64.5 + i * 4, 41), 4)));
+  const ctx = { players: [{ id: 'P1', x: 60, y: 40 }, { id: 'P2', x: 80, y: 42 }] };
+  const ops = classifyPenGroup([stroke(dot), ...dashes], ctx);
+  T('puck before pass', kinds(ops), ['puck', 'pass']);
+  T('puck rides P1', ops[0] && ops[0].on, { id: 'P1' });
+}
+
 // ---- glyph split: L + W side by side is ONE player "LW"; X X is two ----
 {
   const lw = [...place(GLYPHS.L, 60, 40, 5), ...place(GLYPHS.W, 66, 40, 5)];
