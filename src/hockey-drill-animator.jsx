@@ -9325,8 +9325,10 @@ export default function DrillAnimator() {
               onClick={() => { resetAnim(); setPlaying(false); setPopup(null); setTool("marker"); }}>
               <span className="hd-toolglyph"><Icon name="marker" size={22} /></span><span>Marker</span>
             </button>
+            {/* close the sheet on pick — on a phone it covers most of the ice,
+                and the next thing you want to do is draw */}
             <button className={`hd-tool${tool === "pen" ? " on" : ""}`}
-              onClick={() => { resetAnim(); setPlaying(false); setPopup(null); setTool("pen"); }}>
+              onClick={() => { resetAnim(); setPlaying(false); setPopup(null); setTool("pen"); setOpenMenu(null); }}>
               <span className="hd-toolglyph"><Icon name="marker" size={22} /></span><span>Smart pen</span>
             </button>
             {[["square", "□", "Square"], ["circle", "○", "Circle"], ["triangle", "△", "Triangle"]].map(([k, glyph, lbl]) => (

@@ -405,6 +405,29 @@ const kinds = ops => ops.map(o => o.op);
   T('bowed D still reads D', recognizeSymbol(drawn(GLYPHS.D, 60, 40, 9, 0.25, 223))?.sym, 'D');
 }
 
+// ---- THE PEN FLICK: coaches finish a circle by flicking outward, and that
+//      little tail sits far off the ring — it dropped a clean O from 0.899 to
+//      0.199 (unrecognized). Every circle on Nate's board had one. ----
+{
+  const hooked = (r, sweep, tail) => {
+    const o = [], n = 26;
+    for (let i = 0; i <= n; i++) {
+      const a = ((-60 + (sweep * i) / n) * Math.PI) / 180;
+      o.push({ x: 100 + r * Math.cos(a), y: 100 + r * Math.sin(a) });
+    }
+    const l = o[o.length - 1];
+    for (let k = 1; k <= 6; k++) o.push({ x: l.x + k * tail * 1.2, y: l.y + k * tail });
+    return o;
+  };
+  [['small', 1.5], ['medium', 2.5], ['long', 4], ['huge', 6]].forEach(([lbl, t]) =>
+    T(`circle with a ${lbl} flick is an O`, recognizeSymbol([hooked(15, 300, t)])?.sym, 'O'));
+  T('nearly-closed ring + flick is an O', recognizeSymbol([hooked(15, 340, 2.5)])?.sym, 'O');
+  // the letters that a too-eager tail-trim would swallow must survive: a C is
+  // a 240° arc whether or not you trim it, and G keeps its bar
+  T('C not swallowed by tail-trim', recognizeSymbol(drawn(GLYPHS.C, 60, 40, 6, 0.12, 307))?.sym, 'C');
+  T('G not swallowed by tail-trim', recognizeSymbol(drawn(GLYPHS.G, 60, 40, 7, 0.12, 311))?.sym, 'G');
+}
+
 // ---- phone scale (pxFt ≈ 0.5: the full 200ft rink spans ~390px, so a finger
 //      X is 20-40 FEET) — the view-scaled gates must keep everything working ----
 {

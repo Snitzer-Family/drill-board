@@ -181,6 +181,31 @@ const turnDeg = (a, b, c) => {
   return (Math.acos(cos) * 180) / Math.PI;
 };
 
+// spread of the radius about the centroid — low means ring-like
+function radialCV(pts) {
+  const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+  const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+  const rad = pts.map(p => Math.hypot(p.x - cx, p.y - cy));
+  const m = rad.reduce((a, v) => a + v, 0) / rad.length || 1e-9;
+  return Math.sqrt(rad.reduce((a, v) => a + (v - m) ** 2, 0) / rad.length) / m;
+}
+
+// Coaches finish a circle by flicking the pen outward, and that little tail
+// wrecks the shape: its points sit far off the ring, dropping a clean 0.899 O
+// to 0.199 (unrecognized). So look for the longest leading run that IS a ring
+// and judge that. A C or a G can't be rescued this way — trimming a 240° arc
+// leaves a 240° arc — so the letters stay safe.
+function ringOf(pts) {
+  const n = pts.length;
+  if (n < 8) return null;
+  let best = null;
+  for (let k = n; k >= Math.max(8, Math.floor(n * 0.55)); k--) {
+    const cv = radialCV(pts.slice(0, k));
+    if (!best || cv < best.cv) best = { cv, k };
+  }
+  return best && best.cv < 0.11 ? pts.slice(0, best.k) : null;
+}
+
 function features(strokes) {
   const all = strokes.flat();
   const b = bboxOf(all);
@@ -214,11 +239,7 @@ function features(strokes) {
   // how ring-like: spread of the radius about the centroid. Hand circles sit
   // near 0.03-0.09, D at 0.14, C and triangles above 0.2 — the most reliable
   // way to know a circle, and it doesn't care where the pen closed the loop.
-  const cx = all.reduce((s, p) => s + p.x, 0) / all.length;
-  const cy = all.reduce((s, p) => s + p.y, 0) / all.length;
-  const rad = all.map(p => Math.hypot(p.x - cx, p.y - cy));
-  const rMean = rad.reduce((a, v) => a + v, 0) / rad.length || 1e-9;
-  const radialCV = Math.sqrt(rad.reduce((a, v) => a + (v - rMean) ** 2, 0) / rad.length) / rMean;
+  const cv = radialCV(all);
   // D's real signature: a SPINE. Its leftmost edge sits at the same x at the
   // top, middle and bottom; a circle curves away at both ends (0.00 vs 0.91).
   // leftRMS alone let round ink win D over O.
@@ -229,7 +250,7 @@ function features(strokes) {
   const lT = leftAt(0, 0.2), lM = leftAt(0.4, 0.6), lB = leftAt(0.8, 1);
   const spineDrift = lT == null || lM == null || lB == null ? 9
     : Math.max(Math.abs(lT - lM), Math.abs(lB - lM)) / (b.w || 1e-9);
-  return { closure, corners, leftRMS, tail, radialCV, spineDrift };
+  return { closure, corners, leftRMS, tail, radialCV: cv, spineDrift };
 }
 
 // Closure bounds are finger-loose: coaches leave big gaps, and capture
@@ -294,8 +315,14 @@ export function recognizeSymbol(strokes) {
   // 0.561) because the template's points spread over the missing arc — but
   // "every point the same distance from the middle" is unambiguous, and it
   // holds however far round the pen got.
-  if (strokes.length === 1 && f.radialCV < 0.11 && f.corners <= 1 && f.closure < 0.52 && f.tail <= 1)
-    return { sym: "O", score: 1 - f.radialCV, second: null };
+  if (strokes.length === 1) {
+    const ring = ringOf(strokes[0]);        // ignores a trailing pen flick
+    if (ring) {
+      const rf = ring.length === strokes[0].length ? f : features([ring]);
+      if (rf.corners <= 1 && rf.closure < 0.52 && rf.tail <= 1)
+        return { sym: "O", score: 1 - rf.radialCV, second: null };
+    }
+  }
   const scored = {};
   TEMPLATES.forEach(t => {
     const score = Math.max(0, (2 - greedyMatch(cloud, t.cloud)) / 2);
