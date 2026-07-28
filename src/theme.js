@@ -89,6 +89,9 @@ const LIGHT = {
     "ice-boards": "#31404e",
     "ice-dash": "#ffffff",
     "ice-ink": "#14171a",
+    // a stick lying on the ice — lifted off the sheet rather than the near-black
+    // literal it used to carry, which vanished on a dark rink
+    "ice-stick": "#3d4753",
     "ice-select": "#a06400",
 
     /* effects — alpha, composited over a declared base in the contrast test */
@@ -154,6 +157,9 @@ const DARK = {
     "ice-boards": "#5b7186",
     "ice-dash": "#0d151c",
     "ice-ink": "#cdd8e2",
+    // a stick lying on the ice — lifted off the sheet rather than the near-black
+    // literal it used to carry, which vanished on a dark rink
+    "ice-stick": "#a6b3c2",
     "ice-select": "#ffd447",
 
     "fx-glass": "rgba(23,29,37,.84)",
@@ -230,6 +236,9 @@ const BARN = {
   "ice-boards": "#545f69",
   "ice-dash": "#ffffff",
   "ice-ink": "#14171a",
+  // a stick lying on the ice — lifted off the sheet rather than the near-black
+  // literal it used to carry, which vanished on a dark rink
+  "ice-stick": "#3d4753",
   "ice-select": "#b87e00",
 };
 
@@ -252,6 +261,9 @@ const SLATE = {
   "ice-boards": "#6a819a",
   "ice-dash": "#1a2836",
   "ice-ink": "#d6e2ee",
+  // a stick lying on the ice — lifted off the sheet rather than the near-black
+  // literal it used to carry, which vanished on a dark rink
+  "ice-stick": "#aebccb",
 };
 
 // Per-theme RENDERED team colours. The stored DSL value is never touched — this

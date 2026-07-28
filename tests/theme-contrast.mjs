@@ -193,6 +193,32 @@ check("the action bar is one border-box height, one reserved band", () => {
     assert.ok(!css.includes(dead), `${dead}…} should no longer exist — the band is unconditional`);
 });
 
+// A piece's default colour is written out TWICE — once in the board editor's
+// defaultColor(), once in the DSL parser — so a kind can end up one colour when
+// you place it and another when you load the same board from text. That is
+// exactly what happened to the stick (#14171a placed, #20242a parsed), and it
+// stayed invisible because both are near-black. Pin the two tables together.
+check("the two default-colour tables agree on every kind", () => {
+  const js = read("../src/hockey-drill-animator.jsx");
+  const fmt = read("../src/drill-format.js");
+  const grab = (src, after) => {
+    const i = src.indexOf(after);
+    assert.ok(i >= 0, `couldn't find "${after}"`);
+    const body = src.slice(i, i + 700);
+    const out = {};
+    for (const m of body.matchAll(/kind === "(\w+)" \? "(#[0-9a-fA-F]{6})"/g)) out[m[1]] = m[2].toLowerCase();
+    return out;
+  };
+  const editor = grab(js, "const defaultColor =");
+  const parser = grab(fmt, "let color = kind ===");
+  const kinds = [...new Set([...Object.keys(editor), ...Object.keys(parser)])]
+    .filter(k => k in editor && k in parser);
+  assert.ok(kinds.length >= 7, `only matched ${kinds.length} kinds — did a table's shape change?`);
+  for (const k of kinds)
+    assert.equal(editor[k], parser[k],
+      `${k}: the editor places it ${editor[k]} but the parser loads it ${parser[k]}`);
+});
+
 // STYLES is one big template literal, so a stray backtick — even inside a CSS
 // comment, quoting a property name — closes the string and the whole file stops
 // parsing. Worse, the build error points at the next odd character rather than

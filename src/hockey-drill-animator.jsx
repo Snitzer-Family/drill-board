@@ -71,7 +71,12 @@ const SHAPE_KINDS = new Set(["square", "circle", "triangle"]);
 const defaultColor = (kind, playerColor) =>
   kind === "player" ? playerColor : kind === "cone" ? "#e0731d" : kind === "net" ? "#c81e33"
     : kind === "bumper" ? "#1b1e22" : kind === "deker" ? "#c79a4e" : kind === "passer" ? "#57636f"
-    : kind === "label" ? "#14202b" : kind === "tire" ? "#1c1c1e" : kind === "light" ? "#2ea043" : "#14171a";
+    : kind === "label" ? "#14202b" : kind === "tire" ? "#1c1c1e" : kind === "light" ? "#2ea043"
+    // stick is spelled out rather than left to the fallback: drill-format.js has
+    // its own copy of this table and defaults a stick to #20242a, so the two
+    // silently disagreed depending on whether a board was placed or loaded.
+    // tests/theme-contrast.mjs now pins the two tables together.
+    : kind === "stick" ? "#20242a" : "#14171a";
 const toolImg = (kind, wb = false, wbCircle = false) => {
   const k = kind === "playerpuck" ? "player" : kind;
   const g = TOOL_GLYPH[k];

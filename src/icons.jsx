@@ -7,6 +7,11 @@ import { useTheme, useInk } from "./theme-react.jsx";
    One monochrome, stroke-based set drawn on a 24×24 grid in currentColor, so
    every button inherits its text colour and they all read as one family. */
 const F = { fill: "currentColor", stroke: "none" };
+// The stick's "no opinion" colours — one from the DSL parser, one from the
+// board editor, kept apart by a table that had drifted. A stick carrying either
+// follows the theme instead; neither is offered by the colour picker, so this
+// can't swallow a real choice.
+const STICK_AUTO = new Set(["#20242a", "#14171a"]);
 const ICONS = {
   play: <path d="M7 5.5v13l11-6.5z" {...F} />,
   pause: <><rect x="6.5" y="5" width="3.6" height="14" rx="1.1" {...F} /><rect x="13.9" y="5" width="3.6" height="14" rx="1.1" {...F} /></>,
@@ -275,7 +280,16 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
   } else if (p.kind === "stick") {
     // a hockey stick laid on the ice: shaft along local +x, blade angled off the
     // toe end; rotate with facing. A subtle ground shadow for depth.
-    const wood = p.color || "#20242a";
+    // Themed, not a literal: the stick painted near-black, which on a dark
+    // sheet (#0d151c) left it all but invisible.
+    // Two historical "no opinion" values have to count as unset — the DSL
+    // parser defaulted a stick to #20242a and the board editor to #14171a,
+    // which is the drift that hid this. Neither is one of the six colours the
+    // picker offers, so treating both as unset cannot override a choice the
+    // user actually made, and boards already saved either way start following
+    // the theme.
+    const auto = !p.color || STICK_AUTO.has(p.color.toLowerCase());
+    const wood = auto ? T["ice-stick"] : p.color;
     body = (
       <g pointerEvents="none">
         {selected && <rect x={-6.2} y={-3.0} width={12.6} height={5.6} rx={0.8} fill="none" stroke={SEL} strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
