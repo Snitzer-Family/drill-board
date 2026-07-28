@@ -1,0 +1,35 @@
+{
+  "//": "Allow-lists for drill frontmatter. A typo tag would otherwise silently create an orphan facet page with one drill on it, so tests/content-drills.mjs fails the build on anything not listed here. Adding a value is a deliberate edit.",
+  "zones": {
+    "offensive-zone": "Offensive zone",
+    "neutral-zone": "Neutral zone",
+    "defensive-zone": "Defensive zone",
+    "full-ice": "Full ice"
+  },
+  "levels": {
+    "u8": "U8 / Mite",
+    "u10": "U10 / Squirt",
+    "u12": "U12 / Peewee",
+    "u14": "U14 / Bantam",
+    "u16": "U16 / Midget"
+  },
+  "skills": {
+    "board-play": "Board play",
+    "deception": "Deception",
+    "passing": "Passing",
+    "puck-protection": "Puck protection",
+    "shooting": "Shooting",
+    "skating": "Skating",
+    "support": "Support",
+    "transition": "Transition"
+  },
+  "tags": {
+    "entries": "Zone entries",
+    "breakout": "Breakouts",
+    "regroup": "Regroups",
+    "forecheck": "Forecheck",
+    "small-area": "Small area",
+    "warmup": "Warm-up",
+    "conditioning": "Conditioning"
+  }
+}
