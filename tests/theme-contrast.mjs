@@ -153,37 +153,74 @@ check("menu width agrees between styles.js and the anchoring JS", () => {
   assert.ok(cssW, "--hd-menu-w not found in styles.js");
   assert.ok(jsW, "MENU_W not found in hockey-drill-animator.jsx");
   assert.equal(jsW[1], cssW[1], `MENU_W=${jsW[1]} but --hd-menu-w=${cssW[1]}px`);
-  // and the stretch breakpoint must match the one the media query uses
+  // and the stretch breakpoint must match the one the media query uses.
+  // MENU_ANCHOR_MIN is DENSE_MIN, so resolve through it.
   const cssBp = /@media \(max-width: (\d+)px\) \{\s*\.hd-menu/.exec(css);
-  const jsBp = /MENU_ANCHOR_MIN = (\d+)/.exec(js);
+  const jsBp = /const DENSE_MIN = (\d+)/.exec(js);
   assert.ok(cssBp && jsBp, "menu breakpoint not found on both sides");
   assert.equal(+jsBp[1], +cssBp[1] + 1,
     `JS anchors at >=${jsBp[1]}px but CSS stretches up to ${cssBp[1]}px — ` +
     `there is a gap or overlap where both or neither apply`);
 });
 
-// The player bar and the pen palette are alternate contents of the same slot,
-// so they must share one height and both be border-box — otherwise switching
-// tools in landscape jogs the ice, and the reserved band (which is computed
-// from --hd-barh) silently stops matching what actually renders. Reading these
-// heights off the CSS by hand has been wrong twice, so pin the structure.
-check("the two bottom panels share one border-box height", () => {
+// The pen palette and the player bar are alternate CONTENTS of one element now,
+// so there is one height and one reserved band. Both must derive from --hd-barh:
+// if the bar's rendered height and the strip of ice reserved for it ever stop
+// agreeing, the bar overlaps the ice (band too short) or the ice floats above a
+// gap (too tall). Reading these heights off the CSS by hand has been wrong
+// twice, so pin the structure instead.
+check("the action bar is one border-box height, one reserved band", () => {
   const css = read("../src/styles.js");
-  const rule = name => {
-    const m = new RegExp(`\\.hd-${name} \\{[^}]*\\}`, "s").exec(css);
-    assert.ok(m, `.hd-${name} rule not found`);
-    return m[0];
-  };
-  for (const [name, prop] of [["scrub", "height"], ["pen", "min-height"]]) {
-    const r = rule(name);
-    assert.match(r, /box-sizing:\s*border-box/,
-      `.hd-${name} must be border-box or its stated height isn't its rendered height`);
-    assert.match(r, new RegExp(`${prop}:\\s*var\\(--hd-barh\\)`),
-      `.hd-${name} must take its ${prop} from --hd-barh, not a literal`);
+  const m = /^\s*\.hd-act \{[^}]*\}/ms.exec(css);
+  assert.ok(m, ".hd-act base rule not found");
+  assert.match(m[0], /box-sizing:\s*border-box/,
+    ".hd-act must be border-box or its stated height isn't its rendered height");
+  assert.match(m[0], /height:\s*var\(--hd-barh\)/,
+    ".hd-act must take its height from --hd-barh, not a literal");
+  assert.doesNotMatch(m[0], /min-height/,
+    ".hd-act must be a fixed height — min-height lets it grow past its reserved band");
+  // the band is unconditional and computed from the SAME variable
+  assert.match(css, /--hd-act: calc\(4px \+ var\(--hd-barh\) \+ var\(--hd-icegap\)\);/);
+  assert.match(css, /\.hd-root\.act-off \{ --hd-act: 0px; \}/);
+  // The two-row palette and its second height variable are gone for good.
+  // Match declarations and var() uses, not bare names — the comments above
+  // --hd-act deliberately explain what --hd-barh2 was and why it died.
+  for (const dead of ["--hd-barh2", "--hd-scrub"]) {
+    assert.doesNotMatch(css, new RegExp(`${dead}\\s*:`), `${dead} is still declared — one bar, one height`);
+    assert.ok(!css.includes(`var(${dead})`), `${dead} is still used — one bar, one height`);
   }
-  // and the reserved bands must be derived from the same variables
-  assert.match(css, /\.hd-root\.scrub-on \{ --hd-scrub: calc\(4px \+ var\(--hd-barh\)/);
-  assert.match(css, /\.hd-root\.pen-on \{ --hd-scrub: calc\(4px \+ var\(--hd-barh2\)/);
+  for (const dead of [".hd-root.pen-on {", ".hd-root.scrub-on {"])
+    assert.ok(!css.includes(dead), `${dead}…} should no longer exist — the band is unconditional`);
+});
+
+// The single-line guarantee. The palette used to wrap to a second row on a
+// narrow phone, which is the only reason a second height variable ever existed.
+// nowrap on both bars is what makes one height true at every width; without it
+// the reserved band silently goes short and the bar sits on the ice.
+check("neither bottom bar can wrap to a second row", () => {
+  const css = read("../src/styles.js");
+  for (const name of ["act", "bar"]) {
+    // anchored to the start of a line so this finds the BASE rule, not one of
+    // the `.hd-root:not(.dense) .hd-act {…}` overrides that precede it
+    const m = new RegExp(`^\\s*\\.hd-${name} \\{[^}]*\\}`, "ms").exec(css);
+    assert.ok(m, `.hd-${name} base rule not found`);
+    assert.match(m[0], /flex-wrap:\s*nowrap/,
+      `.hd-${name} must be flex-wrap:nowrap — a second row breaks the reserved band`);
+  }
+});
+
+// The bar's layout tier and the corner menus' stretch breakpoint are the same
+// number, so a device changes personality exactly once as it rotates. DENSE_MIN
+// is the JS source of truth; the stylesheet keys off the .dense class it writes,
+// which is why there is no bar media query to drift against.
+check("DENSE_MIN drives both the bar tier and the menu anchoring", () => {
+  const js = read("../src/hockey-drill-animator.jsx");
+  const d = /const DENSE_MIN = (\d+)/.exec(js);
+  assert.ok(d, "DENSE_MIN not found in hockey-drill-animator.jsx");
+  assert.match(js, /MENU_ANCHOR_MIN = DENSE_MIN/,
+    "MENU_ANCHOR_MIN must be derived from DENSE_MIN, not a second copy of the number");
+  assert.match(js, new RegExp(`min-width: \\$\\{DENSE_MIN\\}px`),
+    "the dense matchMedia query must interpolate DENSE_MIN rather than repeat it");
 });
 
 // A rule that FILLS with the accent must also set the on-accent text colour,
@@ -192,7 +229,7 @@ check("the two bottom panels share one border-box height", () => {
 // dark-on-teal the moment a light theme existed. Pair contrast can't catch
 // this: both tokens are individually fine, the rule just never opts in.
 const ACCENT_FILL_NO_TEXT = new Set([
-  ".hd-penswknob",   // the sliding knob; its label lives on .hd-penswopt
+  ".hd-modeknob",    // the sliding mode knob; its labels live on .hd-modeopt
   ".hd-sw.on",       // switch track, no text at all
 ]);
 check("every accent-filled rule sets the on-accent text colour", () => {

@@ -24,6 +24,9 @@ import { SAVE_KEY, peekBackup, clearBackup } from "./storage.js";
 // in the ink you drew it with — so they're the team colours plus the classic
 // yellow whiteboard marker. No white: it vanishes on the ice.
 const PEN_INKS = ["#ffd447", "#d7263d", "#1f4fa3", "#1f8a4c", "#e0731d", "#7a3fa8", "#111318"];
+// the line kinds a mark can be drawn in. One list — the pen palette and the
+// marker's settings both offer them, and they used to be written out twice.
+const PEN_STYLES = [["solid", "Solid"], ["dashed", "Dashed"], ["dotted", "Dotted"], ["wavy", "Wavy"]];
 
 // the add-tool buttons show the SAME vector sprite the piece uses on the ice.
 // Each kind renders a mini PieceIcon in a viewBox tight to its body (raw icon
@@ -330,13 +333,18 @@ const HALFNS_KEY = "drillboard:half-ns";  // half-ice shown north-south (vertica
 const HALFFLIP_KEY = "drillboard:half-flip";  // half-ice net at the far end (left / top)
 const STRETCH_KEY = "drillboard:stretch-fill";  // full ice stretches to fill the screen
 const PRESS_KEY = "drillboard:pencil-pressure";  // Apple Pencil pressure → line weight
+// The ONE width breakpoint in the app. Above it the action bar lays its groups
+// out inline and the corner menus centre on the button that opened them; below,
+// the bar collapses groups into popovers and the stylesheet stretches the menus
+// to the screen edges instead. Keeping both on the same number means a device
+// changes personality exactly once as it rotates, which is the whole reason the
+// pen palette and the menus already shared 700.
+const DENSE_MIN = 700;
 // Corner-menu anchoring. MENU_W must equal --hd-menu-w in styles.js (asserted by
 // tests/theme-contrast.mjs) — the panel is sized by CSS but centred by JS, so a
 // mismatch silently offsets every menu by half the difference. Below
-// MENU_ANCHOR_MIN the stylesheet stretches the panel instead and JS stands down;
-// it matches the pen palette's breakpoint so a device doesn't change personality
-// between the two.
-const MENU_W = 230, MENU_PAD = 10, MENU_ANCHOR_MIN = 700;
+// MENU_ANCHOR_MIN the stylesheet stretches the panel instead and JS stands down.
+const MENU_W = 230, MENU_PAD = 10, MENU_ANCHOR_MIN = DENSE_MIN;
 // THEME_KEY ("drillboard:theme") lives in theme.js — the pre-paint boot script
 // in index.html reads the same constant, and they must not drift.
 
@@ -560,10 +568,21 @@ export default function DrillAnimator() {
   useEffect(() => { try { localStorage.setItem(PRESS_KEY, pencilPress ? "1" : "0"); } catch { /* private mode */ } }, [pencilPress]);
   const pressRef = useRef(true);
   pressRef.current = pencilPress;
-  // the pen palette takes over the player-bar band while sketching. It stays
-  // put when you flip to the item editor, so moving a piece and going back to
-  // drawing is one tap instead of a trip through the Add sheet.
-  const [penMode, setPenMode] = useState(false);
+  // Which of the three editor flows is live. This is the app's top-level mode
+  // and the bottom bar's segmented control writes it:
+  //   draw — sketch with the smart pen; ink becomes real pieces
+  //   edit — add and modify pieces, routes and their properties
+  //   play — animate, scrub, present, write captions
+  // It replaces a pile of implicit modes (a penMode boolean, a Draw|Edit knob
+  // inside the pen palette, "is the animation running") that between them meant
+  // the chrome never said which of the three you were in.
+  //
+  // Deliberately NOT persisted and NOT derived from a loaded drill: the DSL has
+  // no concept of a mode, and giving it one would break the round-trip.
+  const [mode, setModeRaw] = useState("edit");
+  // Kept as a derived name because ~7 sites read it and they all mean the same
+  // thing — the pen is the active tool.
+  const penMode = mode === "draw";
   const [eraser, setEraser] = useState(false);
   const eraserRef = useRef(false);          // finishDraw reads it from a stale closure
   eraserRef.current = eraser;
@@ -614,16 +633,21 @@ export default function DrillAnimator() {
   // corner and the panel opens nowhere near what was tapped — Tune's used to
   // open under Menu. (Must live below openMenu — reading it from higher up is a
   // temporal-dead-zone crash the build can't see.)
+  // Only the buttons that still exist in the bar get a ref. Panels reached from
+  // INSIDE another panel (Tune, opened from Menu's "App & drill settings") have
+  // no button of their own, so they borrow the one that got them there —
+  // otherwise the anchoring finds nothing and the panel falls back to the
+  // stylesheet's left edge, nowhere near what was tapped.
   const barBtnRefs = {
-    settings: useRef(null), rinkmenu: useRef(null),
-    tools: useRef(null), prefs: useRef(null),
+    settings: useRef(null), rinkmenu: useRef(null), tools: useRef(null),
   };
+  const anchorFor = m => (m === "prefs" ? "settings" : m);
   const [menuLeft, setMenuLeft] = useState(null);
   useLayoutEffect(() => {
     // Below the breakpoint we write NO inline left: the stylesheet stretches the
     // panel to the bar's insets instead. Inline styles would outrank that rule.
     const place = () => {
-      const r = barBtnRefs[openMenu]?.current?.getBoundingClientRect();
+      const r = barBtnRefs[anchorFor(openMenu)]?.current?.getBoundingClientRect();
       if (!r || window.innerWidth < MENU_ANCHOR_MIN) { setMenuLeft(null); return; }
       setMenuLeft(Math.round(Math.max(MENU_PAD,
         Math.min(window.innerWidth - MENU_W - MENU_PAD, r.left + r.width / 2 - MENU_W / 2))));
@@ -807,6 +831,14 @@ export default function DrillAnimator() {
   const [isWide, setIsWide] = useState(() =>
     typeof matchMedia === "function" &&
     matchMedia("(pointer: fine) and (min-width: 760px)").matches);
+  // The action bar's layout tier. It decides what REACT RENDERS, not just how
+  // it's styled — below DENSE_MIN the pen's ink/size/style trio collapses into
+  // one popover so the bar still fits on its single line — so it has to be a JS
+  // flag, not a media query. It's also written onto .hd-root as `.dense`, which
+  // is what the compact CSS keys off: one source of truth, so the stylesheet and
+  // the render tree can't disagree about which layout is live.
+  const [dense, setDense] = useState(() =>
+    typeof matchMedia === "function" && matchMedia(`(min-width: ${DENSE_MIN}px)`).matches);
   // a coarse (touch) primary pointer needs fatter grab targets than a mouse.
   // Stable for a session, so compute once (no listener like isWide needs).
   const coarsePtr = useMemo(
@@ -961,6 +993,16 @@ export default function DrillAnimator() {
     if (typeof matchMedia !== "function") return;
     const mq = matchMedia("(pointer: fine) and (min-width: 760px)");
     const on = () => setIsWide(mq.matches);
+    mq.addEventListener ? mq.addEventListener("change", on) : mq.addListener(on);
+    return () => { mq.removeEventListener ? mq.removeEventListener("change", on) : mq.removeListener(on); };
+  }, []);
+  // …and the action bar's layout tier, same shape. A popover only exists at one
+  // density, so a rotation across the breakpoint has to close it — otherwise the
+  // open panel outlives the button it sprang from.
+  useEffect(() => {
+    if (typeof matchMedia !== "function") return;
+    const mq = matchMedia(`(min-width: ${DENSE_MIN}px)`);
+    const on = () => { setDense(mq.matches); setPenPop(null); };
     mq.addEventListener ? mq.addEventListener("change", on) : mq.addListener(on);
     return () => { mq.removeEventListener ? mq.removeEventListener("change", on) : mq.removeListener(on); };
   }, []);
@@ -1787,7 +1829,7 @@ export default function DrillAnimator() {
   // No pos → the CSS default (bottom-centre). Arg is a 0..1 app-rect fraction.
   const captionStyle = (pos, placing) => pos ? {
     left: `clamp(calc(var(--cap-hw) + 6px), ${(pos.x * 100).toFixed(2)}%, calc(100% - var(--cap-hw) - 6px))`,
-    top: `clamp(calc(env(safe-area-inset-top, 0px) + ${placing ? 96 : 58}px), ${(pos.y * 100).toFixed(2)}%, calc(100% - 54px - var(--hd-b) - var(--hd-scrub) - 58px))`,
+    top: `clamp(calc(env(safe-area-inset-top, 0px) + ${placing ? 96 : 58}px), ${(pos.y * 100).toFixed(2)}%, calc(100% - 54px - var(--hd-b) - var(--hd-act) - 58px))`,
     right: "auto", bottom: "auto", transform: "translate(-50%, -50%)",
   } : undefined;
   // seed the editable caption + focus it when a step's placement begins (kept out of
@@ -2985,8 +3027,12 @@ export default function DrillAnimator() {
     solvedRef.current = solved;
     return out;
   }
-  // enter draw mode to author a reaction fork for player `id` under `color`
+  // enter route-drawing to author a reaction fork for player `id` under `color`.
+  // Reachable from a PINNED panel, which stays up through playback, so it has to
+  // put the app back in Edit rather than assume it is already there. setMode
+  // does the reset/stop/clear work, then the selection is re-established.
   function beginForkDraw(id, color) {
+    setMode("edit");
     resetAnim(); setPlaying(false); setPopup(null); setSelectedId(id); setEditingFork(null);
     forkTarget.current = { id, color }; setForkDrawColor(color); setTool("draw");
   }
@@ -3115,6 +3161,7 @@ export default function DrillAnimator() {
   // enter freehand draw mode for a route: a reaction fork, else the base route
   function drawRouteMode(id, fork) {
     if (fork) { beginForkDraw(id, fork); return; }
+    setMode("edit");   // route drawing is a sub-state of Edit, never its own flow
     resetAnim(); setPlaying(false); setPopup(null); setSelectedId(id); setEditingFork(null); setTool("draw");
   }
   // the reaction-authoring controls (curve buttons + action + Edit/Clear per cue
@@ -6990,7 +7037,7 @@ export default function DrillAnimator() {
         <>
           {/* same order as the main Add/draw palette so both grids build one
               muscle memory; the pen leads here too */}
-          <button className="hd-item" onClick={() => { setPopup(null); resetAnim(); setPlaying(false); setTool("pen"); setPenMode(true); }}>
+          <button className="hd-item" onClick={() => { setMode("draw"); }}>
             <Icon name="marker" size={16} /> Smart pen — sketch it
           </button>
           <div className="hd-toolgrid compact">
@@ -7278,7 +7325,7 @@ export default function DrillAnimator() {
               <div className="hd-field">
                 <div className="hd-sectitle">Style</div>
                 <div className="hd-poprow">
-                  {[["solid", "Solid"], ["dashed", "Dashed"], ["dotted", "Dotted"], ["wavy", "Wavy"]].map(([s, lbl]) => (
+                  {PEN_STYLES.map(([s, lbl]) => (
                     <button key={s} className={`hd-mini${(p.style || "solid") === s ? " on" : ""}`} onClick={() => updateById(p.id, { style: s })}>{lbl}</button>
                   ))}
                 </div>
@@ -8430,7 +8477,11 @@ export default function DrillAnimator() {
       : tool === "pen" ? (stylusOn && stylusMode()
           ? "Smart pen — Apple Pencil (palm rejection on; fingers ignored on the ice)"
           : "Smart pen — sketch X's, routes & dashed passes; ink becomes pieces")
-      : tool !== "select" ? "Tap the ice to place" : null;
+      : tool !== "select" ? "Tap the ice to place"
+      // Edit mode's bar has room for a standing hint, so say what the two
+      // gestures are rather than leaving the strip blank
+      : selected ? `${selected.id} selected — drag to move, tap for its settings`
+      : "Tap a piece to edit it · double-tap the ice to add";
 
   const mlbl = { fontSize: 8, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase",
     lineHeight: 1, opacity: 0.8, marginTop: 2 };
@@ -8438,7 +8489,39 @@ export default function DrillAnimator() {
     padding: "0 8px", borderRadius: 999, border: "1px solid rgba(255,255,255,0.14)", background: "rgba(255,255,255,0.06)",
     color: "#eaf0f6", fontSize: 14, fontWeight: 700, cursor: "pointer" };
 
+  // Switch editor flows. Every clause here is lifted from a place that already
+  // did exactly this before there was a mode to name — the Add sheet's pen rows,
+  // togglePlay, wakeEdit — so this is one definition replacing five copies.
+  //
+  // The one thing it must NOT do is disturb the pen. flushPen() COMMITS buffered
+  // ink (it is not clearInk), and the ink colour, width, style, note flag and
+  // auto-convert setting all survive a trip through another mode: draw → edit →
+  // draw has always been a free round trip so you can nudge a piece mid-sketch,
+  // and moving that switch from the palette to the bottom bar mustn't cost it.
+  const setMode = next => {
+    if (next === mode) return;
+    flushPen();
+    setPenPop(null); setOpenMenu(null); setPopup(null);
+    setPlacingStep(null); setEditAnchor(null);
+    setHoldStep(null); holdRef.current = 0;
+    if (next !== "play") {
+      setPlaying(false);
+      // same rule as wakeEdit: you can only edit the board at t=0
+      if (animT > 0) { resetAnim(); flash("Back to start — editing"); }
+    }
+    if (next === "draw") { setTool("pen"); setEraser(false); }
+    else { setTool("select"); setEraser(false); setNoteMode(false); }
+    if (next !== "edit") { setSelectedId(null); setMultiSel(null); setEditingFork(null); }
+    setModeRaw(next);
+  };
+  // Leaving Play with nothing to play. Deleting the last route mid-run would
+  // otherwise strand you looking at an empty transport with a dead scrubber.
+  useEffect(() => {
+    if (mode === "play" && !hasTimeline) setMode("edit");
+  }, [hasTimeline]);  // eslint-disable-line
+
   const togglePlay = () => {
+    if (mode !== "play") setMode("play");   // Space plays from any flow
     flushPen();                    // buffered pen ink lands before playback
     // starting a FRESH run (from the top OR replaying a finished one) re-rolls playSeed
     // → random reactions / cue timings vary each run. NB: check animT >= 1 too — after a
@@ -8464,11 +8547,16 @@ export default function DrillAnimator() {
         else togglePlay();                         // otherwise pause / continue
       } else if (e.key === "Escape") {
         if (playing) { e.preventDefault(); resetPlay(); }   // stop & reset
+      } else if (e.key === "1" || e.key === "2" || e.key === "3") {
+        // the three flows, left to right, matching the bar's own order
+        const m = ["draw", "edit", "play"][+e.key - 1];
+        if (m === "play" && !hasTimeline) return;
+        e.preventDefault(); setMode(m);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [presentation, holdStep, playing]); // eslint-disable-line
+  }, [presentation, holdStep, playing, mode, hasTimeline]); // eslint-disable-line
 
   // during playback the "Routes on play" setting controls what stays visible;
   // while editing everything shows regardless
@@ -8540,13 +8628,43 @@ export default function DrillAnimator() {
     }
   }
 
+  // Whether the action bar is showing. ONE expression, read by both the bar's
+  // own render and the root class that reserves its band — those used to be
+  // written separately and disagreed during a presentation hold, which kept a
+  // strip of ice reserved for a bar that wasn't there. The bar is otherwise
+  // present in every mode at one height, so switching flows never jogs the ice.
+  const actOn = !aiPlay && !holdStep;
+
+  // The pen's three line settings — colour, thickness, style. Wide screens lay
+  // them out inline, ready at the click; narrow ones stack all three inside a
+  // single "Ink" popover so the bar keeps its one line. Built once here and
+  // placed by either layout, so the two can never offer different options.
+  const inkSwatches = PEN_INKS.map(c => (
+    <button key={c} className={`hd-penswatch${markColor === c && !eraser ? " on" : ""}`}
+      style={{ background: c }} title={`Ink ${c}`}
+      onClick={() => { setMarkColor(c); setEraser(false); }} />
+  ));
+  const sizeSlider = (
+    <>
+      <span className="hd-penpoptip">{markWidth.toFixed(1)}</span>
+      <input className="hd-penrange" type="range" min={0.4} max={3} step={0.1} value={markWidth}
+        onChange={e => setMarkWidth(parseFloat(e.target.value))} />
+    </>
+  );
+  const styleRows = PEN_STYLES.map(([s, lbl]) => (
+    <button key={s} className={`hd-penopt${markStyle === s ? " on" : ""}`} title={`${lbl} line`}
+      onClick={() => { setMarkStyle(s); if (dense) setPenPop(null); }}>
+      <span className={`hd-penstyle ${s}`} /><span>{lbl}</span>
+    </button>
+  ));
+
   return (
     // wraps the WHOLE return, so renderLoupe()'s second <RinkMarkings/> subtree
     // gets the same tokens as the main sheet — if the loupe's ice and the board's
     // ice ever disagree, a wrong-shade rim shows at the loupe's corners
     <ThemeCtx.Provider value={T}>
     <InkCtx.Provider value={ink}>
-    <div className={`hd-root${penMode && !aiPlay ? " pen-on" : aiPlay || !hasTimeline ? "" : " scrub-on"}${docked ? " dock-open" : ""}${
+    <div className={`hd-root${actOn ? "" : " act-off"}${dense ? " dense" : ""}${docked ? " dock-open" : ""}${
       tool === "pen" || tool === "marker" ? (eraser && tool === "pen" ? " erase-cursor" : " draw-cursor") : ""}`} ref={rootRef}>
       <style>{STYLES}</style>
 
@@ -9445,32 +9563,22 @@ export default function DrillAnimator() {
       })()}
 
       {/* ---------- empty-board coaching hint (new/cleared board only) ---------- */}
-      {editing && !openMenu && !popup && tool === "select" &&
+      {editing && mode === "edit" && !openMenu && !popup && tool === "select" &&
         pieces.every(p => p.kind === "net") && (
         <div className="hd-emptyhint">
-          Tap <b>Add</b> below to place players, or grab the <b>Smart pen</b> and sketch the drill.
+          Tap <b>Add</b> on the bar to place players, or switch to <b>Draw</b> and sketch the drill.
           <span className="hd-ehsub">Quick add: double-tap anywhere on the ice</span>
         </div>
       )}
 
-      {/* ---------- pen palette: takes over the player-bar band while sketching ---------- */}
-      {penMode && !aiPlay && !holdStep && (
-        <div className="hd-pen">
+      {/* ---------- action bar · DRAW: the pen palette ---------- */}
+      {actOn && mode === "draw" && (
+        <div className="hd-act draw">
           {/* what the PEN does */}
           <div className="hd-pengroup">
-            {/* one switch for the two modes: the knob slides to whichever side
-                is live, and a tap anywhere on it flips */}
-            <button className={`hd-penswitch ${tool === "pen" ? "draw" : "edit"}`}
-              title={tool === "pen" ? "Draw mode — tap to edit pieces" : "Edit mode — tap to draw"}
-              onClick={() => {
-                setPopup(null);
-                if (tool === "pen") { flushPen(); setTool("select"); return; }
-                setTool("pen");
-              }}>
-              <span className="hd-penswknob" />
-              <span className="hd-penswopt draw"><Icon name="marker" size={17} /><span>Draw</span></span>
-              <span className="hd-penswopt edit"><Icon name="cursor" size={17} /><span>Edit</span></span>
-            </button>
+            {/* No Draw|Edit switch here any more — the bottom bar's DRAW·EDIT·PLAY
+                segment owns that, and it's the ~90px this palette needed to fit
+                on one line at phone widths. */}
             <button className={`hd-pentool${noteMode ? " on" : ""}`}
               title={noteMode ? "Note ink — never converted; tap for normal ink"
                 : "Note — scribbles and text that the converter leaves alone"}
@@ -9486,46 +9594,53 @@ export default function DrillAnimator() {
               <Icon name="eraser" size={18} /><span>Erase</span>
             </button>
             <div className="hd-pensep" />
-            <div className="hd-peninks" title="Ink colour — also the colour of any piece you draw">
-              {PEN_INKS.map(c => (
-                <button key={c} className={`hd-penswatch${markColor === c && !eraser ? " on" : ""}`}
-                  style={{ background: c }} title={`Ink ${c}`}
-                  onClick={() => { setMarkColor(c); setEraser(false); }} />
-              ))}
-            </div>
-            <div className="hd-pensep" />
-            {/* size: a vertical slider that springs from its own button */}
-            <div className="hd-penwrap">
-              <button className={`hd-pentool${penPop === "size" ? " on" : ""}`} title="Line thickness"
-                onClick={() => setPenPop(v => (v === "size" ? null : "size"))}>
-                <span className="hd-penwdot" style={{ height: Math.max(2, Math.round(markWidth * markWidth * 2.4)) }} />
-                <span>Size</span>
-              </button>
-              {penPop === "size" && (
-                <div className="hd-penpop">
-                  <span className="hd-penpoptip">{markWidth.toFixed(1)}</span>
-                  <input className="hd-penrange" type="range" min={0.4} max={3} step={0.1} value={markWidth}
-                    onChange={e => setMarkWidth(parseFloat(e.target.value))} />
+            {dense ? (
+              /* wide: colour, size and style all out on the bar, one click each */
+              <>
+                <div className="hd-peninks" title="Ink colour — also the colour of any piece you draw">
+                  {inkSwatches}
                 </div>
-              )}
-            </div>
-            {/* style: the four line kinds, stacked above their button */}
-            <div className="hd-penwrap">
-              <button className={`hd-pentool${penPop === "style" ? " on" : ""}`} title="Line style"
-                onClick={() => setPenPop(v => (v === "style" ? null : "style"))}>
-                <span className={`hd-penstyle ${markStyle}`} /><span>Style</span>
-              </button>
-              {penPop === "style" && (
-                <div className="hd-penpop menu">
-                  {[["solid", "Solid"], ["dashed", "Dashed"], ["dotted", "Dotted"], ["wavy", "Wavy"]].map(([s, lbl]) => (
-                    <button key={s} className={`hd-penopt${markStyle === s ? " on" : ""}`} title={`${lbl} line`}
-                      onClick={() => { setMarkStyle(s); setPenPop(null); }}>
-                      <span className={`hd-penstyle ${s}`} /><span>{lbl}</span>
-                    </button>
-                  ))}
+                <div className="hd-pensep" />
+                {/* size: a vertical slider that springs from its own button */}
+                <div className="hd-penwrap">
+                  <button className={`hd-pentool${penPop === "size" ? " on" : ""}`} title="Line thickness"
+                    onClick={() => setPenPop(v => (v === "size" ? null : "size"))}>
+                    <span className="hd-penwdot" style={{ height: Math.max(2, Math.round(markWidth * markWidth * 2.4)) }} />
+                    <span>Size</span>
+                  </button>
+                  {penPop === "size" && <div className="hd-penpop">{sizeSlider}</div>}
                 </div>
-              )}
-            </div>
+                {/* style: the four line kinds, stacked above their button */}
+                <div className="hd-penwrap">
+                  <button className={`hd-pentool${penPop === "style" ? " on" : ""}`} title="Line style"
+                    onClick={() => setPenPop(v => (v === "style" ? null : "style"))}>
+                    <span className={`hd-penstyle ${markStyle}`} /><span>Style</span>
+                  </button>
+                  {penPop === "style" && <div className="hd-penpop menu">{styleRows}</div>}
+                </div>
+              </>
+            ) : (
+              /* narrow: all three behind one button. The trigger wears the live
+                 ink as a swatch — the only place a raw colour is legible, since
+                 .hd-penwdot and .hd-penstyle deliberately follow the BUTTON's
+                 colour so black ink can't vanish against a dark bar. */
+              <div className="hd-penwrap">
+                <button className={`hd-pentool${penPop === "ink" ? " on" : ""}`} title="Ink colour, thickness & style"
+                  onClick={() => setPenPop(v => (v === "ink" ? null : "ink"))}>
+                  <span className="hd-penswatch" style={{ background: markColor, width: 18, height: 18 }} />
+                  <span>Ink</span>
+                </button>
+                {penPop === "ink" && (
+                  <div className="hd-penpop menu">
+                    <div className="hd-inkgrid">{inkSwatches}</div>
+                    <div className="hd-penrule" />
+                    {sizeSlider}
+                    <div className="hd-penrule" />
+                    {styleRows}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="hd-penspacer" />
@@ -9543,18 +9658,36 @@ export default function DrillAnimator() {
             <button className="hd-pentool danger" title="Clear all ink (Undo restores it)" onClick={clearInk}>
               <Icon name="trash" size={17} /><span>Clear</span>
             </button>
-            <div className="hd-pensep" />
-            <button className="hd-pentool" title="Close the pen palette"
-              onClick={() => { flushPen(); setPenMode(false); setEraser(false); setTool("select"); }}>
-              <Icon name="close" size={17} /><span>Done</span>
-            </button>
+            {/* no Done either: tapping EDIT or PLAY below is what finishes a
+                sketch, and it commits the buffered ink on the way out */}
           </div>
         </div>
       )}
 
-      {/* ---------- player bar: transport + scrubber in one strip ---------- */}
-      {!penMode && !aiPlay && !holdStep && hasTimeline && (
-        <div className="hd-scrub">
+      {/* ---------- action bar · EDIT ----------
+          Interim: one button onto the existing Add sheet. The next commit moves
+          that sheet's tiles onto this bar, which is the whole point of giving
+          Edit a bar of its own. */}
+      {actOn && mode === "edit" && (
+        <div className="hd-act edit">
+          <button ref={barBtnRefs.tools} className={`hd-pentool${openMenu === "tools" ? " on" : ""}`}
+            title="Add a player, puck, net or prop"
+            onClick={() => setOpenMenu(m => (m === "tools" ? null : "tools"))}>
+            <Icon name="plus" size={18} /><span>Add</span>
+          </button>
+          {tool !== "select" && (
+            <button className="hd-pentool danger" title="Cancel the armed tool"
+              onClick={() => setTool("select")}>
+              <Icon name="close" size={17} /><span>Cancel</span>
+            </button>
+          )}
+          <div className="hd-acthint">{toolHint || ""}</div>
+        </div>
+      )}
+
+      {/* ---------- action bar · PLAY: transport + scrubber ---------- */}
+      {actOn && mode === "play" && (
+        <div className="hd-act play">
           <button className="hd-scrubbtn play" onClick={togglePlay} title={playing ? "Pause" : "Play"}>
             <Icon name={playing ? "pause" : "play"} size={20} /></button>
           <button className="hd-scrubbtn" onClick={resetPlay} title={playing ? "Stop" : "Reset"}>
@@ -9588,17 +9721,31 @@ export default function DrillAnimator() {
             : rink === "half" ? `Half ${halfNS ? (halfFlip ? "↑" : "↓") : (halfFlip ? "←" : "→")}`
             : "¼ ice"}</span>
         </button>
-        <button ref={barBtnRefs.tools} className={`hd-barbtn${tool !== "select" || openMenu === "tools" ? " on" : ""}`} title="Add / draw"
-          onClick={() => setOpenMenu(m => (m === "tools" ? null : "tools"))}>
-          <Icon name="pencil" size={16} /><span className="hd-blbl">Add</span></button>
-        <button ref={barBtnRefs.prefs} className={`hd-barbtn${openMenu === "prefs" ? " on" : ""}`} title="Settings"
-          onClick={() => setOpenMenu(m => (m === "prefs" ? null : "prefs"))}>
-          <Icon name="sliders" size={16} /><span className="hd-blbl">Tune</span></button>
+        {/* The three editor flows, always on screen so the chrome says which one
+            you're in. PLAY is disabled with nothing to animate; tapping it while
+            already in Play starts/pauses the run, so a preview is one tap from
+            anywhere without spending bar width on a separate transport button. */}
+        <div className={`hd-mode ${mode}`} role="group" aria-label="Editor mode">
+          <span className="hd-modeknob" />
+          {[["draw", "marker", "Draw", "Sketch the drill with the smart pen"],
+            ["edit", "cursor", "Edit", "Add and change pieces, routes and settings"],
+            ["play", "play", "Play", "Animate, scrub and present"]].map(([m, icon, lbl, tip]) => (
+            <button key={m} className={`hd-modeopt ${m}`} title={tip}
+              disabled={m === "play" && !hasTimeline}
+              aria-pressed={mode === m}
+              onClick={() => (mode === m ? (m === "play" && togglePlay()) : setMode(m))}>
+              <Icon name={m === "play" && mode === "play" && playing ? "pause" : icon} size={16} />
+              <span className="hd-blbl">{lbl}</span>
+            </button>
+          ))}
+        </div>
         <button className="hd-barbtn" title="Undo last change" disabled={!undoCount}
           onClick={undoLast}><Icon name="undo" size={16} /><span className="hd-blbl">Undo</span></button>
         <button className="hd-barbtn" title="Redo" disabled={!redoCount}
           onClick={redoLast}><Icon name="redo" size={16} /><span className="hd-blbl">Redo</span></button>
-        <div className="hd-barhint">{toolHint || ""}</div>
+        {/* the hint lives on the action bar now, beside the controls it
+            describes — and the width it used to take is what lets the version
+            watermark stay legible at 375px, which is how a deploy gets checked */}
         <div className="hd-ver"><span className="hd-vernum">v{APP_VERSION}</span><span className="hd-verstamp">&nbsp;· {BUILD_STAMP}</span></div>
       </div>
 
@@ -9761,6 +9908,26 @@ export default function DrillAnimator() {
             <input type="range" min={0.1} max={1} step={0.05} value={markOpacity} style={{ flex: 1, minWidth: 80 }}
               onChange={e => setMarkOpacity(parseFloat(e.target.value))} />
           </div>
+          {/* Smart pen — settings that outlive a sketch, so they belong with the
+              standing preferences rather than inside the Draw palette (which is
+              a strip, not a settings panel, and only exists while drawing). */}
+          <div className="hd-mh" style={{ marginTop: 4, color: "var(--db-text-faint)" }}>Smart pen</div>
+          <div className="hd-poprow">
+            <span>Apple Pencil</span>
+            <button className={`hd-mini${palmReject ? " on" : ""}`} onClick={() => setPalmReject(v => !v)}
+              title="Ignore fingers on the ice while a Pencil is in use">
+              <Icon name={palmReject ? "check" : "close"} size={13} /> Palm rejection
+            </button>
+            <button className={`hd-mini${pencilPress ? " on" : ""}`} onClick={() => setPencilPress(v => !v)}
+              title="Pressure varies line weight — off draws every stroke at the chosen width">
+              <Icon name={pencilPress ? "check" : "close"} size={13} /> Pressure
+            </button>
+          </div>
+          <div className="hd-poprow">
+            <span>Won&rsquo;t convert?</span>
+            <button className="hd-mini" onClick={copyPenDiag}>Copy diagnostics</button>
+            <span className="hd-sechint">dumps what the recogniser saw for the last burst of ink</span>
+          </div>
           <div className="hd-mh" style={{ marginTop: 4, color: "#6b7a8c" }}>Routes &amp; playback</div>
           <div className="hd-poprow">
             <button className={`hd-mini${collisions ? " on" : ""}`}
@@ -9886,7 +10053,7 @@ export default function DrillAnimator() {
 
       {openMenu === "tools" && (
         <div className="hd-menu" style={menuAnchor}>
-          <button className="hd-item" onClick={() => { resetAnim(); setPlaying(false); setPopup(null); setTool("pen"); setPenMode(true); setOpenMenu(null); }}>
+          <button className="hd-item" onClick={() => { setMode("draw"); }}>
             <Icon name="marker" size={16} /> Smart pen — sketch it
           </button>
           <div className="hd-mh">Main items</div>
@@ -9915,7 +10082,7 @@ export default function DrillAnimator() {
             {/* close the sheet on pick — on a phone it covers most of the ice,
                 and the next thing you want to do is draw */}
             <button className={`hd-tool${tool === "pen" ? " on" : ""}`}
-              onClick={() => { resetAnim(); setPlaying(false); setPopup(null); setTool("pen"); setPenMode(true); setOpenMenu(null); }}>
+              onClick={() => { setMode("draw"); }}>
               <span className="hd-toolglyph"><Icon name="marker" size={22} /></span><span>Smart pen</span>
             </button>
             {[["square", "□", "Square"], ["circle", "○", "Circle"], ["triangle", "△", "Triangle"]].map(([k, glyph, lbl]) => (
@@ -9939,36 +10106,19 @@ export default function DrillAnimator() {
               </div>
               <div className="hd-poprow">
                 <span>Style</span>
-                {[["solid", "Solid"], ["dashed", "Dashed"], ["dotted", "Dotted"], ["wavy", "Wavy"]].map(([s, lbl]) => (
+                {PEN_STYLES.map(([s, lbl]) => (
                   <button key={s} className={`hd-mini${markStyle === s ? " on" : ""}`} onClick={() => setMarkStyle(s)}>{lbl}</button>
                 ))}
               </div>
-              {tool === "pen" && (
-                <>
-                  <div className="hd-poprow">
-                    <span>Apple Pencil</span>
-                    <button className={`hd-mini${palmReject ? " on" : ""}`} onClick={() => setPalmReject(v => !v)}>
-                      <Icon name={palmReject ? "check" : "close"} size={13} /> Palm rejection
-                    </button>
-                    <button className={`hd-mini${pencilPress ? " on" : ""}`} onClick={() => setPencilPress(v => !v)}
-                      title="Pressure varies line weight — off draws every stroke at the chosen width">
-                      <Icon name={pencilPress ? "check" : "close"} size={13} /> Pressure
-                    </button>
-                  </div>
-                  <div className="hd-poprow">
-                    <span>Won't convert?</span>
-                    <button className="hd-mini" onClick={copyPenDiag}>Copy diagnostics</button>
-                  </div>
-                </>
-              )}
+              {/* The Apple Pencil settings used to sit here, gated on
+                  tool === "pen". This sheet is only reachable from EDIT now, so
+                  that gate can never be true — they live in Tune instead. */}
               <div className="hd-poprow">
                 <span>Thickness</span>
                 <input type="range" min={0.5} max={3} step={0.1} value={markWidth} style={{ flex: 1, minWidth: 80 }}
                   onChange={e => setMarkWidth(parseFloat(e.target.value))} />
               </div>
-              <span style={{ fontSize: 11, color: "#8b99a8", padding: "0 2px" }}>{tool === "pen"
-                ? "sketch X's and O's, routes, dashed passes, a dot for the puck — the ink becomes real pieces (unrecognized strokes stay ink)"
-                : "drag on the ice to draw; tap a mark to restyle, resize by its corners, or delete"}</span>
+              <span className="hd-note">drag on the ice to draw; tap a mark to restyle, resize by its corners, or delete</span>
             </>
           )}
           {tool !== "select" && (
@@ -10237,7 +10387,7 @@ export default function DrillAnimator() {
       )}
       {/* toast rides above the player-bar / pen-palette band, not across its controls */}
       {toast && (
-        <div style={{ position: "fixed", left: "50%", bottom: "calc(64px + var(--hd-b) + var(--hd-scrub))",
+        <div style={{ position: "fixed", left: "50%", bottom: "calc(64px + var(--hd-b) + var(--hd-act))",
           transform: "translateX(-50%)", background: "rgba(20,26,32,0.92)", color: "#eaf2f8",
           padding: "6px 14px", borderRadius: 8, fontSize: 13, zIndex: 9999, pointerEvents: "none" }}>{toast}</div>
       )}

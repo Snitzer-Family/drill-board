@@ -111,6 +111,26 @@ restart so the settings watcher reloads it.
   counter-corrected (yFix), icons render in stretch-cancelling matrix frames
   (iconXf). Keep that separation.
 
+## Editor chrome: three flows, one action bar
+
+- `mode` is `"draw" | "edit" | "play"`, set only by `setMode()` and shown by the
+  `.hd-mode` segment in the bottom bar. `penMode` is derived (`mode === "draw"`),
+  not stored. Mode is **not** persisted and **not** in the DSL.
+- `.hd-act` is ONE element whose contents swap per mode. It is `height:
+  var(--hd-barh)` and `flex-wrap:nowrap`, and the ice's reserved band
+  (`--hd-act`) is computed from the same `--hd-barh` — never a literal, never a
+  second variable. Each mode's contents must have exactly one flexible child.
+- `DENSE_MIN` (700) is the app's only width breakpoint. It drives the bar's
+  layout tier AND the corner-menu anchoring, and JS owns it: the `.dense` class
+  on `.hd-root` is what the stylesheet keys off, so there is no media query to
+  drift against. Below it, groups collapse into popovers — that's a different
+  render tree, which is why it can't be pure CSS.
+- `setMode()` must never disturb the pen: it commits buffered ink (`flushPen`,
+  not `clearInk`) and leaves ink colour/width/style/note/auto alone, so
+  draw → edit → draw stays a free round trip.
+- Never give `.hd-act` `overflow:hidden` — the line-settings popovers are its
+  children and spring upward out of its box.
+
 ## Platform lessons (learned painfully — do not relearn)
 
 - Never size full-screen layout with vh/dvh on iOS; anchor with
@@ -150,12 +170,23 @@ run it on every change. The browser suites live outside the repo in
 input against the dev server. Run them with the parallel runner, not one at a
 time:
 
-- `node /tmp/db-verify/run.mjs ui` — palette, modes, cursor, convert, extend.
-  Use for UI/markup/CSS changes (~45s).
-- `node /tmp/db-verify/run.mjs recog` — the recognition suites. Use when
+- `node /tmp/db-verify/run.mjs ui <url>` — bar fit, palette, modes, cursor,
+  convert, extend. Use for UI/markup/CSS changes.
+- `node /tmp/db-verify/run.mjs recog <url>` — the recognition suites. Use when
   `sketch-recognize.js` or the capture path changes.
-- `node /tmp/db-verify/run.mjs` — everything. Before a deploy, or after a
-  change that touches both.
+- `node /tmp/db-verify/run.mjs '' <url>` — everything. Before a deploy, or after
+  a change that touches both.
+
+**Always pass this session's LAN URL.** The suites build their own `#d=` links,
+so the runner hands the base down as `DB_URL`; a suite run without it silently
+falls back to a hardcoded port and can report a green sweep for a *different
+worktree's* dev server. That has happened — a full `ui` pass once validated
+markup this branch had already deleted.
+
+`bar-fit.mjs` is the single-line guarantee: at eight widths × three modes it
+asserts `scrollWidth <= clientWidth`, that the bar's height still equals
+`--hd-barh`, and that the ice ends above the bar. Layout arithmetic in this app
+has been wrong three times; measure with this, don't reason from the CSS.
 
 Scope the group to what changed; a full sweep on a CSS tweak is waste. But do
 run `ui` on markup changes: the suites select by class/title, and layout
