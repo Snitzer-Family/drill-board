@@ -195,6 +195,8 @@ function rink() {
   const fo = (x, y, c) => `<circle cx="${x}" cy="${y}" r="15" fill="none" stroke="${c}" stroke-width="0.45" opacity="0.9"/>`;
   // end-zone circle hash marks: 2' long, ~5'7" apart, outside the circle edge
   const hash = (x, y) => `<path d="M ${x - 2.8} ${y - 17} V ${y - 15} M ${x + 2.8} ${y - 17} V ${y - 15} M ${x - 2.8} ${y + 15} V ${y + 17} M ${x + 2.8} ${y + 15} V ${y + 17}" stroke="${mk}" stroke-width="0.45" opacity="0.9" fill="none"/>`;
+  // L-shaped player restraint brackets — must track rink.jsx (legs 3' apart, not the regulation 18")
+  const bracket = (x, y) => `<path d="M ${x + 2} ${y - 1.5} H ${x + 6} V ${y - 4.5} M ${x + 2} ${y + 1.5} H ${x + 6} V ${y + 4.5} M ${x - 2} ${y - 1.5} H ${x - 6} V ${y - 4.5} M ${x - 2} ${y + 1.5} H ${x - 6} V ${y + 4.5}" stroke="${mk}" stroke-width="0.45" opacity="0.9" fill="none"/>`;
   return `
     <rect x="0.6" y="0.6" width="198.8" height="83.8" rx="28" fill="${V("db-ice", L.ice)}" stroke="${V("db-ice-boards", L["ice-boards"])}" stroke-width="1.1"/>
     <g clip-path="url(#ice)">
@@ -210,7 +212,8 @@ function rink() {
       </g>
       ${fo(100, 42.5, mkb)}${fo(31, 20.5, mk)}${fo(31, 64.5, mk)}${fo(169, 20.5, mk)}${fo(169, 64.5, mk)}
       ${hash(31, 20.5)}${hash(31, 64.5)}${hash(169, 20.5)}${hash(169, 64.5)}
-      ${dot(100, 42.5, 0.5, mkb)}${dot(31, 20.5)}${dot(31, 64.5)}${dot(169, 20.5)}${dot(169, 64.5)}
+      ${bracket(31, 20.5)}${bracket(31, 64.5)}${bracket(169, 20.5)}${bracket(169, 64.5)}
+      ${dot(100, 42.5, 1, mkb)}${dot(31, 20.5)}${dot(31, 64.5)}${dot(169, 20.5)}${dot(169, 64.5)}
       ${dot(80, 20.5)}${dot(80, 64.5)}${dot(120, 20.5)}${dot(120, 64.5)}
     </g>`;
 }
