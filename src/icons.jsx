@@ -66,6 +66,7 @@ const ICONS = {
   label: <><path d="M5 6h14" /><path d="M12 6v13" /></>,
   puck: <ellipse cx="12" cy="12" rx="8" ry="4.4" {...F} />,
   check: <path d="M5 12.5l4.5 4.5L19 6.5" />,
+  info: <><circle cx="12" cy="12" r="9" /><path d="M12 11v5.5" /><path d="M12 7.7v.01" /></>,
   grip: <><circle cx="9" cy="7" r="1.4" {...F} /><circle cx="15" cy="7" r="1.4" {...F} /><circle cx="9" cy="12" r="1.4" {...F} /><circle cx="15" cy="12" r="1.4" {...F} /><circle cx="9" cy="17" r="1.4" {...F} /><circle cx="15" cy="17" r="1.4" {...F} /></>,
   // a pushpin (keep the editor floating) + a panel with a right column (dock to sidebar)
   pin: <><path d="M9.5 3.5h5l-.8 5 2.8 2.8v1.7H7.5v-1.7l2.8-2.8-.8-5z" /><path d="M12 13v7.5" /></>,

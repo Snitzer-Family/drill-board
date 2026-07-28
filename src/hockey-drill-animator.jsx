@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo, Fragment } from "react";
 import { VIEWS, COLORS, vb, APP_VERSION, ICON_SCALE, ROUTE_START_GAP, BUILD_STAMP, DEFAULT_TEXT, SPEED,
-  SAVE_PROB, MISS_POST, MISS_WIDE, MISS_OVER, SHOT_AIR_PROB, BOUNCE_REST, WB_SYMS, symOf } from "./constants.js";
+  SAVE_PROB, MISS_POST, MISS_WIDE, MISS_OVER, SHOT_AIR_PROB, BOUNCE_REST, WB_SYMS, symOf,
+  DSL_VERSION } from "./constants.js";
 import { parseDrill, serializeDrill, extractDrill, deriveInventory, ensureShotNet } from "./drill-format.js";
 import { prepareImage, drillFromImage, ANTHROPIC_KEY_STORE } from "./drill-vision.js";
 import { drillSvg } from "./drill-svg.js";
@@ -10096,16 +10097,6 @@ export default function DrillAnimator() {
       <div className="hd-bar"
         onPointerDown={presoFull ? showBar : undefined}
         onPointerMove={presoFull ? showBar : undefined}>
-        <button ref={barBtnRefs.settings} className={`hd-barbtn${openMenu === "settings" ? " on" : ""}`} title="Menu"
-          onClick={() => setOpenMenu(m => (m === "settings" ? null : "settings"))}>
-          <Icon name="menu" size={16} /><span className="hd-blbl">Menu</span></button>
-        <button ref={barBtnRefs.rinkmenu} className={`hd-barbtn${openMenu === "rinkmenu" ? " on" : ""}`} title="Rink"
-          onClick={() => setOpenMenu(m => (m === "rinkmenu" ? null : "rinkmenu"))}>
-          <Icon name="rink" size={16} />
-          <span className="hd-blbl">{rink === "full" ? "Full"
-            : rink === "half" ? `Half ${halfNS ? (halfFlip ? "↑" : "↓") : (halfFlip ? "←" : "→")}`
-            : "¼ ice"}</span>
-        </button>
         {/* The three editor flows, always on screen so the chrome says which one
             you're in. PLAY is disabled with nothing to animate; tapping it while
             already in Play starts/pauses the run, so a preview is one tap from
@@ -10128,10 +10119,18 @@ export default function DrillAnimator() {
           onClick={undoLast}><Icon name="undo" size={16} /><span className="hd-blbl">Undo</span></button>
         <button className="hd-barbtn" title="Redo" disabled={!redoCount}
           onClick={redoLast}><Icon name="redo" size={16} /><span className="hd-blbl">Redo</span></button>
-        {/* the hint lives on the action bar now, beside the controls it
-            describes — and the width it used to take is what lets the version
-            watermark stay legible at 375px, which is how a deploy gets checked */}
-        <div className="hd-ver"><span className="hd-vernum">v{APP_VERSION}</span><span className="hd-verstamp">&nbsp;· {BUILD_STAMP}</span></div>
+        {/* the ice, not a control: pushes the "where things live" half right */}
+        <div className="hd-barspacer" />
+        <button ref={barBtnRefs.rinkmenu} className={`hd-barbtn${openMenu === "rinkmenu" ? " on" : ""}`} title="Rink"
+          onClick={() => setOpenMenu(m => (m === "rinkmenu" ? null : "rinkmenu"))}>
+          <Icon name="rink" size={16} />
+          <span className="hd-blbl">{rink === "full" ? "Full"
+            : rink === "half" ? `Half ${halfNS ? (halfFlip ? "↑" : "↓") : (halfFlip ? "←" : "→")}`
+            : "¼ ice"}</span>
+        </button>
+        <button ref={barBtnRefs.settings} className={`hd-barbtn${openMenu === "settings" ? " on" : ""}`} title="Menu"
+          onClick={() => setOpenMenu(m => (m === "settings" ? null : "settings"))}>
+          <Icon name="menu" size={16} /><span className="hd-blbl">Menu</span></button>
       </div>
 
       {/* ---------- menus ---------- */}
@@ -10223,6 +10222,64 @@ export default function DrillAnimator() {
           <div className="hd-note">
             Tap a piece, route point, or line for its settings.
             Double-tap a line to add a point. Drag to move; touch drags show a magnifier.
+          </div>
+          {/* The version watermark used to sit in the bottom bar. It moved in
+              here so the bar could be controls only — it's the build stamp you
+              check after a deploy, so it stays a tap away rather than being
+              buried, and it doubles as the way into About. */}
+          <button className="hd-item hd-verrow" onClick={() => setOpenMenu("about")}>
+            <Icon name="info" size={16} />
+            <span className="hd-vernum">v{APP_VERSION}</span>
+            <span className="hd-verstamp">{BUILD_STAMP}</span>
+            <span className="hd-chev"><Icon name="chevronRight" size={14} /></span>
+          </button>
+        </div>
+      )}
+
+      {openMenu === "about" && (
+        <div className="hd-sheet">
+          <div className="hd-mh">About DrillBoard</div>
+          <div className="hd-prefbody">
+            <div className="hd-pref">
+              <div className="hd-prefhead"><span className="hd-preftitle">Version</span>
+                <span className="hd-vernum">v{APP_VERSION}</span></div>
+              <div className="hd-prefdesc">
+                Built {BUILD_STAMP}. Drill format DSL&nbsp;{DSL_VERSION} — the version stamped into
+                every drill you save or share.
+              </div>
+            </div>
+            <div className="hd-pref">
+              <div className="hd-prefhead"><span className="hd-preftitle">What this is</span></div>
+              <div className="hd-prefdesc">
+                A full-screen drill animator for the bench. Sketch a drill with the smart pen or
+                place pieces by hand, then play it back — skating, passes, shots and reactions all
+                timed from real rink distances rather than from anything on screen.
+              </div>
+            </div>
+            <div className="hd-pref">
+              <div className="hd-prefhead"><span className="hd-preftitle">Where drills live</span></div>
+              <div className="hd-prefdesc">
+                On this device. The board autosaves as you work, and a crash keeps a recoverable
+                copy. Share a drill with <b>Share preview link</b> — the whole thing travels in the
+                URL, so nothing is uploaded anywhere.
+              </div>
+            </div>
+            <div className="hd-pref">
+              <div className="hd-prefhead"><span className="hd-preftitle">Something wrong?</span>
+                <button className="hd-mini" onClick={() => { setShowDiag(true); setOpenMenu(null); }}>
+                  Open diagnostics</button></div>
+              <div className="hd-prefdesc">
+                Diagnostics shows live viewport, safe-area and rink numbers — the fastest way to
+                describe a layout problem on a phone. For ink that won&rsquo;t convert, use
+                <b> Copy diagnostics</b> in App &amp; drill settings.
+              </div>
+            </div>
+            <div className="hd-note">
+              Add to Home Screen for the full-screen version — that&rsquo;s the one this is built for.
+            </div>
+          </div>
+          <div className="hd-row">
+            <button className="hd-btn primary" onClick={() => setOpenMenu("settings")}>Back</button>
           </div>
         </div>
       )}

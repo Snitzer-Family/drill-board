@@ -35,7 +35,9 @@ restart so the settings watcher reloads it.
    to `main` (GitHub Actions builds and publishes to Pages, ~90s), so it goes
    live. Always confirm and get the user's go-ahead before merging to `main` or
    pushing. Commit on the worktree/session branch freely; the user verifies
-   deploys via the version watermark in the app's bottom bar (bottom-right).
+   deploys via the version watermark, which lives at the foot of the ☰ menu
+   (it also opens About) — it left the bottom bar so that bar could be
+   controls only.
 4. `vite.config.js` must keep `base: "/drill-board/"` (matches repo name).
 5. No new dependencies without asking — the app is deliberately React-only.
 

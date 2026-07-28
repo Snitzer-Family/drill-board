@@ -258,9 +258,11 @@ export const STYLES = `
           font-size:11px; font-weight:600; cursor:pointer; text-align:left; }
         .hd-penopt.on { background:var(--db-accent); border-color:var(--db-accent); color:var(--db-text-on-accent); }
         .hd-penopt .hd-penstyle { flex:none; }
-        /* inks as round chips, matching the swatches used elsewhere */
+        /* Inks as squares. The round chips read as PIECES — a puck, a player
+           dot — which is what round means everywhere else on this board; a
+           square says "a colour", the way a paint well does. */
         .hd-peninks { display:flex; align-items:center; gap:4px; }
-        .hd-penswatch { flex:none; width:22px; height:22px; border-radius:50%;
+        .hd-penswatch { flex:none; width:22px; height:22px; border-radius:4px;
           border:1px solid var(--db-border-strong); cursor:pointer; padding:0; }
         /* same "this one is selected" token as .hd-swatch.on — one meaning, one colour */
         .hd-penswatch.on { outline:2px solid var(--db-ui-select); outline-offset:2px; }
@@ -341,17 +343,17 @@ export const STYLES = `
         /* caption under each bar icon — tooltips don't exist on touch */
         .hd-blbl { font-size:8.5px; font-weight:700; letter-spacing:.05em; line-height:1;
           text-transform:uppercase; opacity:.8; white-space:nowrap; }
-        /* The version never runs off the edge: vN stays put, only the build
-           stamp truncates (ellipsis) when the bar is too narrow. It is also the
-           bar's ONE flexible child now that the hint moved to the action bar —
-           it takes the slack (so it stays hard right) and gives it back first
-           when the bar gets tight, which at 375px is the difference between a
-           readable watermark and none. */
-        .hd-ver { flex:1 1 auto; min-width:0; display:flex; align-items:baseline;
-          justify-content:flex-end; overflow:hidden; font-size:10px; color:var(--db-text-faint);
-          font-variant-numeric:tabular-nums; letter-spacing:.02em; }
-        .hd-vernum { flex:0 0 auto; white-space:nowrap; }
-        .hd-verstamp { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        /* the bar's one flexible child: what you're DOING sits left of it,
+           where things LIVE sits right of it */
+        .hd-barspacer { flex:1 1 auto; min-width:0; }
+        /* The version row at the foot of the menu — the watermark left the
+           bottom bar so that bar could be controls only. The build stamp is
+           what you check after a deploy, so it keeps its tabular figures and
+           truncates from the stamp end, never from vN. */
+        .hd-verrow { font-variant-numeric:tabular-nums; letter-spacing:.02em; }
+        .hd-vernum { flex:0 0 auto; white-space:nowrap; font-weight:700; }
+        .hd-verstamp { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis;
+          white-space:nowrap; font-size:11px; color:var(--db-text-faint); }
         /* corner menus — same scroll-shadow cue as .hd-pop: a soft edge shadow
            appears only while more content lies that way (iOS hides the native
            bar for touch overflow, so without this a long menu reads as complete).
