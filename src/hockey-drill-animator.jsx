@@ -13,7 +13,7 @@ import { RinkMarkings } from "./rink.jsx";
 import { ZONES, zoneAt } from "./zones.js";
 import { PieceIcon, Stepper, DiagPanel, Icon, ICONS } from "./icons.jsx";
 import { createTiming, resolveNearest } from "./timing.js";
-import { buildLedger, mayHoldOn, mayHoldEntering } from "./possession.js";
+import { buildLedger, mayHoldOn, mayHoldEntering, orderTransfers } from "./possession.js";
 import { classifyPenGroup, SYMBOL_MAX, SYMBOL_MAX_PX } from "./sketch-recognize.js";
 import { newGame, stepGame } from "./ai-game.js";
 import { STYLES } from "./styles.js";
@@ -1467,7 +1467,7 @@ export default function DrillAnimator() {
   // → effective piece so position sampling follows the reaction, not the base end
   const effById = new Map(effPieces.map(p => [p.id, p]));
   const effOf = p => p && p.kind === "player" && (p.forks || []).length ? (effById.get(p.id) || p) : p;
-  const { getPlan, pieceTime, displayPosAt, stickSwing, waypointTime, puckInGoal } = createTiming({ pieces: effPieces, pace, segRefs, planCache, seed: playSeed, realisticShots: effRealistic, detail: effDetail, odds: shotOdds });
+  const { getPlan, pieceTime, displayPosAt, stickSwing, stickSpot, waypointTime, puckInGoal } = createTiming({ pieces: effPieces, pace, segRefs, planCache, seed: playSeed, realisticShots: effRealistic, detail: effDetail, odds: shotOdds });
   // intent plan for the route preview (identical to the main plan but with misses
   // off, so shots always route on net). Only built when realistic shots are on and
   // the puck-path overlay is actually shown; otherwise the main plan already IS the
@@ -3262,7 +3262,8 @@ export default function DrillAnimator() {
       // branch below) — NOT the detoured centre (x,y), which diverges from the
       // puck by several feet at a detour's apex and would cut the shield off
       // exactly when the carrier is rounding the obstacle.
-      const rawBlade = bladeAtWorld(res.x, res.y, res.a || 0, BLADE_FWD, BLADE_LAT, side);
+      const spSelf = stickSpot(p.id, animT <= 0 ? 0 : animT * totalTime);
+      const rawBlade = bladeAtWorld(res.x, res.y, res.a || 0, spSelf.fwd * ICON_SCALE, spSelf.lat * ICON_SCALE, side);
       const carries = collisions && pieces.some(q => q.kind === "puck"
         && Math.hypot(displayPosRaw(q).x - rawBlade.x, displayPosRaw(q).y - rawBlade.y) < 2.2);
       if (carries) {
@@ -3288,9 +3289,14 @@ export default function DrillAnimator() {
         // stride/plant lean. A deep hockey-stop plant swings a leaned blade several
         // feet, which used to push the carrier past this 2.2ft gate and drop the puck
         // off the stick for as long as the lean lasted.
-        const raw = displayPosAt(q, animT <= 0 ? 0 : animT * totalTime);
+        const e = animT <= 0 ? 0 : animT * totalTime;
+        const raw = displayPosAt(q, e);
         const side = q.hand === "L" ? -1 : 1;
-        const bladeRaw = bladeAtWorld(raw.x, raw.y, raw.a || 0, BLADE_FWD, BLADE_LAT, side);
+        // ...and against the SAME lever the puck is sitting on: through a shot/pass
+        // wind-up that lever swings out to the release spot, which would otherwise
+        // carry the puck straight out of this gate's reach mid-wind-up
+        const sp = stickSpot(q.id, e);
+        const bladeRaw = bladeAtWorld(raw.x, raw.y, raw.a || 0, sp.fwd * ICON_SCALE, sp.lat * ICON_SCALE, side);
         const d = Math.hypot(res.x - bladeRaw.x, res.y - bladeRaw.y);
         if (d < cd) { cd = d; cq = q; cSide = side; }
       }
@@ -3298,11 +3304,15 @@ export default function DrillAnimator() {
         const q = cq, side = cSide;
         if (q) {   // this puck is on q's blade
           const qd = displayPos(q);                                       // shielded carrier
-          // whiteboard: no stick to ride, so tuck the puck right up against the
-          // symbol (just clear of the glyph) instead of out at the blade tip
+          // the blade tip, swinging out to the release spot beside the near foot
+          // through a shot/pass wind-up — the same lever the plan launches from, so
+          // the puck travels there with the stick instead of jumping at the release.
+          // Whiteboard: no stick to ride, so tuck the puck right up against the
+          // symbol (just clear of the glyph) instead of out at the blade tip.
+          const sp = stickSpot(q.id, animT <= 0 ? 0 : animT * totalTime);
           const tip = whiteboard
             ? bladeAtWorld(qd.x, qd.y, qd.a || 0, 2.4, 0, side)
-            : bladeAtWorld(qd.x, qd.y, qd.a || 0, TIP_FWD, TIP_LAT, side);
+            : bladeAtWorld(qd.x, qd.y, qd.a || 0, sp.fwd * ICON_SCALE, sp.lat * ICON_SCALE, side);
           // carry stickhandle: the puck cradles side-to-side on the blade —
           // more at low speed, less (with a forward push) when skating hard
           const e = animT * totalTime;
@@ -3310,8 +3320,11 @@ export default function DrillAnimator() {
           const spd = Math.hypot(b2.x - a2.x, b2.y - a2.y) / 0.14;
           const fast = Math.min(1, spd / 24);
           const w = Math.sin(e * 8.5);
-          const lat = effDetail ? w * 1.2 * (1 - 0.5 * fast) : 0;         // side-to-side cradle (off with detail anims)
-          const push = effDetail ? (0.5 + 0.5 * Math.sin(e * 8.5 + 1.3)) * 1.1 * fast : 0; // slight fore-push when moving fast
+          // the cradle settles out as a shot or pass winds up (sp.k) — carrying it all
+          // the way to the release frame just leaves its offset behind as a jump
+          const cr = effDetail ? 1 - (sp.k || 0) : 0;
+          const lat = w * 1.2 * (1 - 0.5 * fast) * cr;                    // side-to-side cradle
+          const push = (0.5 + 0.5 * Math.sin(e * 8.5 + 1.3)) * 1.1 * fast * cr; // slight fore-push when moving fast
           const hd = ((qd.a || 0) * Math.PI) / 180;
           const lx = -Math.sin(hd), ly = Math.cos(hd), fx = Math.cos(hd), fy = Math.sin(hd);
           return { ...res, x: tip.x + lx * lat + fx * push, y: tip.y + ly * lat + fy * push };
@@ -4046,14 +4059,20 @@ export default function DrillAnimator() {
       if (q.id !== pkId) return q;
       const ts = (q.transfers || []).slice();
       if (tr) ts[stage] = tr; else ts.splice(stage, 1);
-      return { ...q, transfers: ts };
+      return chained({ ...q, transfers: ts });
     });
   }
+  // Actions are authored per waypoint but stored as an ORDERED chain, so a hop added
+  // for an earlier moment lands at the end of the array and the chain stops resolving
+  // (downstream releases read as "isn't holding the puck", and a shot loses its final
+  // holder). Re-derive a working order after any transfer edit — a no-op when the
+  // stored order already resolves, and when none does.
+  const chained = q => { const ts = orderTransfers(q); return ts === q.transfers ? q : { ...q, transfers: ts }; };
   // append an action for a player who doesn't actually hold the puck here — it's
   // recorded (with its intended `by` actor) and flagged "won't complete", not
   // silently dropped, so the user sees their intent
   const appendTransfer = (pkId, tr) =>
-    update(q => (q.id === pkId ? { ...q, transfers: [...(q.transfers || []), tr] } : q));
+    update(q => (q.id === pkId ? chained({ ...q, transfers: [...(q.transfers || []), tr] }) : q));
   // default travel distance (feet) for a fresh terminal release
   const REL_DEFAULT = { rimAt: 65, chipAt: 26 };
   // does terminal `t` match matcher `m` (kind + point + lineage + actor)? — used to
@@ -4158,7 +4177,7 @@ export default function DrillAnimator() {
     update(q => {
       if (q.id !== pkId) return q;
       const ts = (q.transfers || []).map((t, k) => (k === trIdx ? { ...t, recvAt: idx } : t));
-      return { ...q, transfers: ts };
+      return chained({ ...q, transfers: ts });
     });
   }
   // manual "Receive Pass": the chosen source player passes to `receiverId` at

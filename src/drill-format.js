@@ -1,5 +1,6 @@
 // Drill text format: parser and serializer. See the DSL spec in App header.
 import { VIEWS, DSL_VERSION } from "./constants.js";
+import { orderTransfers } from "./possession.js";
 
 // A puck-action index may be qualified by the branch route it lives on. On the wire
 // the qualifier is the branch colour-path (hex, no #) then '.', e.g. `shoot=2ea043.3`,
@@ -497,7 +498,16 @@ export function parseDrill(text) {
     } catch (e) { errors.push(`line ${i + 1}: ${e.message}`); }
   });
   if (capturingNotes) notes = noteBuf.join("\n");   // unterminated NOTES: flush what we have
-  return { rink, pieces: ensureShotNet(pieces), errors, title, desc, dslVersion, steps, notes: notes || "", items };
+  // A puck chain is positional, but its hops are authored per waypoint, so a drill
+  // can arrive with them out of sequence (see orderTransfers) — in which case every
+  // release past the first reads as "isn't holding the puck" and a shot has no final
+  // holder. Settle the order on the way in; a chain that already resolves is untouched.
+  const chained = pieces.map(p => {
+    if (p.kind !== "puck") return p;
+    const ts = orderTransfers(p);
+    return ts === p.transfers ? p : { ...p, transfers: ts };
+  });
+  return { rink, pieces: ensureShotNet(chained), errors, title, desc, dslVersion, steps, notes: notes || "", items };
 }
 
 const f1 = n => (Math.round(n * 10) / 10).toString();
