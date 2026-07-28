@@ -357,6 +357,13 @@ centre), in **rink feet** (`x` 0–200, `y` 0–85 — the same coordinates as p
 it holds the same area of the ice across portrait and landscape. Omit it and the
 caption defaults to bottom-centre.
 
+How long each caption holds isn't authored here — it's a playback setting (☰ →
+*Presentation*). **Min pause** is a floor every caption gets; a caption too long
+to read in that time stretches by its own reading time, at the **Read** pace the
+presenter picks (*Fixed* opts out and holds every caption for exactly the
+minimum). So a long step is worth writing without trimming it to fit — and a tap
+on the ice always skips a hold early.
+
 ```drill
 STEP at=0 "Play begins — F1 carries out of the corner"
 STEP on=F1:3 pos=150:20 "F1 hits the far blue line and cuts to the net"

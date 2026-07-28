@@ -409,11 +409,13 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
 
 /* ---------------- stepper ---------------- */
 
-export function Stepper({ value, onChange, step = 0.5, min = 0, max = Infinity, suffix = "s" }) {
+// `fmt` names the value instead of printing it — for a stepper that walks a list
+// (a reading pace, a mode) rather than a quantity.
+export function Stepper({ value, onChange, step = 0.5, min = 0, max = Infinity, suffix = "s", fmt = null }) {
   return (
     <span className="hd-stepper">
       <button onClick={() => onChange(Math.max(min, +(value - step).toFixed(2)))}>−</button>
-      <span>{value}{suffix}</span>
+      <span>{fmt ? fmt(value) : `${value}${suffix}`}</span>
       <button onClick={() => onChange(Math.min(max, +(value + step).toFixed(2)))}>+</button>
     </span>
   );

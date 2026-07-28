@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo, Fragment } from "react";
 import { VIEWS, COLORS, vb, APP_VERSION, ICON_SCALE, PLAYER_SCALE, ROUTE_START_GAP, BUILD_STAMP, DEFAULT_TEXT, SPEED,
-  SAVE_PROB, MISS_POST, MISS_WIDE, MISS_OVER, SHOT_AIR_PROB, BOUNCE_REST, WB_SYMS, symOf } from "./constants.js";
+  SAVE_PROB, MISS_POST, MISS_WIDE, MISS_OVER, SHOT_AIR_PROB, BOUNCE_REST, WB_SYMS, symOf,
+  READ_PACES, READ_PACE_DEFAULT, captionHold } from "./constants.js";
 import { parseDrill, serializeDrill, extractDrill, deriveInventory, ensureShotNet } from "./drill-format.js";
 import { prepareImage, drillFromImage, ANTHROPIC_KEY_STORE } from "./drill-vision.js";
 import { drillSvg } from "./drill-svg.js";
@@ -660,7 +661,8 @@ export default function DrillAnimator() {
   const [playRoutes, setPlayRoutes] = useState("player");
   // presentation mode: pause at each described step so viewers can read along
   const [presentation, setPresentation] = useState(false);
-  const [presoDelay, setPresoDelay] = useState(2.5);   // seconds held at each step
+  const [presoDelay, setPresoDelay] = useState(2.5);   // MINIMUM seconds held at each step
+  const [readPace, setReadPace] = useState(READ_PACE_DEFAULT); // index into READ_PACES: how far past the minimum a long caption stretches
   const [holdStep, setHoldStep] = useState(null);      // step currently being read
   const [placingStep, setPlacingStep] = useState(null); // idx of the step whose caption is being placed on the ice
   const [editAnchor, setEditAnchor] = useState(null);  // idx of the step whose time/waypoint anchor is being edited inline
@@ -858,6 +860,7 @@ export default function DrillAnimator() {
   const nextStepRef = useRef(0);    // index of the next step to pause at
   const stepsRef = useRef([]);      // presentation steps, mirrored for the raf loop
   const presoDelayRef = useRef(2.5);
+  const readCpsRef = useRef(READ_PACES[READ_PACE_DEFAULT].cps);
   const presoRef = useRef(false);
   const loopRef = useRef(false);
   const loopPendingRef = useRef(false); // holding on the finished drill before a loop restart
@@ -1687,6 +1690,7 @@ export default function DrillAnimator() {
     ? (drillSteps.length ? playSteps : buildSteps())
     : playSteps;
   presoDelayRef.current = presoDelay;
+  readCpsRef.current = (READ_PACES[readPace] || READ_PACES[READ_PACE_DEFAULT]).cps;
   presoRef.current = presentation;
   loopRef.current = loopMode;
   loopPauseRef.current = loopPause;
@@ -1872,7 +1876,8 @@ export default function DrillAnimator() {
           animRef.current = stF; setAnimT(stF);
           nextStepRef.current += 1;
           if (presoDelayRef.current > 0) {
-            holdRef.current = presoDelayRef.current;
+            // the delay is a floor; a caption too long to read in it holds longer
+            holdRef.current = captionHold(st.text, presoDelayRef.current, readCpsRef.current);
             setHoldStep(st);
             raf = requestAnimationFrame(step);
             return;
@@ -9789,8 +9794,14 @@ export default function DrillAnimator() {
           <div className="hd-poprow">
             <button className={`hd-mini${presentation ? " on" : ""}`}
               onClick={() => setPresentation(v => !v)}>{presentation ? "✓ On" : "Off"}</button>
-            <span>Pause</span>
+            <span>Min pause</span>
             <Stepper value={presoDelay} onChange={setPresoDelay} step={0.5} min={0} />
+          </div>
+          <div className="hd-poprow">
+            <span>Read</span>
+            <Stepper value={readPace} onChange={setReadPace} step={1} min={0} max={READ_PACES.length - 1}
+              fmt={i => (READ_PACES[i] || READ_PACES[READ_PACE_DEFAULT]).label} />
+            <span className="hd-sechint">longer captions hold longer</span>
           </div>
           <div className="hd-poprow">
             <button className={`hd-mini${minorDesc ? " on" : ""}`}
