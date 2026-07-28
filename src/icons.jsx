@@ -1,6 +1,6 @@
 // Piece icons (screen-true frames), stepper control, diagnostics overlay.
 import { useState, useRef, useEffect } from "react";
-import { APP_VERSION, BUILD_STAMP, ICON_SCALE, DSL_VERSION, symOf } from "./constants.js";
+import { APP_VERSION, BUILD_STAMP, ICON_SCALE, DSL_VERSION, symOf, PLAYER_SCALE } from "./constants.js";
 import { useTheme, useInk } from "./theme-react.jsx";
 
 /* ---------------- unified action icons ----------------
@@ -410,7 +410,7 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
   }
   // nets and tires come in sizes — scale the drawn body + its grab area;
   // players draw a touch under full scale so they crowd the ice less
-  const sz = (p.kind === "net" || p.kind === "tire") && p.size ? p.size : p.kind === "player" ? 0.93 : 1;
+  const sz = (p.kind === "net" || p.kind === "tire") && p.size ? p.size : p.kind === "player" ? PLAYER_SCALE : 1;
   // a locked, non-selectable piece is click-through: its transparent grab shape
   // hit-tests unless pointer-events is switched off, so taps fall to nearby
   // unlocked items instead of the locked one stealing them
@@ -432,7 +432,7 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
     <g opacity={dim ? 0.92 : 1} transform={frame}>
       {sz !== 1 ? <g transform={`scale(${sz})`}>{body}{grab}</g> : <>{body}{grab}</>}
       {onStickDown && p.kind === "player" && !wb && (
-        <circle cx={4.7} cy={p.hand === "L" ? -2.55 : 2.55} r={3.3} fill="transparent"
+        <circle cx={4.7 * PLAYER_SCALE} cy={(p.hand === "L" ? -2.55 : 2.55) * PLAYER_SCALE} r={3.3} fill="transparent"
           pointerEvents={hPE} style={{ cursor: "grab" }} onPointerDown={onStickDown} />
       )}
     </g>
@@ -441,11 +441,13 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
 
 /* ---------------- stepper ---------------- */
 
-export function Stepper({ value, onChange, step = 0.5, min = 0, max = Infinity, suffix = "s" }) {
+// `fmt` names the value instead of printing it — for a stepper that walks a list
+// (a reading pace, a mode) rather than a quantity.
+export function Stepper({ value, onChange, step = 0.5, min = 0, max = Infinity, suffix = "s", fmt = null }) {
   return (
     <span className="hd-stepper">
       <button onClick={() => onChange(Math.max(min, +(value - step).toFixed(2)))}>−</button>
-      <span>{value}{suffix}</span>
+      <span>{fmt ? fmt(value) : `${value}${suffix}`}</span>
       <button onClick={() => onChange(Math.min(max, +(value + step).toFixed(2)))}>+</button>
     </span>
   );

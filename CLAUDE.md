@@ -93,6 +93,9 @@ restart so the settings watcher reloads it.
 - `possession.js` — the possession ledger: pure, condition-aware possession
   stints + loose-puck intervals per puck (branch-choice atom conjunctions prove
   cross-player mutual exclusion); node-testable, no seed/DOM
+- `route-dir.js` — the sticky write rule for skate direction: `dir` is stored on
+  every leg, but setting one waypoint backwards means "and everything after it,
+  down the branches too" until a later one flips. Pure, node-tested
 - `timing.js` — createTiming() factory: leg timing, pass/shot/pickup planner,
   receiver time-warps, warp-aware positions
 - `hockey-drill-animator.jsx` — App shell: state, pointer interaction, popouts,
@@ -163,6 +166,13 @@ recogniser, theme contrast, crash-recovery stash — plus drift guards that pin
 invariants a reader can't verify by eye (no raw hex in `styles.js`, `MENU_W` vs
 `--hd-menu-w`, `drill-svg.js` fallbacks tracking `THEMES.light`).
 
+**`npm run build` exits 0 on a JSX warning**, so "the build passed" never meant
+the JSX was sound. `tests/jsx-warnings.mjs` runs the compiler's own check and
+fails on any warning — it caught a merge that added a class as a *second*
+attribute (`className="hd-poprow" className="hd-stephint"`), where JSX keeps the
+last one and the layout class vanished silently. Read the build's output too;
+don't trust its exit code alone.
+
 Nothing covers the rendered UI. That still means an iPhone 15 (standalone) and
 the user's eyes, and it is where the real bugs have been — a stated `height:40px`
 that renders 50, a menu centred on a width it doesn't have. **Measure the DOM in
@@ -195,6 +205,13 @@ markup this branch had already deleted.
 asserts `scrollWidth <= clientWidth`, that the bar's height still equals
 `--hd-barh`, and that the ice ends above the bar. Layout arithmetic in this app
 has been wrong three times; measure with this, don't reason from the CSS.
+
+**Don't edit `src/` while a sweep is running.** Vite hot-reloads the app under
+the running Chromes, so the suites measure a moving target: a full sweep once
+came back `70 pass, 123 fail` with 16 suites "crashed", and every one of them
+passed on a quiet tree minutes later. A sweep takes ~18 minutes — start it when
+the tree is settled, and re-run rather than interpret one that overlapped edits.
+Pipe it to a file, too: `| tail` hides the failure lines you actually need.
 
 Scope the group to what changed; a full sweep on a CSS tweak is waste. But do
 run `ui` on markup changes: the suites select by class/title, and layout

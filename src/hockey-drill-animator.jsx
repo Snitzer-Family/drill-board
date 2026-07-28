@@ -1,19 +1,20 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo, Fragment } from "react";
-import { VIEWS, COLORS, vb, APP_VERSION, ICON_SCALE, ROUTE_START_GAP, BUILD_STAMP, DEFAULT_TEXT, SPEED,
+import { VIEWS, COLORS, vb, APP_VERSION, ICON_SCALE, PLAYER_SCALE, ROUTE_START_GAP, BUILD_STAMP, DEFAULT_TEXT, SPEED,
   SAVE_PROB, MISS_POST, MISS_WIDE, MISS_OVER, SHOT_AIR_PROB, BOUNCE_REST, WB_SYMS, symOf,
-  DSL_VERSION, TYPEFACES, TYPEFACE_KEY } from "./constants.js";
+  DSL_VERSION, TYPEFACES, TYPEFACE_KEY, READ_PACES, READ_PACE_DEFAULT, captionHold } from "./constants.js";
 import { parseDrill, serializeDrill, extractDrill, deriveInventory, ensureShotNet } from "./drill-format.js";
 import { prepareImage, drillFromImage, ANTHROPIC_KEY_STORE } from "./drill-vision.js";
 import { drillSvg } from "./drill-svg.js";
 import { mdEscape, mdInline, mdBlock } from "./md.js";
 import { clampX, clampY, segEnd, segD, nearestT, splitSeg, zigzagPoints, wigglePoints, wigglePoly, zigzagPoly, convertSeg, fitRoute, evalSeg, rdp, catmullToBezier, alignJoint, mirrorJoint, translateJointHandles, trimSegStart, trimSegEnd, trimPolyStart, trimPolyEnd, gapPolyAt } from "./geometry.js";
+import { dirOf, dirAtWaypoint, spreadDir } from "./route-dir.js";
 import * as boards from "./boards.js";
 import { netShapes, bumperShapes, solidShapes, detourRoute, segCrossesNet } from "./net-collide.js";
 import { RinkMarkings } from "./rink.jsx";
 import { ZONES, zoneAt } from "./zones.js";
 import { PieceIcon, Stepper, DiagPanel, Icon, ICONS } from "./icons.jsx";
 import { createTiming, resolveNearest } from "./timing.js";
-import { buildLedger, mayHoldOn, mayHoldEntering } from "./possession.js";
+import { buildLedger, mayHoldOn, mayHoldEntering, orderTransfers } from "./possession.js";
 import { classifyPenGroup, SYMBOL_MAX, SYMBOL_MAX_PX } from "./sketch-recognize.js";
 import { newGame, stepGame } from "./ai-game.js";
 import { STYLES } from "./styles.js";
@@ -364,6 +365,7 @@ function DelayTrigger({ value, onChange, sub, players, actorIds, nameOf }) {
    Modifier words BEFORE a segment apply to that segment only:
      PASS / SHOT / CARRY   puck speed class (3x / 6x / 1x)
      BWD / FWD             skating direction (BWD draws zigzag)
+     TURN left|right|player|puck   which way they pivot when the direction reverses
      STOP <sec>            hold at this leg's START point
      WAIT <player> <pt>    hold until that player REACHES <pt>
      WACT <player> <pt>    hold until that player RELEASES the puck at <pt> (0 = any action)
@@ -767,7 +769,8 @@ export default function DrillAnimator() {
   const [playRoutes, setPlayRoutes] = useState("player");
   // presentation mode: pause at each described step so viewers can read along
   const [presentation, setPresentation] = useState(false);
-  const [presoDelay, setPresoDelay] = useState(2.5);   // seconds held at each step
+  const [presoDelay, setPresoDelay] = useState(2.5);   // MINIMUM seconds held at each step
+  const [readPace, setReadPace] = useState(READ_PACE_DEFAULT); // index into READ_PACES: how far past the minimum a long caption stretches
   const [holdStep, setHoldStep] = useState(null);      // step currently being read
   const [placingStep, setPlacingStep] = useState(null); // idx of the step whose caption is being placed on the ice
   const [editAnchor, setEditAnchor] = useState(null);  // idx of the step whose time/waypoint anchor is being edited inline
@@ -973,6 +976,7 @@ export default function DrillAnimator() {
   const nextStepRef = useRef(0);    // index of the next step to pause at
   const stepsRef = useRef([]);      // presentation steps, mirrored for the raf loop
   const presoDelayRef = useRef(2.5);
+  const readCpsRef = useRef(READ_PACES[READ_PACE_DEFAULT].cps);
   const presoRef = useRef(false);
   const loopRef = useRef(false);
   const loopPendingRef = useRef(false); // holding on the finished drill before a loop restart
@@ -1671,7 +1675,7 @@ export default function DrillAnimator() {
   // → effective piece so position sampling follows the reaction, not the base end
   const effById = new Map(effPieces.map(p => [p.id, p]));
   const effOf = p => p && p.kind === "player" && (p.forks || []).length ? (effById.get(p.id) || p) : p;
-  const { getPlan, pieceTime, displayPosAt, stickSwing, waypointTime, puckInGoal } = createTiming({ pieces: effPieces, pace, segRefs, planCache, seed: playSeed, realisticShots: effRealistic, detail: effDetail, odds: shotOdds });
+  const { getPlan, pieceTime, displayPosAt, stickSwing, stickSpot, catchApproach, puckInFlight, waypointTime, puckInGoal } = createTiming({ pieces: effPieces, pace, segRefs, planCache, seed: playSeed, realisticShots: effRealistic, detail: effDetail, odds: shotOdds });
   // intent plan for the route preview (identical to the main plan but with misses
   // off, so shots always route on net). Only built when realistic shots are on and
   // the puck-path overlay is actually shown; otherwise the main plan already IS the
@@ -1683,7 +1687,16 @@ export default function DrillAnimator() {
   // a light's cue timeline can outlast every route — keep the drill running long
   // enough to show every cue (so a "read the light" reaction has time to resolve)
   const cueSpan = p => p.kind === "light" && p.cues ? p.cues.reduce((a, c) => a + Math.max(0.1, c.dur || 0), 0) : 0;
-  const totalTime = Math.max(0.1, ...effPieces.map(pieceTime), ...effPieces.map(cueSpan));
+  // How long the DRILL is — what a coach reads off the panel.
+  const drillTime = Math.max(0.1, ...effPieces.map(pieceTime), ...effPieces.map(cueSpan));
+  // ...and how long the ANIMATION runs. The last thing to happen in most drills is a
+  // skater stopping, and a stop is not instant: the hockey-stop plant settles back
+  // square and the snow it throws drifts out and fades. With the clock ending on the
+  // same frame the last leg does, none of that ever played — it was cut off mid-bite
+  // and the loop snapped straight back to the start. A short tail lets it finish.
+  // Idle time only: every leg time is absolute, so nothing in the drill moves.
+  const END_HOLD = 0.8;
+  const totalTime = drillTime + END_HOLD;
   const hasTimeline = totalTime > 0.1001; // static board (no routes/cues) → no player bar
   totalRef.current = totalTime;
 
@@ -1812,6 +1825,7 @@ export default function DrillAnimator() {
     ? (drillSteps.length ? playSteps : buildSteps())
     : playSteps;
   presoDelayRef.current = presoDelay;
+  readCpsRef.current = (READ_PACES[readPace] || READ_PACES[READ_PACE_DEFAULT]).cps;
   presoRef.current = presentation;
   loopRef.current = loopMode;
   loopPauseRef.current = loopPause;
@@ -2002,7 +2016,8 @@ export default function DrillAnimator() {
           animRef.current = stF; setAnimT(stF);
           nextStepRef.current += 1;
           if (presoDelayRef.current > 0) {
-            holdRef.current = presoDelayRef.current;
+            // the delay is a floor; a caption too long to read in it holds longer
+            holdRef.current = captionHold(st.text, presoDelayRef.current, readCpsRef.current);
             setHoldStep(st);
             raf = requestAnimationFrame(step);
             return;
@@ -2181,6 +2196,47 @@ export default function DrillAnimator() {
   const FIDGET_BOB = 0.07;  // ft of fore-aft drift while standing
   const FIDGET_LEAN = 2.2;  // deg of body wobble while standing
   const FIDGET_FADE = 0.35; // ×base pace at which the fidget has fully faded out
+  // Ice spray: a skater who bites the ice hard throws a little puff of shavings off
+  // their edges. Only worth drawing when they actually arrive with speed — a glide
+  // into a stop shaves nothing. Display-only and, like everything else in playback, a
+  // pure function of t: the specks are placed off a hash of the piece id, never a
+  // live random, so scrubbing back retraces the same puff.
+  // Painted in ice-ink (the puck's colour) rather than white: light ice is #f5fafd,
+  // so white shavings on it are invisible. ice-ink is the one colour the theme
+  // guarantees against the ice in BOTH modes — dark scuff on a white sheet, bright
+  // spray on a dark one.
+  const SPRAY_AT = 1.15;    // ×base pace: below this the stop is a glide, no snow
+  const SPRAY_FULL = 2.0;   // ×base pace: a full-blooded hockey stop
+  const SPRAY_N = 16;       // specks
+  function snowSpray(p, dp) {
+    if (p.kind !== "player" || !effDetail || animT <= 0 || whiteboard) return null;
+    const amt = dp.brake || 0;
+    if (amt <= 0.02) return null;
+    const hard = Math.max(0, Math.min(1, ((dp.brakeSpd || 0) - SPRAY_AT) / (SPRAY_FULL - SPRAY_AT)));
+    if (hard <= 0.02) return null;
+    // the puff keeps expanding as it fades — it is thrown, not breathed in again.
+    // `brakeUp` says which half of the bite we are in, so the throw grows straight
+    // through the stop instead of tracking `amt` back down.
+    const grow = dp.brakeUp ? 0.45 * amt : 0.45 + 0.55 * (1 - amt);
+    // ...off the edge they planted on, and forward along the way they were going
+    const side = Math.sin((2 * Math.PI * (dp.brakeAt || 0)) / STRIDE_LAMBDA) >= 0 ? 1 : -1;
+    const hd = ((dp.a || 0) - PLANT_DEG * amt * side) * Math.PI / 180;   // travel, before the plant turned them
+    const fx0 = Math.cos(hd), fy0 = Math.sin(hd), lx0 = -Math.sin(hd), ly0 = Math.cos(hd);
+    let h = 0;
+    for (let i = 0; i < String(p.id).length; i++) h = (h * 31 + String(p.id).charCodeAt(i)) | 0;
+    const els = [];
+    for (let i = 0; i < SPRAY_N; i++) {
+      const r1 = ((Math.sin((h + i * 97) * 12.9898) * 43758.5453) % 1 + 1) % 1;
+      const r2 = ((Math.sin((h + i * 313) * 78.233) * 43758.5453) % 1 + 1) % 1;
+      const reach = (0.7 + 5.4 * ((i + r1) / SPRAY_N)) * grow * (0.6 + 0.4 * hard);
+      const fan = (r2 - 0.5) * 2.4 * reach * 0.5;             // widens as it flies out
+      const cx = dp.x + (fx0 * reach + lx0 * (fan + 1.5 * side)) ;
+      const cy = dp.y + (fy0 * reach + ly0 * (fan + 1.5 * side));
+      els.push(<circle key={i} cx={cx} cy={cy} r={(0.42 + 0.66 * r1) * (0.55 + 0.7 * grow)}
+        fill={T["ice-ink"]} opacity={0.92 * amt * hard * (1 - 0.45 * grow)} />);
+    }
+    return <g pointerEvents="none">{els}</g>;
+  }
   function displaySwing(p) {
     return p.kind === "player" && animT > 0 ? stickSwing(p.id, animT * totalTime) : 0;
   }
@@ -2354,8 +2410,11 @@ export default function DrillAnimator() {
   }
   // where a carried puck sits: the drawn blade tip, forward + strong side (icon
   // units × ICON_SCALE), and the timing blade the puck rides in the plan
-  const TIP_FWD = 5.6 * ICON_SCALE, TIP_LAT = 2.45 * ICON_SCALE;
-  const BLADE_FWD = 4.9 * ICON_SCALE, BLADE_LAT = 2.55 * ICON_SCALE;
+  // ...in RINK FEET. PLAYER_SCALE is the glyph's own draw scale: without it these
+  // levers describe a stick 7% longer than the one on screen, and the puck hangs
+  // about four inches off the end of the blade.
+  const TIP_FWD = 5.6 * ICON_SCALE * PLAYER_SCALE, TIP_LAT = 2.45 * ICON_SCALE * PLAYER_SCALE;
+  const BLADE_FWD = 4.9 * ICON_SCALE * PLAYER_SCALE, BLADE_LAT = 2.55 * ICON_SCALE * PLAYER_SCALE;
   const bladeAtWorld = (x, y, aDeg, fwd, lat, side) => {
     const a = (aDeg * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a);
     return { x: x + c * fwd - s * lat * side, y: y + s * fwd + c * lat * side };
@@ -2685,6 +2744,18 @@ export default function DrillAnimator() {
     }
     return branchPoint(p);
   }
+  // the skate direction a branch inherits: a branch runs in parallel with the leg
+  // after its departure waypoint, so it picks that sibling leg up (or, off the very
+  // end of a route, the last leg the player skated)
+  function forkEntryDir(p, ref) {
+    const parts = forkParts(ref);
+    const self = forkAt(p, ref);
+    const parentSegs = parts.length <= 1 ? p.path
+      : (forkAt(p, parts.slice(0, -1).join("/"))?.path || []);
+    if (!parentSegs || !parentSegs.length) return "fwd";
+    const at = self && self.at != null ? Math.min(self.at, parentSegs.length - 1) : parentSegs.length - 1;
+    return dirAtWaypoint(parentSegs, Math.min(at + 1, parentSegs.length - 1));
+  }
   // a synthetic "route piece" whose path is a fork and whose origin is where it
   // forks from, so the base-route editing math (segEnd/convertSeg/splitSeg) is reused
   function forkPiece(p, ref) {
@@ -2978,9 +3049,9 @@ export default function DrillAnimator() {
           const a = flatOf(lastTo, t.ref, t.at);
           if (a != null) { win = t; winAt = a; break; }
         }
-        const tp = { shotAt: null, rimAt: null, chipAt: null, rimAim: null, chipAim: null, rimDist: null, chipDist: null };
+        const tp = { shotAt: null, rimAt: null, chipAt: null, rimAim: null, chipAim: null, rimDist: null, chipDist: null, shand: null };
         if (win) {
-          if (win.kind === "shot") { tp.shotAt = winAt; tp.net = win.net ?? null; }   // the terminal's OWN net (absent = nearest)
+          if (win.kind === "shot") { tp.shotAt = winAt; tp.net = win.net ?? null; tp.shand = win.shand ?? null; }   // the terminal's OWN net (absent = nearest) + forehand/backhand call
           else if (win.kind === "rim") { tp.rimAt = winAt; tp.rimAim = win.aim ?? null; tp.rimDist = win.dist ?? null; }
           else { tp.chipAt = winAt; tp.chipAim = win.aim ?? null; tp.chipDist = win.dist ?? null; }
           tp._winTerm = win;   // the AUTHORING terminal that fired this run (ghost pass skips its duplicate)
@@ -3139,6 +3210,8 @@ export default function DrillAnimator() {
       if (p.id !== id) return p;
       const forks = ensureForkAt(p.forks, ref, c => ({ color: c, action: "skate", forks: [], path: [] }));
       const o = forkOriginPoint({ ...p, forks }, ref);
+      // a branch's first leg picks up the direction the player was already skating
+      const entry = forkEntryDir({ ...p, forks }, ref);
       return { ...p, forks: mapForkAt(forks, ref, f => {
         const rp = { ...p, x: o.x, y: o.y, path: f.path };
         const n = rp.path.length;
@@ -3147,7 +3220,8 @@ export default function DrillAnimator() {
         let dx = prev.x - before.x, dy = prev.y - before.y;
         const m = Math.hypot(dx, dy);
         if (m < 0.5) { dx = 22; dy = 0; } else { dx = (dx / m) * 22; dy = (dy / m) * 22; }
-        const seg = convertSeg({ type, x: clampX(prev.x + dx), y: clampY(prev.y + dy) }, prev);
+        const seg = { ...convertSeg({ type, x: clampX(prev.x + dx), y: clampY(prev.y + dy) }, prev),
+          dir: n ? dirAtWaypoint(rp.path, n - 1) : entry };
         return { ...f, path: [...f.path, seg] };
       }) };
     });
@@ -3434,7 +3508,10 @@ export default function DrillAnimator() {
       if (rd) {
         const f = rd.origLen > 0 ? (res.dist || 0) / rd.origLen : 0;
         const s = samplePoly(rd.pts, f);
-        x = s.x; y = s.y; a = p.path.some(sg => sg.dir === "bwd") ? res.a : s.a;
+        // follow the detour's own tangent, but keep whatever the route says the body
+        // is doing — backwards, or partway through a pivot (a per-route "any leg is
+        // bwd" boolean can't express the middle of a turn)
+        x = s.x; y = s.y; a = s.a + (res.flip || 0);
       }
       const side = p.hand === "L" ? -1 : 1;
       const others = [];                                   // other skaters (for shield + push)
@@ -3462,7 +3539,8 @@ export default function DrillAnimator() {
       // branch below) — NOT the detoured centre (x,y), which diverges from the
       // puck by several feet at a detour's apex and would cut the shield off
       // exactly when the carrier is rounding the obstacle.
-      const rawBlade = bladeAtWorld(res.x, res.y, res.a || 0, BLADE_FWD, BLADE_LAT, side);
+      const spSelf = stickSpot(p.id, animT <= 0 ? 0 : animT * totalTime);
+      const rawBlade = bladeAtWorld(res.x, res.y, res.a || 0, spSelf.fwd * ICON_SCALE * PLAYER_SCALE, spSelf.lat * ICON_SCALE * PLAYER_SCALE, side);
       const carries = collisions && pieces.some(q => q.kind === "puck"
         && Math.hypot(displayPosRaw(q).x - rawBlade.x, displayPosRaw(q).y - rawBlade.y) < 2.2);
       if (carries) {
@@ -3481,35 +3559,57 @@ export default function DrillAnimator() {
     // spot and steal the puck for a few frames as they pass by.
     if (p.kind === "puck") {
       let cq = null, cSide = 1, cd = 2.2;
-      for (const q of pieces) {
+      // A puck the plan says is in the air is NOT on anyone's stick, however close it
+      // still is to the one that fired it — only the catch approach below may claim
+      // it. Without this the proximity match holds a just-released puck on the blade
+      // for a frame or two and then hands over the whole gap at once.
+      const inAir = puckInFlight(p.id, animT <= 0 ? 0 : animT * totalTime);
+      for (const q of inAir ? [] : pieces) {
         if (q.kind !== "player" || q.defense) continue;   // (defense never carries; avoids recursion)
-        const raw = displayPosRaw(q);
+        // Match against the ROUTE pose, not displayPosRaw: the puck's own position
+        // comes off that same pose (carriedPuckAt), while displayPosRaw adds the
+        // stride/plant lean. A deep hockey-stop plant swings a leaned blade several
+        // feet, which used to push the carrier past this 2.2ft gate and drop the puck
+        // off the stick for as long as the lean lasted.
+        const e = animT <= 0 ? 0 : animT * totalTime;
+        const raw = displayPosAt(q, e);
         const side = q.hand === "L" ? -1 : 1;
-        const bladeRaw = bladeAtWorld(raw.x, raw.y, raw.a || 0, BLADE_FWD, BLADE_LAT, side);
+        // ...and against the SAME lever the puck is sitting on: through a shot/pass
+        // wind-up that lever swings out to the release spot, which would otherwise
+        // carry the puck straight out of this gate's reach mid-wind-up
+        const sp = stickSpot(q.id, e);
+        const bladeRaw = bladeAtWorld(raw.x, raw.y, raw.a || 0, sp.fwd * ICON_SCALE * PLAYER_SCALE, sp.lat * ICON_SCALE * PLAYER_SCALE, side);
         const d = Math.hypot(res.x - bladeRaw.x, res.y - bladeRaw.y);
         if (d < cd) { cd = d; cq = q; cSide = side; }
+      }
+      // ...or it is the last stretch of a pass on its way to them. The plan already
+      // steers the flight onto the receiver's route-pose blade; only here do we know
+      // where that blade really is once the body lean, plant and shield are on it, so
+      // ease the rest of the way in. `w` is 1 by the time it lands, which is what
+      // makes the catch continuous instead of a hop onto the stick.
+      let approachW = 1;
+      if (!cq) {
+        const ap = catchApproach(p.id, animT <= 0 ? 0 : animT * totalTime);
+        const rec = ap && pieces.find(x => x.id === ap.id && x.kind === "player" && !x.defense);
+        if (rec) { cq = rec; cSide = rec.hand === "L" ? -1 : 1; approachW = ap.w; }
       }
       {
         const q = cq, side = cSide;
         if (q) {   // this puck is on q's blade
           const qd = displayPos(q);                                       // shielded carrier
-          // whiteboard: no stick to ride, so tuck the puck right up against the
-          // symbol (just clear of the glyph) instead of out at the blade tip
+          // the blade tip, swinging out to the release spot beside the near foot
+          // through a shot/pass wind-up — the same lever the plan launches from, so
+          // the puck travels there with the stick instead of jumping at the release.
+          // Whiteboard: no stick to ride, so tuck the puck right up against the
+          // symbol (just clear of the glyph) instead of out at the blade tip.
+          const sp = stickSpot(q.id, animT <= 0 ? 0 : animT * totalTime);
           const tip = whiteboard
             ? bladeAtWorld(qd.x, qd.y, qd.a || 0, 2.4, 0, side)
-            : bladeAtWorld(qd.x, qd.y, qd.a || 0, TIP_FWD, TIP_LAT, side);
-          // carry stickhandle: the puck cradles side-to-side on the blade —
-          // more at low speed, less (with a forward push) when skating hard
-          const e = animT * totalTime;
-          const a2 = displayPosAt(q, Math.max(0, e - 0.07)), b2 = displayPosAt(q, Math.min(totalTime, e + 0.07));
-          const spd = Math.hypot(b2.x - a2.x, b2.y - a2.y) / 0.14;
-          const fast = Math.min(1, spd / 24);
-          const w = Math.sin(e * 8.5);
-          const lat = effDetail ? w * 1.2 * (1 - 0.5 * fast) : 0;         // side-to-side cradle (off with detail anims)
-          const push = effDetail ? (0.5 + 0.5 * Math.sin(e * 8.5 + 1.3)) * 1.1 * fast : 0; // slight fore-push when moving fast
-          const hd = ((qd.a || 0) * Math.PI) / 180;
-          const lx = -Math.sin(hd), ly = Math.cos(hd), fx = Math.cos(hd), fy = Math.sin(hd);
-          return { ...res, x: tip.x + lx * lat + fx * push, y: tip.y + ly * lat + fy * push };
+            : bladeAtWorld(qd.x, qd.y, qd.a || 0, sp.fwd * ICON_SCALE * PLAYER_SCALE, sp.lat * ICON_SCALE * PLAYER_SCALE, side);
+          // the stickhandle is already in `sp` — it swings the lever with the stick,
+          // so the puck rides the blade instead of orbiting it on a separate cradle
+          return { ...res, x: res.x + (tip.x - res.x) * approachW,
+            y: res.y + (tip.y - res.y) * approachW };
         }
       }
     }
@@ -3540,11 +3640,16 @@ export default function DrillAnimator() {
       const strength = g * g * (3 - 2 * g);               // 0 glide → 1 aggressive
       const phase = (2 * Math.PI * (dp.dist || 0)) / STRIDE_LAMBDA;
       lat += Math.sin(phase) * STRIDE_AMP * strength;
-      // hockey stop: as speed bleeds off, plant the body sideways so the finish
-      // reads like a bite, not a coast
-      const plant = dp.braking ? PLANT_DEG * (1 - dp.v) * (Math.sin(phase) >= 0 ? 1 : -1) : 0;
-      lean += STRIDE_LEAN * strength * Math.cos(phase) + plant;
+      lean += STRIDE_LEAN * strength * Math.cos(phase);
     }
+    // Hockey stop: the body turns sideways into the bite, deepest at the moment they
+    // come to rest, then settles back square — so it has to keep relaxing AFTER the
+    // route stops (dp.brake outlives the speed) and it has to stay on ONE edge the
+    // whole time (dp.brakeAt is the arrival distance, frozen, so the stride phase
+    // can't advance the plant onto the other foot part-way through).
+    if (dp.brake > 0)
+      lean += PLANT_DEG * dp.brake
+        * (Math.sin((2 * Math.PI * (dp.brakeAt || 0)) / STRIDE_LAMBDA) >= 0 ? 1 : -1);
     if (!lat && !fore && !lean) return dp;
     const hd = ((dp.a || 0) * Math.PI) / 180;             // lateral = facing+90
     return {
@@ -3618,8 +3723,17 @@ export default function DrillAnimator() {
       if (leg.type !== "fly" || (!leg.sauce && !leg.rise)) continue;
       const span = (leg.t1 - leg.t0) || 1;
       if (leg.rise) {
-        if (e >= leg.t0 && e <= leg.t1) return Math.sin(((e - leg.t0) / span) * Math.PI / 2);       // climb to a peak at the net
-        if (e > leg.t1 && e < leg.t1 + 0.16) return Math.cos(((e - leg.t1) / 0.16) * Math.PI / 2);  // drop into the net
+        // Climb, then drop back ONTO the contact point. Height is faked by offsetting
+        // the puck away from its ground shadow, and a top-down rink has no spare axis
+        // for it — so a puck still lifted when it reaches the net is drawn feet to the
+        // SIDE of where it actually hit. That read as posts struck wide of the mesh and
+        // goals hanging in mid-air beside the net. Peaked late (u^1.5) so it still
+        // reads as rising, but it is back on the ice by the time it arrives.
+        // ...and down BEFORE it gets there, not just at the instant of impact: the
+        // last stretch of the approach has to be at ice level or the puck is still
+        // drawn a foot or two to the side of the post it is about to hit.
+        const uu = ((e - leg.t0) / span) / 0.82;
+        if (e >= leg.t0 && e <= leg.t1) return uu >= 1 ? 0 : Math.sin(Math.PI * Math.pow(uu, 1.2));
       } else {
         if (e >= leg.t0 && e <= leg.t1) return Math.sin(Math.PI * ((e - leg.t0) / span));           // sauce arc up and down
         if (e > leg.t1 && e < leg.t1 + 0.22) return Math.sin(Math.PI * ((e - leg.t1) / 0.22)) * 0.22; // landing bounce
@@ -3782,6 +3896,24 @@ export default function DrillAnimator() {
       return { ...p, path: edit(p.path) };
     });
 
+  // Skate direction is sticky: setting a leg carries the change through every
+  // following leg that still reads the old direction — and into the branches that
+  // continue from those waypoints — stopping wherever the user flipped it back.
+  // spreadDir returns a whole rewritten subtree, so the fork case only needs
+  // mapForkAt to graft it back onto the spine.
+  const setSegDir = (id, i, dir, fork = null) =>
+    update(p => {
+      if (p.id !== id) return p;
+      if (!fork) {
+        const r = spreadDir(p.path, p.forks, i, dir);
+        return r.changed ? { ...p, path: r.path, forks: r.forks } : p;
+      }
+      return { ...p, forks: mapForkAt(p.forks, fork, f => {
+        const r = spreadDir(f.path, f.forks, i, dir);
+        return r.changed ? { ...f, path: r.path, forks: r.forks } : f;
+      }) };
+    });
+
   // `arr` lets the pen materializer allocate against its working array inside
   // a setPieces reducer, where `pieces` is stale
   function nextId(kind, arr = pieces) {
@@ -3828,7 +3960,9 @@ export default function DrillAnimator() {
       let dx = prev.x - before.x, dy = prev.y - before.y;
       const m = Math.hypot(dx, dy);
       if (m < 0.5) { dx = 22; dy = 0; } else { dx = (dx / m) * 22; dy = (dy / m) * 22; }
-      const seg = convertSeg({ type, x: clampX(prev.x + dx), y: clampY(prev.y + dy) }, prev);
+      // a new leg keeps skating the way the one before it did (direction is sticky)
+      const seg = { ...convertSeg({ type, x: clampX(prev.x + dx), y: clampY(prev.y + dy) }, prev),
+        dir: dirAtWaypoint(rp.path, n - 1) };
       // extending curve → curve: make the shared waypoint a smooth join so the new
       // leg continues the heading instead of kinking off with wild split handles
       const build = arr => {
@@ -4216,14 +4350,20 @@ export default function DrillAnimator() {
       if (q.id !== pkId) return q;
       const ts = (q.transfers || []).slice();
       if (tr) ts[stage] = tr; else ts.splice(stage, 1);
-      return { ...q, transfers: ts };
+      return chained({ ...q, transfers: ts });
     });
   }
+  // Actions are authored per waypoint but stored as an ORDERED chain, so a hop added
+  // for an earlier moment lands at the end of the array and the chain stops resolving
+  // (downstream releases read as "isn't holding the puck", and a shot loses its final
+  // holder). Re-derive a working order after any transfer edit — a no-op when the
+  // stored order already resolves, and when none does.
+  const chained = q => { const ts = orderTransfers(q); return ts === q.transfers ? q : { ...q, transfers: ts }; };
   // append an action for a player who doesn't actually hold the puck here — it's
   // recorded (with its intended `by` actor) and flagged "won't complete", not
   // silently dropped, so the user sees their intent
   const appendTransfer = (pkId, tr) =>
-    update(q => (q.id === pkId ? { ...q, transfers: [...(q.transfers || []), tr] } : q));
+    update(q => (q.id === pkId ? chained({ ...q, transfers: [...(q.transfers || []), tr] }) : q));
   // default travel distance (feet) for a fresh terminal release
   const REL_DEFAULT = { rimAt: 65, chipAt: 26 };
   // does terminal `t` match matcher `m` (kind + point + lineage + actor)? — used to
@@ -4495,8 +4635,11 @@ export default function DrillAnimator() {
       if (raw.length < 3) return;
       setPieces(ps => ps.map(p => {
         if (p.id !== id) return p;
-        const route = fitRoute(forkOriginPoint(p, ref), raw);
-        if (!route.length) return p;
+        const fit = fitRoute(forkOriginPoint(p, ref), raw);
+        if (!fit.length) return p;
+        // the branch keeps skating whichever way the player arrived at the split
+        const entry = forkEntryDir(p, ref);
+        const route = entry === "fwd" ? fit : fit.map(s => ({ ...s, dir: entry }));
         const prev = forkAt(p, ref);   // redraw keeps the action + nested reactions
         const forks = ensureForkAt(p.forks, ref, c => ({ color: c, action: "skate", forks: [], path: [] }));
         return { ...p, forks: mapForkAt(forks, ref, f => ({
@@ -4742,7 +4885,10 @@ export default function DrillAnimator() {
         }
         const route = fitRoute(from, raw);
         if (!route.length) { inkMark(o.raw); return; }
-        const legs = o.bwd ? route.map(s => ({ ...s, dir: "bwd" })) : route;
+        // the zigzag gesture says backwards outright; without it an EXTENSION keeps
+        // skating the way the route already was (direction is sticky downstream)
+        const dir = o.bwd ? "bwd" : (extending ? dirAtWaypoint(cur.path, cur.path.length - 1) : "fwd");
+        const legs = dir === "fwd" ? route : route.map(s => ({ ...s, dir }));
         if (!extending) { out[pi] = { ...cur, path: legs }; return; }
         // the old last leg is no longer the end, so its stop mark comes off
         const kept = cur.path.map((s, i) =>
@@ -5838,6 +5984,13 @@ export default function DrillAnimator() {
   // rotated to read upright under rink rotation) and an optional count bubble. Shared
   // by base-route action marks, reaction-light branch badges, and reaction-fork ends,
   // so every action circle in the app is identical.
+  // the little filled disc with a bold number. One tally style, shared by the action
+  // circles and by a merged shot mark, so they can't drift apart.
+  const tallyBubble = (n, r, fill, ink) => (<>
+    <circle cx={0} cy={0} r={r} fill={fill} />
+    <text x={0} y={0} textAnchor="middle" dominantBaseline="central" fontSize={r * 1.4}
+      fontWeight={800} fill={ink} style={{ fontFamily: "system-ui, sans-serif" }}>{n}</text>
+  </>);
   function iconBadge(pt, iconName, color, key, opacity = 1, count = 0, dy = 0) {
     const cfx = iconXf({ x: pt.x, y: pt.y, a: 0 });
     return (
@@ -5850,9 +6003,7 @@ export default function DrillAnimator() {
           </g>
           {count > 1 && (
             <g transform={`translate(${ACT_R * 0.74} ${-ACT_R * 0.74})`}>
-              <circle cx={0} cy={0} r={1.55} fill={color} />
-              <text x={0} y={0} textAnchor="middle" dominantBaseline="central" fontSize={2.2}
-                fontWeight={800} fill="#fff" style={{ fontFamily: "system-ui, sans-serif" }}>{count}</text>
+              {tallyBubble(count, 1.55, color, "#fff")}
             </g>
           )}
         </g>
@@ -6852,7 +7003,7 @@ export default function DrillAnimator() {
             <button className="hd-x" title="Close" onPointerDown={e => e.stopPropagation()}
               onClick={() => { setPopup(null); setPinMode(null); }}><Icon name="close" size={15} /></button>
           </div>
-          <div className="hd-poprow" className="hd-stephint">
+          <div className="hd-poprow hd-stephint">
             Tap a player, puck, or point to edit it here.
           </div>
         </div>
@@ -6892,6 +7043,58 @@ export default function DrillAnimator() {
         <div className="hd-poprow">
           <button className={`hd-mini${isSauce ? " on" : ""}`} onClick={doSauce}><Icon name={isSauce ? "check" : "sauce"} size={14} /> Sauce pass</button>
         </div>
+      );
+    };
+
+    // The receiver's side of a delivery. "Open up" is the coach's term for turning
+    // to face where the puck is coming from so it arrives on the forehand instead of
+    // reaching back onto the backhand — a right shot down the left wing taking a pass
+    // from behind on their right, or a left shot down the right wing from their left.
+    // The flag rides the same transfer the passer's step edits (or the pickup, for a
+    // loose puck), so it round-trips as a trailing `+` in the DSL.
+    const gainSubRows = (p, i, st) => {
+      const pk = st.pk;
+      if (!pk) return null;
+      const pick = st.role === "pickup";
+      const tr = pick ? (pk.pickup || {}) : (pk.transfers || [])[st.stage] || {};
+      const isOpen = !!tr.open;
+      const doOpen = () => update(q => q.id !== pk.id ? q
+        : pick ? { ...q, pickup: { ...q.pickup, open: !isOpen } }
+        : { ...q, transfers: (q.transfers || []).map((x, s) => s === st.stage ? { ...x, open: !isOpen } : x) });
+      return (
+        <>
+          <div className="hd-poprow">
+            <button className={`hd-mini${isOpen ? " on" : ""}`} onClick={doOpen}>
+              <Icon name={isOpen ? "check" : "rotateCw"} size={14} /> Open up
+            </button>
+          </div>
+          <div className="hd-sechint">Turns to face the puck and takes it on the forehand, then pivots forward.</div>
+        </>
+      );
+    };
+
+    // Which hand a shot comes off. Default reads the shooter's angle to the net and
+    // takes whichever side it is already on; the coach can force either instead —
+    // a drill built around finishing on the backhand shouldn't depend on geometry.
+    const shotSubRows = (p, i, st) => {
+      const pk = st.pk, term = st.term;
+      if (!pk || !term) return null;
+      const cur = term.shand || "auto";
+      const setHand = h => update(q => q.id !== pk.id ? q
+        : { ...q, terminals: (q.terminals || []).map(x => sameTerm(x, term)
+            ? { ...x, shand: h === "auto" ? undefined : h } : x) });
+      return (
+        <>
+          <div className="hd-sectitle" style={{ marginTop: 5 }}>Shot hand</div>
+          <div className="hd-poprow">
+            {[["auto", "Default", "whichever side the net is already on"],
+              ["fore", "Forehand", "always off the strong side"],
+              ["back", "Backhand", "always off the back of the blade"]].map(([k, lbl, tip]) => (
+              <button key={k} className={`hd-mini${cur === k ? " on" : ""}`} title={`${lbl} — ${tip}`}
+                onClick={() => setHand(k)}>{lbl}</button>
+            ))}
+          </div>
+        </>
       );
     };
 
@@ -7038,7 +7241,11 @@ export default function DrillAnimator() {
               const { recvRef, ...rest } = x;
               return { ...rest, recvAt: parseInt(idx, 10), ...(ref ? { recvRef: ref } : {}) };
             });
-            return { ...q, transfers: ts };
+            // chained(): moving WHERE a pass is caught moves it in the chain, so
+            // the transfers have to re-order. main added this to setRecvAt — the
+            // chip row this branch replaced — and this dropdown is now the only
+            // control for recvAt, so the fix has to live here instead.
+            return chained({ ...q, transfers: ts });
           });
           return (<>
             <select className="hd-select on" value={val} onChange={e => { const v = e.target.value;
@@ -7144,6 +7351,8 @@ export default function DrillAnimator() {
                 </div>
                 {st.warn && <div className="hd-poprow"><span className="hd-stepwarn">⚠ {st.warn}</span></div>}
                 {t === "pass" && passSubRows(p, i, st)}
+                {isGain(t) && gainSubRows(p, i, st)}
+                {t === "shoot" && shotSubRows(p, i, st)}
                 {(t === "chip" || t === "rim") && <div className="hd-poprow"><span className="hd-stephint">drag the on-ice handle to aim &amp; set distance</span></div>}
               </div>
             );
@@ -7536,11 +7745,12 @@ export default function DrillAnimator() {
                 <div className="hd-field">
                   <div className="hd-sectitle">Skate direction</div>
                   <div className="hd-poprow">
-                    <button className={`hd-mini${(p.path[0].dir || "fwd") === "fwd" ? " on" : ""}`}
-                      onClick={() => updateSeg(p.id, 0, { dir: "fwd" })}>Forwards</button>
-                    <button className={`hd-mini${p.path[0].dir === "bwd" ? " on" : ""}`}
-                      onClick={() => updateSeg(p.id, 0, { dir: "bwd" })}>Backwards</button>
+                    <button className={`hd-mini${dirOf(p.path[0]) === "fwd" ? " on" : ""}`}
+                      onClick={() => setSegDir(p.id, 0, "fwd")}>Forwards</button>
+                    <button className={`hd-mini${dirOf(p.path[0]) === "bwd" ? " on" : ""}`}
+                      onClick={() => setSegDir(p.id, 0, "bwd")}>Backwards</button>
                   </div>
+                  <div className="hd-sechint">Applies from here on, until you change it at a later point.</div>
                 </div>
               )}
               {/* the name doubles as the whiteboard symbol, so it's offered from
@@ -7964,11 +8174,28 @@ export default function DrillAnimator() {
                 <div className="hd-field">
                   <div className="hd-sectitle">Skate direction</div>
                   <div className="hd-poprow">
-                    <button className={`hd-mini${(next.dir || "fwd") === "fwd" ? " on" : ""}`}
-                      onClick={() => uSeg(i + 1, { dir: "fwd" })}>Forwards</button>
-                    <button className={`hd-mini${next.dir === "bwd" ? " on" : ""}`}
-                      onClick={() => uSeg(i + 1, { dir: "bwd" })}>Backwards</button>
+                    <button className={`hd-mini${dirOf(next) === "fwd" ? " on" : ""}`}
+                      onClick={() => setSegDir(p.id, i + 1, "fwd", fork)}>Forwards</button>
+                    <button className={`hd-mini${dirOf(next) === "bwd" ? " on" : ""}`}
+                      onClick={() => setSegDir(p.id, i + 1, "bwd", fork)}>Backwards</button>
                   </div>
+                  <div className="hd-sechint">Applies from here on, until you change it at a later point.</div>
+                  {/* the player pivots here, so which shoulder they open over is a
+                      real choice — by default they turn to face the puck in play */}
+                  {dirOf(next) !== dirOf(s) && (
+                    <>
+                      <div className="hd-sectitle" style={{ marginTop: 6 }}>Turn toward</div>
+                      <div className="hd-poprow">
+                        {[["left", "Left", "pivots over their left shoulder"],
+                          ["right", "Right", "pivots over their right shoulder"],
+                          ["player", "Player", "turns toward the nearest other player"],
+                          ["puck", "Puck", "turns toward the puck on a player's stick"]].map(([k, lbl, tip]) => (
+                          <button key={k} className={`hd-mini${(next.turn || "puck") === k ? " on" : ""}`}
+                            title={`${lbl} — ${tip}`} onClick={() => uSeg(i + 1, { turn: k })}>{lbl}</button>
+                        ))}
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
               {p.kind === "puck" && (
@@ -7992,7 +8219,7 @@ export default function DrillAnimator() {
               <div className="hd-poprow">{curveButtons(t => addSegment(p.id, t, fork), () => drawRouteMode(p.id, fork))}</div>
             </div>
           ) : (
-            <div className="hd-poprow" className="hd-stephint">End of {fork ? "reaction" : "route"}</div>
+            <div className="hd-poprow hd-stephint">End of {fork ? "reaction" : "route"}</div>
           )}
           {/* route end: mark that the player stops here → a ‖ stop mark replaces
               the direction arrowhead (skating-diagram convention). Offered on a base
@@ -8210,9 +8437,32 @@ export default function DrillAnimator() {
     // shots step back — so nothing overlaps and short shots still read accurately
     const shotTargets = pieces.filter(q => q.kind === "net" || q.kind === "passer" || q.kind === "bumper" || q.kind === "tire");
     const nearNet = (x, y) => { let best = "?", bd = 24; for (const nt of shotTargets) { const d = Math.hypot(nt.x - x, nt.y - y); if (d < bd) { bd = d; best = nt.id; } } return best; };
-    const byNet = {}, shotStagger = {};   // `${pk}/${k}` → extra feet in front of the net
+    // A player firing a pile of pucks from one spot at one net draws the same arrow
+    // over and over. Collapse those into ONE mark carrying a count, the way an action
+    // circle already tallies repeats, instead of a stack of identical lines. Bucketed
+    // by release point (~3ft) rather than exact coordinates: the blade shifts a little
+    // between shots as the body settles, and they are still visually the same mark.
+    const shotOne = {}, shotN = {};      // `${pk}/${k}` → is the drawn one / how many it stands for
+    const byNet = {}, shotStagger = {};  // `${pk}/${k}` → extra feet in front of the net
+    const groups = {};
     pieces.filter(q => q.kind === "puck" && plans[q.id]).forEach(q => plans[q.id].legs.forEach((L, k, legs) => {
       if (L.type === "fly" && L.shot && (!legs[k + 1] || legs[k + 1].type !== "fly")) {
+        // keyed on the SHOOTER as well as the spot: two players standing within a
+        // yard of each other are still two marks, not one attributed to whoever
+        // happened to shoot shortest
+        const g = `${L.by || "?"}|${Math.round(L.x0 / 3)},${Math.round(L.y0 / 3)}|${nearNet(L.x1, L.y1)}`;
+        (groups[g] = groups[g] || []).push({ id: `${q.id}/${k}`, len: Math.hypot(L.x1 - L.x0, L.y1 - L.y0) });
+      }
+    }));
+    // the shortest of a group is the one drawn — it reads truest against the net
+    Object.values(groups).forEach(list => {
+      const lead = list.reduce((a, c) => (c.len < a.len ? c : a));
+      list.forEach(sIt => { shotN[sIt.id] = list.length; });
+      shotOne[lead.id] = true;
+    });
+    // ...and only the drawn ones queue for room in front of the net
+    pieces.filter(q => q.kind === "puck" && plans[q.id]).forEach(q => plans[q.id].legs.forEach((L, k, legs) => {
+      if (L.type === "fly" && L.shot && (!legs[k + 1] || legs[k + 1].type !== "fly") && shotOne[`${q.id}/${k}`]) {
         const net = nearNet(L.x1, L.y1);
         (byNet[net] = byNet[net] || []).push({ id: `${q.id}/${k}`, len: Math.hypot(L.x1 - L.x0, L.y1 - L.y0) });
       }
@@ -8328,6 +8578,9 @@ export default function DrillAnimator() {
             </g>
           );
         }
+        // one of a pile of identical shots — the group draws once, on its shortest
+        if (L.shot && runEnd && shotN[`${q.id}/${k}`] > 1 && !shotOne[`${q.id}/${k}`]) return null;
+        const nShots = L.shot && runEnd ? (shotN[`${q.id}/${k}`] || 1) : 1;
         const dx = L.x1 - L.x0, dy = L.y1 - L.y0;
         // start: released AT an action badge → begin just outside its round edge,
         // measured from the badge CENTRE (not the stick); off a standing stick → start there.
@@ -8391,6 +8644,15 @@ export default function DrillAnimator() {
                         end in the standard open ">" like skating routes */}
                     <path d="M -3.3 -2.2 L 0 0 L -3.3 2.2" fill="none" stroke={INK} strokeWidth={casing ? 2.1 : 0.95} strokeLinecap="round" strokeLinejoin="round" />
                   </g></g>; })())}
+            {/* how many shots this one mark stands for — same tally an action circle
+                uses for repeats, sat just off the shoulder of the caret */}
+            {nShots > 1 && !casing && !flat && (() => {
+              const b0 = gmMove(ex, ey, -ux, -uy, 3.1);          // back off the caret...
+              const bp = gmMove(b0.x, b0.y, -uy, ux, 2.6);        // ...and off its shoulder
+              const bfx = iconXf({ x: bp.x, y: bp.y, a: 0 });
+              return <g transform={bfx.t}><g transform={`rotate(${-bfx.th})`}>
+                {tallyBubble(nShots, 1.75, INK, T.ice)}
+              </g></g>; })()}
             {ghostLand && !casing && (() => {
               // ghost puck resting where the chip/rim lands
               const fx = iconXf({ x: L.x1, y: L.y1, a: 0 });
@@ -9757,7 +10019,7 @@ export default function DrillAnimator() {
                 );
               }
               const fx = iconXf(dp);
-              return (
+              const icon = (
                 <PieceIcon key={p.id} p={p} pos={dp} xf={fx.t} thDeg={fx.th} wb={whiteboard} wbCircle={wbCircle}
                   selected={editing && p.id === selectedId} swing={displaySwing(p)}
                   dim={animT > 0} onDown={e => pieceDown(e, p.id)}
@@ -9765,6 +10027,8 @@ export default function DrillAnimator() {
                   onStickDown={editing && tool !== "draw" && p.kind === "player" && !p.path.length && !(p.lock && !lockedSelectable)
                     ? e => stickDown(e, p) : undefined} />
               );
+              const spray = snowSpray(p, dp);
+              return spray ? <g key={p.id}>{spray}{icon}</g> : icon;
             })}
             {/* editing handles ON TOP of all piece icons: a waypoint's grab target
                 must beat any prop (stick/cone/…) stacked over it, so these paint
@@ -10146,7 +10410,7 @@ export default function DrillAnimator() {
               onPointerDown={() => { if (playing) setPlaying(false); setHoldStep(null); holdRef.current = 0; }}
               onChange={e => scrubTo(+e.target.value)} />
           </div>
-          <span className="hd-scrubtime">{(animT * totalTime).toFixed(1)}/{totalTime.toFixed(1)}s</span>
+          <span className="hd-scrubtime">{Math.min(animT * totalTime, drillTime).toFixed(1)}/{drillTime.toFixed(1)}s</span>
         </div>
       )}
 
@@ -10255,11 +10519,10 @@ export default function DrillAnimator() {
             <Icon name={anyLocked ? "unlock" : "lock"} size={16} /> {anyLocked ? "Unlock all" : "Lock board"}
             <span className={`hd-sw${anyLocked ? " on" : ""}`} />
           </button>
-          <div className="hd-poprow">
-            <span>Let AI play 5v5 for</span>
-            <Stepper value={aiMins} onChange={setAiMins} step={1} min={1} suffix="m" />
-            <button className="hd-mini" onClick={startAiPlay}><Icon name="play" size={13} /> Start</button>
-          </div>
+          <button className="hd-item" onClick={() => setOpenMenu("game")}>
+            <Icon name="react" size={16} /> Game mode
+            <span className="hd-chev"><Icon name="chevronRight" size={14} /></span>
+          </button>
 
           <div className="hd-mh hd-prefsec">App</div>
           <button className="hd-item" onClick={() => setOpenMenu("prefs")}>
@@ -10398,9 +10661,15 @@ export default function DrillAnimator() {
             desc="A locked piece normally ignores taps entirely, so you can draw over it freely. Turn this on to still select one — its panel opens with an Unlock button instead of its settings." />
 
           <div className="hd-mh hd-prefsec">Presentation</div>
-          <PrefRow title="Caption pause"
-            desc={`How long play holds at each caption before carrying on — ${presoDelay}s. Tapping the ice skips ahead without waiting.`}
+          <PrefRow title="Minimum caption pause"
+            desc={`The least time play holds at any caption — ${presoDelay}s. A longer note holds longer than this on its own (see below). Tapping the ice skips ahead without waiting.`}
             control={<Stepper value={presoDelay} onChange={setPresoDelay} step={0.5} min={0} suffix="s" />} />
+          <PrefRow title="Reading pace"
+            desc={(READ_PACES[readPace] || READ_PACES[READ_PACE_DEFAULT]).cps
+              ? "Long captions hold past the minimum, scaled to how much there is to read. Brisk assumes a quick reader; Relaxed gives a room more time."
+              : "Fixed — every caption holds for exactly the minimum above, however much it says."}
+            control={<Stepper value={readPace} onChange={setReadPace} step={1} min={0} max={READ_PACES.length - 1}
+              fmt={i => (READ_PACES[i] || READ_PACES[READ_PACE_DEFAULT]).label} />} />
           <PrefToggle title="Minor steps" on={minorDesc} set={setMinorDesc}
             desc="Auto-caption the areas each player skates through, on top of the steps you wrote yourself. A quick way to narrate a drill you haven't annotated." />
 
@@ -10434,7 +10703,7 @@ export default function DrillAnimator() {
             desc="How long a looping drill holds on the last frame before it starts again."
             control={<Stepper value={loopPause} onChange={setLoopPause} step={0.5} min={0} suffix="s" />} />
           <PrefRow title="Drill pace"
-            desc={`Base skating speed for the whole drill — ${pace} ft/s, a ${totalTime.toFixed(1)}s run. Every player's own speed multiplies this, and all timing follows from it.`}>
+            desc={`Base skating speed for the whole drill — ${pace} ft/s, a ${drillTime.toFixed(1)}s run. Every player's own speed multiplies this, and all timing follows from it.`}>
             <input type="range" min={6} max={30} step={1} value={pace} style={{ width: "100%" }}
               onChange={e => setPace(parseFloat(e.target.value))} />
           </PrefRow>
@@ -10461,6 +10730,14 @@ export default function DrillAnimator() {
               </div>
             </PrefRow>
           )}
+
+          {/* Sits directly above the odds it governs. It went missing in the
+              settings rewrite — the only way to reach it had become the "Turn
+              it on" button inside the collapsed Advanced warning, so it could
+              be switched on and never off again. */}
+          <div className="hd-mh hd-prefsec">Shots</div>
+          <PrefToggle title="Realistic shots" on={realisticShots} set={setRealisticShots}
+            desc="Shots resolve by chance — saved, off the post, wide, over, or in. Off, every shot goes in flat along the ice, which is clearer when you're teaching the pattern rather than the outcome." />
 
           <button className={`hd-item${showAdvanced ? " on" : ""}`} style={{ marginTop: 4 }}
             aria-expanded={showAdvanced} onClick={() => setShowAdvanced(v => !v)}>
@@ -10506,6 +10783,36 @@ export default function DrillAnimator() {
           <div className="hd-row">
             <button className="hd-btn" onClick={() => setOpenMenu("settings")}><Icon name="chevronLeft" size={14} /> Menu</button>
             <button className="hd-btn exit" onClick={() => setOpenMenu(null)}>Done</button>
+          </div>
+        </div>
+      )}
+
+      {openMenu === "game" && (
+        <div className="hd-sheet">
+          <div className="hd-mh">Game mode</div>
+          <div className="hd-prefbody">
+            <div className="hd-pref">
+              <div className="hd-prefhead"><span className="hd-preftitle">Let AI play</span></div>
+              <div className="hd-prefdesc">
+                Ten skaters and two goalies play a live 5v5 on the sheet — no drill, no routes,
+                just a game. Useful for showing a shape or a situation you haven't drawn, or for
+                letting the board run while you talk.
+              </div>
+            </div>
+            <PrefRow title="Length"
+              desc={`How long the run lasts before it stops on its own — ${aiMins} minute${aiMins > 1 ? "s" : ""}. You can stop it any time from the scoreboard at the top of the ice.`}
+              control={<Stepper value={aiMins} onChange={setAiMins} step={1} min={1} suffix="m" />} />
+            <div className="hd-pref">
+              <div className="hd-prefhead"><span className="hd-preftitle">Your board is safe</span></div>
+              <div className="hd-prefdesc">
+                The game runs OVER your drill without touching it — nothing is added, moved or
+                saved while it plays, and your board is exactly as you left it when it ends.
+              </div>
+            </div>
+          </div>
+          <div className="hd-row">
+            <button className="hd-btn" onClick={() => setOpenMenu("settings")}><Icon name="chevronLeft" size={14} /> Menu</button>
+            <button className="hd-btn exit" onClick={startAiPlay}><Icon name="play" size={14} /> Start game</button>
           </div>
         </div>
       )}
@@ -10766,7 +11073,8 @@ export default function DrillAnimator() {
             anchors there (and tracks edits); otherwise it pins the time. Type it on the ice and
             drag it clear of the action; “Place” re-places a caption. Tap the anchor chip to set an
             exact time in seconds, or pin the step to a player's route point.
-            In Presentation mode, play pauses {presoDelay}s at each step (tap the ice to skip ahead).
+            In Presentation mode, play pauses at each step for at least {presoDelay}s — longer if
+            there's more to read (tap the ice to skip ahead).
           </div>
         </div>
       )}

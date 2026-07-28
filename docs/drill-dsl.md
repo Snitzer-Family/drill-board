@@ -149,7 +149,9 @@ Places a piece. `id` is any unique token (e.g. `F1`, `PK1`, `N2`).
 | `pass=<pt>:<to>[@<recv>]%<by>` | …released by a specific player. Any transfer form (`pass=`/`rebound=`/`rim=`/`chip=` handoffs) takes a `%<by>` suffix pinning WHO performs it — required after sibling-branch receivers, where several players each hold the puck on their own mutually-exclusive run and the releaser can't be inferred. Written only when it differs from the inferred holder, so linear chains are unchanged. (For `pass=`, `%<by>` sits after `^<passer>` and before the sauce `!`.) |
 | `pass=<pt>:<to>[@<recv>]^<passer>` | Give-and-go: pass at `pt` into passer `<passer>`, which returns it to `to` (usually the passer themselves) at their point `recv`. In the app, tap a passer's id in the *Pass to* row (marked ⟲). |
 | `pass=<pt>:<to>[@<recv>]!` | Sauce (raised) pass — a trailing `!`. The puck arcs up over ice obstacles and bounces on landing (with a shadow under it in flight). Toggle *Sauce pass ⤴* on the pass. |
+| `<gain>…+` | **Open up** into the catch — a trailing `+` on any form that delivers the puck to a player (`pass=`, `rebound=`, the `rim=`/`chip=` handoff forms, and `pickup=`). The receiver turns to face where the puck is coming from just before it arrives, takes it on their forehand instead of reaching back onto their backhand, then pivots forward again to skate on. Purely how the catch is played — the flight and every leg time are unchanged. Toggle *Open up ⟳* on the receiving step in the Actions panel. On `pass=` the `+` sits last, after the sauce `!`; on `rim=`/`chip=` it sits after `~<deg>`/`*<ft>`; on `pickup=` after the nearest `*`. |
 | `shoot=<pt>[^<shooter>][>net]` | Terminal shot at point `pt` — the puck caroms off the net and lands loose. `>net` targets a specific net (absent = nearest). If a drill has a shot but **no net or passer at all**, loading it auto-places an empty net in the crease nearest the shooter — (11, 42.5) or (189, 42.5), one per end as needed (a shot pinned `>` to an existing bumper/tire doesn't trigger this). Several `shoot=` tokens may coexist on one puck: each is an independent chain end tied to its own shooter/branch, and exactly one fires per run (the resolved final holder's). |
+| `shoot=<pt>…&f` / `…&b` | Force the shot onto the **forehand** (`&f`) or the **backhand** (`&b`). Absent = whichever side the net is already on when they release — nobody reaches across their body for a net sitting on their backhand. A forehand leaves out beside the strong-side foot, a backhand off the other face of the blade, from in front and round to the weak side. Set via *Shot hand* on the Shoot step in the Actions panel. |
 | `shoot=<pt>^<shooter>` | …by a specific player. Needed when two conditional receivers (on mutually-exclusive branches) could each be the final holder — `^<shooter>` says which one shoots, so the shot lands on that player's run only, not both. The app always pins `^<shooter>` on newly authored shots. |
 | `rim=<pt>[^<shooter>][~<deg>][*<ft>]` | Hard-rim **release** around the boards. `~<deg>` sets the direction, `*<ft>` the distance — or drag the on-ice handle at the end of the rim to set both. The puck lands loose. `^<shooter>` pins the acting player when several conditional receivers could each be the final holder (as with `shoot=`). |
 | `chip=<pt>[^<shooter>][~<deg>][*<ft>]` | Chip **release** into space (banks off the boards). `~<deg>` sets the direction (default: the chipper's facing), `*<ft>` the distance — or drag the on-ice handle. The puck lands loose. `^<shooter>` pins the acting player as above. |
@@ -212,7 +214,8 @@ is the piece's starting spot (so `shoot=0` / `chip=0` releases before skating).
 | Modifier | Meaning |
 |---|---|
 | `CARRY` / `PASS` / `SHOT` | Puck speed class for a puck's own route leg |
-| `FWD` / `BWD` | Skate forward / backward |
+| `FWD` / `BWD` | Skate forward / backward. Per **leg** in the file (forward is the default, so only `BWD` is ever written) — but in the app it is *sticky*: toggling *Skate direction* at a waypoint carries the change through every following leg, and into the branches that continue from them, until a later waypoint is toggled back. |
+| `TURN left\|right\|player\|puck` | On a leg that **reverses** the skate direction: which way the player sweeps through the 180° pivot. `left`/`right` are literal shoulders; `player` opens toward the nearest other player; `puck` (the default, so it is only written when it isn't `puck`) opens toward whichever puck is on a player's stick at that moment. With nothing to read, they open toward mid-ice. Set via *Turn toward* on the waypoint popup, which only appears at a waypoint that actually changes direction. |
 | `STOP <n>` | Pause `n` seconds at the start of this leg (*Delay trigger → Timer*) |
 | `WAIT <player> <pt>` | Pause at the start of this leg until `<player>` **reaches** point `<pt>`. In the app: *Delay trigger → Waypoint* on the waypoint popup. |
 | `WACT <player> <pt>` | Pause at the start of this leg until `<player>` **releases the puck** (pass/chip/rim/shot) at point `<pt>` (`0` = at any of their actions). In the app: *Delay trigger → Action*. |
@@ -354,6 +357,13 @@ An optional **`pos=<x>:<y>`** saves where the caption sits during playback (its
 centre), in **rink feet** (`x` 0–200, `y` 0–85 — the same coordinates as pieces), so
 it holds the same area of the ice across portrait and landscape. Omit it and the
 caption defaults to bottom-centre.
+
+How long each caption holds isn't authored here — it's a playback setting (☰ →
+*Presentation*). **Min pause** is a floor every caption gets; a caption too long
+to read in that time stretches by its own reading time, at the **Read** pace the
+presenter picks (*Fixed* opts out and holds every caption for exactly the
+minimum). So a long step is worth writing without trimming it to fit — and a tap
+on the ice always skips a hold early.
 
 ```drill
 STEP at=0 "Play begins — F1 carries out of the corner"

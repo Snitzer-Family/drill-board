@@ -239,3 +239,47 @@ export function looseOn(ledger, pieces, pid, ref) {
   if (ctx === null) return [];
   return ledger.loose.filter(lo => mergeCond(lo.cond, ctx) !== null);
 }
+
+// The puck chain is a POSITIONAL array: transfers[s]'s releaser is whoever holds
+// the puck after transfers[0..s-1]. Authoring, though, is by waypoint — so adding a
+// hop that happens EARLIER in the play appends it at the END, and from there the
+// chain no longer resolves: the later releases read as "isn't holding the puck",
+// and the terminal (a shot) has no final holder to belong to, so the app stops
+// offering it. Completing the chain (e.g. the give-and-go back) doesn't help,
+// because the ORDER is still wrong.
+//
+// This re-derives an order that resolves. It is deliberately conservative: if the
+// stored order already resolves it is returned untouched (same array identity), and
+// if no order resolves it is also left alone rather than half-rewritten.
+export function orderTransfers(pk) {
+  const ts = (pk && pk.transfers) || [];
+  if (ts.length < 2) return ts;
+  // branch-tagged chains resolve per-lineage rather than by position, which a flat
+  // reordering can't express — leave those to the author
+  if (ts.some(t => t.atRef || t.recvRef)) return ts;
+  const head = pk.carrier || (pk.pickup && pk.pickup.to) || null;
+  if (!head) return ts;
+  // a hop is releasable by `h` when h is the pinned actor (or none is pinned) and it
+  // isn't a pass from a player to themselves (a give-and-go via a passer is fine)
+  const canRelease = (t, h) => (t.by || h) === h && (t.to !== h || !!t.via);
+  const resolves = order => {
+    let h = head;
+    for (const t of order) { if (!canRelease(t, h)) return false; h = t.to; }
+    return true;
+  };
+  if (resolves(ts)) return ts;                       // already a valid chain — never reorder
+  const left = ts.slice(), out = [];
+  let h = head;
+  while (left.length) {
+    // of everything this holder could release, take the one they let go of FIRST:
+    // earliest release waypoint, then the earliest catch (two hops off the same spot)
+    const cand = left.filter(t => canRelease(t, h));
+    if (!cand.length) return ts;                     // unresolvable — leave the author's order
+    cand.sort((a, b) => (a.at - b.at)
+      || ((a.recvAt == null ? Infinity : a.recvAt) - (b.recvAt == null ? Infinity : b.recvAt)));
+    out.push(cand[0]);
+    left.splice(left.indexOf(cand[0]), 1);
+    h = cand[0].to;
+  }
+  return out;
+}

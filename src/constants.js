@@ -37,7 +37,7 @@ export const TYPEFACES = [
 ];
 export const TYPEFACE_KEY = "drillboard:typeface";
 
-export const APP_VERSION = "6.87";
+export const APP_VERSION = "6.88";
 // DSL schema version, stamped into every serialized drill (`DSL <n>` header) so
 // production builds can eventually render a drill per the version that wrote it.
 // Bump ONLY on a breaking DSL change (new kinds/modifiers that older builds would
@@ -45,6 +45,11 @@ export const APP_VERSION = "6.87";
 export const DSL_VERSION = 9;
 // visual size of players/pucks/cones relative to true rink-feet scale
 export const ICON_SCALE = 0.8;
+// ...and the player glyph draws a touch under that, so skaters crowd the ice less.
+// Anything converting a point ON the drawn player (the stick, the blade, the puck
+// riding it) into rink feet must fold this in too, or the puck floats off the end
+// of the blade — the glyph shrank but the lever it hangs off did not.
+export const PLAYER_SCALE = 0.93;
 // a route line starts this many rink feet clear of the player icon (drawing only —
 // timing still measures from the true start point)
 export const ROUTE_START_GAP = 3;
@@ -65,6 +70,32 @@ export const SHOT_AIR_PROB = 0.4;
 // fraction of speed a missed puck keeps when it caroms off a board or post
 // (restitution); 1 = perfectly elastic, lower = the boards absorb more energy
 export const BOUNCE_REST = 0.6;
+
+// How long a presentation caption stays on screen. The presenter's pause setting
+// is a MINIMUM; a caption too long to read in that time stretches by the reading
+// time it actually needs. How fast the audience is assumed to read is the
+// presenter's call — reading it themselves at the bench is quicker than reading
+// it aloud to a room — so the pace is a menu control, in characters per second.
+// "Fixed" (0) opts out: every caption holds exactly the minimum.
+export const READ_PACES = [
+  { label: "Fixed", cps: 0 },
+  { label: "Brisk", cps: 15 },
+  { label: "Balanced", cps: 13 },
+  { label: "Relaxed", cps: 11 },
+];
+export const READ_PACE_DEFAULT = 2;      // index into READ_PACES → "Balanced"
+// ...but one long note can't stall the play: this caps the added reading time.
+export const CAPTION_MAX_EXTRA = 5;
+export const captionHold = (text, minSec, cps) => {
+  if (!(cps > 0)) return minSec;
+  // count what the viewer SEES: inline markdown renders away, so a bolded
+  // caption shouldn't be billed for its asterisks
+  const chars = String(text == null ? "" : text)
+    .replace(/\[([^\]]+)\]\([^)\s]*\)/g, "$1")
+    .replace(/[`*_]/g, "")
+    .trim().length;
+  return minSec + Math.min(CAPTION_MAX_EXTRA, Math.max(0, chars / cps - minSec));
+};
 
 export const DEFAULT_TEXT = `RINK full
 PIECE N1 net 11 42.5

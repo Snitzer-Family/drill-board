@@ -277,5 +277,56 @@ PIECE PK1 puck 40 42 #111 on=P3 pass=2ea043.1:P1@1 pass=e5342b.1:P2@1 chip=1:P2@
   T('wig4: red feed pass viable', L.viability['t:PK1:4'], 'ok');
   T('wig4: P1 shot viable', L.viability['x:PK1:0'], 'ok');
 }
+/* ---- chain ORDER: actions are authored per waypoint, stored as an ordered chain ---- */
+{
+  const { orderTransfers } = await import('../src/possession.js');
+  const ord = pk => orderTransfers(pk).map(t => `${t.by || '-'}>${t.to}@${t.recvAt}`).join(' ');
+
+  // the reported break: P2 passes to P1 (caught late), then the user inserts an
+  // EARLIER pass to P1 and completes it with a give-and-go back — the new hops are
+  // appended, so the stored order no longer resolves and the shot loses its holder
+  const broken = { carrier: 'P2', transfers: [
+    { at: -1, to: 'P1', recvAt: 5, kind: 'pass' },
+    { at: -1, to: 'P1', recvAt: 0, kind: 'pass', by: 'P2' },
+    { at: 1, to: 'P2', recvAt: null, kind: 'pass' }] };
+  T('chain: reorders a give-and-go authored out of sequence',
+    ord(broken), 'P2>P1@0 ->P2@null ->P1@5');
+
+  // an order that already resolves is returned untouched, same array identity
+  const fine = { carrier: 'P1', transfers: [
+    { at: 0, to: 'P2', recvAt: 0, kind: 'pass' },
+    { at: 1, to: 'P3', recvAt: 1, kind: 'pass' }] };
+  T('chain: a working order is left exactly alone', orderTransfers(fine) === fine.transfers, true);
+
+  // two hops released from the same spot order by where they are CAUGHT
+  const sameSpot = { carrier: 'P1', transfers: [
+    { at: 2, to: 'P2', recvAt: 4, kind: 'pass' },
+    { at: 2, to: 'P2', recvAt: 1, kind: 'pass' },
+    { at: 0, to: 'P1', recvAt: 0, kind: 'pass', by: 'P2' }] };
+  T('chain: same release point orders by the catch', ord(sameSpot), '->P2@1 P2>P1@0 ->P2@4');
+
+  // conservative: nothing to do, nothing that resolves, branch-tagged chains
+  T('chain: a single hop is untouched', orderTransfers({ carrier: 'P1', transfers: [{ at: 0, to: 'P2' }] }).length, 1);
+  T('chain: no head → untouched', orderTransfers({ transfers: [{ at: 0, to: 'P2' }, { at: 1, to: 'P3' }] }).length, 2);
+  const unresolvable = { carrier: 'P1', transfers: [
+    { at: 0, to: 'P2', kind: 'pass' }, { at: 0, to: 'P3', kind: 'pass', by: 'P9' }] };
+  T('chain: an unresolvable chain keeps the author\'s order',
+    orderTransfers(unresolvable) === unresolvable.transfers, true);
+  const branchy = { carrier: 'P1', transfers: [
+    { at: 1, to: 'P2', recvAt: 3, kind: 'pass' },
+    { at: 0, to: 'P3', recvAt: 0, kind: 'pass', atRef: '#2ea043' }] };
+  T('chain: branch-tagged chains are left to the author',
+    orderTransfers(branchy) === branchy.transfers, true);
+  // a give-and-go off a passer is a legal self-directed hop and must stay releasable
+  // a give-and-go off a passer is a legal self-directed hop: pinning both to P1
+  // makes the stored order unresolvable, and the fix must still be willing to put
+  // the self-hop first rather than rejecting it as a self-pass
+  const viaGo = { carrier: 'P1', transfers: [
+    { at: 3, to: 'P2', recvAt: 2, kind: 'pass', by: 'P1' },
+    { at: 1, to: 'P1', recvAt: 1, kind: 'pass', via: 'PS1', by: 'P1' }] };
+  T('chain: a give-and-go via a passer stays releasable', ord(viaGo), 'P1>P1@1 P1>P2@2');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
+
