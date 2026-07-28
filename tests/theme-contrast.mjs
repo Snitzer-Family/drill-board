@@ -193,6 +193,23 @@ check("the action bar is one border-box height, one reserved band", () => {
     assert.ok(!css.includes(dead), `${dead}…} should no longer exist — the band is unconditional`);
 });
 
+// STYLES is one big template literal, so a stray backtick — even inside a CSS
+// comment, quoting a property name — closes the string and the whole file stops
+// parsing. Worse, the build error points at the next odd character rather than
+// the backtick, and on a clean tree the copy-preview plugin's ENOENT (dist/ was
+// never written) masks it completely. Cost twenty minutes twice; catch it in a
+// one-second node test instead.
+check("styles.js has no stray backticks inside the STYLES literal", () => {
+  const css = read("../src/styles.js");
+  const body = css.slice(css.indexOf("export const STYLES = `") + 23);
+  const end = body.indexOf("`");
+  assert.ok(end >= 0, "STYLES literal is never closed");
+  assert.equal(body.slice(0, end).includes("`"), false);
+  // the only backtick after the opener must be the one that closes it
+  assert.equal((body.match(/`/g) || []).length, 1,
+    "a backtick inside STYLES ends the template literal early — use plain prose");
+});
+
 // The single-line guarantee. The palette used to wrap to a second row on a
 // narrow phone, which is the only reason a second height variable ever existed.
 // nowrap on both bars is what makes one height true at every width; without it

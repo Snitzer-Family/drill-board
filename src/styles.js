@@ -7,6 +7,12 @@
 // or add one to theme.js if nothing fits.
 //
 // Geometry vars stay --hd-*; only colour is --db-*.
+//
+// STYLES is a template literal, so a backtick anywhere in here — including in a
+// comment, quoting a property name — ends the string and the file stops parsing.
+// The build error then points at the NEXT stray character rather than the
+// backtick, and if dist/ doesn't exist yet the copy-preview plugin's ENOENT
+// masks it entirely. tests/theme-contrast.mjs pins this; keep prose plain.
 
 export const STYLES = `
         /* Scoped box-sizing reset. The app has no global reset, so by default a
@@ -130,6 +136,11 @@ export const STYLES = `
           cursor:pointer; font-size:8.5px; font-weight:700; letter-spacing:.03em;
           text-transform:uppercase; line-height:1; }
         .hd-pentool > span:last-child { opacity:.75; }
+        /* a piece sprite used as a bar chip's icon. .hd-toolimg is sized for the
+           big grid tiles (46px tall, full width); inside a 42px-tall bar button
+           it has to come down to icon scale. */
+        .hd-pentool .hd-toolimg { width:24px; height:20px; flex:none; }
+        .hd-actglyph { font-size:17px; line-height:1; }
         .hd-pentool.on { background:var(--db-accent); border-color:var(--db-accent); color:var(--db-text-on-accent); }
         .hd-pentool.on > span:last-child { opacity:1; }
         .hd-pentool.danger { color:var(--db-danger); }
@@ -162,6 +173,23 @@ export const STYLES = `
            thickness, style — under one button. Its swatches are the only thing
            in a popover that wraps, so they get their own grid. */
         .hd-penpop .hd-inkgrid { display:grid; grid-template-columns:repeat(4, auto); gap:6px; }
+        /* The add-group popovers reuse .hd-toolgrid, which sizes its columns in
+           1fr — fine inside a menu panel that has a width, but this popover is a
+           shrink-to-fit column flexbox, so 1fr resolved to ZERO and every tile
+           stacked in a 10px stripe. Fixed columns instead, so the popover takes
+           its width from the grid rather than the other way round.
+           The selector carries .compact because the base .hd-toolgrid.compact
+           rule is equally specific and declared later — a looser one loses. */
+        .hd-penpop .hd-toolgrid.compact { grid-template-columns:repeat(4, 66px); }
+        .hd-penpop .hd-toolgrid.compact .hd-tool .hd-toolimg { height:30px; }
+        /* …and on a narrow screen that grid is wider than the button it hangs
+           off, so centring on the button pushes it past the screen edge. Anchor
+           it to the BAR instead — the same answer the corner menus reach below
+           this breakpoint, and it cannot clip wherever the button sits.
+           position:static on the wrap is what re-points the popover's containing
+           block at .hd-act, so its bottom:100% then measures the bar. */
+        .hd-root:not(.dense) .hd-act .hd-penwrap { position:static; }
+        .hd-root:not(.dense) .hd-act .hd-penpop.grid { left:8px; right:8px; transform:none; }
         .hd-penpop .hd-penrule { width:100%; height:1px; background:var(--db-border-strong); margin:2px 0; }
         .hd-penpoptip { font-size:10px; font-weight:700; color:var(--db-text-muted); }
         /* Vertical range: the modern property first, then the WebKit one older

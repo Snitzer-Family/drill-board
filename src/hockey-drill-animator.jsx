@@ -46,6 +46,26 @@ const TOOL_GLYPH = {
 // the interchangeable on-ice training tools: any one can be swapped for
 // another from its popup ("Change to" row) without re-placing it
 const TOOL_KINDS = ["cone", "tire", "bumper", "deker", "passer", "stick", "light"];
+// Everything you can put on the ice, in three groups. ONE table, because the
+// same set is offered from three places — the Edit bar, its group popovers, and
+// the double-tap "Add here" popup — and it used to be written out twice, which
+// is how the quick-add popup and the Add sheet drifted apart.
+//   main  — what a drill is made of; earns a permanent slot on the bar
+//   props — training gear; a group popover unless the screen is wide
+//   marks — annotation, not equipment
+// `k` is the tool/kind name; a `glyph` renders an Icon instead of a piece sprite.
+const ADD_GROUPS = [
+  { key: "main", label: "Players", tip: "Players, pucks and nets", icon: "player", kinds: [
+    ["player", "Player"], ["playerpuck", "+ Puck"], ["puck", "Puck"], ["net", "Net"]] },
+  { key: "props", label: "Props", tip: "Cones, tires and training gear", icon: "grid", kinds: [
+    ["cone", "Cone"], ["tire", "Tire"], ["bumper", "Bumper"], ["deker", "Deker"],
+    ["passer", "Passer"], ["stick", "Stick"], ["light", "Light"]] },
+  { key: "marks", label: "Marks", tip: "Freehand marker, shapes andconst [openMenu, setOpenMenu] = useState(null); // settings | rinkmenu | prefs | notes | inventory | steps | text labels", icon: "marker", kinds: [
+    ["marker", "Marker", "marker"], ["square", "Square", "□"], ["circle", "Circle", "○"],
+    ["triangle", "Triangle", "△"], ["label", "Label", "label"]] },
+];
+// the shapes are added straight to the board rather than arming a tool
+const SHAPE_KINDS = new Set(["square", "circle", "triangle"]);
 // the creation-time default colour for each piece kind (players cycle COLORS,
 // so their pick is passed in); also re-applied when a tool is swapped kinds
 const defaultColor = (kind, playerColor) =>
@@ -626,7 +646,7 @@ export default function DrillAnimator() {
   // through this ref so the classifier context is always current
   const piecesRef = useRef(pieces);
   piecesRef.current = pieces;
-  const [openMenu, setOpenMenu] = useState(null); // settings | rinkmenu | tools | text
+  const [openMenu, setOpenMenu] = useState(null); // settings | rinkmenu | prefs | notes | inventory | steps | text
   // Every corner menu hangs off the button that opens it, rather than off a
   // screen corner. Corner-pinning reads fine on a phone, where the bar spans the
   // whole width, but in landscape or on desktop the buttons sit well left of the
@@ -639,7 +659,7 @@ export default function DrillAnimator() {
   // otherwise the anchoring finds nothing and the panel falls back to the
   // stylesheet's left edge, nowhere near what was tapped.
   const barBtnRefs = {
-    settings: useRef(null), rinkmenu: useRef(null), tools: useRef(null),
+    settings: useRef(null), rinkmenu: useRef(null),
   };
   const anchorFor = m => (m === "prefs" ? "settings" : m);
   const [menuLeft, setMenuLeft] = useState(null);
@@ -7040,19 +7060,18 @@ export default function DrillAnimator() {
           <button className="hd-item" onClick={() => { setMode("draw"); }}>
             <Icon name="marker" size={16} /> Smart pen — sketch it
           </button>
+          {/* Driven by the SAME ADD_GROUPS table as the Edit bar, so the two
+              can't drift — they were written out separately and did. Marks are
+              skipped: they're drawn or placed, not dropped at a tapped point. */}
           <div className="hd-toolgrid compact">
-            <button className="hd-tool" {...hov("player")} onClick={() => addPieceAt("player", popup.pt)}>{toolImg("player", whiteboard, wbCircle)}<span>Player</span></button>
-            <button className="hd-tool" {...hov("playerpuck")} onClick={() => addPlayerWithPuck(popup.pt, true)}>{toolImg("playerpuck", whiteboard, wbCircle)}<span>+ Puck</span></button>
-            <button className="hd-tool" {...hov("puck")} onClick={() => addPieceAt("puck", popup.pt)}>{toolImg("puck")}<span>Puck</span></button>
-            <button className="hd-tool" {...hov("net")} onClick={() => addPieceAt("net", popup.pt)}>{toolImg("net")}<span>Net</span></button>
-            <button className="hd-tool" {...hov("cone")} onClick={() => addPieceAt("cone", popup.pt)}>{toolImg("cone")}<span>Cone</span></button>
-            <button className="hd-tool" {...hov("tire")} onClick={() => addPieceAt("tire", popup.pt)}>{toolImg("tire")}<span>Tire</span></button>
-            <button className="hd-tool" {...hov("bumper")} onClick={() => addPieceAt("bumper", popup.pt)}>{toolImg("bumper")}<span>Bumper</span></button>
-            <button className="hd-tool" {...hov("deker")} onClick={() => addPieceAt("deker", popup.pt)}>{toolImg("deker")}<span>Deker</span></button>
-            <button className="hd-tool" {...hov("passer")} onClick={() => addPieceAt("passer", popup.pt)}>{toolImg("passer")}<span>Passer</span></button>
-            <button className="hd-tool" {...hov("stick")} onClick={() => addPieceAt("stick", popup.pt)}>{toolImg("stick")}<span>Stick</span></button>
-            <button className="hd-tool" {...hov("light")} onClick={() => addPieceAt("light", popup.pt)}>{toolImg("light")}<span>Light</span></button>
-            <button className="hd-tool" {...hov("label")} onClick={() => addPieceAt("label", popup.pt)}><span className="hd-toolglyph"><Icon name="label" size={22} /></span><span>Label</span></button>
+            {ADD_GROUPS.slice(0, 2).flatMap(g => g.kinds).map(([k, lbl]) => (
+              <button key={k} className="hd-tool" {...hov(k)} title={lbl}
+                onClick={() => (k === "playerpuck" ? addPlayerWithPuck(popup.pt, true) : addPieceAt(k, popup.pt))}>
+                {toolImg(k, whiteboard, wbCircle)}<span>{lbl}</span>
+              </button>
+            ))}
+            <button className="hd-tool" {...hov("label")} onClick={() => addPieceAt("label", popup.pt)}>
+              <span className="hd-toolglyph"><Icon name="label" size={22} /></span><span>Label</span></button>
           </div>
         </>
       );
@@ -8658,6 +8677,52 @@ export default function DrillAnimator() {
     </button>
   ));
 
+  // ---- Edit mode's add palette ------------------------------------------
+  // Arm a tool (tap the ice to place it), except shapes, which land straight on
+  // the board — the same two behaviours the Add sheet has always had.
+  const armAdd = k => {
+    setPenPop(null);
+    if (SHAPE_KINDS.has(k)) { resetAnim(); setPlaying(false); addShapeMark(k); return; }
+    setTool(t => (t === k ? "select" : k));   // tapping the armed tool disarms it
+  };
+  // one chip, sized for the bar: the piece's own sprite over a caption, so the
+  // palette and the ice show the same thing
+  const addChip = ([k, lbl, glyph]) => (
+    <button key={k} className={`hd-pentool${tool === k ? " on" : ""}`} title={lbl}
+      onClick={() => armAdd(k)}>
+      {glyph === "marker" ? <Icon name="marker" size={17} />
+        : glyph === "label" ? <Icon name="label" size={17} />
+        : glyph ? <span className="hd-actglyph">{glyph}</span>
+        : toolImg(k, whiteboard, wbCircle)}
+      <span>{lbl}</span>
+    </button>
+  );
+  // the same kinds as a grid, for a group that had to collapse into a popover
+  const addGroupPop = g => (
+    <div key={g.key} className="hd-penwrap">
+      <button className={`hd-pentool${penPop === g.key ? " on" : ""}`} title={g.tip}
+        onClick={() => setPenPop(v => (v === g.key ? null : g.key))}>
+        <Icon name={g.icon} size={17} /><span>{g.label}</span>
+      </button>
+      {penPop === g.key && (
+        <div className="hd-penpop grid">
+          <div className="hd-toolgrid compact">
+            {g.kinds.map(([k, lbl, glyph]) => (
+              <button key={k} className={`hd-tool${tool === k ? " on" : ""}`} title={lbl}
+                onClick={() => { armAdd(k); setPenPop(null); }}>
+                {glyph === "marker" ? <span className="hd-toolglyph"><Icon name="marker" size={22} /></span>
+                  : glyph === "label" ? <span className="hd-toolglyph"><Icon name="label" size={22} /></span>
+                  : glyph ? <span className="hd-toolglyph">{glyph}</span>
+                  : toolImg(k, whiteboard, wbCircle)}
+                <span>{lbl}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
   return (
     // wraps the WHOLE return, so renderLoupe()'s second <RinkMarkings/> subtree
     // gets the same tokens as the main sheet — if the loupe's ice and the board's
@@ -9664,19 +9729,46 @@ export default function DrillAnimator() {
         </div>
       )}
 
-      {/* ---------- action bar · EDIT ----------
-          Interim: one button onto the existing Add sheet. The next commit moves
-          that sheet's tiles onto this bar, which is the whole point of giving
-          Edit a bar of its own. */}
+      {/* ---------- action bar · EDIT: the add palette ----------
+          What used to be a full-screen sheet you opened, picked from, and closed
+          again. Groups expand onto the bar as the screen earns the room:
+            phone (< DENSE_MIN) — the four mains inline, props behind a popover
+            tablet / desktop    — props come out too, so every common piece is
+                                  one click away, which is the point of the room
+          Keyed on width alone, NOT on isWide's pointer:fine — an iPad reports a
+          COARSE pointer even with a Pencil attached, and a Pencil on a tablet is
+          exactly the case that wants the open palette.
+          Marks stay grouped at every width: they're annotation, not equipment,
+          and inlining them would push the common pieces off the line. */}
       {actOn && mode === "edit" && (
         <div className="hd-act edit">
-          <button ref={barBtnRefs.tools} className={`hd-pentool${openMenu === "tools" ? " on" : ""}`}
-            title="Add a player, puck, net or prop"
-            onClick={() => setOpenMenu(m => (m === "tools" ? null : "tools"))}>
-            <Icon name="plus" size={18} /><span>Add</span>
-          </button>
+          {ADD_GROUPS[0].kinds.map(addChip)}
+          <div className="hd-pensep" />
+          {dense ? <>{ADD_GROUPS[1].kinds.map(addChip)}</> : addGroupPop(ADD_GROUPS[1])}
+          {addGroupPop(ADD_GROUPS[2])}
+          {/* the marker's own ink settings, surfaced only while it's armed —
+              they came off the deleted Add sheet, where they appeared under the
+              same condition */}
+          {tool === "marker" && (
+            <div className="hd-penwrap">
+              <button className={`hd-pentool${penPop === "ink" ? " on" : ""}`} title="Marker colour, thickness & style"
+                onClick={() => setPenPop(v => (v === "ink" ? null : "ink"))}>
+                <span className="hd-penswatch" style={{ background: markColor, width: 18, height: 18 }} />
+                <span>Ink</span>
+              </button>
+              {penPop === "ink" && (
+                <div className="hd-penpop menu">
+                  <div className="hd-inkgrid">{inkSwatches}</div>
+                  <div className="hd-penrule" />
+                  {sizeSlider}
+                  <div className="hd-penrule" />
+                  {styleRows}
+                </div>
+              )}
+            </div>
+          )}
           {tool !== "select" && (
-            <button className="hd-pentool danger" title="Cancel the armed tool"
+            <button className="hd-pentool danger" title="Cancel the armed tool — nothing will be placed"
               onClick={() => setTool("select")}>
               <Icon name="close" size={17} /><span>Cancel</span>
             </button>
@@ -10051,81 +10143,6 @@ export default function DrillAnimator() {
         </div>
       )}
 
-      {openMenu === "tools" && (
-        <div className="hd-menu" style={menuAnchor}>
-          <button className="hd-item" onClick={() => { setMode("draw"); }}>
-            <Icon name="marker" size={16} /> Smart pen — sketch it
-          </button>
-          <div className="hd-mh">Main items</div>
-          <div className="hd-toolgrid">
-            {[["player", "Player"], ["playerpuck", "+ Puck"], ["puck", "Puck"], ["net", "Net"]].map(([k, lbl]) => (
-              <button key={k} className={`hd-tool${tool === k ? " on" : ""}`} onClick={() => { setTool(k); setOpenMenu(null); }}>
-                {toolImg(k, whiteboard, wbCircle)}<span>{lbl}</span>
-              </button>
-            ))}
-          </div>
-          <div className="hd-mh" style={{ marginTop: 4 }}>Tools</div>
-          <div className="hd-toolgrid">
-            {[["cone", "Cone"], ["tire", "Tire"], ["bumper", "Bumper"], ["deker", "Deker"],
-              ["passer", "Passer"], ["stick", "Stick"], ["light", "Light"]].map(([k, lbl]) => (
-              <button key={k} className={`hd-tool${tool === k ? " on" : ""}`} onClick={() => { setTool(k); setOpenMenu(null); }}>
-                {toolImg(k, whiteboard, wbCircle)}<span>{lbl}</span>
-              </button>
-            ))}
-          </div>
-          <div className="hd-mh" style={{ marginTop: 4 }}>Ice markers &amp; overlays</div>
-          <div className="hd-toolgrid">
-            <button className={`hd-tool${tool === "marker" ? " on" : ""}`}
-              onClick={() => { resetAnim(); setPlaying(false); setPopup(null); setTool("marker"); }}>
-              <span className="hd-toolglyph"><Icon name="marker" size={22} /></span><span>Marker</span>
-            </button>
-            {/* close the sheet on pick — on a phone it covers most of the ice,
-                and the next thing you want to do is draw */}
-            <button className={`hd-tool${tool === "pen" ? " on" : ""}`}
-              onClick={() => { setMode("draw"); }}>
-              <span className="hd-toolglyph"><Icon name="marker" size={22} /></span><span>Smart pen</span>
-            </button>
-            {[["square", "□", "Square"], ["circle", "○", "Circle"], ["triangle", "△", "Triangle"]].map(([k, glyph, lbl]) => (
-              <button key={k} className="hd-tool" onClick={() => { resetAnim(); setPlaying(false); addShapeMark(k); setOpenMenu(null); }}>
-                <span className="hd-toolglyph">{glyph}</span><span>{lbl}</span>
-              </button>
-            ))}
-            <button className={`hd-tool${tool === "label" ? " on" : ""}`} onClick={() => { setTool("label"); setOpenMenu(null); }}>
-              <span className="hd-toolglyph"><Icon name="label" size={22} /></span><span>Label</span>
-            </button>
-          </div>
-          {/* marker style/colour/thickness, shown once the marker (or pen —
-              shared settings style its fallback ink) is picked */}
-          {(tool === "marker" || tool === "pen") && (
-            <>
-              <div className="hd-poprow">
-                {PEN_INKS.map(c => (
-                  <div key={c} className={`hd-swatch${markColor === c ? " on" : ""}`} style={{ background: c }}
-                    onClick={() => setMarkColor(c)} />
-                ))}
-              </div>
-              <div className="hd-poprow">
-                <span>Style</span>
-                {PEN_STYLES.map(([s, lbl]) => (
-                  <button key={s} className={`hd-mini${markStyle === s ? " on" : ""}`} onClick={() => setMarkStyle(s)}>{lbl}</button>
-                ))}
-              </div>
-              {/* The Apple Pencil settings used to sit here, gated on
-                  tool === "pen". This sheet is only reachable from EDIT now, so
-                  that gate can never be true — they live in Tune instead. */}
-              <div className="hd-poprow">
-                <span>Thickness</span>
-                <input type="range" min={0.5} max={3} step={0.1} value={markWidth} style={{ flex: 1, minWidth: 80 }}
-                  onChange={e => setMarkWidth(parseFloat(e.target.value))} />
-              </div>
-              <span className="hd-note">drag on the ice to draw; tap a mark to restyle, resize by its corners, or delete</span>
-            </>
-          )}
-          {tool !== "select" && (
-            <button className="hd-item" onClick={() => { setTool("select"); setOpenMenu(null); }}><Icon name="close" size={16} /> Cancel tool</button>
-          )}
-        </div>
-      )}
 
       {openMenu === "notes" && (
         <div className="hd-sheet">

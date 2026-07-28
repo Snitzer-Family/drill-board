@@ -130,6 +130,12 @@ restart so the settings watcher reloads it.
   draw → edit → draw stays a free round trip.
 - Never give `.hd-act` `overflow:hidden` — the line-settings popovers are its
   children and spring upward out of its box.
+- `ADD_GROUPS` is the single table of everything placeable. The Edit bar, its
+  group popovers and the double-tap quick-add all read it; that grid used to be
+  written out twice and the two copies drifted.
+- `src/styles.js` is one template literal. A backtick in a comment ends it, the
+  build then blames the next odd character, and on a clean tree the
+  copy-preview plugin's ENOENT hides the error entirely. Guarded by a test.
 
 ## Platform lessons (learned painfully — do not relearn)
 
