@@ -58,6 +58,33 @@ export const STYLES = `
            --hd-barh rather than any literal.
            The band is present in every mode; only these two states drop it. */
         .hd-root.act-off { --hd-act: 0px; }
+        /* Presentation: the transport gets out of the way so the rink is as big
+           as it can be. The ice takes the band back and KEEPS it — a revealed
+           bar floats over the ice rather than reserving space again, because
+           re-reserving would resize the rink every time the bar came and went,
+           which is the jump this whole layout exists to avoid.
+           The menu bar deliberately stays: hiding every control means an app
+           that can strand you, and this one is used one-handed at a bench. */
+        .hd-root.preso-full { --hd-act: 0px; }
+        .hd-root.preso-full .hd-act {
+          transform:translateY(calc(100% + 70px)); transition:transform .22s ease; }
+        .hd-root.preso-full.bar-up .hd-act { transform:none; }
+        /* With --hd-act at 0 the caption would sit exactly where the revealed
+           transport lands, so it holds a spot clear of BOTH — the same offset
+           whether the bar is up or down, because a caption that shuffles every
+           time the transport appears is the jump we're avoiding elsewhere. */
+        .hd-root.preso-full .hd-preso { bottom:calc(126px + var(--hd-b)); }
+        /* the touch way back. Sits above the menu bar, clear of the band where
+           iOS claims the upward swipe for its own home gesture. */
+        .hd-presohandle { position:absolute; z-index:45; left:50%; transform:translateX(-50%);
+          bottom:calc(54px + var(--hd-b) + 8px); width:64px; height:30px;
+          display:flex; align-items:center; justify-content:center;
+          background:none; border:none; padding:0; cursor:pointer; }
+        .hd-presohandle::before { content:""; width:46px; height:4px; border-radius:2px;
+          background:var(--db-border-strong); box-shadow:var(--db-fx-shadow); }
+        @media (prefers-reduced-motion: reduce) {
+          .hd-root.preso-full .hd-act { transition:none; }
+        }
         /* editing sidebar docked: shrink the ice to the left of it (the stage's
            ResizeObserver re-fits the rink automatically) */
         .hd-root.dock-open .hd-stage { right:calc(env(safe-area-inset-right, 0px) + var(--hd-dock-w)); }

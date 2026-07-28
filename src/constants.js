@@ -20,7 +20,7 @@ export const symOf = p => {
   return l && !/^P\d+$/.test(l) ? l.slice(0, 3) : "X";
 };
 
-export const APP_VERSION = "6.74";
+export const APP_VERSION = "6.75";
 // DSL schema version, stamped into every serialized drill (`DSL <n>` header) so
 // production builds can eventually render a drill per the version that wrote it.
 // Bump ONLY on a breaking DSL change (new kinds/modifiers that older builds would
