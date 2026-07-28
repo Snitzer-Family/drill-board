@@ -10150,11 +10150,17 @@ export default function DrillAnimator() {
             {/* No Draw|Edit switch here any more — the bottom bar's DRAW·EDIT·PLAY
                 segment owns that, and it's the ~90px this palette needed to fit
                 on one line at phone widths. */}
+            {/* "Sketch", not "Note": the point isn't that you're annotating,
+                it's that the stroke is left exactly as drawn instead of being
+                read as a player or a route. Note implied writing something
+                down; what this actually buys you is free drawing.
+                The DSL keyword is still `note` on a mark — renaming that would
+                break every saved drill and share link for a label change. */}
             <button className={`hd-pentool${noteMode ? " on" : ""}`}
-              title={noteMode ? "Note ink — never converted; tap for normal ink"
-                : "Note — scribbles and text that the converter leaves alone"}
+              title={noteMode ? "Sketch — this ink stays exactly as drawn; tap to let the pen read it again"
+                : "Sketch — draw freely, and the pen won't turn it into players or routes"}
               onClick={() => { setNoteMode(v => !v); setEraser(false); if (tool !== "pen") setTool("pen"); }}>
-              <Icon name="note" size={18} /><span>Note</span>
+              <Icon name="pencil" size={18} /><span>Sketch</span>
             </button>
             {/* a toggle, not a one-way latch — with Draw folded into the mode
                 switch, this is the only way back to inking */}
