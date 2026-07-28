@@ -8556,32 +8556,57 @@ export default function DrillAnimator() {
       : selected ? `${selected.id} selected — drag to move, tap for its settings`
       : "Tap a piece to edit it · double-tap the ice to add";
 
-  // ---- presentation: the transport gets out of the way -------------------
-  // In presentation the action bar slides away and the ice takes its band, so
-  // the rink is as big as it can be while still leaving the menu bar — you can
-  // always find your way back out, which an app that hides EVERYTHING can't
-  // promise. Revealed, the bar floats OVER the ice rather than reclaiming its
-  // band: reserving it again would resize the rink every time the bar came and
-  // went, and a drill that resizes mid-presentation is the thing we're avoiding.
+  // ---- presentation: the EDITOR chrome gets out of the way ----------------
+  // Showing a drill to a room, you still want play/pause and the scrubber —
+  // what you don't want is Menu, Rink, the mode switch and Undo/Redo. So the
+  // menu bar slides away and hands its 54px to the ice; the transport stays.
+  // Revealing the menu bar again OVERLAYS (the transport steps up over it)
+  // rather than re-reserving the space, because reserving it would resize the
+  // rink every time the chrome came and went.
   const [barUp, setBarUp] = useState(false);
   const barTimer = useRef(0);
   const presoFull = presentation && mode === "play" && !aiPlay;
-  const revealBar = () => {
+  // idempotent: the desktop pointer fires this continuously, so it must not
+  // toggle — it shows the bar and restarts the idle countdown
+  const showBar = () => {
     setBarUp(true);
     clearTimeout(barTimer.current);
     barTimer.current = setTimeout(() => setBarUp(false), 3000);
   };
+  const toggleBar = () => {
+    if (barUp) { clearTimeout(barTimer.current); setBarUp(false); } else showBar();
+  };
   // entering or leaving presentation always starts from hidden
   useEffect(() => { setBarUp(false); clearTimeout(barTimer.current); }, [presoFull]);
   useEffect(() => () => clearTimeout(barTimer.current), []);
-  // desktop: the pointer approaching the bottom edge is the intent. Touch has
-  // the grab handle instead — a swipe from the very bottom is iOS's own home
-  // gesture in standalone, and the app can't reliably see it.
+  // Desktop pointer in presentation, doing two jobs off one listener:
+  //   · near the bottom edge → bring the editor bar back
+  //   · anywhere → the pointer is "live"; a still one fades out after a beat,
+  //     the way a video player does, so a forgotten cursor doesn't sit over the
+  //     ice for a whole run-through
+  // Touch has neither: there's no cursor, and a swipe from the very bottom is
+  // iOS's own home gesture in standalone, so the app can't count on seeing it —
+  // the chevron on the transport is the way back there.
+  const [cursorIdle, setCursorIdle] = useState(false);
+  const cursorTimer = useRef(0);
   useEffect(() => {
-    if (!presoFull || coarsePtr) return;
-    const on = e => { if (e.clientY > window.innerHeight - 90) revealBar(); };
+    if (!presoFull || coarsePtr) { setCursorIdle(false); return; }
+    const arm = () => {
+      clearTimeout(cursorTimer.current);
+      cursorTimer.current = setTimeout(() => setCursorIdle(true), 2500);
+    };
+    const on = e => {
+      setCursorIdle(false); arm();
+      if (e.clientY > window.innerHeight - 90) showBar();
+    };
     window.addEventListener("pointermove", on);
-    return () => window.removeEventListener("pointermove", on);
+    window.addEventListener("pointerdown", on);
+    arm();                                   // a cursor that never moves still fades
+    return () => {
+      window.removeEventListener("pointermove", on);
+      window.removeEventListener("pointerdown", on);
+      clearTimeout(cursorTimer.current); setCursorIdle(false);
+    };
   }, [presoFull, coarsePtr]);   // eslint-disable-line
 
   // Presentation is for showing the drill to a room, so turning it on clears
@@ -8879,7 +8904,7 @@ export default function DrillAnimator() {
     <ThemeCtx.Provider value={T}>
     <InkCtx.Provider value={ink}>
     <div className={`hd-root${actOn ? "" : " act-off"}${dense ? " dense" : ""}${docked ? " dock-open" : ""}${
-      presoFull ? (barUp ? " preso-full bar-up" : " preso-full") : ""}${
+      presoFull ? (barUp ? " preso-full bar-up" : " preso-full") : ""}${cursorIdle ? " cursor-idle" : ""}${
       tool === "pen" || tool === "marker" ? (eraser && tool === "pen" ? " erase-cursor" : " draw-cursor") : ""}`} ref={rootRef}>
       <style>{STYLES}</style>
 
@@ -9962,19 +9987,19 @@ export default function DrillAnimator() {
         </div>
       )}
 
-      {/* the grab handle: the touch way back to a hidden transport. It rides
-          just above the menu bar, deliberately clear of the home-indicator band
-          where iOS claims the swipe for itself. */}
-      {presoFull && !barUp && (
-        <button className="hd-presohandle" title="Show the transport"
-          aria-label="Show the transport" onPointerDown={revealBar} />
-      )}
-
       {/* ---------- action bar · PLAY: transport + scrubber ---------- */}
       {actOn && mode === "play" && (
-        <div className="hd-act play"
-          onPointerDown={presoFull ? revealBar : undefined}
-          onPointerMove={presoFull ? revealBar : undefined}>
+        <div className="hd-act play">
+          {/* In presentation the editor chrome is hidden; this is the way back
+              to it. It lives ON the transport rather than being an edge gesture
+              because the transport is the one thing always on screen — nothing
+              to discover, and no fight with the iOS home swipe. */}
+          {presoFull && (
+            <button className={`hd-scrubbtn${barUp ? " on" : ""}`} onClick={toggleBar}
+              title={barUp ? "Hide the editor bar" : "Show the editor bar"}
+              aria-pressed={barUp}>
+              <Icon name={barUp ? "chevronDown" : "chevronUp"} size={17} /></button>
+          )}
           <button className="hd-scrubbtn play" onClick={togglePlay} title={playing ? "Pause" : "Play"}>
             <Icon name={playing ? "pause" : "play"} size={20} /></button>
           <button className="hd-scrubbtn" onClick={resetPlay} title={playing ? "Stop" : "Reset"}>
@@ -9997,7 +10022,11 @@ export default function DrillAnimator() {
       )}
 
       {/* ---------- bottom menu bar ---------- */}
-      <div className="hd-bar">
+      {/* touching it while it's on loan in presentation restarts the countdown,
+          so it can't slide away mid-reach */}
+      <div className="hd-bar"
+        onPointerDown={presoFull ? showBar : undefined}
+        onPointerMove={presoFull ? showBar : undefined}>
         <button ref={barBtnRefs.settings} className={`hd-barbtn${openMenu === "settings" ? " on" : ""}`} title="Menu"
           onClick={() => setOpenMenu(m => (m === "settings" ? null : "settings"))}>
           <Icon name="menu" size={16} /><span className="hd-blbl">Menu</span></button>
@@ -10599,7 +10628,7 @@ export default function DrillAnimator() {
       )}
       {/* toast rides above the player-bar / pen-palette band, not across its controls */}
       {toast && (
-        <div style={{ position: "fixed", left: "50%", bottom: "calc(64px + var(--hd-b) + var(--hd-act))",
+        <div style={{ position: "fixed", left: "50%", bottom: "calc(var(--hd-menubar) + 10px + var(--hd-b) + var(--hd-act))",
           transform: "translateX(-50%)", background: "rgba(20,26,32,0.92)", color: "#eaf2f8",
           padding: "6px 14px", borderRadius: 8, fontSize: 13, zIndex: 9999, pointerEvents: "none" }}>{toast}</div>
       )}

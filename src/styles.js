@@ -36,6 +36,11 @@ export const STYLES = `
              a jump when you switched tools in landscape. It is border-box, so
              this is the rendered height, not a content box to add padding to. */
           --hd-barh: 54px;
+          /* The height the bottom MENU bar claims from the layout. A variable
+             so presentation can hand it back to the ice — the bar keeps its own
+             height (it slides away rather than shrinking), this is only what
+             everything else has to keep clear of. */
+          --hd-menubar: 54px;
           /* The reserved band the ice gives up to the bar. Derived from the SAME
              --hd-barh that the bar's own height property uses, so they can never
              disagree. There used to be a second variable for a two-row palette
@@ -58,33 +63,32 @@ export const STYLES = `
            --hd-barh rather than any literal.
            The band is present in every mode; only these two states drop it. */
         .hd-root.act-off { --hd-act: 0px; }
-        /* Presentation: the transport gets out of the way so the rink is as big
-           as it can be. The ice takes the band back and KEEPS it — a revealed
-           bar floats over the ice rather than reserving space again, because
-           re-reserving would resize the rink every time the bar came and went,
-           which is the jump this whole layout exists to avoid.
-           The menu bar deliberately stays: hiding every control means an app
-           that can strand you, and this one is used one-handed at a bench. */
-        .hd-root.preso-full { --hd-act: 0px; }
-        .hd-root.preso-full .hd-act {
-          transform:translateY(calc(100% + 70px)); transition:transform .22s ease; }
-        .hd-root.preso-full.bar-up .hd-act { transform:none; }
-        /* With --hd-act at 0 the caption would sit exactly where the revealed
-           transport lands, so it holds a spot clear of BOTH — the same offset
-           whether the bar is up or down, because a caption that shuffles every
-           time the transport appears is the jump we're avoiding elsewhere. */
-        .hd-root.preso-full .hd-preso { bottom:calc(126px + var(--hd-b)); }
-        /* the touch way back. Sits above the menu bar, clear of the band where
-           iOS claims the upward swipe for its own home gesture. */
-        .hd-presohandle { position:absolute; z-index:45; left:50%; transform:translateX(-50%);
-          bottom:calc(54px + var(--hd-b) + 8px); width:64px; height:30px;
-          display:flex; align-items:center; justify-content:center;
-          background:none; border:none; padding:0; cursor:pointer; }
-        .hd-presohandle::before { content:""; width:46px; height:4px; border-radius:2px;
-          background:var(--db-border-strong); box-shadow:var(--db-fx-shadow); }
+        /* Presentation: the EDITOR chrome goes and the transport stays. While
+           you're showing a drill to a room you still need play, pause and the
+           scrubber; what you don't need is Menu, Rink, the mode switch and
+           Undo/Redo. So the menu bar slides away and hands its 54px to the ice.
+           Revealing it again OVERLAYS — the bar comes up and the transport
+           rides above it, but the ice does not move. Re-reserving the space
+           would resize the rink every time the chrome came and went, and a
+           drill that resizes mid-presentation is the jump this whole layout
+           exists to prevent. */
+        .hd-root.preso-full { --hd-menubar: 0px; }
+        .hd-root.preso-full .hd-bar {
+          transform:translateY(100%); transition:transform .22s ease; }
+        .hd-root.preso-full.bar-up .hd-bar { transform:none; }
+        /* the transport steps up out of the revealed bar's way rather than
+           being covered by it — chrome moving is fine, the ice moving is not */
+        .hd-root.preso-full .hd-act { transition:transform .22s ease; }
+        .hd-root.preso-full.bar-up .hd-act { transform:translateY(calc(-54px - var(--hd-b))); }
         @media (prefers-reduced-motion: reduce) {
-          .hd-root.preso-full .hd-act { transition:none; }
+          .hd-root.preso-full .hd-bar, .hd-root.preso-full .hd-act { transition:none; }
         }
+        /* A still pointer fades out during a presentation, the way a video
+           player's does — otherwise a forgotten cursor sits over the ice for a
+           whole run-through. !important because the per-piece grab cursors and
+           the draw-mode cursor both set their own, and this has to beat them:
+           the pointer is idle, so nothing it might be hovering matters. */
+        .hd-root.cursor-idle, .hd-root.cursor-idle * { cursor:none !important; }
         /* editing sidebar docked: shrink the ice to the left of it (the stage's
            ResizeObserver re-fits the rink automatically) */
         .hd-root.dock-open .hd-stage { right:calc(env(safe-area-inset-right, 0px) + var(--hd-dock-w)); }
@@ -93,7 +97,7 @@ export const STYLES = `
            opaque system bar there that web content cannot render under */
         .hd-stage { position:absolute; top:env(safe-area-inset-top, 0px);
           left:env(safe-area-inset-left, 0px); right:env(safe-area-inset-right, 0px);
-          bottom:calc(54px + var(--hd-b) + var(--hd-act));
+          bottom:calc(var(--hd-menubar) + var(--hd-b) + var(--hd-act));
           display:flex; align-items:center; justify-content:center; }
         /* Desktop: the ice shows what the pointer will DO. The !important beats
            the per-piece grab cursors, which is right — in draw mode nothing on
@@ -116,7 +120,7 @@ export const STYLES = `
            when you switched between them. It sits in its own reserved band
            (--hd-act) and never overlaps the ice sheet. */
         .hd-act { position:absolute; z-index:44; left:8px; right:8px;
-          bottom:calc(54px + var(--hd-b) + 4px);
+          bottom:calc(var(--hd-menubar) + var(--hd-b) + 4px);
           box-sizing:border-box; height:var(--hd-barh);
           display:flex; align-items:center; gap:6px; padding:4px 8px;
           /* The single-line guarantee: content can never spill onto a second row
@@ -354,7 +358,7 @@ export const STYLES = `
              are now opened from a button ON the action bar (Add, in Edit), and
              anchoring only to the menu bar's height dropped the panel straight
              over the button that opened it. */
-          bottom:calc(62px + var(--hd-b) + var(--hd-act));
+          bottom:calc(var(--hd-menubar) + 8px + var(--hd-b) + var(--hd-act));
           left:calc(10px + env(safe-area-inset-left, 0px));
           display:flex; flex-direction:column; gap:8px; width:var(--hd-menu-w); max-height:70vh; overflow-y:auto;
           scrollbar-width:none; -ms-overflow-style:none;
@@ -467,7 +471,7 @@ export const STYLES = `
            Default spot is bottom-centre; a saved pos (inline style) overrides it. */
         .hd-preso { position:absolute; z-index:47; box-sizing:border-box; left:50%; transform:translateX(-50%);
           --cap-hw: min(170px, 35vw);   /* max half-width, for the on-screen clamp */
-          bottom:calc(64px + var(--hd-b) + var(--hd-act)); width:max-content; max-width:min(340px, 70vw);
+          bottom:calc(var(--hd-menubar) + 10px + var(--hd-b) + var(--hd-act)); width:max-content; max-width:min(340px, 70vw);
           display:flex; flex-direction:column; align-items:stretch; gap:9px; padding:12px 15px;
           background:var(--db-fx-glass); border:1px solid var(--db-border-strong); border-radius:13px;
           box-shadow:var(--db-fx-shadow-lg); backdrop-filter:blur(5px); }
@@ -494,7 +498,7 @@ export const STYLES = `
         .hd-preso-tab.del { color:var(--db-danger); padding:0 9px; }
         .hd-preso-tab.done { color:var(--db-text-on-accent); background:var(--db-accent); border-color:var(--db-accent); }
         @media (pointer: fine) and (min-width: 760px) {
-          .hd-preso { --cap-hw:min(310px, 30vw); max-width:min(620px, 60vw); gap:12px; padding:16px 20px; bottom:calc(74px + var(--hd-b) + var(--hd-act)); }
+          .hd-preso { --cap-hw:min(310px, 30vw); max-width:min(620px, 60vw); gap:12px; padding:16px 20px; bottom:calc(var(--hd-menubar) + 20px + var(--hd-b) + var(--hd-act)); }
           .hd-preso-text { font-size:22px; }
           .hd-preso-btn { font-size:15px; padding:9px 16px; }
           .hd-preso.placing { gap:8px; }
@@ -586,7 +590,7 @@ export const STYLES = `
         /* docked editing sidebar: a fixed full-height column on the right edge,
            square outer corners, shadow only on its inner (left) edge */
         .hd-pop.pinned.dock { position:fixed; top:env(safe-area-inset-top, 0px); right:0;
-          bottom:calc(54px + var(--hd-b) + var(--hd-act));
+          bottom:calc(var(--hd-menubar) + var(--hd-b) + var(--hd-act));
           width:var(--hd-dock-w); max-height:none; height:auto;
           border-radius:0; border-top:none; border-right:none; border-bottom:none;
           box-shadow:-8px 0 24px var(--db-fx-edge); }
