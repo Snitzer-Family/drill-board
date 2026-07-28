@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo, Fragment } from "react";
 import { VIEWS, COLORS, vb, APP_VERSION, ICON_SCALE, ROUTE_START_GAP, BUILD_STAMP, DEFAULT_TEXT, SPEED,
   SAVE_PROB, MISS_POST, MISS_WIDE, MISS_OVER, SHOT_AIR_PROB, BOUNCE_REST, WB_SYMS, symOf,
-  DSL_VERSION } from "./constants.js";
+  DSL_VERSION, TYPEFACES, TYPEFACE_KEY } from "./constants.js";
 import { parseDrill, serializeDrill, extractDrill, deriveInventory, ensureShotNet } from "./drill-format.js";
 import { prepareImage, drillFromImage, ANTHROPIC_KEY_STORE } from "./drill-vision.js";
 import { drillSvg } from "./drill-svg.js";
@@ -648,6 +648,14 @@ export default function DrillAnimator() {
   useEffect(() => { try { localStorage.setItem(PRESS_KEY, pencilPress ? "1" : "0"); } catch { /* private mode */ } }, [pencilPress]);
   const pressRef = useRef(true);
   pressRef.current = pencilPress;
+  // Interface typeface. A view preference like the theme — stored per device,
+  // never in the drill. Applied as a CSS var on .hd-root so every panel and
+  // popup inherits it in one place.
+  const [typeface, setTypeface] = useState(() => {
+    try { return localStorage.getItem(TYPEFACE_KEY) || "system"; } catch { return "system"; }
+  });
+  useEffect(() => { try { localStorage.setItem(TYPEFACE_KEY, typeface); } catch { /* private mode */ } }, [typeface]);
+  const fontStack = (TYPEFACES.find(f => f[0] === typeface) || TYPEFACES[0])[2];
   // Which of the three editor flows is live. This is the app's top-level mode
   // and the bottom bar's segmented control writes it:
   //   draw — sketch with the smart pen; ink becomes real pieces
@@ -8957,7 +8965,8 @@ export default function DrillAnimator() {
     <InkCtx.Provider value={ink}>
     <div className={`hd-root${actOn ? "" : " act-off"}${dense ? " dense" : ""}${docked ? " dock-open" : ""}${
       presoFull ? (barUp ? " preso-full bar-up" : " preso-full") : ""}${cursorIdle ? " cursor-idle" : ""}${
-      tool === "pen" || tool === "marker" ? (eraser && tool === "pen" ? " erase-cursor" : " draw-cursor") : ""}`} ref={rootRef}>
+      tool === "pen" || tool === "marker" ? (eraser && tool === "pen" ? " erase-cursor" : " draw-cursor") : ""}`} ref={rootRef}
+      style={{ "--hd-font": fontStack }}>
       <style>{STYLES}</style>
 
       {/* ---------- the ice, filling the screen ---------- */}
@@ -10301,6 +10310,11 @@ export default function DrillAnimator() {
               : `Which palette the board and chrome use. Pinned to ${themePref}, ignoring your device's appearance.`}>
             <Pills value={themePref} set={setThemePref}
               opts={THEME_ORDER.map(v => [v, THEME_LABEL[v] || v])} />
+          </PrefRow>
+          <PrefRow title="Typeface"
+            desc="Which face the interface uses. All four are already on the device — nothing is downloaded, so this works with no signal. Rounded is Apple's SF Pro Rounded and only looks different on an iPhone or iPad.">
+            <Pills value={typeface} set={setTypeface}
+              opts={TYPEFACES.map(([v, lab]) => [v, lab])} />
           </PrefRow>
           <PrefToggle title="Whiteboard mode" on={whiteboard} set={setWhiteboard}
             desc="Draw players as classic X and O symbols with plain arrowed routes, the way a coach's board looks. Shots stay flat on the ice, and splashes and detailed animation are suppressed." />

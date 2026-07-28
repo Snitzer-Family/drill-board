@@ -20,7 +20,24 @@ export const symOf = p => {
   return l && !/^P\d+$/.test(l) ? l.slice(0, 3) : "X";
 };
 
-export const APP_VERSION = "6.79";
+// Interface typefaces. All are already ON the device — no web font, because
+// that would be a network fetch and a new dependency, and this app gets used in
+// a cold rink with no signal. Each stack ends at the system face, so a device
+// without the named one simply looks like "System".
+//   rounded — SF Pro Rounded on Apple. Can only be judged on an iPhone: Chrome
+//     on macOS resolves ui-rounded to the plain system face, so it renders
+//     identically there and a desktop screenshot says nothing about it.
+//   avenir  — measures ~6% narrower per caption than SF Pro, so it costs no room
+//   verdana — the most legible at 11.5px, but ~8% wider and it eats the hint
+export const TYPEFACES = [
+  ["system", "System", 'system-ui, -apple-system, "Segoe UI", sans-serif'],
+  ["rounded", "Rounded", 'ui-rounded, "SF Pro Rounded", system-ui, -apple-system, sans-serif'],
+  ["avenir", "Avenir", '"Avenir Next", Avenir, system-ui, -apple-system, sans-serif'],
+  ["verdana", "Verdana", 'Verdana, Geneva, system-ui, sans-serif'],
+];
+export const TYPEFACE_KEY = "drillboard:typeface";
+
+export const APP_VERSION = "6.80";
 // DSL schema version, stamped into every serialized drill (`DSL <n>` header) so
 // production builds can eventually render a drill per the version that wrote it.
 // Bump ONLY on a breaking DSL change (new kinds/modifiers that older builds would

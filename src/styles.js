@@ -54,7 +54,10 @@ export const STYLES = `
           --hd-menu-w: 230px;
           --hd-pintop: 10px; /* no floating top dock any more — popups can ride the top edge */
           --hd-dock-w: min(320px, 34vw);   /* width of the docked editing sidebar (desktop) */
-          font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+          /* the interface typeface, set as a var by the app so one assignment
+             reaches every panel and popup. The fallback after the first comma
+             is what renders if the var is ever missing. */
+          font-family: var(--hd-font, system-ui, -apple-system, "Segoe UI", sans-serif); }
         /* The band = the bar's 4px offset above the menu bar + the bar's REAL
            rendered height + the clearance. An old version hardcoded 48px on the
            assumption that .hd-scrub was its stated height:40px, but it isn't
