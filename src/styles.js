@@ -201,6 +201,12 @@ export const STYLES = `
            block at .hd-act, so its bottom:100% then measures the bar. */
         .hd-root:not(.dense) .hd-act .hd-penwrap { position:static; }
         .hd-root:not(.dense) .hd-act .hd-penpop.grid { left:8px; right:8px; transform:none; }
+        /* …and at ANY width, a popover hanging off a chip at the start of the bar
+           has no room to centre on it — it is several times the chip's width, so
+           it ran ~108px off the left of a 1440px screen. Pin it to the edge it
+           is closest to instead. (Only matters at dense; below the breakpoint the
+           rule above already spans the bar.) */
+        .hd-penpop.grid.edge { left:0; transform:none; }
         .hd-penpop .hd-penrule { width:100%; height:1px; background:var(--db-border-strong); margin:2px 0; }
         .hd-penpoptip { font-size:10px; font-weight:700; color:var(--db-text-muted); }
         /* Vertical range: the modern property first, then the WebKit one older

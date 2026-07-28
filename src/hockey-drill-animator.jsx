@@ -8697,15 +8697,24 @@ export default function DrillAnimator() {
     a.push({ key: "lock", icon: "lock", label: "Lock",
       title: "Pin in place so it can't be moved or edited by accident.",
       on: () => updateById(p.id, { lock: true }) });
-    if (bar) a.push({ key: "more", icon: "sliders", label: "More",
-      title: `Everything else about ${p.id}`, on: () => setPopup({ type: "piece", id: p.id }) });
+    // "More" is the door to the full inspector — but only where there IS a door
+    // to open. Docked, the panel is a permanent sidebar that already re-targets
+    // itself to whatever you select, so the button had nothing to do and read as
+    // broken. Floating, it's a toggle that lights while its panel is up; before,
+    // pressing it with the panel already open did nothing visible.
+    const panelHas = popup && popup.id === p.id
+      && (popup.type === "piece" || popup.type === "point" || popup.type === "line");
+    if (bar && !docked) a.push({ key: "more", icon: "sliders", label: "More",
+      title: panelHas ? `Hide ${p.id}'s settings` : `Everything else about ${p.id}`,
+      active: panelHas,
+      on: () => setPopup(panelHas ? null : { type: "piece", id: p.id }) });
     a.push({ key: "del", icon: "trash", label: "Delete", danger: true,
       title: `Delete ${p.id}`, on: () => deletePiece(p.id) });
     return a;
   };
   const actionChip = a => (
-    <button key={a.key} className={`hd-pentool${a.danger ? " danger" : ""}`} title={a.title}
-      onClick={a.on}>
+    <button key={a.key} className={`hd-pentool${a.danger ? " danger" : ""}${a.active ? " on" : ""}`}
+      title={a.title} onClick={a.on}>
       <Icon name={a.icon} size={17} /><span>{dense ? a.label : (a.short || a.label)}</span>
     </button>
   );
@@ -8734,15 +8743,18 @@ export default function DrillAnimator() {
   // shouldn't have to deselect to add the next piece.
   const ADD_ALL = { key: "all", label: "Add", tip: "Add a piece", icon: "plus",
     kinds: ADD_GROUPS.flatMap(g => g.kinds) };
-  // the same kinds as a grid, for a group that had to collapse into a popover
-  const addGroupPop = g => (
+  // the same kinds as a grid, for a group that had to collapse into a popover.
+  // `edge` pins the panel to the bar's left edge instead of centring it on its
+  // button: a popover is far wider than the chip it hangs off, so one sitting at
+  // the start of the bar hung ~108px off the left of a 1440px screen.
+  const addGroupPop = (g, edge) => (
     <div key={g.key} className="hd-penwrap">
       <button className={`hd-pentool${penPop === g.key ? " on" : ""}`} title={g.tip}
         onClick={() => setPenPop(v => (v === g.key ? null : g.key))}>
         <Icon name={g.icon} size={17} /><span>{g.label}</span>
       </button>
       {penPop === g.key && (
-        <div className="hd-penpop grid">
+        <div className={`hd-penpop grid${edge ? " edge" : ""}`}>
           <div className="hd-toolgrid compact">
             {g.kinds.map(([k, lbl, glyph]) => (
               <button key={k} className={`hd-tool${tool === k ? " on" : ""}`} title={lbl}
@@ -9745,7 +9757,7 @@ export default function DrillAnimator() {
           {/* A selection takes the bar over — what you want next is almost always
               something to DO with it, not another piece. Adding stays one tap
               away behind the collapsed palette, so you needn't deselect first. */}
-          {selected || multiSel?.size ? addGroupPop(ADD_ALL) : (
+          {selected || multiSel?.size ? addGroupPop(ADD_ALL, true) : (
             <>
               {ADD_GROUPS[0].kinds.map(addChip)}
               <div className="hd-pensep" />
