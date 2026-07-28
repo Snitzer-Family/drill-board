@@ -1958,11 +1958,16 @@ export default function DrillAnimator() {
     }));
     flash("Steps generated from the play");
   }
-  // scrubber tick positions (fractions 0..1): player waypoint activations + steps
+  // Scrubber tick positions (fractions 0..1): player waypoint activations and
+  // steps. Wide screens only — a phone's track is ~70px, and a drill with a few
+  // players puts a tick every couple of pixels, which reads as one thick smear
+  // rather than as marks you could aim at. Skipped, not hidden: this is a
+  // waypointTime() per waypoint plus a resolveSteps() every render, and there's
+  // no reason a phone should pay for marks it will never draw.
   const scrubDur = Math.max(0.1, totalTime);
   const wpTicks = [];
-  if (!aiPlay) effPieces.forEach(p => { if (p.kind === "player") (p.path || []).forEach((_, i) => wpTicks.push(Math.min(1, waypointTime(p, i) / scrubDur))); });
-  const stepTicks = (!aiPlay && drillSteps.length)
+  if (dense && !aiPlay) effPieces.forEach(p => { if (p.kind === "player") (p.path || []).forEach((_, i) => wpTicks.push(Math.min(1, waypointTime(p, i) / scrubDur))); });
+  const stepTicks = (dense && !aiPlay && drillSteps.length)
     ? resolveSteps().filter(s => s.resolved).map(s => Math.min(1, s.t / scrubDur)) : [];
 
   useEffect(() => {
