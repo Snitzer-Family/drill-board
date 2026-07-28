@@ -238,6 +238,28 @@ check("every pen ink is visible on every sheet", () => {
   }
 });
 
+// Same problem, different piece: props moulded in black rubber were ~1.1:1 on
+// the dark rink — the ice with a faint outline round it. These are the DEFAULT
+// body colours, the ones a piece gets when nobody has chosen one, so they have
+// to be visible on whatever sheet they land on.
+check("default prop bodies are visible on every sheet", () => {
+  const BODIES = {
+    tire: "#1c1c1e", bumper: "#1b1e22", cone: "#e0731d", deker: "#c79a4e",
+    passer: "#57636f", light: "#2ea043", net: "#c81e33", stick: "#20242a",
+  };
+  for (const theme of Object.keys(THEMES)) {
+    const ice = THEMES[theme].ice;
+    for (const [kind, stored] of Object.entries(BODIES)) {
+      // the stick reads its body from a token rather than a stored colour
+      const painted = kind === "stick" ? THEMES[theme]["ice-stick"] : teamInk(theme, stored);
+      const r = contrast(parseHex(painted), parseHex(ice));
+      assert.ok(r >= 3, `${theme}: ${kind} body ${stored}` +
+        (painted === stored ? "" : ` (painted ${painted})`) +
+        ` is ${r.toFixed(2)}:1 on the ice — it disappears into the rink`);
+    }
+  }
+});
+
 // STYLES is one big template literal, so a stray backtick — even inside a CSS
 // comment, quoting a property name — closes the string and the whole file stops
 // parsing. Worse, the build error points at the next odd character rather than

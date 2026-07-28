@@ -281,9 +281,15 @@ export const TEAM_LIFT = {
   //   #ffd447  the pen's yellow. On the light rink (#f5fafd) it is ~1.3:1, a
   //            highlighter smear rather than a line, so it deepens to amber.
   //   #22262b  the whiteboard black used for PLAYERS, same problem as the pen's.
-  light: { "#ffd447": "#a06400" },
-  sheet: { "#ffd447": "#a06400" },
-  barn:  { "#ffd447": "#a06400" },
+  // #c79a4e is the deker's wood. On white ice it is 2.45:1 — visible, but under
+  // the bar, and it was only caught because the guard walks EVERY default body
+  // rather than the two that were reported. Deepened just enough to clear it;
+  // still unmistakably wood.
+  // #e0731d is the cone. 3.01:1 on white ice is ON the bar, not over it —
+  // slate already deepens the same orange for the same reason.
+  light: { "#ffd447": "#a06400", "#c79a4e": "#ad7f30", "#e0731d": "#c46519" },
+  sheet: { "#ffd447": "#a06400", "#c79a4e": "#ad7f30", "#e0731d": "#c46519" },
+  barn:  { "#ffd447": "#a06400", "#c79a4e": "#ad7f30", "#e0731d": "#c46519" },
   dark: {
     "#111318": "#cdd8e2",   // pen black    1.01 -> 12.7 on the dark sheet
     "#22262b": "#8b99a8",   // player black 1.21 ->  5.6
@@ -292,6 +298,15 @@ export const TEAM_LIFT = {
     // the darker ice makes them clear the bar by more.
     "#1f4fa3": "#457bdc",   // blue         2.37 ->  4.5
     "#7a3fa8": "#9c67c6",   // purple       2.72 ->  4.6
+    // Props moulded in black rubber. On this sheet they were the ice with a
+    // faint outline; flipped, they read as equipment lying on it. Their tread
+    // ticks, edges and dividers are all DARKER than the body, so they keep
+    // working against a light one — only the body moves.
+    "#1c1c1e": "#9aa2ab",   // tire         1.12 ->  6.6
+    "#1b1e22": "#98a0aa",   // bumper       1.14 ->  6.5
+    "#57636f": "#6b7784",   // passer       3.00 ->  4.03 — it sat exactly ON
+                            // the bar, which is not "visible", it's a rounding
+                            // coin-flip. Nudged until it clearly clears.
   },
   slate: {
     "#d7263d": "#de475b",   // red     3.71 -> 4.53 on the slate sheet
@@ -301,6 +316,10 @@ export const TEAM_LIFT = {
     "#22262b": "#727f90",   // black   1.21 -> 4.52
     "#7a3fa8": "#9c67c6",   // purple  2.72 -> 4.53
     "#111318": "#d6e2ee",   // pen black — as dark, against slate's own ink tone
+    "#1c1c1e": "#8d97a3",   // tire   — as dark, tuned to slate's lighter sheet
+    "#1b1e22": "#8b95a1",   // bumper
+    "#57636f": "#6b7784",   // passer 2.44 -> 3.28
+    "#c81e33": "#de475b",   // net    2.63 -> 3.68, the same lift its posts get
   },
 };
 // stored colour -> what this theme should actually paint

@@ -194,7 +194,7 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
   else if (p.kind === "net") {
     // top-down hockey goal: the mouth (goal line) faces local +x, the caged
     // frame bows back toward -x with a rounded back. ~±3.75 ≈ a 6 ft mouth.
-    const red = p.color || "#c81e33";
+    const red = ink(p.color || "#c81e33");
     // mouth (goal line) faces +x at x=0; the cage bows back to a rounded back at -x
     const CAGE = "M 0 -3.75 L -1.7 -3.75 Q -4.15 -3.75 -4.15 -1.5 L -4.15 1.5 Q -4.15 3.75 -1.7 3.75 L 0 3.75";
     body = (
@@ -219,7 +219,10 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
     );
   } else if (p.kind === "tire") {
     // agility tire, top-down: a black rubber ring with tread ticks (~r 2.6 ≈ 4 ft)
-    const rub = p.color || "#1c1c1e";
+    // through ink(): black rubber on a dark rink was ~1.1:1, an invisible ring.
+    // The tread ticks and edge lines are already darker than the body, so they
+    // keep reading once it flips light — only the body needs to move.
+    const rub = ink(p.color || "#1c1c1e");
     const ticks = [];
     for (let k = 0; k < 12; k++) {
       const a = (k / 12) * Math.PI * 2, c = Math.cos(a), s = Math.sin(a);
@@ -269,7 +272,9 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
   else if (p.kind === "bumper") {
     // solid barrier laid on the ice — a black rectangle; runs along local +x,
     // rotate with facing (drawn oversize vs true 6 ft so it reads on the sheet)
-    const foam = p.color && p.color !== "#4d6fa6" ? p.color : "#1b1e22";
+    // same as the tire — the foam body flips with the sheet; its outline and
+    // segment dividers are darker than it, so they survive the flip
+    const foam = ink(p.color && p.color !== "#4d6fa6" ? p.color : "#1b1e22");
     body = (
       <g pointerEvents="none">
         {selected && <rect x={-8.1} y={-1.9} width={16.2} height={3.8} rx={0.9} fill="none" stroke={SEL} strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
@@ -314,7 +319,7 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
   } else if (p.kind === "deker") {
     // stickhandling gate: a hockey stick laid across two pegs — the puck goes
     // UNDER the shaft. The stick runs along local x; rotate with facing.
-    const wood = p.color || "#c79a4e";
+    const wood = ink(p.color || "#c79a4e");
     body = (
       <g pointerEvents="none">
         {selected && <rect x={-3.6} y={-2.4} width={7.2} height={4.8} rx={0.8} fill="none" stroke={SEL} strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
@@ -330,7 +335,7 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
     );
   } else if (p.kind === "passer") {
     // a rectangular rebounder box; pucks carom off the face (local +x)
-    const col = p.color || "#57636f";
+    const col = ink(p.color || "#57636f");
     body = (
       <g pointerEvents="none">
         {selected && <rect x={-2.1} y={-3.1} width={4.4} height={6.2} rx={0.7} fill="none" stroke={SEL} strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
