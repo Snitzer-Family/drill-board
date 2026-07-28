@@ -10482,7 +10482,7 @@ export default function DrillAnimator() {
                 onClick={() => setPenPop(v => (v === "more" ? null : "more"))}>
                 <Icon name="sliders" size={17} /></button>
               {penPop === "more" && (
-                <div className="hd-penpop menu">
+                <div className="hd-penpop menu more">
                   <button className={`hd-penopt${loopMode ? " on" : ""}`}
                     onClick={() => { setLoopMode(v => !v); setPenPop(null); }}>
                     <Icon name="loop" size={15} /><span>Loop</span></button>

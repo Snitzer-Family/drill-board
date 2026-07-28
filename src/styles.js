@@ -262,6 +262,14 @@ export const STYLES = `
            block at .hd-act, so its bottom:100% then measures the bar. */
         .hd-root:not(.dense) .hd-act .hd-penwrap { position:static; }
         .hd-root:not(.dense) .hd-act .hd-penpop.grid { left:8px; right:8px; transform:none; }
+        /* …but a NARROW popover must still point at the button that opened it.
+           position:static above re-points the containing block at the bar, so
+           the base left:50% centres these on the BAR — which put the play bar's
+           folded loop/presentation/caption menu 162px away from the button at
+           the far right, floating over the middle of the transport. It is only
+           116px wide, so it cannot clip: anchor it to the bar's right edge,
+           where its button lives. */
+        .hd-root:not(.dense) .hd-act .hd-penpop.more { left:auto; right:8px; transform:none; }
         .hd-penpop .hd-penrule { width:100%; height:1px; background:var(--db-border-strong); margin:2px 0; }
         .hd-penpoptip { font-size:10px; font-weight:700; color:var(--db-text-muted); }
         /* Vertical range: the modern property first, then the WebKit one older
