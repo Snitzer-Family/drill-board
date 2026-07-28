@@ -1546,7 +1546,7 @@ export default function DrillAnimator() {
   // → effective piece so position sampling follows the reaction, not the base end
   const effById = new Map(effPieces.map(p => [p.id, p]));
   const effOf = p => p && p.kind === "player" && (p.forks || []).length ? (effById.get(p.id) || p) : p;
-  const { getPlan, pieceTime, displayPosAt, stickSwing, stickSpot, catchApproach, waypointTime, puckInGoal } = createTiming({ pieces: effPieces, pace, segRefs, planCache, seed: playSeed, realisticShots: effRealistic, detail: effDetail, odds: shotOdds });
+  const { getPlan, pieceTime, displayPosAt, stickSwing, stickSpot, catchApproach, puckInFlight, waypointTime, puckInGoal } = createTiming({ pieces: effPieces, pace, segRefs, planCache, seed: playSeed, realisticShots: effRealistic, detail: effDetail, odds: shotOdds });
   // intent plan for the route preview (identical to the main plan but with misses
   // off, so shots always route on net). Only built when realistic shots are on and
   // the puck-path overlay is actually shown; otherwise the main plan already IS the
@@ -1558,7 +1558,16 @@ export default function DrillAnimator() {
   // a light's cue timeline can outlast every route — keep the drill running long
   // enough to show every cue (so a "read the light" reaction has time to resolve)
   const cueSpan = p => p.kind === "light" && p.cues ? p.cues.reduce((a, c) => a + Math.max(0.1, c.dur || 0), 0) : 0;
-  const totalTime = Math.max(0.1, ...effPieces.map(pieceTime), ...effPieces.map(cueSpan));
+  // How long the DRILL is — what a coach reads off the panel.
+  const drillTime = Math.max(0.1, ...effPieces.map(pieceTime), ...effPieces.map(cueSpan));
+  // ...and how long the ANIMATION runs. The last thing to happen in most drills is a
+  // skater stopping, and a stop is not instant: the hockey-stop plant settles back
+  // square and the snow it throws drifts out and fades. With the clock ending on the
+  // same frame the last leg does, none of that ever played — it was cut off mid-bite
+  // and the loop snapped straight back to the start. A short tail lets it finish.
+  // Idle time only: every leg time is absolute, so nothing in the drill moves.
+  const END_HOLD = 0.8;
+  const totalTime = drillTime + END_HOLD;
   const hasTimeline = totalTime > 0.1001; // static board (no routes/cues) → no player bar
   totalRef.current = totalTime;
 
@@ -2051,6 +2060,43 @@ export default function DrillAnimator() {
   const FIDGET_BOB = 0.07;  // ft of fore-aft drift while standing
   const FIDGET_LEAN = 2.2;  // deg of body wobble while standing
   const FIDGET_FADE = 0.35; // ×base pace at which the fidget has fully faded out
+  // Snow spray: a skater who bites the ice hard throws a little puff off their
+  // edges. Only worth drawing when they actually arrive with speed — a glide into
+  // a stop shaves nothing. Display-only and, like everything else in playback, a
+  // pure function of t: the specks are placed off a hash of the piece id, never a
+  // live random, so scrubbing back retraces the same puff.
+  const SPRAY_AT = 1.15;    // ×base pace: below this the stop is a glide, no snow
+  const SPRAY_FULL = 2.0;   // ×base pace: a full-blooded hockey stop
+  const SPRAY_N = 7;        // specks
+  function snowSpray(p, dp) {
+    if (p.kind !== "player" || !effDetail || animT <= 0 || whiteboard) return null;
+    const amt = dp.brake || 0;
+    if (amt <= 0.02) return null;
+    const hard = Math.max(0, Math.min(1, ((dp.brakeSpd || 0) - SPRAY_AT) / (SPRAY_FULL - SPRAY_AT)));
+    if (hard <= 0.02) return null;
+    // the puff keeps expanding as it fades — it is thrown, not breathed in again.
+    // `brakeUp` says which half of the bite we are in, so the throw grows straight
+    // through the stop instead of tracking `amt` back down.
+    const grow = dp.brakeUp ? 0.45 * amt : 0.45 + 0.55 * (1 - amt);
+    // ...off the edge they planted on, and forward along the way they were going
+    const side = Math.sin((2 * Math.PI * (dp.brakeAt || 0)) / STRIDE_LAMBDA) >= 0 ? 1 : -1;
+    const hd = ((dp.a || 0) - PLANT_DEG * amt * side) * Math.PI / 180;   // travel, before the plant turned them
+    const fx0 = Math.cos(hd), fy0 = Math.sin(hd), lx0 = -Math.sin(hd), ly0 = Math.cos(hd);
+    let h = 0;
+    for (let i = 0; i < String(p.id).length; i++) h = (h * 31 + String(p.id).charCodeAt(i)) | 0;
+    const els = [];
+    for (let i = 0; i < SPRAY_N; i++) {
+      const r1 = ((Math.sin((h + i * 97) * 12.9898) * 43758.5453) % 1 + 1) % 1;
+      const r2 = ((Math.sin((h + i * 313) * 78.233) * 43758.5453) % 1 + 1) % 1;
+      const reach = (0.5 + 3.2 * ((i + r1) / SPRAY_N)) * grow * (0.6 + 0.4 * hard);
+      const fan = (r2 - 0.5) * 1.9 * reach * 0.5;             // widens as it flies out
+      const cx = dp.x + (fx0 * reach + lx0 * (fan + 1.5 * side)) ;
+      const cy = dp.y + (fy0 * reach + ly0 * (fan + 1.5 * side));
+      els.push(<circle key={i} cx={cx} cy={cy} r={(0.26 + 0.42 * r1) * (0.5 + 0.7 * grow)}
+        fill="#fff" opacity={0.5 * amt * hard * (1 - 0.55 * grow)} />);
+    }
+    return <g pointerEvents="none">{els}</g>;
+  }
   function displaySwing(p) {
     return p.kind === "player" && animT > 0 ? stickSwing(p.id, animT * totalTime) : 0;
   }
@@ -3364,7 +3410,12 @@ export default function DrillAnimator() {
     // spot and steal the puck for a few frames as they pass by.
     if (p.kind === "puck") {
       let cq = null, cSide = 1, cd = 2.2;
-      for (const q of pieces) {
+      // A puck the plan says is in the air is NOT on anyone's stick, however close it
+      // still is to the one that fired it — only the catch approach below may claim
+      // it. Without this the proximity match holds a just-released puck on the blade
+      // for a frame or two and then hands over the whole gap at once.
+      const inAir = puckInFlight(p.id, animT <= 0 ? 0 : animT * totalTime);
+      for (const q of inAir ? [] : pieces) {
         if (q.kind !== "player" || q.defense) continue;   // (defense never carries; avoids recursion)
         // Match against the ROUTE pose, not displayPosRaw: the puck's own position
         // comes off that same pose (carriedPuckAt), while displayPosRaw adds the
@@ -9439,7 +9490,7 @@ export default function DrillAnimator() {
                 );
               }
               const fx = iconXf(dp);
-              return (
+              const icon = (
                 <PieceIcon key={p.id} p={p} pos={dp} xf={fx.t} thDeg={fx.th} wb={whiteboard} wbCircle={wbCircle}
                   selected={editing && p.id === selectedId} swing={displaySwing(p)}
                   dim={animT > 0} onDown={e => pieceDown(e, p.id)}
@@ -9447,6 +9498,8 @@ export default function DrillAnimator() {
                   onStickDown={editing && tool !== "draw" && p.kind === "player" && !p.path.length && !(p.lock && !lockedSelectable)
                     ? e => stickDown(e, p) : undefined} />
               );
+              const spray = snowSpray(p, dp);
+              return spray ? <g key={p.id}>{spray}{icon}</g> : icon;
             })}
             {/* editing handles ON TOP of all piece icons: a waypoint's grab target
                 must beat any prop (stick/cone/…) stacked over it, so these paint
@@ -9696,7 +9749,7 @@ export default function DrillAnimator() {
               onPointerDown={() => { if (playing) setPlaying(false); setHoldStep(null); holdRef.current = 0; }}
               onChange={e => scrubTo(+e.target.value)} />
           </div>
-          <span className="hd-scrubtime">{(animT * totalTime).toFixed(1)}/{totalTime.toFixed(1)}s</span>
+          <span className="hd-scrubtime">{Math.min(animT * totalTime, drillTime).toFixed(1)}/{drillTime.toFixed(1)}s</span>
         </div>
       )}
 
@@ -9926,7 +9979,7 @@ export default function DrillAnimator() {
           </div>
           <div className="hd-mh" style={{ marginTop: 4 }}>Default drill pace</div>
           <div style={{ fontSize: 12, color: "#8b99a8" }}>
-            {pace} ft/s · run {totalTime.toFixed(1)}s
+            {pace} ft/s · run {drillTime.toFixed(1)}s
             <input type="range" min={6} max={30} step={1} value={pace} style={{ width: "100%" }}
               onChange={e => setPace(parseFloat(e.target.value))} />
           </div>

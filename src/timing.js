@@ -1169,7 +1169,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
       return { x: pt.x, y: pt.y, a: a + f, aStep: a + stepFlip(s), flip: f };
     };
     let prev = { x: p.x, y: p.y };
-    let dist = 0;
+    let dist = 0, lastSpd = 0;   // cruise speed of the leg just skated (for the stop spray)
     for (let i = 0; i < p.path.length; i++) {
       const s = p.path[i];
       const stop = (s.stop || 0) + trigPauseOf(p, i);
@@ -1189,7 +1189,8 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
         return { ...prev, a: tan + f, aStep: tOut + stepFlip(s), flip: f, v: 0, dist,
           // only a real STOP braked the previous leg (exitRest tests s.stop, not a
           // trigger pause) — relaxing a plant they never took would snap it on
-          brakeAt: dist, brake: i > 0 && (s.stop || 0) > 0 ? brakeRelax(e) : 0 };
+          brakeAt: dist, brakeUp: false, brakeSpd: lastSpd,
+          brake: i > 0 && (s.stop || 0) > 0 ? brakeRelax(e) : 0 };
       }
       e -= stop;
       const mt = effMove(p, s, i, warp);
@@ -1248,18 +1249,19 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           const braking = exitRest && e / mt > 1 - RAMP_DOWN;   // biting into a stop
           const smul = mt > 0 ? ((L / mt) / pace) * v : 0;
           return { ...atArc(el, L, L * sf, s, i), v, smul, dist: dist + L * sf, brakeAt: dist + L,
-            brake: braking ? 1 - v : 0 };
+            brake: braking ? 1 - v : 0, brakeUp: braking, brakeSpd: mt > 0 ? (L / mt) / pace : 0 };
         } catch { return { ...prev, a: 0, aStep: 0, flip: 0, v: 0, dist }; }
       }
       e -= mt;
       dist += L;
+      lastSpd = mt > 0 ? (L / mt) / pace : 0;
       prev = { x: s.x, y: s.y };
     }
     const last = p.path[p.path.length - 1], li = p.path.length - 1;
     const lp = segEnd(p, li - 1);
     const ta = segTangentAngle(lp, last, 0.98), fl = flip(li);
     return { x: last.x, y: last.y, a: ta + fl, aStep: ta + stepFlip(last), flip: fl, v: 0, dist,
-      brakeAt: dist, brake: brakeRelax(e) };
+      brakeAt: dist, brakeUp: false, brakeSpd: lastSpd, brake: brakeRelax(e) };
   }
 
   // A puck in the closing stretch of a delivery that ends in a catch: who takes it,
@@ -1276,6 +1278,19 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
     if (!leg || leg.type !== "fly" || e >= leg.t1 || !nx || nx.type !== "ride" || !nx.catch) return null;
     const w = smooth01(((e - leg.t0) / Math.max(0.001, leg.t1 - leg.t0) - 0.65) / 0.35);
     return w > 0 ? { id: nx.id, w } : null;
+  }
+
+  // Is this puck in the air (or skidding) right now? The renderer attaches a puck to
+  // the nearest blade by proximity, which is right for a carry but wrong the instant
+  // one is fired: for a frame or two the puck is still within reach of the stick that
+  // just shot it, so it gets snapped back onto the blade and then let go all at once.
+  function puckInFlight(pkId, e) {
+    const { plans } = getPlan();
+    const pl = plans[pkId];
+    if (!pl) return false;
+    let leg = pl.legs[0];
+    for (const L of pl.legs) { if (e >= L.t0) leg = L; else break; }
+    return !!leg && (leg.type === "fly" || leg.type === "skid") && e < leg.t1;
   }
 
   function displayPosAt(p, e) {
@@ -1418,5 +1433,5 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
   // warped arrival time at a player's waypoint index (for movement captions)
   function waypointTime(p, i) { const { warp } = getPlan(); return routeTimeW(p, warp, i); }
 
-  return { getPlan, pieceTime, displayPosAt, stickSwing, stickSpot, catchApproach, waypointTime, puckInGoal };
+  return { getPlan, pieceTime, displayPosAt, stickSwing, stickSpot, catchApproach, puckInFlight, waypointTime, puckInGoal };
 }
