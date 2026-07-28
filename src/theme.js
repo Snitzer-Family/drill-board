@@ -271,6 +271,28 @@ const SLATE = {
 // lightness moves, so a red player still reads red. Keyed by the stored hex.
 // A theme absent here renders team colours exactly as authored.
 export const TEAM_LIFT = {
+  // Two inks are all but invisible on the sheet they land on, so they flip with
+  // it. The STORED value never changes — a drill saved with black ink is still
+  // black ink — this is only what gets painted, so the DSL round-trip and a
+  // share link are unaffected and the board looks right on either theme.
+  //   #111318  the pen's black. On the dark rink (#0d151c) that is 1.1:1 — you
+  //            genuinely cannot see the stroke you just drew. It becomes the
+  //            sheet's own ink colour, which is what "black pen" MEANS there.
+  //   #ffd447  the pen's yellow. On the light rink (#f5fafd) it is ~1.3:1, a
+  //            highlighter smear rather than a line, so it deepens to amber.
+  //   #22262b  the whiteboard black used for PLAYERS, same problem as the pen's.
+  light: { "#ffd447": "#a06400" },
+  sheet: { "#ffd447": "#a06400" },
+  barn:  { "#ffd447": "#a06400" },
+  dark: {
+    "#111318": "#cdd8e2",   // pen black    1.01 -> 12.7 on the dark sheet
+    "#22262b": "#8b99a8",   // player black 1.21 ->  5.6
+    // measured, not assumed: these two were under 3:1 on this sheet as well.
+    // slate already lifted them, dark never did — same values work here, and
+    // the darker ice makes them clear the bar by more.
+    "#1f4fa3": "#457bdc",   // blue         2.37 ->  4.5
+    "#7a3fa8": "#9c67c6",   // purple       2.72 ->  4.6
+  },
   slate: {
     "#d7263d": "#de475b",   // red     3.71 -> 4.53 on the slate sheet
     "#1f4fa3": "#457bdc",   // blue    2.37 -> 4.50
@@ -278,6 +300,7 @@ export const TEAM_LIFT = {
     "#e0731d": "#c46519",   // orange  5.82 -> 4.58
     "#22262b": "#727f90",   // black   1.21 -> 4.52
     "#7a3fa8": "#9c67c6",   // purple  2.72 -> 4.53
+    "#111318": "#d6e2ee",   // pen black — as dark, against slate's own ink tone
   },
 };
 // stored colour -> what this theme should actually paint

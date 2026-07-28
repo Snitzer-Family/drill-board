@@ -11,7 +11,7 @@
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { THEMES, PAIRS, EXEMPT, NON_COLOR_TOKENS, AUTO_MAP, themeCss } from "../src/theme.js";
+import { THEMES, PAIRS, EXEMPT, NON_COLOR_TOKENS, AUTO_MAP, themeCss, teamInk } from "../src/theme.js";
 
 let passed = 0, failed = 0, known = 0;
 // Empty is the goal state. Add a check name here only to land a migration in
@@ -217,6 +217,25 @@ check("the two default-colour tables agree on every kind", () => {
   for (const k of kinds)
     assert.equal(editor[k], parser[k],
       `${k}: the editor places it ${editor[k]} but the parser loads it ${parser[k]}`);
+});
+
+// Pen ink has to be visible on the sheet it lands on. Black ink was 1.01:1 on
+// the dark rink — literally the same colour as the ice — and yellow was 1.35:1
+// on the light one. TEAM_LIFT flips those (and a couple of others measurement
+// turned up) at PAINT time only; the stored colour never changes, so a drill
+// saved with black ink is still black ink and the DSL round-trip is untouched.
+check("every pen ink is visible on every sheet", () => {
+  const INKS = ["#ffd447", "#d7263d", "#1f4fa3", "#1f8a4c", "#e0731d", "#7a3fa8", "#111318"];
+  for (const theme of Object.keys(THEMES)) {
+    const ice = THEMES[theme].ice;
+    for (const stored of INKS) {
+      const painted = teamInk(theme, stored);
+      const r = contrast(parseHex(painted), parseHex(ice));
+      assert.ok(r >= 3, `${theme}: ink ${stored}` +
+        (painted === stored ? "" : ` (painted ${painted})`) +
+        ` is ${r.toFixed(2)}:1 on the ice — a stroke you can't see`);
+    }
+  }
 });
 
 // STYLES is one big template literal, so a stray backtick — even inside a CSS

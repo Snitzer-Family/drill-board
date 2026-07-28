@@ -6541,11 +6541,11 @@ export default function DrillAnimator() {
             handful and still read as a pencil. */}
         {pencilPress && m.note && m.press && m.press.length === m.pts.length ? pressRuns(m).map((run, i) => (
           <polyline key={`pw${i}`} points={run.pts.map(q => `${clampX(q.x)},${clampY(q.y)}`).join(" ")}
-            fill="none" stroke={m.color} strokeWidth={w * run.k} strokeDasharray={dash}
+            fill="none" stroke={ink(m.color)} strokeWidth={w * run.k} strokeDasharray={dash}
             strokeLinecap="round" strokeLinejoin="round" opacity={0.94}
             pointerEvents={hit ? "none" : undefined} />
         )) : (
-          <polyline points={line} fill="none" stroke={m.color} strokeWidth={w} strokeDasharray={dash}
+          <polyline points={line} fill="none" stroke={ink(m.color)} strokeWidth={w} strokeDasharray={dash}
             strokeLinecap="round" strokeLinejoin="round" opacity={0.94}
             pointerEvents={hit ? "none" : undefined} />
         )}
@@ -8873,7 +8873,7 @@ export default function DrillAnimator() {
   // placed by either layout, so the two can never offer different options.
   const inkSwatches = PEN_INKS.map(c => (
     <button key={c} className={`hd-penswatch${markColor === c && !eraser ? " on" : ""}`}
-      style={{ background: c }} title={`Ink ${c}`}
+      style={{ background: ink(c) }} title={`Ink ${c}`}
       onClick={() => { setMarkColor(c); setEraser(false); }} />
   ));
   const sizeSlider = (
@@ -9503,12 +9503,12 @@ export default function DrillAnimator() {
                 reads as one continuous line until the burst snaps into pieces */}
             {penInk.map((pts, i) => pts.length > 1 && (
               <polyline key={`pen${i}`} points={pts.map(q => `${q.x},${q.y}`).join(" ")} fill="none"
-                stroke={markColor} strokeWidth={penW} strokeLinecap="round" strokeLinejoin="round"
+                stroke={ink(markColor)} strokeWidth={penW} strokeLinecap="round" strokeLinejoin="round"
                 opacity={0.9} pointerEvents="none" />
             ))}
             {drawPreview && drawPreview.length > 1 && (
               tool === "marker" || tool === "pen"
-                ? <polyline points={drawPreview.map(q => `${q.x},${q.y}`).join(" ")} fill="none" stroke={markColor}
+                ? <polyline points={drawPreview.map(q => `${q.x},${q.y}`).join(" ")} fill="none" stroke={ink(markColor)}
                     strokeWidth={tool === "pen" ? penW : markWidth} strokeLinecap="round" strokeLinejoin="round"
                     opacity={0.9} pointerEvents="none" />
                 : <polyline points={drawPreview.map(q => `${q.x},${q.y}`).join(" ")} vectorEffect="non-scaling-stroke"
@@ -9914,7 +9914,7 @@ export default function DrillAnimator() {
               <div className="hd-penwrap">
                 <button className={`hd-pentool${penPop === "ink" ? " on" : ""}`} title="Ink colour, thickness & style"
                   onClick={() => setPenPop(v => (v === "ink" ? null : "ink"))}>
-                  <span className="hd-penswatch" style={{ background: markColor, width: 18, height: 18 }} />
+                  <span className="hd-penswatch" style={{ background: ink(markColor), width: 18, height: 18 }} />
                   <span>Ink</span>
                 </button>
                 {penPop === "ink" && (

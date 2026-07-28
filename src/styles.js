@@ -216,7 +216,7 @@ export const STYLES = `
         .hd-root:not(.dense) .hd-mode { --mw:40px; }
         .hd-root:not(.dense) .hd-act.draw { padding:5px 5px; }
         .hd-root:not(.dense) .hd-pentool { min-width:40px; padding:3px 3px 2px; }
-        .hd-root:not(.dense) .hd-penswatch { width:20px; height:20px; }
+        .hd-root:not(.dense) .hd-penswatch { width:24px; height:24px; }
         .hd-root:not(.dense) .hd-peninks { gap:3px; }
         .hd-root:not(.dense) .hd-pensep { margin:0 1px; }
         /* size / style popovers spring upward from their own button */
@@ -265,7 +265,7 @@ export const STYLES = `
            dot — which is what round means everywhere else on this board; a
            square says "a colour", the way a paint well does. */
         .hd-peninks { display:flex; align-items:center; gap:4px; }
-        .hd-penswatch { flex:none; width:22px; height:22px; border-radius:4px;
+        .hd-penswatch { flex:none; width:27px; height:27px; border-radius:5px;
           border:1px solid var(--db-border-strong); cursor:pointer; padding:0; }
         /* same "this one is selected" token as .hd-swatch.on — one meaning, one colour */
         .hd-penswatch.on { outline:2px solid var(--db-ui-select); outline-offset:2px; }
