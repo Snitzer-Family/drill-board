@@ -8013,18 +8013,30 @@ export default function DrillAnimator() {
     // they're independent, so a placed/frozen popup can still carry the user's
     // resize, and an auto-height (popDim.h == null) freeze grows to fit content
     const finalStyle = { ...style };
-    if (!collapsed && popPos) {
+    // Position is honoured even when collapsed — that's what keeps the header
+    // still. Only the HEIGHT is dropped: a collapsed panel is its header.
+    if (popPos) {
       finalStyle.left = `${popPos.left}px`;
       finalStyle.top = `${popPos.top}px`;
       finalStyle.bottom = "auto";
       finalStyle.transform = `translate(${popOff.x}px, ${popOff.y}px)`;   // px position: no centering
     }
-    if (!collapsed && popDim) {
+    if (popDim) {
       finalStyle.width = `${popDim.w}px`;
-      if (popDim.h != null) { finalStyle.height = `${popDim.h}px`; finalStyle.maxHeight = "none"; }
+      if (!collapsed && popDim.h != null) { finalStyle.height = `${popDim.h}px`; finalStyle.maxHeight = "none"; }
     }
     const boxed = !collapsed && (popPos || popDim);
     const usePreset = () => { setPopPos(null); setPopDim(null); };   // presets re-anchor at default size
+    // Collapsing must not MOVE the panel — only shorten it. Pin it to where it
+    // is first, so the header stays under the finger that just tapped it.
+    // Without this the panel fell back to its anchor style, which is derived
+    // from the piece's spot on the ice: it slid sideways, and a bottom-anchored
+    // one flipped to the top of the screen, so minimising looked like the panel
+    // had jumped somewhere else.
+    const freezeHere = () => {
+      const r = popRef.current?.getBoundingClientRect();
+      if (r) setPopPos({ left: Math.round(r.left), top: Math.round(r.top) });
+    };
     return (
       <div className={`hd-pop pinned${docked ? " dock" : ""}`} style={docked ? undefined : finalStyle} ref={popRef}
         onScroll={syncPopScroll} onPointerDown={e => e.stopPropagation()}>
@@ -8050,11 +8062,16 @@ export default function DrillAnimator() {
           )}
           {!docked && !collapsed && (
             <button className="hd-x" onPointerDown={e => e.stopPropagation()} title="Minimize"
-              onClick={() => { usePreset(); setPopState("min"); }}><Icon name="chevronUp" size={15} /></button>
+              onClick={() => { freezeHere(); setPopState("min"); }}><Icon name="chevronUp" size={15} /></button>
           )}
           {!docked && (
             <button className="hd-x" onPointerDown={e => e.stopPropagation()} title={maxed ? "Restore" : "Maximize"}
-              onClick={() => { usePreset(); setPopState(maxed && !boxed ? "mid" : collapsed ? "mid" : "max"); }}>
+              onClick={() => {
+                // expanding a collapsed panel keeps its spot too and grows
+                // downward from the header; only the size PRESETS re-anchor
+                if (!collapsed) usePreset();
+                setPopState(maxed && !boxed ? "mid" : collapsed ? "mid" : "max");
+              }}>
               <Icon name={collapsed ? "chevronDown" : (maxed && !boxed) ? "restore" : "expand"} size={15} /></button>
           )}
           <button className="hd-x" onPointerDown={e => e.stopPropagation()}
