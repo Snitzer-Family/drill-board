@@ -16,7 +16,8 @@ export function RinkMarkings({ yFix = 1 }) {
   // 44' apart (y=20.5/64.5), 15' circles with hash marks (2' long, ~5'7" apart).
   // Plus the four L-shaped player restraint brackets: a 4' leg parallel to the
   // side boards (x±2 → x±6, i.e. starting 1' outside the spot) with a 3' leg
-  // parallel to the goal line flaring outward at its far end. Regulation puts
+  // parallel to the goal line rising at its INNER end (the one nearest the
+  // spot) and flaring away from the dot's centre line. Regulation puts
   // the long legs 18" apart, but at full-rink zoom on a phone that gap is ~3px
   // between two ~2px lines and the pair smears into one — so they sit 3' apart.
   [[31, 20.5], [31, 64.5], [169, 20.5], [169, 64.5]].forEach(([x, y]) =>
@@ -26,7 +27,7 @@ export function RinkMarkings({ yFix = 1 }) {
         <ellipse cx={x} cy={y} rx={1} ry={yFix} fill={red} />
         <path d={`M ${x - 2.8} ${y - 17 * yFix} V ${y - 15 * yFix} M ${x + 2.8} ${y - 17 * yFix} V ${y - 15 * yFix} M ${x - 2.8} ${y + 15 * yFix} V ${y + 17 * yFix} M ${x + 2.8} ${y + 15 * yFix} V ${y + 17 * yFix}`}
           stroke={red} strokeWidth={0.4} opacity={0.8} fill="none" />
-        <path d={`M ${x + 2} ${y - 1.5 * yFix} H ${x + 6} V ${y - 4.5 * yFix} M ${x + 2} ${y + 1.5 * yFix} H ${x + 6} V ${y + 4.5 * yFix} M ${x - 2} ${y - 1.5 * yFix} H ${x - 6} V ${y - 4.5 * yFix} M ${x - 2} ${y + 1.5 * yFix} H ${x - 6} V ${y + 4.5 * yFix}`}
+        <path d={`M ${x + 6} ${y - 1.5 * yFix} H ${x + 2} V ${y - 4.5 * yFix} M ${x + 6} ${y + 1.5 * yFix} H ${x + 2} V ${y + 4.5 * yFix} M ${x - 6} ${y - 1.5 * yFix} H ${x - 2} V ${y - 4.5 * yFix} M ${x - 6} ${y + 1.5 * yFix} H ${x - 2} V ${y + 4.5 * yFix}`}
           stroke={red} strokeWidth={0.4} opacity={0.8} fill="none" />
       </g>
     ));

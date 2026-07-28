@@ -196,7 +196,7 @@ function rink() {
   // end-zone circle hash marks: 2' long, ~5'7" apart, outside the circle edge
   const hash = (x, y) => `<path d="M ${x - 2.8} ${y - 17} V ${y - 15} M ${x + 2.8} ${y - 17} V ${y - 15} M ${x - 2.8} ${y + 15} V ${y + 17} M ${x + 2.8} ${y + 15} V ${y + 17}" stroke="${mk}" stroke-width="0.45" opacity="0.9" fill="none"/>`;
   // L-shaped player restraint brackets — must track rink.jsx (legs 3' apart, not the regulation 18")
-  const bracket = (x, y) => `<path d="M ${x + 2} ${y - 1.5} H ${x + 6} V ${y - 4.5} M ${x + 2} ${y + 1.5} H ${x + 6} V ${y + 4.5} M ${x - 2} ${y - 1.5} H ${x - 6} V ${y - 4.5} M ${x - 2} ${y + 1.5} H ${x - 6} V ${y + 4.5}" stroke="${mk}" stroke-width="0.45" opacity="0.9" fill="none"/>`;
+  const bracket = (x, y) => `<path d="M ${x + 6} ${y - 1.5} H ${x + 2} V ${y - 4.5} M ${x + 6} ${y + 1.5} H ${x + 2} V ${y + 4.5} M ${x - 6} ${y - 1.5} H ${x - 2} V ${y - 4.5} M ${x - 6} ${y + 1.5} H ${x - 2} V ${y + 4.5}" stroke="${mk}" stroke-width="0.45" opacity="0.9" fill="none"/>`;
   return `
     <rect x="0.6" y="0.6" width="198.8" height="83.8" rx="28" fill="${V("db-ice", L.ice)}" stroke="${V("db-ice-boards", L["ice-boards"])}" stroke-width="1.1"/>
     <g clip-path="url(#ice)">
