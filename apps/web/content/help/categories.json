@@ -1,0 +1,8 @@
+{
+  "//": "Ordered. A category listed here with no articles is a build error (tests/help-content.mjs), and an article in a directory not listed here is too.",
+  "categories": [
+    { "slug": "getting-started", "title": "Getting started", "blurb": "Install it, draw your first drill, run a practice." },
+    { "slug": "drill-dsl", "title": "The drill format", "blurb": "How drills are written, shared and imported." },
+    { "slug": "billing", "title": "Plans and billing", "blurb": "What's free, what isn't, and how to cancel." }
+  ]
+}

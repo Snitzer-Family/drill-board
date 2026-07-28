@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Route } from "next";
 import { Wordmark } from "./Wordmark";
+import { HeaderAuth } from "./HeaderAuth";
 import { BOARD_URL } from "@/lib/config";
 
 const NAV: { href: Route; label: string }[] = [
@@ -37,18 +38,7 @@ export function SiteHeader() {
           >
             Open the board
           </a>
-          <Link
-            href="/login"
-            className="text-sm font-medium text-ink-soft transition-colors hover:text-ink"
-          >
-            Sign in
-          </Link>
-          <Link
-            href="/register"
-            className="rounded-chip bg-accent px-3.5 py-2 text-sm font-semibold text-on-accent"
-          >
-            Start free
-          </Link>
+          <HeaderAuth />
         </div>
       </div>
     </header>
