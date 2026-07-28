@@ -1,9 +1,12 @@
 <meta charset="utf-8">
 <title>DrillBoard · live drill card</title>
-<style>:root{--db-surface-app:#e7edf3;--db-surface-bar:#f4f7fa;--db-surface-panel:#ffffff;--db-surface-panel-0:rgba(255,255,255,0);--db-surface-raised:#e9eef4;--db-surface-sunken:#f7fafc;--db-text:#14202b;--db-text-soft:#33414f;--db-text-muted:#576572;--db-text-faint:#5e6b78;--db-text-on-accent:#ffffff;--db-border:#d3dde6;--db-border-strong:#b9c6d2;--db-border-hair:#e4eaf0;--db-accent:#0c7e7a;--db-focus:#0b6d66;--db-danger:#b3222f;--db-danger-border:#e6b4ba;--db-danger-bg:#fdeef0;--db-warn:#8a6100;--db-good:#177a41;--db-info:#1657c4;--db-info-bg:#e6eefc;--db-info-border:#a9c4ee;--db-track:#7c8b9a;--db-track-thumb:#ffffff;--db-ui-select:#a06400;--db-brand-red:#d7263d;--db-ice:#f5fafd;--db-ice-surround:#eef5f9;--db-ice-line-red:#d7263d;--db-ice-line-blue:#1f4fa3;--db-ice-crease:#1f4fa3;--db-ice-boards:#31404e;--db-ice-dash:#ffffff;--db-ice-ink:#14171a;--db-ice-select:#a06400;--db-fx-glass:rgba(255,255,255,.86);--db-fx-scrim:rgba(255,255,255,.94);--db-fx-shadow:0 3px 12px rgba(20,32,43,.14);--db-fx-shadow-lg:0 8px 24px rgba(20,32,43,.20);--db-fx-edge:rgba(20,32,43,.16);--db-fx-edge-0:rgba(20,32,43,0);color-scheme:light}
-@media (prefers-color-scheme:dark){:root:not([data-theme]){--db-surface-app:#0c1014;--db-surface-bar:#11161c;--db-surface-panel:#1a222c;--db-surface-panel-0:rgba(26,34,44,0);--db-surface-raised:#212b36;--db-surface-sunken:#0f141a;--db-text:#e8edf2;--db-text-soft:#dbe4ec;--db-text-muted:#8b99a8;--db-text-faint:#8593a3;--db-text-on-accent:#ffffff;--db-border:#2c3846;--db-border-strong:#3a4756;--db-border-hair:#243040;--db-accent:#0c7e7a;--db-focus:#45c1cb;--db-danger:#ff8d9c;--db-danger-border:#4a2a30;--db-danger-bg:#3a2126;--db-warn:#e0a92e;--db-good:#3ecf7a;--db-info:#6ea8ff;--db-info-bg:#1c2b45;--db-info-border:#2c477a;--db-track:#6c7d8e;--db-track-thumb:#e8eef4;--db-ui-select:#ffd447;--db-brand-red:#d7263d;--db-ice:#0d151c;--db-ice-surround:#0d151c;--db-ice-line-red:#ff5a6a;--db-ice-line-blue:#5f92e2;--db-ice-crease:#4a6f9e;--db-ice-boards:#5b7186;--db-ice-dash:#0d151c;--db-ice-ink:#cdd8e2;--db-ice-select:#ffd447;--db-fx-glass:rgba(23,29,37,.84);--db-fx-scrim:rgba(10,13,17,.96);--db-fx-shadow:0 3px 12px rgba(0,0,0,.4);--db-fx-shadow-lg:0 8px 24px rgba(0,0,0,.5);--db-fx-edge:rgba(0,0,0,.55);--db-fx-edge-0:rgba(0,0,0,0);color-scheme:dark}}
-:root[data-theme="light"]{--db-surface-app:#e7edf3;--db-surface-bar:#f4f7fa;--db-surface-panel:#ffffff;--db-surface-panel-0:rgba(255,255,255,0);--db-surface-raised:#e9eef4;--db-surface-sunken:#f7fafc;--db-text:#14202b;--db-text-soft:#33414f;--db-text-muted:#576572;--db-text-faint:#5e6b78;--db-text-on-accent:#ffffff;--db-border:#d3dde6;--db-border-strong:#b9c6d2;--db-border-hair:#e4eaf0;--db-accent:#0c7e7a;--db-focus:#0b6d66;--db-danger:#b3222f;--db-danger-border:#e6b4ba;--db-danger-bg:#fdeef0;--db-warn:#8a6100;--db-good:#177a41;--db-info:#1657c4;--db-info-bg:#e6eefc;--db-info-border:#a9c4ee;--db-track:#7c8b9a;--db-track-thumb:#ffffff;--db-ui-select:#a06400;--db-brand-red:#d7263d;--db-ice:#f5fafd;--db-ice-surround:#eef5f9;--db-ice-line-red:#d7263d;--db-ice-line-blue:#1f4fa3;--db-ice-crease:#1f4fa3;--db-ice-boards:#31404e;--db-ice-dash:#ffffff;--db-ice-ink:#14171a;--db-ice-select:#a06400;--db-fx-glass:rgba(255,255,255,.86);--db-fx-scrim:rgba(255,255,255,.94);--db-fx-shadow:0 3px 12px rgba(20,32,43,.14);--db-fx-shadow-lg:0 8px 24px rgba(20,32,43,.20);--db-fx-edge:rgba(20,32,43,.16);--db-fx-edge-0:rgba(20,32,43,0);color-scheme:light}
-:root[data-theme="dark"]{--db-surface-app:#0c1014;--db-surface-bar:#11161c;--db-surface-panel:#1a222c;--db-surface-panel-0:rgba(26,34,44,0);--db-surface-raised:#212b36;--db-surface-sunken:#0f141a;--db-text:#e8edf2;--db-text-soft:#dbe4ec;--db-text-muted:#8b99a8;--db-text-faint:#8593a3;--db-text-on-accent:#ffffff;--db-border:#2c3846;--db-border-strong:#3a4756;--db-border-hair:#243040;--db-accent:#0c7e7a;--db-focus:#45c1cb;--db-danger:#ff8d9c;--db-danger-border:#4a2a30;--db-danger-bg:#3a2126;--db-warn:#e0a92e;--db-good:#3ecf7a;--db-info:#6ea8ff;--db-info-bg:#1c2b45;--db-info-border:#2c477a;--db-track:#6c7d8e;--db-track-thumb:#e8eef4;--db-ui-select:#ffd447;--db-brand-red:#d7263d;--db-ice:#0d151c;--db-ice-surround:#0d151c;--db-ice-line-red:#ff5a6a;--db-ice-line-blue:#5f92e2;--db-ice-crease:#4a6f9e;--db-ice-boards:#5b7186;--db-ice-dash:#0d151c;--db-ice-ink:#cdd8e2;--db-ice-select:#ffd447;--db-fx-glass:rgba(23,29,37,.84);--db-fx-scrim:rgba(10,13,17,.96);--db-fx-shadow:0 3px 12px rgba(0,0,0,.4);--db-fx-shadow-lg:0 8px 24px rgba(0,0,0,.5);--db-fx-edge:rgba(0,0,0,.55);--db-fx-edge-0:rgba(0,0,0,0);color-scheme:dark}
+<style>:root{--db-surface-app:#e7edf3;--db-surface-bar:#f4f7fa;--db-surface-panel:#ffffff;--db-surface-panel-0:rgba(255,255,255,0);--db-surface-raised:#e9eef4;--db-surface-sunken:#f7fafc;--db-text:#14202b;--db-text-soft:#33414f;--db-text-muted:#576572;--db-text-faint:#5e6b78;--db-text-on-accent:#ffffff;--db-border:#d3dde6;--db-border-strong:#b9c6d2;--db-border-hair:#e4eaf0;--db-accent:#0c7e7a;--db-focus:#0b6d66;--db-danger:#b3222f;--db-danger-border:#e6b4ba;--db-danger-bg:#fdeef0;--db-warn:#8a6100;--db-good:#177a41;--db-info:#1657c4;--db-info-bg:#e6eefc;--db-info-border:#a9c4ee;--db-track:#7c8b9a;--db-track-thumb:#ffffff;--db-ui-select:#a06400;--db-brand-red:#d7263d;--db-ice:#f5fafd;--db-ice-surround:#eef5f9;--db-ice-line-red:#d7263d;--db-ice-line-blue:#1f4fa3;--db-ice-crease:#1f4fa3;--db-ice-boards:#31404e;--db-ice-dash:#ffffff;--db-ice-ink:#14171a;--db-ice-select:#a06400;--db-fx-glass:rgba(255,255,255,.86);--db-fx-scrim:rgba(255,255,255,.94);--db-fx-shadow:0 3px 12px rgba(20,32,43,.14);--db-fx-shadow-lg:0 8px 24px rgba(20,32,43,.20);--db-fx-edge:rgba(20,32,43,.16);--db-fx-edge-0:rgba(20,32,43,0);--db-fx-hover:brightness(0.955);color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme]){--db-surface-app:#0c1014;--db-surface-bar:#11161c;--db-surface-panel:#1a222c;--db-surface-panel-0:rgba(26,34,44,0);--db-surface-raised:#212b36;--db-surface-sunken:#0f141a;--db-text:#e8edf2;--db-text-soft:#dbe4ec;--db-text-muted:#8b99a8;--db-text-faint:#8593a3;--db-text-on-accent:#ffffff;--db-border:#2c3846;--db-border-strong:#3a4756;--db-border-hair:#243040;--db-accent:#0c7e7a;--db-focus:#45c1cb;--db-danger:#ff8d9c;--db-danger-border:#4a2a30;--db-danger-bg:#3a2126;--db-warn:#e0a92e;--db-good:#3ecf7a;--db-info:#6ea8ff;--db-info-bg:#1c2b45;--db-info-border:#2c477a;--db-track:#6c7d8e;--db-track-thumb:#e8eef4;--db-ui-select:#ffd447;--db-brand-red:#d7263d;--db-ice:#0d151c;--db-ice-surround:#0d151c;--db-ice-line-red:#ff5a6a;--db-ice-line-blue:#5f92e2;--db-ice-crease:#4a6f9e;--db-ice-boards:#5b7186;--db-ice-dash:#0d151c;--db-ice-ink:#cdd8e2;--db-ice-select:#ffd447;--db-fx-glass:rgba(23,29,37,.84);--db-fx-scrim:rgba(10,13,17,.96);--db-fx-shadow:0 3px 12px rgba(0,0,0,.4);--db-fx-shadow-lg:0 8px 24px rgba(0,0,0,.5);--db-fx-edge:rgba(0,0,0,.55);--db-fx-edge-0:rgba(0,0,0,0);--db-fx-hover:brightness(1.18);color-scheme:dark}}
+:root[data-theme="light"]{--db-surface-app:#e7edf3;--db-surface-bar:#f4f7fa;--db-surface-panel:#ffffff;--db-surface-panel-0:rgba(255,255,255,0);--db-surface-raised:#e9eef4;--db-surface-sunken:#f7fafc;--db-text:#14202b;--db-text-soft:#33414f;--db-text-muted:#576572;--db-text-faint:#5e6b78;--db-text-on-accent:#ffffff;--db-border:#d3dde6;--db-border-strong:#b9c6d2;--db-border-hair:#e4eaf0;--db-accent:#0c7e7a;--db-focus:#0b6d66;--db-danger:#b3222f;--db-danger-border:#e6b4ba;--db-danger-bg:#fdeef0;--db-warn:#8a6100;--db-good:#177a41;--db-info:#1657c4;--db-info-bg:#e6eefc;--db-info-border:#a9c4ee;--db-track:#7c8b9a;--db-track-thumb:#ffffff;--db-ui-select:#a06400;--db-brand-red:#d7263d;--db-ice:#f5fafd;--db-ice-surround:#eef5f9;--db-ice-line-red:#d7263d;--db-ice-line-blue:#1f4fa3;--db-ice-crease:#1f4fa3;--db-ice-boards:#31404e;--db-ice-dash:#ffffff;--db-ice-ink:#14171a;--db-ice-select:#a06400;--db-fx-glass:rgba(255,255,255,.86);--db-fx-scrim:rgba(255,255,255,.94);--db-fx-shadow:0 3px 12px rgba(20,32,43,.14);--db-fx-shadow-lg:0 8px 24px rgba(20,32,43,.20);--db-fx-edge:rgba(20,32,43,.16);--db-fx-edge-0:rgba(20,32,43,0);--db-fx-hover:brightness(0.955);color-scheme:light}
+:root[data-theme="dark"]{--db-surface-app:#0c1014;--db-surface-bar:#11161c;--db-surface-panel:#1a222c;--db-surface-panel-0:rgba(26,34,44,0);--db-surface-raised:#212b36;--db-surface-sunken:#0f141a;--db-text:#e8edf2;--db-text-soft:#dbe4ec;--db-text-muted:#8b99a8;--db-text-faint:#8593a3;--db-text-on-accent:#ffffff;--db-border:#2c3846;--db-border-strong:#3a4756;--db-border-hair:#243040;--db-accent:#0c7e7a;--db-focus:#45c1cb;--db-danger:#ff8d9c;--db-danger-border:#4a2a30;--db-danger-bg:#3a2126;--db-warn:#e0a92e;--db-good:#3ecf7a;--db-info:#6ea8ff;--db-info-bg:#1c2b45;--db-info-border:#2c477a;--db-track:#6c7d8e;--db-track-thumb:#e8eef4;--db-ui-select:#ffd447;--db-brand-red:#d7263d;--db-ice:#0d151c;--db-ice-surround:#0d151c;--db-ice-line-red:#ff5a6a;--db-ice-line-blue:#5f92e2;--db-ice-crease:#4a6f9e;--db-ice-boards:#5b7186;--db-ice-dash:#0d151c;--db-ice-ink:#cdd8e2;--db-ice-select:#ffd447;--db-fx-glass:rgba(23,29,37,.84);--db-fx-scrim:rgba(10,13,17,.96);--db-fx-shadow:0 3px 12px rgba(0,0,0,.4);--db-fx-shadow-lg:0 8px 24px rgba(0,0,0,.5);--db-fx-edge:rgba(0,0,0,.55);--db-fx-edge-0:rgba(0,0,0,0);--db-fx-hover:brightness(1.18);color-scheme:dark}
+:root[data-theme="sheet"]{--db-surface-app:#dde5ec;--db-surface-bar:#e9eff5;--db-surface-panel:#ffffff;--db-surface-panel-0:rgba(255,255,255,0);--db-surface-raised:#e4ebf2;--db-surface-sunken:#f7fafc;--db-text:#0e1a24;--db-text-soft:#33414f;--db-text-muted:#55677a;--db-text-faint:#5e6b78;--db-text-on-accent:#ffffff;--db-border:#d3dde6;--db-border-strong:#b9c6d2;--db-border-hair:#e4eaf0;--db-accent:#10707c;--db-focus:#0b6d66;--db-danger:#b3222f;--db-danger-border:#e6b4ba;--db-danger-bg:#fdeef0;--db-warn:#8a6100;--db-good:#177a41;--db-info:#1657c4;--db-info-bg:#e6eefc;--db-info-border:#a9c4ee;--db-track:#7c8b9a;--db-track-thumb:#ffffff;--db-ui-select:#b87e00;--db-brand-red:#d7263d;--db-ice:#fbfdff;--db-ice-surround:#eef5f9;--db-ice-line-red:#d7263d;--db-ice-line-blue:#1f4fa3;--db-ice-crease:#1f4fa3;--db-ice-boards:#31404e;--db-ice-dash:#ffffff;--db-ice-ink:#14171a;--db-ice-select:#b87e00;--db-fx-glass:rgba(255,255,255,.86);--db-fx-scrim:rgba(255,255,255,.94);--db-fx-shadow:0 3px 12px rgba(20,32,43,.14);--db-fx-shadow-lg:0 8px 24px rgba(20,32,43,.20);--db-fx-edge:rgba(20,32,43,.16);--db-fx-edge-0:rgba(20,32,43,0);--db-fx-hover:brightness(0.955);color-scheme:sheet}
+:root[data-theme="barn"]{--db-surface-app:#05080b;--db-surface-bar:#0a1015;--db-surface-panel:#131c26;--db-surface-panel-0:rgba(19,28,38,0);--db-surface-raised:#1b2531;--db-surface-sunken:#080d12;--db-text:#e8edf2;--db-text-soft:#dbe4ec;--db-text-muted:#9aaec1;--db-text-faint:#8593a3;--db-text-on-accent:#ffffff;--db-border:#26323f;--db-border-strong:#364554;--db-border-hair:#1a242f;--db-accent:#147a86;--db-focus:#45c1cb;--db-danger:#ff8d9c;--db-danger-border:#4a2a30;--db-danger-bg:#3a2126;--db-warn:#e0a92e;--db-good:#3ecf7a;--db-info:#6ea8ff;--db-info-bg:#1c2b45;--db-info-border:#2c477a;--db-track:#8292a2;--db-track-thumb:#ffffff;--db-ui-select:#ffd447;--db-brand-red:#d7263d;--db-ice:#fbfdff;--db-ice-surround:#0d151c;--db-ice-line-red:#d7263d;--db-ice-line-blue:#1f4fa3;--db-ice-crease:#1f4fa3;--db-ice-boards:#545f69;--db-ice-dash:#ffffff;--db-ice-ink:#14171a;--db-ice-select:#b87e00;--db-fx-glass:rgba(23,29,37,.84);--db-fx-scrim:rgba(10,13,17,.96);--db-fx-shadow:0 3px 12px rgba(0,0,0,.4);--db-fx-shadow-lg:0 8px 24px rgba(0,0,0,.5);--db-fx-edge:rgba(0,0,0,.55);--db-fx-edge-0:rgba(0,0,0,0);--db-fx-hover:brightness(1.18);color-scheme:barn}
+:root[data-theme="slate"]{--db-surface-app:#04070a;--db-surface-bar:#090f15;--db-surface-panel:#141d27;--db-surface-panel-0:rgba(20,29,39,0);--db-surface-raised:#1c2733;--db-surface-sunken:#0f141a;--db-text:#e8edf2;--db-text-soft:#dbe4ec;--db-text-muted:#8b99a8;--db-text-faint:#8593a3;--db-text-on-accent:#ffffff;--db-border:#2c3846;--db-border-strong:#3a4756;--db-border-hair:#243040;--db-accent:#137d89;--db-focus:#45c1cb;--db-danger:#ff8d9c;--db-danger-border:#4a2a30;--db-danger-bg:#3a2126;--db-warn:#e0a92e;--db-good:#3ecf7a;--db-info:#6ea8ff;--db-info-bg:#1c2b45;--db-info-border:#2c477a;--db-track:#6c7d8e;--db-track-thumb:#e8eef4;--db-ui-select:#ffd447;--db-brand-red:#d7263d;--db-ice:#1a2836;--db-ice-surround:#1a2836;--db-ice-line-red:#ff6472;--db-ice-line-blue:#6ba3f0;--db-ice-crease:#547399;--db-ice-boards:#6a819a;--db-ice-dash:#1a2836;--db-ice-ink:#d6e2ee;--db-ice-select:#ffd447;--db-fx-glass:rgba(23,29,37,.84);--db-fx-scrim:rgba(10,13,17,.96);--db-fx-shadow:0 3px 12px rgba(0,0,0,.4);--db-fx-shadow-lg:0 8px 24px rgba(0,0,0,.5);--db-fx-edge:rgba(0,0,0,.55);--db-fx-edge-0:rgba(0,0,0,0);--db-fx-hover:brightness(1.18);color-scheme:slate}
 html,body{margin:0;padding:0;overflow:hidden;background:var(--db-surface-app)}
   :root{--ice:#eef5f9;--panel:#fff;--ink:#14202b;--muted:#5c6b78;--line:#d6e2ea;--hair:#e4edf3;--red:#d7263d;--blue:#1f4fa3;--surface:#f6fafd;--mark:#cf3346;--mark-blue:#2f5fb0;--puck:#14171a;--code-bg:#0f1a23;--code-ink:#d9e6f0;--code-dim:#7e93a4;--shadow:0 1px 2px rgba(20,32,43,.06),0 12px 34px -14px rgba(20,32,43,.28);--font-display:800 1em/1 "Helvetica Neue",Helvetica,Arial,sans-serif;--font-body:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;--font-mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace}
   @media (prefers-color-scheme:dark){:root{--ice:#0d151c;--panel:#131f28;--ink:#e8eff5;--muted:#93a4b2;--line:#26343f;--hair:#1c2831;--red:#ff5a6a;--blue:#5f92e2;--surface:#16232d;--mark:#e2475a;--mark-blue:#4f7fd6;--puck:#cdd8e2;--code-bg:#0a1219;--code-ink:#d3e2ee;--code-dim:#6f8496;--shadow:0 1px 2px rgba(0,0,0,.4),0 18px 44px -18px rgba(0,0,0,.7)}}
@@ -1163,6 +1166,7 @@ function bounceOffNets(x, y, nx, ny, vx, vy, shapes, rest = 0.72) {
 // Drill text format: parser and serializer. See the DSL spec in App header.
 
 
+
 // A puck-action index may be qualified by the branch route it lives on. On the wire
 // the qualifier is the branch colour-path (hex, no #) then '.', e.g. `shoot=2ea043.3`,
 // `pass=2ea043.2:F2@e5342b.1`; unqualified = the base route. ('.' not '#', since '#'
@@ -1170,6 +1174,27 @@ function bounceOffNets(x, y, nx, ny, vx, vy, shapes, rest = 0.72) {
 const memToWireRef = m => m ? String(m).split("/").map(h => h.replace(/^#/, "")).join("/") : "";
 const wireToMemRef = w => w ? "#" + String(w).split("/").map(h => h.replace(/^#/, "")).join("/#") : null;
 const ixRef = (at, ref) => (ref ? memToWireRef(ref) + "." : "") + (at + 1);   // 1-based, optional ref prefix
+
+// Colours from the DSL are interpolated straight into SVG presentation
+// attributes by drill-svg.js (`fill="${p.color}"`, ~20 sites, no escaping). The
+// tokeniser splits on whitespace, so a value like `#fff"onload=alert(1)` arrives
+// as ONE token and would close the attribute and open an event handler. Validate
+// at the single point where a colour enters the model instead of escaping at
+// every interpolation — that way drill-svg.js output is safe by construction and
+// a new render site can't forget.
+//
+// Throwing is deliberate: the per-line try/catch in parseDrill turns it into a
+// reported `errors[]` entry, so a bad colour is visible to the author rather
+// than silently falling back to a default that looks almost right.
+// Exactly 3 or 6 digits, matching the comment-stripper above (which keeps a
+// `#` only when it is followed by 3-or-6 hex digits and a word boundary). #rgba
+// and #rrggbbaa are deliberately NOT accepted: the stripper would eat them as
+// comments before they ever reached here, so accepting them would be a lie.
+const HEX_COLOR = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+const hexColor = raw => {
+  if (!HEX_COLOR.test(raw)) throw new Error(`bad colour ${JSON.stringify(raw)} (want #rgb or #rrggbb)`);
+  return raw;
+};
 
 /* ---------------- inventory ---------------- */
 
@@ -1223,14 +1248,14 @@ function extractDrill(text) {
 function parseSegments(tok, j, unq) {
   const segs = [];
   let mode = "carry", dir = "fwd", stop = 0, rate = 1, name = null, waitOn = null, jump = false, join = null, endStop = false, lock = false;
-  let dsc = null, dmode = null, dsize = null, dox = null, doy = null;
+  let dsc = null, dmode = null, dsize = null, dox = null, doy = null, turn = null;
   const num = () => { const v = parseFloat(tok[j++]); if (isNaN(v)) throw new Error("bad number in PATH"); return v; };
   const push = seg => {
     segs.push({ ...seg, mode, dir, stop, rate, ...(name ? { name } : {}), ...(waitOn ? { waitOn } : {}), ...(jump ? { jump: true } : {}),
       ...(join ? { join } : {}), ...(endStop ? { endStop: true } : {}), ...(lock ? { lock: true } : {}), ...(dsc ? { desc: dsc } : {}), ...(dmode ? { dmode } : {}), ...(dsize != null ? { dsize } : {}),
-      ...(dox != null ? { dox, doy } : {}) });
+      ...(dox != null ? { dox, doy } : {}), ...(turn ? { turn } : {}) });
     mode = "carry"; dir = "fwd"; stop = 0; rate = 1; name = null; waitOn = null; jump = false; join = null; endStop = false; lock = false;
-    dsc = null; dmode = null; dsize = null; dox = null; doy = null;
+    dsc = null; dmode = null; dsize = null; dox = null; doy = null; turn = null;
   };
   while (j < tok.length) {
     const t = tok[j++].toUpperCase();
@@ -1250,10 +1275,12 @@ function parseSegments(tok, j, unq) {
     if (t === "SHOW") { const m = (tok[j++] || "").toLowerCase(); dmode = ["auto", "preso", "label"].includes(m) ? m : null; continue; }
     if (t === "SIZE") { dsize = Math.max(0.2, num()); continue; }
     if (t === "OFF") { dox = num(); doy = num(); continue; }            // label offset from the waypoint
+    // which way the skater sweeps when this leg reverses their direction
+    if (t === "TURN") { const v = (tok[j++] || "").toLowerCase(); turn = ["left", "right", "player", "puck"].includes(v) ? v : null; continue; }
     if (t === "L") push({ type: "L", x: num(), y: num() });
     else if (t === "Q") push({ type: "Q", cx: num(), cy: num(), x: num(), y: num() });
     else if (t === "C") push({ type: "C", c1x: num(), c1y: num(), c2x: num(), c2y: num(), x: num(), y: num() });
-    else throw new Error(`unknown token "${t}" (use L Q C, PASS SHOT CARRY, FWD BWD, STOP n, RATE n)`);
+    else throw new Error(`unknown token "${t}" (use L Q C, PASS SHOT CARRY, FWD BWD, TURN d, STOP n, RATE n)`);
   }
   return segs;
 }
@@ -1403,7 +1430,7 @@ function parseDrill(text) {
         const transfers = [];
         rest.forEach(r => {
           if (quoted(r)) { text = unq(r); }              // a "quoted string" → label text
-          else if (r.startsWith("#")) color = r;
+          else if (r.startsWith("#")) color = hexColor(r);
           else if (r.includes("=")) {
             const [k, v] = r.split("=");
             const key = k.toLowerCase();
@@ -1438,22 +1465,23 @@ function parseDrill(text) {
               // optional <ref># qualifies a release/reception on a branch route; a
               // ^passer makes it a give-and-go; %<by> pins WHO releases (needed after
               // sibling-branch receivers, where the holder is per-run ambiguous); a
-              // trailing ! is a sauce (raised) pass
-              const m2 = /^(?:([0-9a-fA-F/]+)\.)?(\d+):([^@\s^!%]+)(?:@(?:([0-9a-fA-F/]+)\.)?(\d+))?(?:\^([^!%\s]+))?(?:%([^!\s]+))?(!)?$/.exec(v);
+              // trailing ! is a sauce (raised) pass; a trailing + opens the receiver up
+              const m2 = /^(?:([0-9a-fA-F/]+)\.)?(\d+):([^@\s^!%+]+)(?:@(?:([0-9a-fA-F/]+)\.)?(\d+))?(?:\^([^!%+\s]+))?(?:%([^!+\s]+))?(!)?(\+)?$/.exec(v);
               if (m2) transfers.push({ at: parseInt(m2[2], 10) - 1, to: m2[3],
                 recvAt: m2[4] || m2[5] ? parseInt(m2[5], 10) - 1 : null, kind: "pass",
                 ...(m2[1] ? { atRef: wireToMemRef(m2[1]) } : {}), ...(m2[4] ? { recvRef: wireToMemRef(m2[4]) } : {}),
-                ...(m2[6] ? { via: m2[6] } : {}), ...(m2[7] ? { by: m2[7] } : {}), ...(m2[8] ? { sauce: true } : {}) });
+                ...(m2[6] ? { via: m2[6] } : {}), ...(m2[7] ? { by: m2[7] } : {}), ...(m2[8] ? { sauce: true } : {}),
+                ...(m2[9] ? { open: true } : {}) });
             } else if (key === "rebound") {
               // shot whose carom is collected by a player: shoot at <pt>, they
               // gather at their @<pt> (else route end / where they stand)
               // rebound=[<ref>.]<pt>:<to>[@[<ref>.]<recvPt>][>net][%<by>] — >net gives
               // this rebound its own target; %<by> pins the shooter (as with pass=)
-              const m4 = /^(?:([0-9a-fA-F/]+)\.)?(\d+):([^@\s>%]+)(?:@(?:([0-9a-fA-F/]+)\.)?(\d+))?(?:>([^%\s]+))?(?:%(\S+))?$/.exec(v);
+              const m4 = /^(?:([0-9a-fA-F/]+)\.)?(\d+):([^@\s>%+]+)(?:@(?:([0-9a-fA-F/]+)\.)?(\d+))?(?:>([^%\s+]+))?(?:%([^\s+]+))?(\+)?$/.exec(v);
               if (m4) transfers.push({ at: parseInt(m4[2], 10) - 1, to: m4[3],
                 recvAt: m4[4] || m4[5] ? parseInt(m4[5], 10) - 1 : null, kind: "shot",
                 ...(m4[1] ? { atRef: wireToMemRef(m4[1]) } : {}), ...(m4[4] ? { recvRef: wireToMemRef(m4[4]) } : {}),
-                ...(m4[6] ? { net: m4[6] } : {}), ...(m4[7] ? { by: m4[7] } : {}) });
+                ...(m4[6] ? { net: m4[6] } : {}), ...(m4[7] ? { by: m4[7] } : {}), ...(m4[8] ? { open: true } : {}) });
             } else if (key === "shoot") {
               // shoot=[<ref>.]<pt>[^<shooter>][>net] — a terminal shot. `^<shooter>` pins
               // WHICH player shoots (when several conditional receivers could each be the
@@ -1467,7 +1495,7 @@ function parseDrill(text) {
               // collector instead, %<by> pinning who releases (as with pass=).
               // …the TERMINAL form pins its player with `^<shooter>` (before ~aim/*dist),
               // like shoot=, so a cross-run rim/chip lands on the right receiver only.
-              const m5 = /^(?:([0-9a-fA-F/]+)\.)?(\d+)(?::([^@\s~*^%]+)(?:@(?:([0-9a-fA-F/]+)\.)?(\d+))?)?(?:\^([^~*%\s]+))?(?:%([^~*\s]+))?(?:~(-?\d+(?:\.\d+)?))?(?:\*(\d+(?:\.\d+)?))?$/.exec(v);
+              const m5 = /^(?:([0-9a-fA-F/]+)\.)?(\d+)(?::([^@\s~*^%+]+)(?:@(?:([0-9a-fA-F/]+)\.)?(\d+))?)?(?:\^([^~*%+\s]+))?(?:%([^~*+\s]+))?(?:~(-?\d+(?:\.\d+)?))?(?:\*(\d+(?:\.\d+)?))?(\+)?$/.exec(v);
               if (m5) {
                 const aim = m5[8] != null ? parseFloat(m5[8]) : null;
                 const dist = m5[9] != null ? parseFloat(m5[9]) : null;
@@ -1475,14 +1503,14 @@ function parseDrill(text) {
                 if (m5[3]) transfers.push({ at, to: m5[3],
                   recvAt: m5[4] || m5[5] ? parseInt(m5[5], 10) - 1 : null, kind: key,
                   ...(ref ? { atRef: ref } : {}), ...(m5[4] ? { recvRef: wireToMemRef(m5[4]) } : {}),
-                  ...(tby ? { by: tby } : {}), ...(aim != null ? { aim } : {}) });
+                  ...(tby ? { by: tby } : {}), ...(aim != null ? { aim } : {}), ...(m5[10] ? { open: true } : {}) });
                 else terminals.push({ kind: key, at, ref: ref || "", ...(by ? { by } : {}), ...(aim != null ? { aim } : {}), ...(dist != null ? { dist } : {}) });
               }
             } else if (key === "pickup") {
-              // pickup=<player>@[<ref>.]<pt>[*] — trailing * = a live "nearest loose puck"
-              // collect that re-resolves at play time instead of a fixed puck
-              const m3 = /^([^@\s]+)@(?:([0-9a-fA-F/]+)\.)?(\d+)(\*)?$/.exec(v);
-              if (m3) pickup = { to: m3[1], at: parseInt(m3[3], 10) - 1, ...(m3[2] ? { atRef: wireToMemRef(m3[2]) } : {}), ...(m3[4] ? { nearest: true } : {}) };
+              // pickup=<player>@[<ref>.]<pt>[*][+] — trailing * = a live "nearest loose puck"
+              // collect that re-resolves at play time instead of a fixed puck; + opens up
+              const m3 = /^([^@\s]+)@(?:([0-9a-fA-F/]+)\.)?(\d+)(\*)?(\+)?$/.exec(v);
+              if (m3) pickup = { to: m3[1], at: parseInt(m3[3], 10) - 1, ...(m3[2] ? { atRef: wireToMemRef(m3[2]) } : {}), ...(m3[4] ? { nearest: true } : {}), ...(m3[5] ? { open: true } : {}) };
             } else if (key === "net") {
               net = v;                                   // a net piece id (or left/right for legacy)
             } else if (key === "hold") {
@@ -1584,7 +1612,10 @@ function parseDrill(text) {
         // isn't a style word, everything from index 4 on is flags + coords
         const styleWords = ["solid", "dashed", "dotted", "wavy"];
         const hasStyle = styleWords.includes((tok[4] || "").toLowerCase());
-        const mid = tok[1], mcol = tok[2] || "#ffd447", mw = parseFloat(tok[3]) || 1.1, mst = hasStyle ? tok[4].toLowerCase() : "solid";
+        // mcol is interpolated into stroke="…" by drill-svg.js — validate it
+        // like every other colour sink. The serializer always writes it at
+        // position 2, so this is the same token on the way back in.
+        const mid = tok[1], mcol = hexColor(tok[2] || "#ffd447"), mw = parseFloat(tok[3]) || 1.1, mst = hasStyle ? tok[4].toLowerCase() : "solid";
         const rest = tok.slice(hasStyle ? 5 : 4);
         // a bare `lock` flag may sit among the trailing tokens; coords are pure
         // numbers (the tokenizer splits on commas), so it never collides with them
@@ -1599,7 +1630,7 @@ function parseDrill(text) {
         let mfill = null, mfillOp = 0.25;
         if (mfTok) {
           const [fc, fo] = mfTok.slice(5).split(":");
-          if (fc) mfill = fc.startsWith("#") ? fc : "#" + fc;
+          if (fc) mfill = hexColor(fc.startsWith("#") ? fc : "#" + fc);
           const op = parseFloat(fo);
           if (!isNaN(op)) mfillOp = Math.max(0.05, Math.min(1, op));
         }
@@ -1656,7 +1687,16 @@ function parseDrill(text) {
     } catch (e) { errors.push(`line ${i + 1}: ${e.message}`); }
   });
   if (capturingNotes) notes = noteBuf.join("\n");   // unterminated NOTES: flush what we have
-  return { rink, pieces: ensureShotNet(pieces), errors, title, desc, dslVersion, steps, notes: notes || "", items };
+  // A puck chain is positional, but its hops are authored per waypoint, so a drill
+  // can arrive with them out of sequence (see orderTransfers) — in which case every
+  // release past the first reads as "isn't holding the puck" and a shot has no final
+  // holder. Settle the order on the way in; a chain that already resolves is untouched.
+  const chained = pieces.map(p => {
+    if (p.kind !== "puck") return p;
+    const ts = orderTransfers(p);
+    return ts === p.transfers ? p : { ...p, transfers: ts };
+  });
+  return { rink, pieces: ensureShotNet(chained), errors, title, desc, dslVersion, steps, notes: notes || "", items };
 }
 
 const f1 = n => (Math.round(n * 10) / 10).toString();
@@ -1685,6 +1725,7 @@ function segToStr(s) {
     : `WAIT ${s.waitOn.on} ${(s.waitOn.at ?? 0) + 1} `;
   if (s.rate && s.rate !== 1) pre += `RATE ${f2(s.rate)} `;
   if (s.dir === "bwd") pre += "BWD ";
+  if (s.turn && s.turn !== "puck") pre += `TURN ${s.turn} `;   // "puck" is the default sweep
   if (s.mode && s.mode !== "carry") pre += s.mode.toUpperCase() + " ";
   if (s.type === "L") return `${pre}L ${f1(s.x)},${f1(s.y)}`;
   if (s.type === "Q") return `${pre}Q ${f1(s.cx)},${f1(s.cy)} ${f1(s.x)},${f1(s.y)}`;
@@ -1738,7 +1779,7 @@ function serializeDrill(rink, pieces, title = "", desc = "", steps = [], notes =
     const sm = p.kind === "player" && p.sym && String(p.sym).trim()
       ? ` sym=${String(p.sym).trim().slice(0, 3).replace(/[\s,]+/g, "_")}` : "";
     const car = p.kind === "puck" && p.carrier ? ` on=${p.carrier}` : "";
-    const gp = p.kind === "puck" && !p.carrier && p.pickup ? ` pickup=${p.pickup.to}@${ixRef(p.pickup.at, p.pickup.atRef)}${p.pickup.nearest ? "*" : ""}` : "";
+    const gp = p.kind === "puck" && !p.carrier && p.pickup ? ` pickup=${p.pickup.to}@${ixRef(p.pickup.at, p.pickup.atRef)}${p.pickup.nearest ? "*" : ""}${p.pickup.open ? "+" : ""}` : "";
     // chain transfers in order: pass= passes, rebound= shot handoffs, rim=/chip= board plays.
     // Validity is POSSIBILITY-based: every receiver so far could be the holder on their
     // own branch's run, so a sibling-branch releaser is valid. An impossible step (an
@@ -1765,7 +1806,7 @@ function serializeDrill(rink, pieces, title = "", desc = "", steps = [], notes =
     const pas = head && vts.length
       ? vts.map(({ t, s }) => {
           const pby = t.by && t.by !== inferRel(s) ? "%" + t.by : "";
-          return ` ${kw(t)}=${ixRef(t.at, t.atRef)}:${t.to}${t.recvAt != null ? "@" + ixRef(t.recvAt, t.recvRef) : ""}${t.via ? "^" + t.via : ""}${t.kind === "shot" && t.net ? ">" + t.net : ""}${pby}${t.sauce ? "!" : ""}${(t.kind === "chip" || t.kind === "rim") && t.aim != null ? "~" + f1(t.aim) : ""}`;
+          return ` ${kw(t)}=${ixRef(t.at, t.atRef)}:${t.to}${t.recvAt != null ? "@" + ixRef(t.recvAt, t.recvRef) : ""}${t.via ? "^" + t.via : ""}${t.kind === "shot" && t.net ? ">" + t.net : ""}${pby}${t.sauce ? "!" : ""}${(t.kind === "chip" || t.kind === "rim") && t.aim != null ? "~" + f1(t.aim) : ""}${t.open ? "+" : ""}`;
         }).join("")
       : "";
     // every terminal is an independent chain END — one token each, in authored order,
@@ -1887,8 +1928,7 @@ const AUTO_MAP = { light: "light", dark: "dark" };
 // left to choose would fight the manual override.
 const SCHEME = { light: "light", dark: "dark" };
 
-const THEMES = {
-  light: {
+const LIGHT = {
     /* surfaces — what you put content ON */
     "surface-app": "#e7edf3",
     "surface-bar": "#f4f7fa",
@@ -1950,9 +1990,14 @@ const THEMES = {
     // gradient stops. Also NOT `transparent` — same Safari premultiply problem.
     "fx-edge": "rgba(20,32,43,.16)",
     "fx-edge-0": "rgba(20,32,43,0)",
-  },
+    // Hover is a FILTER, not a colour, so one rule covers every control whatever
+    // it's filled with — default chip, accent-filled .on state, danger text, a
+    // raw colour swatch. The direction has to flip per theme: on a light UI
+    // "lighter" is invisible, so light darkens and dark lightens.
+    "fx-hover": "brightness(0.955)",
+};
 
-  dark: {
+const DARK = {
     "surface-app": "#0c1014",
     "surface-bar": "#11161c",
     "surface-panel": "#1a222c",
@@ -2001,15 +2046,132 @@ const THEMES = {
     "fx-shadow-lg": "0 8px 24px rgba(0,0,0,.5)",
     "fx-edge": "rgba(0,0,0,.55)",
     "fx-edge-0": "rgba(0,0,0,0)",
-  },
+    "fx-hover": "brightness(1.18)",
 };
 
-// Order of the Auto/Light/Dark chips in Tune → Display. "auto" is not a theme,
-// it's the absence of an override.
-const THEME_ORDER = ["auto", "light", "dark"];
+/* =================== PROPOSAL MOCKUPS — evaluation only ===================
+   Three candidate schemes, live so they can be compared on-device. Built by
+   spreading over LIGHT/DARK so they can't fall out of key parity.
 
-// Tokens holding a shadow (not a colour) — the contrast test skips parsing these.
-const SHADOW_TOKENS = ["fx-shadow", "fx-shadow-lg"];
+   To remove: delete this block, the three entries in THEMES, their THEME_ORDER
+   and THEME_LABEL entries, and TEAM_LIFT below. Nothing else references them.
+
+   Measured facts these are answering (see the contrast test for the method):
+   - ice vs surface-app is 1.04:1 in dark and 1.12:1 in light, so the rink
+     barely separates from the room it sits in;
+   - the six stored team colours were chosen for white ice — on #0d151c, blue
+     (2.37), purple (2.72) and black (1.21) all fail 3:1;
+   - no middle ground exists: a mid-slate sheet drops the worst team colour to
+     1.39:1, and even a faintly tinted #e3ecf3 puts orange under 3.
+   ------------------------------------------------------------------------ */
+
+// 1. "Fresh Sheet" — light. Make the rink the BRIGHTEST surface and drop the
+//    surround, so the sheet reads as lit rather than as another panel.
+const SHEET = {
+  ...LIGHT,
+  "surface-app": "#dde5ec",
+  "surface-bar": "#e9eff5",
+  "surface-raised": "#e4ebf2",
+  text: "#0e1a24",
+  "text-muted": "#55677a",
+  accent: "#10707c",          // frost cyan, hue 186 — clear of team blue at 218
+  focus: "#0b6d66",
+  ice: "#fbfdff",             // 1.25:1 against the room, up from 1.12
+  "ui-select": "#b87e00",     // #c98a00 measured 2.89 on the brighter sheet
+  "ice-select": "#b87e00",
+};
+
+// 2. "Barn" — the arena at night: the room goes properly dark, the sheet stays
+//    lit. Best-measuring option (rink separation 18.8:1, every team colour keeps
+//    its white-ice contrast) but dark mode then doesn't darken the biggest
+//    surface on screen, and a lit rink may glare at a dark arena.
+const BARN = {
+  ...DARK,
+  "surface-app": "#05080b",
+  "surface-bar": "#0a1015",
+  "surface-panel": "#131c26",
+  "surface-panel-0": "rgba(19,28,38,0)",
+  "surface-raised": "#1b2531",
+  "surface-sunken": "#080d12",
+  border: "#26323f",
+  "border-strong": "#364554",
+  "border-hair": "#1a242f",
+  accent: "#147a86",
+  // the glass player bar now composites over a LIT sheet (#3b4148, not the near
+  // black it used to sit on), so its text and rail have to lift with it
+  "text-muted": "#9aaec1",
+  // the rail is squeezed from both sides — light enough to read on the glass
+  // (3.23) but dark enough for its own knob (3.20), which has to go pure white
+  track: "#8292a2",
+  "track-thumb": "#ffffff",
+  // the sheet and everything on it revert to the light treatment
+  ice: "#fbfdff",
+  "ice-line-red": "#d7263d",
+  "ice-line-blue": "#1f4fa3",
+  "ice-crease": "#1f4fa3",
+  // the boards outline is the one thing straddling both worlds — lit sheet
+  // inside, near-black room outside — so it needs 3:1 against BOTH
+  "ice-boards": "#545f69",
+  "ice-dash": "#ffffff",
+  "ice-ink": "#14171a",
+  "ice-select": "#b87e00",
+};
+
+// 3. "Slate" — keeps the dark rink and fixes what sits ON it instead: the sheet
+//    lifts for separation, and team colours get a per-theme RENDERED value (see
+//    TEAM_LIFT) while their stored DSL value never changes.
+const SLATE = {
+  ...DARK,
+  "surface-app": "#04070a",
+  "surface-bar": "#090f15",
+  "surface-panel": "#141d27",
+  "surface-panel-0": "rgba(20,29,39,0)",
+  "surface-raised": "#1c2733",
+  accent: "#137d89",       // 3.08 on the slate sheet, 3.49 on its panel
+  ice: "#1a2836",             // 1.35:1 against the room, up from 1.04
+  "ice-surround": "#1a2836",
+  "ice-line-red": "#ff6472",
+  "ice-line-blue": "#6ba3f0",
+  "ice-crease": "#547399",
+  "ice-boards": "#6a819a",
+  "ice-dash": "#1a2836",
+  "ice-ink": "#d6e2ee",
+};
+
+// Per-theme RENDERED team colours. The stored DSL value is never touched — this
+// is the same trick that rescued the puck: hue and saturation are held and only
+// lightness moves, so a red player still reads red. Keyed by the stored hex.
+// A theme absent here renders team colours exactly as authored.
+const TEAM_LIFT = {
+  slate: {
+    "#d7263d": "#de475b",   // red     3.71 -> 4.53 on the slate sheet
+    "#1f4fa3": "#457bdc",   // blue    2.37 -> 4.50
+    "#1f8a4c": "#20904f",   // green   4.20 -> 4.51
+    "#e0731d": "#c46519",   // orange  5.82 -> 4.58
+    "#22262b": "#727f90",   // black   1.21 -> 4.52
+    "#7a3fa8": "#9c67c6",   // purple  2.72 -> 4.53
+  },
+};
+// stored colour -> what this theme should actually paint
+const teamInk = (theme, stored) =>
+  (TEAM_LIFT[theme] && TEAM_LIFT[theme][String(stored).toLowerCase()]) || stored;
+
+/* ================= end proposal mockups ================= */
+
+const THEMES = { light: LIGHT, dark: DARK, sheet: SHEET, barn: BARN, slate: SLATE };
+
+// Order of the chips in Tune → Display. "auto" is not a theme, it's the absence
+// of an override — only light/dark are reachable from the OS preference, so the
+// proposal schemes are manual-only by construction.
+const THEME_ORDER = ["auto", "light", "dark", "sheet", "barn", "slate"];
+const THEME_LABEL = {
+  auto: "Auto", light: "Light", dark: "Dark",
+  sheet: "Sheet", barn: "Barn", slate: "Slate",
+};
+
+// Tokens that aren't colours — box-shadow values and the hover filter. The
+// contrast test skips parsing these rather than failing on them.
+const NON_COLOR_TOKENS = ["fx-shadow", "fx-shadow-lg", "fx-hover"];
 
 /* ------------------------------------------------------------------ */
 /* pairings the contrast test asserts                                  */
@@ -2107,7 +2269,14 @@ const decls = t => Object.entries(THEMES[t]).map(([k, v]) => `--db-${k}:${v}`).j
 //                                   specificity AND source order.
 // The :not([data-theme]) in layer 2 is redundant given both of those; it's there
 // so a future reorder of these blocks can't silently break the override.
-function themeCss() {
+//
+// `appShell` picks the base html/body rule. The board is a fixed-inset app that
+// must never scroll (overflow:hidden is load-bearing there, alongside the
+// safe-area layout); the marketing site is a document and would be unscrollable
+// with it. Both still take their background from the SAME token here rather than
+// each app declaring its own — the tempting alternative, overriding html/body in
+// the site's own stylesheet, forks the two apps' base styles permanently.
+function themeCss({ appShell = true } = {}) {
   const blocks = [`:root{${decls("light")};color-scheme:${SCHEME.light}}`];
   for (const [query, name] of Object.entries(AUTO_MAP)) {
     if (name === "light") continue; // already the floor
@@ -2123,7 +2292,11 @@ function themeCss() {
   }
   // The app's own background lives here rather than in styles.js because
   // styles.js is injected by React — this has to be right at first paint.
-  blocks.push(`html,body{margin:0;padding:0;overflow:hidden;background:var(--db-surface-app)}`);
+  blocks.push(
+    `html,body{margin:0;padding:0;` +
+    (appShell ? `overflow:hidden;` : ``) +
+    `background:var(--db-surface-app)}`
+  );
   return blocks.join("\n");
 }
 

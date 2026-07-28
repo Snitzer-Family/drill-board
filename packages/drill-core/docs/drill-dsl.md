@@ -50,6 +50,10 @@ One statement per line. Order is mostly free, but a `PATH` must come after the
 
 - Blank lines are ignored.
 - `#` starts a comment **unless** it's a hex colour (`#c81e33`, `#f80`).
+  A colour is **exactly 3 or 6 hex digits**. `#rgba` / `#rrggbbaa` are eaten as
+  comments, and anything else in a colour position is a reported parse error
+  rather than a silent fallback — colours are interpolated straight into SVG
+  presentation attributes, so the parser is where they are validated.
 - Coordinates are **rink feet**: `x` 0–200, `y` 0–85.
 
 ### Rink landmarks (feet)

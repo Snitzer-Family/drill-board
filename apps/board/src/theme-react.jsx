@@ -8,7 +8,7 @@
 // there's nothing to put a var() in without restructuring the helpers.
 
 import { createContext, useContext } from "react";
-import { THEMES, AUTO_MAP } from "./theme.js";
+import { THEMES, AUTO_MAP } from "@coachvision/drill-core/theme.js";
 
 // Default to dark so an out-of-tree render (the ErrorBoundary path, or any
 // future subtree mounted outside the provider) can't crash on undefined.

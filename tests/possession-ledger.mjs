@@ -1,5 +1,5 @@
-import { buildLedger, mayHoldOn, mayHoldEntering, looseOn, branchCtx, mergeCond } from '../src/possession.js';
-import { parseDrill } from '../src/drill-format.js';
+import { buildLedger, mayHoldOn, mayHoldEntering, looseOn, branchCtx, mergeCond } from "@coachvision/drill-core/possession.js";
+import { parseDrill } from "@coachvision/drill-core/drill-format.js";
 
 let pass = 0, fail = 0;
 const T = (name, got, want) => {
@@ -279,7 +279,7 @@ PIECE PK1 puck 40 42 #111 on=P3 pass=2ea043.1:P1@1 pass=e5342b.1:P2@1 chip=1:P2@
 }
 /* ---- chain ORDER: actions are authored per waypoint, stored as an ordered chain ---- */
 {
-  const { orderTransfers } = await import('../src/possession.js');
+  const { orderTransfers } = await import("@coachvision/drill-core/possession.js");
   const ord = pk => orderTransfers(pk).map(t => `${t.by || '-'}>${t.to}@${t.recvAt}`).join(' ');
 
   // the reported break: P2 passes to P1 (caught late), then the user inserts an

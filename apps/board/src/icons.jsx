@@ -1,6 +1,6 @@
 // Piece icons (screen-true frames), stepper control, diagnostics overlay.
 import { useState, useRef, useEffect } from "react";
-import { APP_VERSION, BUILD_STAMP, ICON_SCALE, DSL_VERSION, symOf, PLAYER_SCALE } from "./constants.js";
+import { APP_VERSION, BUILD_STAMP, ICON_SCALE, DSL_VERSION, symOf, PLAYER_SCALE } from "@coachvision/drill-core/constants.js";
 import { useTheme, useInk } from "./theme-react.jsx";
 
 /* ---------------- unified action icons ----------------

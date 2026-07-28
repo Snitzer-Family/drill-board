@@ -9,8 +9,8 @@
 //
 // Rink feet: x 0..200, y 0..85. Goal lines 11/189, blue lines 75/125,
 // center 100. End-zone dots (31/169, 20.5/64.5), neutral dots (80/120, …).
-import * as boards from "./boards.js";
-import { netShapes, avoidNets, bounceOffNets } from "./net-collide.js";
+import * as boards from "@coachvision/drill-core/boards.js";
+import { netShapes, avoidNets, bounceOffNets } from "@coachvision/drill-core/net-collide.js";
 
 /* ------------------------------------------------------------------ */
 /* tunables                                                           */

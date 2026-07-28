@@ -1,0 +1,39 @@
+name: CI
+
+# Vercel deploys both apps (coach.vision and board.coach.vision) straight from
+# git, so this workflow does not publish anything — it is the gate. Both Vercel
+# projects also run `npm test` in their Build Command, so a red suite blocks a
+# production deploy even if someone bypasses the branch protection here.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      # `npm ci` at the ROOT installs every workspace from the single lockfile.
+      - run: npm ci
+      # The node suites cover the pure cores: possession ledger, drill fit,
+      # auto-net, route direction, sketch recogniser, crash-recovery stash and
+      # the theme/WCAG contrast + drift guards. Auto-discovered — a new
+      # tests/*.mjs is enforced the moment it lands.
+      - run: npm test
+      - run: npm run build:board
+      # The web app is added in Step 2; until then there is nothing to build or
+      # typecheck, and a hard failure here would be noise rather than signal.
+      - name: Web app (typecheck + build)
+        run: |
+          if [ -f apps/web/package.json ]; then
+            npm run typecheck && npm run build
+          else
+            echo "apps/web not present yet — skipping"
+          fi

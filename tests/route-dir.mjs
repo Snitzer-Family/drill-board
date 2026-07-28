@@ -1,5 +1,5 @@
-import { dirOf, dirAtWaypoint, spreadDir } from '../src/route-dir.js';
-import { parseDrill, serializeDrill } from '../src/drill-format.js';
+import { dirOf, dirAtWaypoint, spreadDir } from "../apps/board/src/route-dir.js";
+import { parseDrill, serializeDrill } from "@coachvision/drill-core/drill-format.js";
 
 let pass = 0, fail = 0;
 const T = (name, got, want) => {

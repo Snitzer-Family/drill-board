@@ -21,7 +21,10 @@
          accepted: reverting to "default" risks the iOS 26 dead-band bug. -->
     <meta name="theme-color" content="#e7edf3" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#0c1014" media="(prefers-color-scheme: dark)" />
-    <title>DrillBoard</title>
+    <title>Coach.Vision Board</title>
+    <!-- the home-screen label; without it iOS falls back to <title>, which is
+         long enough to be truncated to "Coach.Vis…" under the icon -->
+    <meta name="apple-mobile-web-app-title" content="Board" />
     <!-- filled by the injectTheme() plugin in vite.config.js, in dev AND build.
          The tokens must be here rather than in styles.js: styles.js is injected
          by React, which is far too late for the first paint. -->

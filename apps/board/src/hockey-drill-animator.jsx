@@ -1,23 +1,23 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo, Fragment } from "react";
 import { VIEWS, COLORS, vb, APP_VERSION, ICON_SCALE, PLAYER_SCALE, ROUTE_START_GAP, BUILD_STAMP, DEFAULT_TEXT, SPEED,
-  SAVE_PROB, MISS_POST, MISS_WIDE, MISS_OVER, SHOT_AIR_PROB, BOUNCE_REST, WB_SYMS, symOf } from "./constants.js";
-import { parseDrill, serializeDrill, extractDrill, deriveInventory, ensureShotNet } from "./drill-format.js";
+  SAVE_PROB, MISS_POST, MISS_WIDE, MISS_OVER, SHOT_AIR_PROB, BOUNCE_REST, WB_SYMS, symOf } from "@coachvision/drill-core/constants.js";
+import { parseDrill, serializeDrill, extractDrill, deriveInventory, ensureShotNet } from "@coachvision/drill-core/drill-format.js";
 import { prepareImage, drillFromImage, ANTHROPIC_KEY_STORE } from "./drill-vision.js";
-import { drillSvg } from "./drill-svg.js";
-import { mdEscape, mdInline, mdBlock } from "./md.js";
-import { clampX, clampY, segEnd, segD, nearestT, splitSeg, zigzagPoints, wigglePoints, wigglePoly, zigzagPoly, convertSeg, fitRoute, evalSeg, rdp, catmullToBezier, alignJoint, mirrorJoint, translateJointHandles, trimSegStart, trimSegEnd, trimPolyStart, trimPolyEnd, gapPolyAt } from "./geometry.js";
+import { drillSvg } from "@coachvision/drill-core/drill-svg.js";
+import { mdEscape, mdInline, mdBlock } from "@coachvision/drill-core/md.js";
+import { clampX, clampY, segEnd, segD, nearestT, splitSeg, zigzagPoints, wigglePoints, wigglePoly, zigzagPoly, convertSeg, fitRoute, evalSeg, rdp, catmullToBezier, alignJoint, mirrorJoint, translateJointHandles, trimSegStart, trimSegEnd, trimPolyStart, trimPolyEnd, gapPolyAt } from "@coachvision/drill-core/geometry.js";
 import { dirOf, dirAtWaypoint, spreadDir } from "./route-dir.js";
-import * as boards from "./boards.js";
-import { netShapes, bumperShapes, solidShapes, detourRoute, segCrossesNet } from "./net-collide.js";
+import * as boards from "@coachvision/drill-core/boards.js";
+import { netShapes, bumperShapes, solidShapes, detourRoute, segCrossesNet } from "@coachvision/drill-core/net-collide.js";
 import { RinkMarkings } from "./rink.jsx";
 import { ZONES, zoneAt } from "./zones.js";
 import { PieceIcon, Stepper, DiagPanel, Icon, ICONS } from "./icons.jsx";
 import { createTiming, resolveNearest } from "./timing.js";
-import { buildLedger, mayHoldOn, mayHoldEntering, orderTransfers } from "./possession.js";
+import { buildLedger, mayHoldOn, mayHoldEntering, orderTransfers } from "@coachvision/drill-core/possession.js";
 import { classifyPenGroup, SYMBOL_MAX, SYMBOL_MAX_PX } from "./sketch-recognize.js";
 import { newGame, stepGame } from "./ai-game.js";
 import { STYLES } from "./styles.js";
-import { THEME_KEY, THEME_ATTR, THEME_ORDER, THEME_LABEL, resolveTheme, tokens, teamInk } from "./theme.js";
+import { THEME_KEY, THEME_ATTR, THEME_ORDER, THEME_LABEL, resolveTheme, tokens, teamInk } from "@coachvision/drill-core/theme.js";
 import { ThemeCtx, InkCtx } from "./theme-react.jsx";
 import { SAVE_KEY, peekBackup, clearBackup } from "./storage.js";
 

@@ -369,7 +369,14 @@ const decls = t => Object.entries(THEMES[t]).map(([k, v]) => `--db-${k}:${v}`).j
 //                                   specificity AND source order.
 // The :not([data-theme]) in layer 2 is redundant given both of those; it's there
 // so a future reorder of these blocks can't silently break the override.
-export function themeCss() {
+//
+// `appShell` picks the base html/body rule. The board is a fixed-inset app that
+// must never scroll (overflow:hidden is load-bearing there, alongside the
+// safe-area layout); the marketing site is a document and would be unscrollable
+// with it. Both still take their background from the SAME token here rather than
+// each app declaring its own — the tempting alternative, overriding html/body in
+// the site's own stylesheet, forks the two apps' base styles permanently.
+export function themeCss({ appShell = true } = {}) {
   const blocks = [`:root{${decls("light")};color-scheme:${SCHEME.light}}`];
   for (const [query, name] of Object.entries(AUTO_MAP)) {
     if (name === "light") continue; // already the floor
@@ -385,7 +392,11 @@ export function themeCss() {
   }
   // The app's own background lives here rather than in styles.js because
   // styles.js is injected by React — this has to be right at first paint.
-  blocks.push(`html,body{margin:0;padding:0;overflow:hidden;background:var(--db-surface-app)}`);
+  blocks.push(
+    `html,body{margin:0;padding:0;` +
+    (appShell ? `overflow:hidden;` : ``) +
+    `background:var(--db-surface-app)}`
+  );
   return blocks.join("\n");
 }
 

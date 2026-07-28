@@ -9,9 +9,14 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
+// Shared helpers, not suites. They export and assert nothing on import, so
+// running them would silently "pass" and pad the count with a green tick that
+// tested nothing.
+const HELPERS = new Set(["run.mjs", "paths.mjs"]);
+
 const here = dirname(fileURLToPath(import.meta.url));
 const suites = readdirSync(here)
-  .filter(f => f.endsWith(".mjs") && f !== "run.mjs")
+  .filter(f => f.endsWith(".mjs") && !HELPERS.has(f))
   .sort();
 
 if (!suites.length) {

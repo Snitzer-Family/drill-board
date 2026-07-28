@@ -11,7 +11,8 @@
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { THEMES, PAIRS, EXEMPT, NON_COLOR_TOKENS, AUTO_MAP, themeCss } from "../src/theme.js";
+import { THEMES, PAIRS, EXEMPT, NON_COLOR_TOKENS, AUTO_MAP, themeCss } from "@coachvision/drill-core/theme.js";
+import { src, BOARD, CORE } from "./paths.mjs";
 
 let passed = 0, failed = 0, known = 0;
 // Empty is the goal state. Add a check name here only to land a migration in
@@ -132,10 +133,15 @@ check("themeCss emits a block per theme plus the media query", () => {
     "`color-scheme: light dark` lets the UA fight the manual override");
 });
 
-const read = p => readFileSync(new URL(p, import.meta.url), "utf8");
+// Every path read goes through paths.mjs::src(), which throws if the file is
+// missing OR implausibly small. The guards below are "assert the bad pattern is
+// absent", so a wrong path would make them pass vacuously and report green while
+// guarding nothing. The byte floors are the tripwire for that.
+const read = (root, file, minBytes) => readFileSync(src(root, file, minBytes), "utf8");
+const STYLES = () => read(BOARD, "src/styles.js", 40000);
 
 check("index.html carries both theme markers", () => {
-  const html = read("../index.html");
+  const html = read(BOARD, "index.html", 800);
   assert.ok(html.includes("<!--theme-css-->"), "missing <!--theme-css--> marker");
   assert.ok(html.includes("<!--theme-boot-->"), "missing <!--theme-boot--> marker");
   assert.ok(!/<body[^>]*style=/i.test(html),
@@ -146,8 +152,8 @@ check("index.html carries both theme markers", () => {
 // must agree — a mismatch offsets every menu by half the difference, which looks
 // like a vague alignment bug rather than a number being wrong in one place.
 check("menu width agrees between styles.js and the anchoring JS", () => {
-  const css = read("../src/styles.js");
-  const js = read("../src/hockey-drill-animator.jsx");
+  const css = STYLES();
+  const js = read(BOARD, "src/hockey-drill-animator.jsx", 200000);
   const cssW = /--hd-menu-w:\s*(\d+)px/.exec(css);
   const jsW = /const MENU_W = (\d+)/.exec(js);
   assert.ok(cssW, "--hd-menu-w not found in styles.js");
@@ -168,7 +174,7 @@ check("menu width agrees between styles.js and the anchoring JS", () => {
 // from --hd-barh) silently stops matching what actually renders. Reading these
 // heights off the CSS by hand has been wrong twice, so pin the structure.
 check("the two bottom panels share one border-box height", () => {
-  const css = read("../src/styles.js");
+  const css = STYLES();
   const rule = name => {
     const m = new RegExp(`\\.hd-${name} \\{[^}]*\\}`, "s").exec(css);
     assert.ok(m, `.hd-${name} rule not found`);
@@ -196,7 +202,7 @@ const ACCENT_FILL_NO_TEXT = new Set([
   ".hd-sw.on",       // switch track, no text at all
 ]);
 check("every accent-filled rule sets the on-accent text colour", () => {
-  const css = read("../src/styles.js");
+  const css = STYLES();
   const offenders = [];
   for (const block of css.split("}")) {
     const i = block.indexOf("{");
@@ -217,16 +223,16 @@ check("every accent-filled rule sets the on-accent text colour", () => {
 // off THEMES.light, not be retyped — a hardcoded fallback is a silent drift that
 // only shows up as a slightly-wrong colour in an exported image.
 check("drill-svg.js takes its var fallbacks from the token table", () => {
-  const src = read("../src/drill-svg.js");
-  const hard = [...src.matchAll(/V\(\s*"[^"]+"\s*,\s*("(#|rgb)[^"]*")\s*\)/g)].map(m => m[1]);
+  const svgSrc = read(CORE, "drill-svg.js", 20000);
+  const hard = [...svgSrc.matchAll(/V\(\s*"[^"]+"\s*,\s*("(#|rgb)[^"]*")\s*\)/g)].map(m => m[1]);
   assert.deepEqual(hard, [], `hardcoded var() fallbacks in drill-svg.js: ${hard.join(", ")}`);
-  assert.ok(/const L = THEMES\.light/.test(src), "drill-svg.js should resolve fallbacks via THEMES.light");
+  assert.ok(/const L = THEMES\.light/.test(svgSrc), "drill-svg.js should resolve fallbacks via THEMES.light");
 });
 
 // This is what actually enforces the 78-values -> one-token-set collapse. Without
 // it the next feature quietly reintroduces a one-off grey.
 check("styles.js has no raw colour literals", () => {
-  const css = read("../src/styles.js")
+  const css = STYLES()
     // the pen/eraser cursor art is a fixed data-URI: a cursor can't take var()
     .replace(/cursor:\s*url\("data:[^"]*"\)/g, "")
     .replace(/url\("data:image\/svg\+xml[^"]*"\)/g, "");

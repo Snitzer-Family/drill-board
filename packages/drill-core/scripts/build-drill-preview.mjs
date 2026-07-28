@@ -2,15 +2,19 @@
 // from the DSL by src/drill-svg.js, and an editable textarea redraws it as you
 // type. The parser + boards + renderer are bundled inline (imports/exports
 // stripped) so the page is fully self-contained (no build step, no CDN).
-//   node scripts/build-drill-preview.mjs [initial.md] [out.html]
+//   node packages/drill-core/scripts/build-drill-preview.mjs [initial.md] [out.html]
+//   npm run preview:drill                      (from the repo root)
 import { readFileSync, writeFileSync } from "fs";
 import { extractDrill } from "../src/drill-format.js";
 import { DSL_VERSION } from "../src/constants.js";
 import { themeCss } from "../src/theme.js";
 
-const src = process.argv[2] || "docs/example-drill.md";
-const out = process.argv[3] || "docs/example-drill-preview.html";
-const read = p => readFileSync(new URL("../" + p, import.meta.url), "utf8");
+// Explicit CLI args are cwd-relative (normal CLI behaviour); the defaults are
+// resolved against the package so `npm run preview:drill` works from anywhere.
+const pkg = p => new URL("../" + p, import.meta.url);
+const src = process.argv[2] || pkg("docs/example-drill.md");
+const out = process.argv[3] || pkg("docs/example-drill-preview.html");
+const read = p => readFileSync(pkg(p), "utf8");
 const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 // ---- inline bundle: constants(VIEWS) + boards + drill-format + drill-svg ----
@@ -31,7 +35,7 @@ const bundle = [
   strip(read("src/drill-svg.js")).replace(/^const VIEWS = \{[^}]*\};.*$/m, ""),
 ].join("\n\n");
 
-const initial = extractDrill(read(src));
+const initial = extractDrill(readFileSync(src, "utf8"));
 
 // The app's --db-* tokens, emitted from the same source the app uses, so the
 // rink in this page and the rink in the app can't drift. The --ice/--panel/--ink
@@ -190,4 +194,4 @@ ${bundle}
 `;
 
 writeFileSync(out, html);
-console.log("wrote", out, `(${(html.length / 1024).toFixed(1)} kB)`);
+console.log("wrote", out.pathname ?? out, `(${(html.length / 1024).toFixed(1)} kB)`);

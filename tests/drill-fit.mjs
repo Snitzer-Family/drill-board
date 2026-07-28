@@ -1,7 +1,7 @@
 // node tests/drill-fit.mjs — exercises the pixel→rink landmark fit and the
 // DSL coordinate rewrite (drill-fit.js is pure, so it imports straight in).
 import assert from "node:assert/strict";
-import { fitTransform, sketchTransform, transformDsl } from "../src/drill-fit.js";
+import { fitTransform, sketchTransform, transformDsl } from "../apps/board/src/drill-fit.js";
 
 let passed = 0;
 const near = (a, b, tol, msg) => { assert.ok(Math.abs(a - b) <= tol, `${msg}: ${a} vs ${b}`); };

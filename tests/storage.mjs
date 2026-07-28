@@ -25,7 +25,7 @@ function stubStorage(mode = "ok") {
 
 stubStorage();
 const { SAVE_KEY, SAVE_BACKUP_KEY, stashAutosave, peekBackup, clearBackup } =
-  await import("../src/storage.js");
+  await import("../apps/board/src/storage.js");
 
 check("stash moves the board aside rather than deleting it", () => {
   const map = stubStorage();

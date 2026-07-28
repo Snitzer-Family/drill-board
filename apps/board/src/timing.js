@@ -1,10 +1,10 @@
 // Timing & pass-planning engine: leg times, receiver warps, transfer chains,
 // shots, releases, and warp-aware positions. Pure functions over the pieces
 // array; the React component passes its refs in each render.
-import { SPEED, ICON_SCALE, PLAYER_SCALE, SAVE_PROB, MISS_POST, MISS_WIDE, MISS_OVER, SHOT_AIR_PROB, BOUNCE_REST } from "./constants.js";
-import { clampX, clampY, segEnd, segTangentAngle } from "./geometry.js";
-import * as boards from "./boards.js";
-import { netShapes, solidShapes, bumperShapes, reflectPath, segCrossesNet, bounceOffNets } from "./net-collide.js";
+import { SPEED, ICON_SCALE, PLAYER_SCALE, SAVE_PROB, MISS_POST, MISS_WIDE, MISS_OVER, SHOT_AIR_PROB, BOUNCE_REST } from "@coachvision/drill-core/constants.js";
+import { clampX, clampY, segEnd, segTangentAngle } from "@coachvision/drill-core/geometry.js";
+import * as boards from "@coachvision/drill-core/boards.js";
+import { netShapes, solidShapes, bumperShapes, reflectPath, segCrossesNet, bounceOffNets } from "@coachvision/drill-core/net-collide.js";
 
 // A "nearest" loose-puck collect (pickup.nearest) is a live intent, not a fixed
 // binding: at play/render time the collect grabs whichever loose puck sits

@@ -10,7 +10,7 @@ import { stashAutosave } from "./storage.js";
 class ErrorBoundary extends React.Component {
   constructor(props) { super(props); this.state = { err: null }; }
   static getDerivedStateFromError(err) { return { err }; }
-  componentDidCatch(err, info) { console.error("DrillBoard crashed:", err, info); }
+  componentDidCatch(err, info) { console.error("Coach.Vision Board crashed:", err, info); }
   render() {
     if (!this.state.err) return this.props.children;
     const e = this.state.err;
@@ -24,7 +24,7 @@ class ErrorBoundary extends React.Component {
     return (
       <div style={{ position: "fixed", inset: 0, background: "var(--db-surface-app)", color: "var(--db-text)",
         font: "13px ui-monospace, monospace", padding: "20px", overflow: "auto", WebkitOverflowScrolling: "touch" }}>
-        <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 10, color: "var(--db-danger)" }}>DrillBoard hit an error</div>
+        <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 10, color: "var(--db-danger)" }}>The board hit an error</div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 }}>
           <button style={btn} onClick={() => this.setState({ err: null })}>Try again</button>
           {/* The board is STASHED, not deleted. It still has to leave the

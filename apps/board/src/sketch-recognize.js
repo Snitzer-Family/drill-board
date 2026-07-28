@@ -16,8 +16,8 @@
 // matching when it's on its side. W-the-letter never collides with a zigzag
 // route purely because of the SYMBOL_MAX size gate.
 
-import { rdp } from "./geometry.js";
-import { WB_SYMS } from "./constants.js";
+import { rdp } from "@coachvision/drill-core/geometry.js";
+import { WB_SYMS } from "@coachvision/drill-core/constants.js";
 
 const N = 32;                   // $P resample count
 export const SYMBOL_MAX = 8;    // ft bbox diagonal — bigger strokes are routes, never symbols

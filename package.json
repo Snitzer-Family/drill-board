@@ -1,20 +1,19 @@
 {
-  "name": "drillboard",
+  "name": "coach-vision",
   "private": true,
   "version": "1.0.0",
   "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview",
-    "test": "node tests/run.mjs"
-  },
-  "dependencies": {
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1"
-  },
-  "devDependencies": {
-    "@vitejs/plugin-react": "^4.3.1",
-    "vite": "^5.4.0"
+    "dev": "npm run dev -w @coachvision/web",
+    "dev:board": "npm run dev -w @coachvision/board",
+    "build": "npm run build -w @coachvision/web",
+    "build:board": "npm run build -w @coachvision/board",
+    "typecheck": "npm run typecheck -w @coachvision/web",
+    "test": "node tests/run.mjs",
+    "preview:drill": "node packages/drill-core/scripts/build-drill-preview.mjs"
   }
 }

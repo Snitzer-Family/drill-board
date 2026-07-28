@@ -1,0 +1,40 @@
+{
+  "name": "@coachvision/drill-core",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./types/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./theme.js": {
+      "types": "./types/theme.d.ts",
+      "default": "./src/theme.js"
+    },
+    "./constants.js": {
+      "types": "./types/constants.d.ts",
+      "default": "./src/constants.js"
+    },
+    "./drill-format.js": {
+      "types": "./types/drill-format.d.ts",
+      "default": "./src/drill-format.js"
+    },
+    "./drill-svg.js": {
+      "types": "./types/drill-svg.d.ts",
+      "default": "./src/drill-svg.js"
+    },
+    "./md.js": {
+      "types": "./types/md.d.ts",
+      "default": "./src/md.js"
+    },
+    "./geometry.js": "./src/geometry.js",
+    "./boards.js": "./src/boards.js",
+    "./net-collide.js": "./src/net-collide.js",
+    "./possession.js": "./src/possession.js",
+    "./docs/drill-dsl.md": "./docs/drill-dsl.md",
+    "./docs/example-drill.md": "./docs/example-drill.md",
+    "./package.json": "./package.json"
+  }
+}

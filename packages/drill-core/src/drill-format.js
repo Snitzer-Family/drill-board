@@ -10,6 +10,27 @@ const memToWireRef = m => m ? String(m).split("/").map(h => h.replace(/^#/, ""))
 const wireToMemRef = w => w ? "#" + String(w).split("/").map(h => h.replace(/^#/, "")).join("/#") : null;
 const ixRef = (at, ref) => (ref ? memToWireRef(ref) + "." : "") + (at + 1);   // 1-based, optional ref prefix
 
+// Colours from the DSL are interpolated straight into SVG presentation
+// attributes by drill-svg.js (`fill="${p.color}"`, ~20 sites, no escaping). The
+// tokeniser splits on whitespace, so a value like `#fff"onload=alert(1)` arrives
+// as ONE token and would close the attribute and open an event handler. Validate
+// at the single point where a colour enters the model instead of escaping at
+// every interpolation — that way drill-svg.js output is safe by construction and
+// a new render site can't forget.
+//
+// Throwing is deliberate: the per-line try/catch in parseDrill turns it into a
+// reported `errors[]` entry, so a bad colour is visible to the author rather
+// than silently falling back to a default that looks almost right.
+// Exactly 3 or 6 digits, matching the comment-stripper above (which keeps a
+// `#` only when it is followed by 3-or-6 hex digits and a word boundary). #rgba
+// and #rrggbbaa are deliberately NOT accepted: the stripper would eat them as
+// comments before they ever reached here, so accepting them would be a lie.
+const HEX_COLOR = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+const hexColor = raw => {
+  if (!HEX_COLOR.test(raw)) throw new Error(`bad colour ${JSON.stringify(raw)} (want #rgb or #rrggbb)`);
+  return raw;
+};
+
 /* ---------------- inventory ---------------- */
 
 // Canonical inventory rows (a "recipe" of what a drill needs), in display order.
@@ -244,7 +265,7 @@ export function parseDrill(text) {
         const transfers = [];
         rest.forEach(r => {
           if (quoted(r)) { text = unq(r); }              // a "quoted string" → label text
-          else if (r.startsWith("#")) color = r;
+          else if (r.startsWith("#")) color = hexColor(r);
           else if (r.includes("=")) {
             const [k, v] = r.split("=");
             const key = k.toLowerCase();
@@ -426,7 +447,10 @@ export function parseDrill(text) {
         // isn't a style word, everything from index 4 on is flags + coords
         const styleWords = ["solid", "dashed", "dotted", "wavy"];
         const hasStyle = styleWords.includes((tok[4] || "").toLowerCase());
-        const mid = tok[1], mcol = tok[2] || "#ffd447", mw = parseFloat(tok[3]) || 1.1, mst = hasStyle ? tok[4].toLowerCase() : "solid";
+        // mcol is interpolated into stroke="…" by drill-svg.js — validate it
+        // like every other colour sink. The serializer always writes it at
+        // position 2, so this is the same token on the way back in.
+        const mid = tok[1], mcol = hexColor(tok[2] || "#ffd447"), mw = parseFloat(tok[3]) || 1.1, mst = hasStyle ? tok[4].toLowerCase() : "solid";
         const rest = tok.slice(hasStyle ? 5 : 4);
         // a bare `lock` flag may sit among the trailing tokens; coords are pure
         // numbers (the tokenizer splits on commas), so it never collides with them
@@ -441,7 +465,7 @@ export function parseDrill(text) {
         let mfill = null, mfillOp = 0.25;
         if (mfTok) {
           const [fc, fo] = mfTok.slice(5).split(":");
-          if (fc) mfill = fc.startsWith("#") ? fc : "#" + fc;
+          if (fc) mfill = hexColor(fc.startsWith("#") ? fc : "#" + fc);
           const op = parseFloat(fo);
           if (!isNaN(op)) mfillOp = Math.max(0.05, Math.min(1, op));
         }

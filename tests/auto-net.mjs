@@ -1,6 +1,6 @@
 // Auto-net injection: a drill with a shot but no net/passer gets an empty net
 // in the crease nearest the shooter (one per end as needed). Run: node tests/auto-net.mjs
-import { parseDrill, serializeDrill, ensureShotNet } from '../src/drill-format.js';
+import { parseDrill, serializeDrill, ensureShotNet } from "@coachvision/drill-core/drill-format.js";
 
 let pass = 0, fail = 0;
 const T = (name, got, want) => {

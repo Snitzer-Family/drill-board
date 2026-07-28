@@ -1,4 +1,4 @@
-import { recognizeSymbol, puckGate, classifyPenGroup, ACCEPT } from '../src/sketch-recognize.js';
+import { recognizeSymbol, puckGate, classifyPenGroup, ACCEPT } from "../apps/board/src/sketch-recognize.js";
 
 let pass = 0, fail = 0;
 const T = (name, got, want) => {

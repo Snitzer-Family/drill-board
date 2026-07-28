@@ -10,10 +10,10 @@
 // visual verify pass renders the result and asks the model to compare it with
 // the photo.
 
-import DSL_REF from "../docs/drill-dsl.md?raw";
-import { parseDrill, extractDrill } from "./drill-format.js";
+import DSL_REF from "@coachvision/drill-core/docs/drill-dsl.md?raw";
+import { parseDrill, extractDrill } from "@coachvision/drill-core/drill-format.js";
 import { fitTransform, sketchTransform, transformDsl } from "./drill-fit.js";
-import { drillSvg } from "./drill-svg.js";
+import { drillSvg } from "@coachvision/drill-core/drill-svg.js";
 
 export const ANTHROPIC_KEY_STORE = "drillboard:anthropic-key";
 
