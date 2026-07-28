@@ -46,11 +46,10 @@ export function resolveNearest(pieces) {
 }
 
 const GOALIE_DEPTH = 2.5; // how far out front of the net the goalie plays
-// stickhandling cradle: the carried puck (and the stick, in unison) oscillate as
-// the player dribbles. Same phase drives both so they move together.
+// stickhandling cradle: ONE oscillation, applied to the stick's rotation — the puck
+// rides the blade tip through it, so they move together by construction rather than
+// by two amplitudes being kept in step by hand.
 const DRIB_W = 2 * Math.PI * 2.0;          // ~2 cradles per second
-const DRIB_FORE = 0.55 * ICON_SCALE;       // fore-aft cradle (ft)
-const DRIB_LAT = 0.8 * ICON_SCALE;         // lateral sweep (ft)
 const DRIB_SWING = 7;                       // matching stick sweep (deg)
 
 // A forward↔backward transition is a PIVOT, not a teleport: the skater sweeps
@@ -62,7 +61,6 @@ const PIVOT_SEC = 0.4;
 // and skates on. Times are relative to the catch.
 const OPEN_IN = 0.7, OPEN_SET = 0.15, OPEN_HELD = 0.2, OPEN_OUT = 0.45;
 const OPEN_BACK_FT = 15;   // how far back down the puck's path counts as "where it came from"
-const CRADLE_IN = 0.3;     // seconds for the stickhandle to wind up after a catch
 // icons.jsx rotates the whole stick group about (1, 0) in icon units, so a point on
 // the blade travels with it. Swinging the puck's lever by the SAME angle is what
 // keeps the puck welded to the blade instead of orbiting it on its own cradle.
@@ -80,9 +78,15 @@ const swungLever = (fwd, lat, deg) => {
 // around NE→E and a left shot's around NW→W; the icon mirrors the stick group by
 // hand, so one set of (forward, lateral) numbers covers both. Icon units, ×ICON_SCALE
 // to get feet — the same convention as BLADE_/TIP_ in the animator.
-const RELEASE_FWD = 2.6, RELEASE_LAT = 5.0;      // ≈ 2.1ft ahead, 4.0ft to the side → 62° off the nose
-// how far the stick group has to swing from its drawn rest pose to put the blade there
-const RELEASE_SWING = 44;
+const TIP_FWD_U = 5.6, TIP_LAT_U = 2.45;         // the drawn blade tip, in icon units
+// How far the stick group swings from its drawn rest pose to release. The release
+// SPOT is derived from the swing rather than specified alongside it — that is what
+// guarantees the puck is exactly on the blade at the moment it leaves.
+const RELEASE_SWING = 44;                        // forehand: blade round to ~72° off the nose
+const BACK_SWING = -75;                          // backhand: round the other way, off the far face
+// ...and the release spots themselves, derived rather than declared alongside
+const FORE_LEVER = swungLever(TIP_FWD_U, TIP_LAT_U, RELEASE_SWING);
+const BACK_LEVER = swungLever(TIP_FWD_U, TIP_LAT_U, BACK_SWING);
 // piecewise smoothstep through [t, value] keyframes — reads as an animation curve
 const keyframe = (ks, t) => {
   if (t <= ks[0][0]) return ks[0][1];
@@ -293,9 +297,8 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
   // A backhand comes off the OTHER face of the blade: the puck leaves from in front
   // of the body and round to the weak side, where a forehand leaves out beside the
   // strong-side foot. (Compass, nose at N: right shot's forehand NE→E, backhand N→NW.)
-  const BACK_FWD = 3.4, BACK_LAT = -2.6;
-  const releaseAt = (pl, e, warp, turn = 0, back = false) => bladeAt(pl, e, warp, false,
-    back ? { fwd: BACK_FWD, lat: BACK_LAT } : { fwd: RELEASE_FWD, lat: RELEASE_LAT }, turn);
+  const releaseAt = (pl, e, warp, turn = 0, back = false) =>
+    bladeAt(pl, e, warp, false, back ? BACK_LEVER : FORE_LEVER, turn);
   // Which hand a shot comes off. "fore"/"back" are the coach's call; with no call it
   // is whichever side the target is already on — you do not reach across your body
   // for a net sitting on your backhand.
@@ -315,41 +318,13 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
   // teleporting there the frame it is fired. Shared by the plan's carried-puck
   // position and the renderer's blade tip, so the two can't drift apart.
   function stickSpot(id, e) {
-    const base = { fwd: 5.6, lat: 2.45 };        // TIP_FWD / TIP_LAT — the drawn blade tip
-    if (!detail) return { ...base, k: 0, cradle: 0 };
-    const { plans } = getPlan();
-    let best = Infinity, k = 0, cradle = 1, toBack = false;
-    for (const pid in plans) {
-      for (const leg of plans[pid].legs) {
-        if (leg.type !== "fly" || leg.by !== id) continue;
-        // hold the lever out through the follow-through as well: the ride leg and the
-        // flight can straddle the release frame, and snapping the lever back at tau=0
-        // flicks the puck back to the blade for a frame right as it leaves
-        const WU = leg.shot ? 0.26 : 0.17, TH = leg.shot ? 0.14 : 0.09, tau = e - leg.t0;
-        if (tau < -WU || tau > TH || Math.abs(tau) >= best) continue;
-        best = Math.abs(tau);
-        toBack = !!leg.back;                     // a backhand releases off the other face
-        k = tau <= 0 ? smooth01(1 + tau / WU)    // 0 at the top of the wind-up → 1 at release
-          : 1 - smooth01(tau / TH);              // ...then recover to the carry blade
-      }
-      // just gathered it: the stickhandle winds UP from rest. Snapping straight to
-      // full swing leaves the cradle's whole offset behind as a jump at the catch.
-      for (const leg of plans[pid].legs) {
-        if (leg.type !== "ride" || !leg.catch || leg.id !== id) continue;
-        const tau = e - leg.t0;
-        if (tau >= 0 && tau < CRADLE_IN) cradle = Math.min(cradle, smooth01(tau / CRADLE_IN));
-      }
-    }
-    // the idle stickhandle: the same waggle stickSwing gives the stick, so the puck
-    // rides the blade through it rather than swinging on a cradle of its own
-    const waggle = Math.sin((e * DRIB_W) / 2) * DRIB_SWING * cradle * (1 - k);
-    if (!k) return { ...swungLever(base.fwd, base.lat, waggle), k: 0 };
-    // `k` also fades the stickhandling cradle out: you don't dangle the puck while
-    // you are shooting it, and letting the cradle survive to the release frame just
-    // leaves its offset behind as a jump the moment the puck goes
-    const rf = toBack ? BACK_FWD : RELEASE_FWD, rl = toBack ? BACK_LAT : RELEASE_LAT;
-    return { ...swungLever(base.fwd + (rf - base.fwd) * k,
-      base.lat + (rl - base.lat) * k, waggle), k };
+    if (!detail) return { fwd: TIP_FWD_U, lat: TIP_LAT_U };
+    // The puck sits on the blade tip — wherever the stick actually is. Swinging it by
+    // the same curve that DRAWS the stick is the whole point: the previous version
+    // slid the puck straight to the release spot while the stick drew back off it, so
+    // for the length of a wind-up the two were pulling in opposite directions and the
+    // puck visibly left the blade before the shot.
+    return swungLever(TIP_FWD_U, TIP_LAT_U, swingDeg(id, e));
   }
 
   function getPlan() {
@@ -1482,7 +1457,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           if (planPhase || !leg.by || !prev || prev.type !== "ride" || prev.id !== leg.by) return null;
           const sh = pieces.find(q => q.id === leg.by && q.kind === "player");
           if (!sh) return null;
-          return bladeAt(sh, leg.t0, warp, true, { fwd: RELEASE_FWD, lat: RELEASE_LAT });
+          return bladeAt(sh, leg.t0, warp, true, leg.back ? BACK_LEVER : FORE_LEVER);
         };
         if (leg.type === "fly" && e < leg.t1) {
           const k = Math.max(0, Math.min(1, (e - leg.t0) / Math.max(0.001, leg.t1 - leg.t0)));
@@ -1538,8 +1513,10 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
   // mirrors the whole stick group for a left shot, so one sign serves both hands.
   // At the release frame the blade sits at RELEASE_SWING — out beside the near
   // foot, where the puck actually leaves — not swept across the nose.
-  function stickSwing(id, e) {
-    if (!detail) return 0;        // detailed animations off → sticks stay still
+  const stickSwing = (id, e) => (detail ? swingDeg(id, e) : 0);
+  // the stick's rotation (deg) at time e — one curve, drawn on the stick AND carried
+  // by the puck, so the two can never come apart
+  function swingDeg(id, e) {
     const { plans } = getPlan();
     let ang = 0, best = Infinity; // pick the most-centered event when several overlap
     let carrying = false;         // no shot/catch nearby → cradle the puck instead
@@ -1554,15 +1531,20 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
       for (const leg of plans[pid].legs) {
         if (leg.type === "fly" && leg.by === id) {
           const shot = !!leg.shot;
-          const WU = shot ? 0.26 : 0.17, FT = shot ? 0.34 : 0.22;
-          const BACK = shot ? RELEASE_SWING + 34 : RELEASE_SWING + 20;   // drawn back off the puck
-          const THRU = shot ? RELEASE_SWING - 52 : RELEASE_SWING - 34;   // follow through across
+          const WU = shot ? 0.22 : 0.15, FT = shot ? 0.32 : 0.2;
+          // The blade sits at ~28° off the nose at rest and at ~72° when it releases.
+          // The wind-up must stay INSIDE the player's own side: +34 swung it round to
+          // ~106°, i.e. behind them, and the stick read as flailing rather than loading.
+          // A backhand loads and follows through the OTHER way round, so the whole
+          // curve mirrors about its own release angle rather than being bolted on.
+          const REL = leg.back ? BACK_SWING : RELEASE_SWING, dir = leg.back ? -1 : 1;
+          const BACK = REL + dir * (shot ? 18 : 12);    // drawn back off the puck
+          const THRU = REL - dir * (shot ? 50 : 34);    // follow through across
           const tau = e - leg.t0;
           if (tau < -WU || tau > FT || Math.abs(tau) >= best) continue;
           best = Math.abs(tau);
           // 0 → back → (release, blade on the puck out beside the foot) → through → 0
-          ang = keyframe([[-WU, 0], [-0.55 * WU, BACK], [0, RELEASE_SWING],
-            [0.4 * FT, THRU], [FT, 0]], tau);
+          ang = keyframe([[-WU, 0], [-0.55 * WU, BACK], [0, REL], [0.4 * FT, THRU], [FT, 0]], tau);
         }
         if (leg.catch && leg.id === id) {
           const IN = 0.12, OUT = 0.24, MAX = 15;
