@@ -57,6 +57,20 @@ const ROUTE_VIS = [
 ];
 const routeVis = m => ({ skaters: m === "player" || m === "all", puck: m === "puck" || m === "all" });
 
+// How fast the whole drill runs, as a multiple of the base skating pace. This
+// is the SAME value the old "Drill pace" slider set in ft/s — it just belongs
+// on the transport, because slowing a drill down is something you do WHILE
+// showing it ("watch the give-and-go again, half speed"), not something you set
+// once in a menu. Expressed as a multiple rather than ft/s: at the bench you
+// think "slower", not "eleven feet per second".
+const BASE_PACE = 15;                      // ft/s at 1× — the long-standing default
+const PLAY_SPEEDS = [
+  [0.5, "½×", "half speed — for walking through a pattern"],
+  [1, "1×", "normal drill pace"],
+  [1.5, "1½×", "quick — shows the flow"],
+  [2, "2×", "double speed"],
+];
+
 /* ---- settings rows -------------------------------------------------------
    Every preference reads the same way: what it's called, a line saying what it
    actually does (and what OFF means, which is the part that was missing), then
@@ -764,7 +778,10 @@ export default function DrillAnimator() {
   const [playing, setPlaying] = useState(false);
   const [animT, setAnimT] = useState(0);
   const [restFade, setRestFade] = useState(1);         // extra splash fade-out that runs while paused/stopped
-  const [pace, setPace] = useState(15);
+  // Playback speed lives as the MULTIPLE, with pace derived — so the transport
+  // button and the timing engine can't disagree about what "1×" means.
+  const [speedMul, setSpeedMul] = useState(1);
+  const pace = BASE_PACE * speedMul;
   // routes shown during playback: "player" (routes only), "hide", "all" (+puck/shots)
   const [playRoutes, setPlayRoutes] = useState("player");
   // presentation mode: pause at each described step so viewers can read along
@@ -10375,14 +10392,24 @@ export default function DrillAnimator() {
               aria-pressed={barUp}>
               <Icon name={barUp ? "chevronDown" : "chevronUp"} size={17} /></button>
           )}
-          <button className="hd-scrubbtn play" onClick={togglePlay} title={playing ? "Pause" : "Play"}>
-            <Icon name={playing ? "pause" : "play"} size={20} /></button>
-          <button className="hd-scrubbtn" onClick={resetPlay} title={playing ? "Stop" : "Reset"}>
-            <Icon name={playing ? "stop" : "reset"} size={17} /></button>
-          <button className={`hd-scrubbtn${loopMode ? " on" : ""}`} onClick={() => setLoopMode(v => !v)} title="Loop">
-            <Icon name="loop" size={17} /></button>
-          <button className={`hd-scrubbtn${presentation ? " on" : ""}`} onClick={togglePresentation} title="Presentation mode">
-            <Icon name="presentation" size={17} /></button>
+          {/* Three jobs, three clusters. Transport (what the clock is doing),
+              then how the ice LOOKS while it runs, and — separated by the track
+              itself — the two that change the drill or the room rather than the
+              playback. Grouping is spacing on a phone and a hairline once
+              there's width for one: the separators cost ~26px, which at 375 the
+              scrub track cannot spare. */}
+          <div className="hd-scrubgrp">
+            <button className="hd-scrubbtn play" onClick={togglePlay} title={playing ? "Pause" : "Play"}>
+              <Icon name={playing ? "pause" : "play"} size={20} /></button>
+            <button className="hd-scrubbtn" onClick={resetPlay} title={playing ? "Stop" : "Reset"}>
+              <Icon name={playing ? "stop" : "reset"} size={17} /></button>
+            {dense && (
+              <button className={`hd-scrubbtn${loopMode ? " on" : ""}`} onClick={() => setLoopMode(v => !v)} title="Loop">
+                <Icon name="loop" size={17} /></button>
+            )}
+          </div>
+          <div className="hd-scrubsep" />
+          <div className="hd-scrubgrp vis">
           {/* What stays drawn while it plays. It belongs here rather than in a
               settings panel: it's something you change WHILE showing a drill —
               lines on to explain the pattern, off to watch it move — and the
@@ -10401,8 +10428,22 @@ export default function DrillAnimator() {
               </button>
             );
           })()}
-          <button className="hd-scrubbtn" disabled={playing} onClick={addStepHere}
-            title="Add a description at this point"><Icon name="note" size={17} /></button>
+          {/* Speed. Same reasoning as the lines button beside it: you reach for
+              it mid-demo, so it sits on the transport and not in a menu. It
+              reads out its own state, so there's nothing to remember. */}
+          {(() => {
+            const i = Math.max(0, PLAY_SPEEDS.findIndex(([m]) => m === speedMul));
+            const [, label, what] = PLAY_SPEEDS[i];
+            return (
+              <button className={`hd-scrubbtn spd${speedMul !== 1 ? " on" : ""}`}
+                title={`Speed: ${label} — ${what}. Tap to change.`}
+                aria-label={`Playback speed ${label}`}
+                onClick={() => setSpeedMul(PLAY_SPEEDS[(i + 1) % PLAY_SPEEDS.length][0])}>
+                {label}
+              </button>
+            );
+          })()}
+          </div>
           <div className="hd-scrubtrack">
             {wpTicks.map((f, k) => <span key={"w" + k} className="hd-tick wp" style={{ left: f * 100 + "%" }} />)}
             {stepTicks.map((f, k) => <span key={"s" + k} className="hd-tick step" style={{ left: f * 100 + "%" }} />)}
@@ -10411,6 +10452,50 @@ export default function DrillAnimator() {
               onChange={e => scrubTo(+e.target.value)} />
           </div>
           <span className="hd-scrubtime">{Math.min(animT * totalTime, drillTime).toFixed(1)}/{drillTime.toFixed(1)}s</span>
+          {/* Past the track, deliberately: neither of these is playback.
+              Presentation changes how the room sees the drill, and the note
+              button WRITES to it. Keeping them off the transport cluster means
+              a reach for Stop can't land on "record a caption" mid-demo.
+
+              On a phone this cluster — plus Loop — folds into one button. Seven
+              controls and a draggable scrub track do not both fit at 375px: the
+              track was measuring 25px, which is not something you can put a
+              thumb on. Loop joins them because it is set once per run, where
+              lines and speed get changed mid-demo. */}
+          {dense ? (
+            <>
+              <div className="hd-scrubsep" />
+              <div className="hd-scrubgrp">
+                <button className={`hd-scrubbtn${presentation ? " on" : ""}`} onClick={togglePresentation} title="Presentation mode">
+                  <Icon name="presentation" size={17} /></button>
+                <button className="hd-scrubbtn" disabled={playing} onClick={addStepHere}
+                  title="Add a description at this point"><Icon name="note" size={17} /></button>
+              </div>
+            </>
+          ) : (
+            <div className="hd-penwrap">
+              {/* lit while open, and lit when something inside it is ON — so a
+                  looping or presenting drill still says so with the pair
+                  folded away */}
+              <button className={`hd-scrubbtn${penPop === "more" || loopMode || presentation ? " on" : ""}`}
+                title="Loop, presentation & captions"
+                onClick={() => setPenPop(v => (v === "more" ? null : "more"))}>
+                <Icon name="sliders" size={17} /></button>
+              {penPop === "more" && (
+                <div className="hd-penpop menu">
+                  <button className={`hd-penopt${loopMode ? " on" : ""}`}
+                    onClick={() => { setLoopMode(v => !v); setPenPop(null); }}>
+                    <Icon name="loop" size={15} /><span>Loop</span></button>
+                  <button className={`hd-penopt${presentation ? " on" : ""}`}
+                    onClick={() => { togglePresentation(); setPenPop(null); }}>
+                    <Icon name="presentation" size={15} /><span>Presentation</span></button>
+                  <button className="hd-penopt" disabled={playing}
+                    onClick={() => { addStepHere(); setPenPop(null); }}>
+                    <Icon name="note" size={15} /><span>Add caption</span></button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -10702,11 +10787,10 @@ export default function DrillAnimator() {
           <PrefRow title="Loop end pause"
             desc="How long a looping drill holds on the last frame before it starts again."
             control={<Stepper value={loopPause} onChange={setLoopPause} step={0.5} min={0} suffix="s" />} />
-          <PrefRow title="Drill pace"
-            desc={`Base skating speed for the whole drill — ${pace} ft/s, a ${drillTime.toFixed(1)}s run. Every player's own speed multiplies this, and all timing follows from it.`}>
-            <input type="range" min={6} max={30} step={1} value={pace} style={{ width: "100%" }}
-              onChange={e => setPace(parseFloat(e.target.value))} />
-          </PrefRow>
+          {/* "Drill pace" is deliberately NOT here — it lives on the transport
+              as the speed button, for the same reason "Lines while playing"
+              does: you change it while showing a drill. One setting, one
+              control. */}
 
           <div className="hd-mh hd-prefsec">App</div>
           {keyEdit == null ? (

@@ -161,6 +161,20 @@ export const STYLES = `
         .hd-rvpuck::before { content:""; width:9px; height:0; border-top:2px dashed currentColor; }
         .hd-rvpuck::after { content:""; width:4px; height:4px; border-radius:50%; background:currentColor; }
         .hd-rvline.on, .hd-rvpuck.on { opacity:1; }
+        /* speed reads out its own multiple, so it needs no icon and no label
+           next to it. Tabular figures keep the glyph from shifting as it
+           cycles, and it lights only when it is NOT 1x — a drill running at
+           normal pace should look like nothing special is set. */
+        .hd-scrubbtn.spd { font-size:12.5px; font-weight:650; letter-spacing:-.02em;
+          font-variant-numeric:tabular-nums; }
+        /* the transport's three clusters: what the clock is doing, how the ice
+           looks while it runs, and the two that are not playback at all. On a
+           phone the grouping is spacing only — a hairline pair costs ~26px and
+           the scrub track has no width to give at 375. */
+        .hd-scrubgrp { flex:none; display:flex; align-items:center; gap:6px; }
+        .hd-scrubsep { flex:none; width:1px; height:26px; background:var(--db-border-strong); margin:0 3px; }
+        .hd-root:not(.dense) .hd-scrubsep { display:none; }
+        .hd-root:not(.dense) .hd-scrubgrp + .hd-scrubgrp { margin-left:4px; }
         .hd-scrubbtn:disabled { opacity:.4; cursor:default; }
         /* the play button is the one piece of chrome wearing a DOMAIN colour —
            hockey red — so it keeps its own token rather than the accent */
