@@ -13,13 +13,21 @@ export function RinkMarkings({ yFix = 1 }) {
   const red = T["ice-line-red"], blue = T["ice-line-blue"];
   const dots = [];
   // end-zone faceoff spots: regulation 20' from the goal line (x=31/169),
-  // 44' apart (y=20.5/64.5), 15' circles with hash marks (2' long, ~5'7" apart)
+  // 44' apart (y=20.5/64.5), 15' circles with hash marks (2' long, ~5'7" apart).
+  // Plus the four L-shaped player restraint brackets: a 4' leg parallel to the
+  // side boards (x±2 → x±6, i.e. starting 1' outside the spot) with a 3' leg
+  // parallel to the goal line rising at its INNER end (the one nearest the
+  // spot) and flaring away from the dot's centre line. Regulation puts
+  // the long legs 18" apart, but at full-rink zoom on a phone that gap is ~3px
+  // between two ~2px lines and the pair smears into one — so they sit 3' apart.
   [[31, 20.5], [31, 64.5], [169, 20.5], [169, 64.5]].forEach(([x, y]) =>
     dots.push(
       <g key={`fo${x}-${y}`}>
         <ellipse cx={x} cy={y} rx={15} ry={15 * yFix} fill="none" stroke={red} strokeWidth={0.4} opacity={0.8} />
         <ellipse cx={x} cy={y} rx={1} ry={yFix} fill={red} />
         <path d={`M ${x - 2.8} ${y - 17 * yFix} V ${y - 15 * yFix} M ${x + 2.8} ${y - 17 * yFix} V ${y - 15 * yFix} M ${x - 2.8} ${y + 15 * yFix} V ${y + 17 * yFix} M ${x + 2.8} ${y + 15 * yFix} V ${y + 17 * yFix}`}
+          stroke={red} strokeWidth={0.4} opacity={0.8} fill="none" />
+        <path d={`M ${x + 6} ${y - 1.5 * yFix} H ${x + 2} V ${y - 4.5 * yFix} M ${x + 6} ${y + 1.5 * yFix} H ${x + 2} V ${y + 4.5 * yFix} M ${x - 6} ${y - 1.5 * yFix} H ${x - 2} V ${y - 4.5 * yFix} M ${x - 6} ${y + 1.5 * yFix} H ${x - 2} V ${y + 4.5 * yFix}`}
           stroke={red} strokeWidth={0.4} opacity={0.8} fill="none" />
       </g>
     ));
@@ -45,7 +53,10 @@ export function RinkMarkings({ yFix = 1 }) {
       <line x1={100} y1={0} x2={100} y2={85} stroke={red} strokeWidth={1} />
       <line x1={100} y1={0} x2={100} y2={85} stroke={T["ice-dash"]} strokeWidth={0.25} strokeDasharray="1.6 1.6" />
       <ellipse cx={100} cy={42.5} rx={15} ry={15 * yFix} fill="none" stroke={blue} strokeWidth={0.4} />
-      <ellipse cx={100} cy={42.5} rx={0.5} ry={0.5 * yFix} fill={blue} />
+      {/* centre dot: regulation is a 12" (r=0.5) blue spot, but that lands on a
+          1'-wide red line and vanishes at full-rink zoom — sized to match every
+          other faceoff dot instead */}
+      <ellipse cx={100} cy={42.5} rx={1} ry={yFix} fill={blue} />
       {dots}
       <rect x={0.5} y={0.5} width={199} height={84} rx={28} ry={28 * yFix} fill="none" stroke={T["ice-boards"]} strokeWidth={1} />
     </g>
