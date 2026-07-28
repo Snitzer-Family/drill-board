@@ -5823,6 +5823,13 @@ export default function DrillAnimator() {
   // rotated to read upright under rink rotation) and an optional count bubble. Shared
   // by base-route action marks, reaction-light branch badges, and reaction-fork ends,
   // so every action circle in the app is identical.
+  // the little filled disc with a bold number. One tally style, shared by the action
+  // circles and by a merged shot mark, so they can't drift apart.
+  const tallyBubble = (n, r, fill, ink) => (<>
+    <circle cx={0} cy={0} r={r} fill={fill} />
+    <text x={0} y={0} textAnchor="middle" dominantBaseline="central" fontSize={r * 1.4}
+      fontWeight={800} fill={ink} style={{ fontFamily: "system-ui, sans-serif" }}>{n}</text>
+  </>);
   function iconBadge(pt, iconName, color, key, opacity = 1, count = 0, dy = 0) {
     const cfx = iconXf({ x: pt.x, y: pt.y, a: 0 });
     return (
@@ -5835,9 +5842,7 @@ export default function DrillAnimator() {
           </g>
           {count > 1 && (
             <g transform={`translate(${ACT_R * 0.74} ${-ACT_R * 0.74})`}>
-              <circle cx={0} cy={0} r={1.55} fill={color} />
-              <text x={0} y={0} textAnchor="middle" dominantBaseline="central" fontSize={2.2}
-                fontWeight={800} fill="#fff" style={{ fontFamily: "system-ui, sans-serif" }}>{count}</text>
+              {tallyBubble(count, 1.55, color, "#fff")}
             </g>
           )}
         </g>
@@ -8229,9 +8234,32 @@ export default function DrillAnimator() {
     // shots step back — so nothing overlaps and short shots still read accurately
     const shotTargets = pieces.filter(q => q.kind === "net" || q.kind === "passer" || q.kind === "bumper" || q.kind === "tire");
     const nearNet = (x, y) => { let best = "?", bd = 24; for (const nt of shotTargets) { const d = Math.hypot(nt.x - x, nt.y - y); if (d < bd) { bd = d; best = nt.id; } } return best; };
-    const byNet = {}, shotStagger = {};   // `${pk}/${k}` → extra feet in front of the net
+    // A player firing a pile of pucks from one spot at one net draws the same arrow
+    // over and over. Collapse those into ONE mark carrying a count, the way an action
+    // circle already tallies repeats, instead of a stack of identical lines. Bucketed
+    // by release point (~3ft) rather than exact coordinates: the blade shifts a little
+    // between shots as the body settles, and they are still visually the same mark.
+    const shotOne = {}, shotN = {};      // `${pk}/${k}` → is the drawn one / how many it stands for
+    const byNet = {}, shotStagger = {};  // `${pk}/${k}` → extra feet in front of the net
+    const groups = {};
     pieces.filter(q => q.kind === "puck" && plans[q.id]).forEach(q => plans[q.id].legs.forEach((L, k, legs) => {
       if (L.type === "fly" && L.shot && (!legs[k + 1] || legs[k + 1].type !== "fly")) {
+        // keyed on the SHOOTER as well as the spot: two players standing within a
+        // yard of each other are still two marks, not one attributed to whoever
+        // happened to shoot shortest
+        const g = `${L.by || "?"}|${Math.round(L.x0 / 3)},${Math.round(L.y0 / 3)}|${nearNet(L.x1, L.y1)}`;
+        (groups[g] = groups[g] || []).push({ id: `${q.id}/${k}`, len: Math.hypot(L.x1 - L.x0, L.y1 - L.y0) });
+      }
+    }));
+    // the shortest of a group is the one drawn — it reads truest against the net
+    Object.values(groups).forEach(list => {
+      const lead = list.reduce((a, c) => (c.len < a.len ? c : a));
+      list.forEach(sIt => { shotN[sIt.id] = list.length; });
+      shotOne[lead.id] = true;
+    });
+    // ...and only the drawn ones queue for room in front of the net
+    pieces.filter(q => q.kind === "puck" && plans[q.id]).forEach(q => plans[q.id].legs.forEach((L, k, legs) => {
+      if (L.type === "fly" && L.shot && (!legs[k + 1] || legs[k + 1].type !== "fly") && shotOne[`${q.id}/${k}`]) {
         const net = nearNet(L.x1, L.y1);
         (byNet[net] = byNet[net] || []).push({ id: `${q.id}/${k}`, len: Math.hypot(L.x1 - L.x0, L.y1 - L.y0) });
       }
@@ -8347,6 +8375,9 @@ export default function DrillAnimator() {
             </g>
           );
         }
+        // one of a pile of identical shots — the group draws once, on its shortest
+        if (L.shot && runEnd && shotN[`${q.id}/${k}`] > 1 && !shotOne[`${q.id}/${k}`]) return null;
+        const nShots = L.shot && runEnd ? (shotN[`${q.id}/${k}`] || 1) : 1;
         const dx = L.x1 - L.x0, dy = L.y1 - L.y0;
         // start: released AT an action badge → begin just outside its round edge,
         // measured from the badge CENTRE (not the stick); off a standing stick → start there.
@@ -8410,6 +8441,15 @@ export default function DrillAnimator() {
                         end in the standard open ">" like skating routes */}
                     <path d="M -3.3 -2.2 L 0 0 L -3.3 2.2" fill="none" stroke={INK} strokeWidth={casing ? 2.1 : 0.95} strokeLinecap="round" strokeLinejoin="round" />
                   </g></g>; })())}
+            {/* how many shots this one mark stands for — same tally an action circle
+                uses for repeats, sat just off the shoulder of the caret */}
+            {nShots > 1 && !casing && !flat && (() => {
+              const b0 = gmMove(ex, ey, -ux, -uy, 3.1);          // back off the caret...
+              const bp = gmMove(b0.x, b0.y, -uy, ux, 2.6);        // ...and off its shoulder
+              const bfx = iconXf({ x: bp.x, y: bp.y, a: 0 });
+              return <g transform={bfx.t}><g transform={`rotate(${-bfx.th})`}>
+                {tallyBubble(nShots, 1.75, INK, T.ice)}
+              </g></g>; })()}
             {ghostLand && !casing && (() => {
               // ghost puck resting where the chip/rim lands
               const fx = iconXf({ x: L.x1, y: L.y1, a: 0 });
