@@ -335,6 +335,26 @@ check("every accent-filled rule sets the on-accent text colour", () => {
     `accent-filled but inheriting their text colour: ${offenders.join(", ")}`);
 });
 
+// A bad merge once spliced a whole line of source INTO a tooltip string, and it
+// shipped: the Marks group's tip read "Freehand marker, shapes andconst
+// [openMenu, setOpenMenu] = useState(null); // settings | rinkmenu | ..." for
+// eleven commits. Nothing caught it — it is a valid string literal, so the
+// build is happy, and no test reads tooltips. These are the strings a user
+// actually reads, so check they look like prose.
+check("no source code has leaked into a user-facing label or tip", () => {
+  const src = read("../src/hockey-drill-animator.jsx");
+  // both spellings: object properties (ADD_GROUPS' label/tip, PEN_READ's rows)
+  // and JSX attributes (title="…"), since the corruption could land in either
+  const strings = [
+    ...[...src.matchAll(/\b(?:label|tip|title|desc):\s*"([^"\\]{4,})"/g)].map(m => m[1]),
+    ...[...src.matchAll(/\b(?:title|aria-label|placeholder)="([^"\\]{4,})"/g)].map(m => m[1]),
+  ];
+  assert.ok(strings.length > 20, `expected plenty of labels, found ${strings.length}`);
+  const codey = strings.filter(s =>
+    /\buseState\s*\(|=>|\bconst\s+\[|\bfunction\s*\(|\);\s*\/\//.test(s));
+  assert.deepEqual(codey, [], `source spliced into user-facing strings: ${codey.join(" | ")}`);
+});
+
 // drill-svg.js's var() fallbacks are what an <img>-loaded SVG actually renders
 // (no host cascade), which is the PNG export and the print sheet. They must come
 // off THEMES.light, not be retyped — a hardcoded fallback is a silent drift that

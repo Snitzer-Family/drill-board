@@ -141,7 +141,7 @@ const ADD_GROUPS = [
   { key: "props", label: "Props", tip: "Cones, tires and training gear", icon: "grid", kinds: [
     ["cone", "Cone"], ["tire", "Tire"], ["bumper", "Bumper"], ["deker", "Deker"],
     ["passer", "Passer"], ["stick", "Stick"], ["light", "Light"]] },
-  { key: "marks", label: "Marks", tip: "Freehand marker, shapes andconst [openMenu, setOpenMenu] = useState(null); // settings | rinkmenu | prefs | notes | inventory | steps | text labels", icon: "marker", kinds: [
+  { key: "marks", label: "Shapes", tip: "Zone shapes, freehand marker and text labels", icon: "shapes", kinds: [
     ["marker", "Marker", "marker"], ["square", "Square", "□"], ["circle", "Circle", "○"],
     ["triangle", "Triangle", "△"], ["label", "Label", "label"]] },
 ];
@@ -447,6 +447,15 @@ const PRESS_KEY = "drillboard:pencil-pressure";  // Apple Pencil pressure → li
 // changes personality exactly once as it rotates, which is the whole reason the
 // pen palette and the menus already shared 700.
 const DENSE_MIN = 700;
+// ...and one tier above it, for the Edit palette only. At DENSE_MIN the props
+// come out onto the bar; the five shape tools need ~204px more than the popover
+// button they replace, and the standing hint has to survive that. The hint
+// measures 130px at 768 today, so that is the floor worth keeping: 980 would
+// leave it 116px — narrower than what already ships — and 1000 leaves 136px.
+// It lands where it should either way: every iPad in LANDSCAPE (1024-1194)
+// opens the shapes out, while a portrait iPad (768-834) keeps them grouped,
+// because there genuinely isn't room. Measured, not guessed.
+const ROOMY_MIN = 1000;
 // Corner-menu anchoring. MENU_W must equal --hd-menu-w in styles.js (asserted by
 // tests/theme-contrast.mjs) — the panel is sized by CSS but centred by JS, so a
 // mismatch silently offsets every menu by half the difference. Below
@@ -968,6 +977,8 @@ export default function DrillAnimator() {
   // the render tree can't disagree about which layout is live.
   const [dense, setDense] = useState(() =>
     typeof matchMedia === "function" && matchMedia(`(min-width: ${DENSE_MIN}px)`).matches);
+  const [roomy, setRoomy] = useState(() =>
+    typeof matchMedia === "function" && matchMedia(`(min-width: ${ROOMY_MIN}px)`).matches);
   // a coarse (touch) primary pointer needs fatter grab targets than a mouse.
   // Stable for a session, so compute once (no listener like isWide needs).
   const coarsePtr = useMemo(
@@ -1132,9 +1143,15 @@ export default function DrillAnimator() {
   useEffect(() => {
     if (typeof matchMedia !== "function") return;
     const mq = matchMedia(`(min-width: ${DENSE_MIN}px)`);
-    const on = () => { setDense(mq.matches); setPenPop(null); };
-    mq.addEventListener ? mq.addEventListener("change", on) : mq.addListener(on);
-    return () => { mq.removeEventListener ? mq.removeEventListener("change", on) : mq.removeListener(on); };
+    const rq = matchMedia(`(min-width: ${ROOMY_MIN}px)`);
+    // both tiers in one effect, and both close any open popover: a group that
+    // inlines at the wider tier must not leave its popover floating over a bar
+    // that no longer has the button it sprang from
+    const on = () => { setDense(mq.matches); setRoomy(rq.matches); setPenPop(null); };
+    const add = q => (q.addEventListener ? q.addEventListener("change", on) : q.addListener(on));
+    const del = q => (q.removeEventListener ? q.removeEventListener("change", on) : q.removeListener(on));
+    add(mq); add(rq);
+    return () => { del(mq); del(rq); };
   }, []);
 
   // stepping Prev/Next through a piece's waypoints keeps the popup put when it
@@ -10351,8 +10368,11 @@ export default function DrillAnimator() {
           Keyed on width alone, NOT on isWide's pointer:fine — an iPad reports a
           COARSE pointer even with a Pencil attached, and a Pencil on a tablet is
           exactly the case that wants the open palette.
-          Marks stay grouped at every width: they're annotation, not equipment,
-          and inlining them would push the common pieces off the line. */}
+          desktop / landscape iPad (>= ROOMY_MIN) — the shapes come out too
+          Shapes used to stay grouped at every width, on the grounds that
+          inlining them would push the common pieces off the line. That's true
+          up to about 972px and false above it, so it's a third tier rather
+          than a rule. */}
       {actOn && mode === "edit" && (
         <div className="hd-act edit">
           {/* A selection takes the bar over completely — what you want next is
@@ -10366,7 +10386,9 @@ export default function DrillAnimator() {
               {ADD_GROUPS[0].kinds.map(addChip)}
               <div className="hd-pensep" />
               {dense ? <>{ADD_GROUPS[1].kinds.map(addChip)}</> : addGroupPop(ADD_GROUPS[1])}
-              {addGroupPop(ADD_GROUPS[2])}
+              {roomy
+                ? <><div className="hd-pensep" />{ADD_GROUPS[2].kinds.map(addChip)}</>
+                : addGroupPop(ADD_GROUPS[2])}
             </>
           )}
           {/* ---- multi-select: was a third floating toolbar over the ice, with

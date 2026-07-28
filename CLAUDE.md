@@ -125,14 +125,22 @@ restart so the settings watcher reloads it.
   var(--hd-barh)` and `flex-wrap:nowrap`, and the ice's reserved band
   (`--hd-act`) is computed from the same `--hd-barh` — never a literal, never a
   second variable. Each mode's contents must have exactly one flexible child.
-- `DENSE_MIN` (700) is the app's only width breakpoint. It drives the bar's
+- `DENSE_MIN` (700) is the app's main width breakpoint. It drives the bar's
   layout tier AND the corner-menu anchoring, and JS owns it: the `.dense` class
   on `.hd-root` is what the stylesheet keys off, so there is no media query to
   drift against. Below it, groups collapse into popovers — that's a different
   render tree, which is why it can't be pure CSS.
+- `ROOMY_MIN` (1000) is the second and only other one, for the Edit palette
+  alone: above it the Shapes group inlines too. It exists because the five
+  shape tools cost ~204px more than the popover button they replace, and the
+  bar's flexible child is the standing hint — so "the bar fits" stays true long
+  after the hint has become a stub. 1000 keeps it at 136px, no worse than the
+  130px it already has at 768. Landscape iPad and up; portrait iPad stays
+  grouped. Width-only, deliberately NOT `isWide`'s `pointer:fine` — an iPad
+  reports a coarse pointer even with a Pencil attached.
 - `setMode()` must never disturb the pen: it commits buffered ink (`flushPen`,
-  not `clearInk`) and leaves ink colour/width/style/note/auto alone, so
-  draw → edit → draw stays a free round trip.
+  not `clearInk`) and leaves ink colour/width/style and the pen's read mode
+  alone, so draw → edit → draw stays a free round trip.
 - Never give `.hd-act` `overflow:hidden` — the line-settings popovers are its
   children and spring upward out of its box.
 - `ADD_GROUPS` is the single table of everything placeable. The Edit bar, its

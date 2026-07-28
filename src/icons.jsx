@@ -93,6 +93,11 @@ const ICONS = {
   // a caption card with text lines + a plus = add a step note
   note: <><rect x="3" y="5.5" width="13.5" height="13" rx="2" /><path d="M6.5 10h6.5M6.5 13.5h4" /><path d="M18.5 13.5v6M15.5 16.5h6" /></>,
   grid: <><rect x="3.5" y="3.5" width="7" height="7" rx="1" /><rect x="13.5" y="3.5" width="7" height="7" rx="1" /><rect x="3.5" y="13.5" width="7" height="7" rx="1" /><rect x="13.5" y="13.5" width="7" height="7" rx="1" /></>,
+  // the shapes group: a square with a circle over it, which is the universal
+  // "shapes" glyph. The marker pen it replaced named ONE of the five tools in
+  // the group and read as "draw freehand" — the wrong promise for a menu whose
+  // point is the zone shapes.
+  shapes: <><rect x="3.2" y="8.4" width="10" height="10" rx="1.4" /><circle cx="15.4" cy="9.2" r="5.4" /></>,
   // a closed padlock (lock board) and an open shackle (unlock)
   lock: <><rect x="4.5" y="10.5" width="15" height="10" rx="2" /><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" /></>,
   unlock: <><rect x="4.5" y="10.5" width="15" height="10" rx="2" /><path d="M8 10.5V7.5a4 4 0 0 1 7.7-1.5" /></>,
