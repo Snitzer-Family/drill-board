@@ -8551,6 +8551,15 @@ export default function DrillAnimator() {
       : selected ? `${selected.id} selected — drag to move, tap for its settings`
       : "Tap a piece to edit it · double-tap the ice to add";
 
+  // Presentation is for showing the drill to a room, so turning it on clears
+  // the editing furniture off the ice: any pinned panel, the docked sidebar
+  // (which costs 320px of rink), and the current selection with its handles.
+  // Turning it OFF leaves the board alone — you re-open what you want.
+  const togglePresentation = () => setPresentation(v => {
+    if (!v) { setPinMode(null); setPopup(null); setSelectedId(null); setMultiSel(null); }
+    return !v;
+  });
+
   // Switch editor flows. Every clause here is lifted from a place that already
   // did exactly this before there was a mode to name — the Add sheet's pen rows,
   // togglePlay, wakeEdit — so this is one definition replacing five copies.
@@ -9928,7 +9937,7 @@ export default function DrillAnimator() {
             <Icon name={playing ? "stop" : "reset"} size={17} /></button>
           <button className={`hd-scrubbtn${loopMode ? " on" : ""}`} onClick={() => setLoopMode(v => !v)} title="Loop">
             <Icon name="loop" size={17} /></button>
-          <button className={`hd-scrubbtn${presentation ? " on" : ""}`} onClick={() => setPresentation(v => !v)} title="Presentation mode">
+          <button className={`hd-scrubbtn${presentation ? " on" : ""}`} onClick={togglePresentation} title="Presentation mode">
             <Icon name="presentation" size={17} /></button>
           <button className="hd-scrubbtn" disabled={playing} onClick={addStepHere}
             title="Add a description at this point"><Icon name="note" size={17} /></button>
@@ -10045,7 +10054,7 @@ export default function DrillAnimator() {
           <div className="hd-mh" style={{ marginTop: 4 }}>Presentation</div>
           <div className="hd-poprow">
             <button className={`hd-mini${presentation ? " on" : ""}`}
-              onClick={() => setPresentation(v => !v)}>{presentation ? "✓ On" : "Off"}</button>
+              onClick={togglePresentation}>{presentation ? "✓ On" : "Off"}</button>
             <span>Pause</span>
             <Stepper value={presoDelay} onChange={setPresoDelay} step={0.5} min={0} />
           </div>
@@ -10513,7 +10522,7 @@ export default function DrillAnimator() {
           <div className="hd-row">
             <button className="hd-btn primary" onClick={() => { setOpenMenu(null); setEditAnchor(null); }}>Done</button>
             <button className={`hd-btn${presentation ? " primary" : ""}`}
-              onClick={() => setPresentation(v => !v)}>Presentation: {presentation ? "On" : "Off"}</button>
+              onClick={togglePresentation}>Presentation: {presentation ? "On" : "Off"}</button>
           </div>
           <div className="hd-note">
             Scrub the timeline, pause, then “＋ Add here” drops a note — near a route point it
