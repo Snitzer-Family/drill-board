@@ -2060,14 +2060,18 @@ export default function DrillAnimator() {
   const FIDGET_BOB = 0.07;  // ft of fore-aft drift while standing
   const FIDGET_LEAN = 2.2;  // deg of body wobble while standing
   const FIDGET_FADE = 0.35; // ×base pace at which the fidget has fully faded out
-  // Snow spray: a skater who bites the ice hard throws a little puff off their
-  // edges. Only worth drawing when they actually arrive with speed — a glide into
-  // a stop shaves nothing. Display-only and, like everything else in playback, a
+  // Ice spray: a skater who bites the ice hard throws a little puff of shavings off
+  // their edges. Only worth drawing when they actually arrive with speed — a glide
+  // into a stop shaves nothing. Display-only and, like everything else in playback, a
   // pure function of t: the specks are placed off a hash of the piece id, never a
   // live random, so scrubbing back retraces the same puff.
+  // Painted in ice-ink (the puck's colour) rather than white: light ice is #f5fafd,
+  // so white shavings on it are invisible. ice-ink is the one colour the theme
+  // guarantees against the ice in BOTH modes — dark scuff on a white sheet, bright
+  // spray on a dark one.
   const SPRAY_AT = 1.15;    // ×base pace: below this the stop is a glide, no snow
   const SPRAY_FULL = 2.0;   // ×base pace: a full-blooded hockey stop
-  const SPRAY_N = 7;        // specks
+  const SPRAY_N = 16;       // specks
   function snowSpray(p, dp) {
     if (p.kind !== "player" || !effDetail || animT <= 0 || whiteboard) return null;
     const amt = dp.brake || 0;
@@ -2088,12 +2092,12 @@ export default function DrillAnimator() {
     for (let i = 0; i < SPRAY_N; i++) {
       const r1 = ((Math.sin((h + i * 97) * 12.9898) * 43758.5453) % 1 + 1) % 1;
       const r2 = ((Math.sin((h + i * 313) * 78.233) * 43758.5453) % 1 + 1) % 1;
-      const reach = (0.5 + 3.2 * ((i + r1) / SPRAY_N)) * grow * (0.6 + 0.4 * hard);
-      const fan = (r2 - 0.5) * 1.9 * reach * 0.5;             // widens as it flies out
+      const reach = (0.7 + 5.4 * ((i + r1) / SPRAY_N)) * grow * (0.6 + 0.4 * hard);
+      const fan = (r2 - 0.5) * 2.4 * reach * 0.5;             // widens as it flies out
       const cx = dp.x + (fx0 * reach + lx0 * (fan + 1.5 * side)) ;
       const cy = dp.y + (fy0 * reach + ly0 * (fan + 1.5 * side));
-      els.push(<circle key={i} cx={cx} cy={cy} r={(0.26 + 0.42 * r1) * (0.5 + 0.7 * grow)}
-        fill="#fff" opacity={0.5 * amt * hard * (1 - 0.55 * grow)} />);
+      els.push(<circle key={i} cx={cx} cy={cy} r={(0.42 + 0.66 * r1) * (0.55 + 0.7 * grow)}
+        fill={T["ice-ink"]} opacity={0.92 * amt * hard * (1 - 0.45 * grow)} />);
     }
     return <g pointerEvents="none">{els}</g>;
   }
