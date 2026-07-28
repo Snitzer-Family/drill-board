@@ -147,6 +147,17 @@ export const STYLES = `
           border:1px solid var(--db-border-strong); color:var(--db-text-soft); display:flex; align-items:center;
           justify-content:center; cursor:pointer; }
         .hd-scrubbtn.on { background:var(--db-accent); border-color:var(--db-accent); color:var(--db-text-on-accent); }
+        /* "lines while playing" — the glyph IS the answer rather than a symbol
+           standing for it: a solid route line over a dashed puck path, each lit
+           or dimmed to match what will actually be drawn. Four states read at a
+           glance without a label, which is what the bar has room for. */
+        .hd-scrubbtn.rv { flex-direction:column; gap:4px; }
+        .hd-rvline { width:15px; height:0; border-top:2px solid currentColor;
+          opacity:.2; transition:opacity .12s; }
+        .hd-rvpuck { display:flex; align-items:center; gap:2px; opacity:.2; transition:opacity .12s; }
+        .hd-rvpuck::before { content:""; width:9px; height:0; border-top:2px dashed currentColor; }
+        .hd-rvpuck::after { content:""; width:4px; height:4px; border-radius:50%; background:currentColor; }
+        .hd-rvline.on, .hd-rvpuck.on { opacity:1; }
         .hd-scrubbtn:disabled { opacity:.4; cursor:default; }
         /* the play button is the one piece of chrome wearing a DOMAIN colour —
            hockey red — so it keeps its own token rather than the accent */
@@ -388,6 +399,36 @@ export const STYLES = `
             right:calc(8px + env(safe-area-inset-right, 0px)); width:auto; }
         }
         .hd-mh { font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:var(--db-text-muted); }
+        /* ---- a settings row ----------------------------------------------
+           Title, a line saying what the setting actually does, then its
+           control. Everything in the prefs panel takes this shape so a reader
+           can scan titles and only drop into the prose for the ones they don't
+           already know — which is most of them, since several change how the
+           simulation behaves rather than how it looks. */
+        .hd-pref { display:flex; flex-direction:column; gap:2px; width:100%;
+          padding:9px 10px; border-radius:9px; text-align:left;
+          background:var(--db-surface-raised); border:1px solid var(--db-border); }
+        /* the whole row is the target for a toggle — 44pt-ish rather than the
+           30px the switch alone would give, which matters with gloves on */
+        .hd-pref.toggle { cursor:pointer; }
+        .hd-pref.dim { opacity:.5; }
+        .hd-prefhead { display:flex; align-items:center; gap:10px; min-height:22px; }
+        .hd-preftitle { flex:1 1 auto; min-width:0; font-size:13.5px; font-weight:650;
+          color:var(--db-text); line-height:1.25; }
+        .hd-prefdesc { font-size:11.5px; line-height:1.45; color:var(--db-text-muted); }
+        .hd-prefctl { margin-top:6px; }
+        .hd-pills { display:flex; flex-wrap:wrap; gap:4px; justify-content:flex-end; }
+        /* a section heading inside the panel, with air above it */
+        .hd-prefsec { margin-top:6px; color:var(--db-text-faint); }
+        /* the settings sheet's scrolling body. max-width caps the MEASURE —
+           prose set the full width of a desktop is hard to track back to the
+           start of the next line, and these are paragraphs now, not labels. */
+        .hd-prefbody { flex:1; min-height:0; overflow-y:auto; overscroll-behavior:contain;
+          display:flex; flex-direction:column; gap:8px;
+          width:100%; max-width:560px; margin:0 auto; padding-right:2px; }
+        .hd-prefwarn { font-size:11.5px; line-height:1.5; color:var(--db-warn);
+          padding:7px 9px; border-radius:8px;
+          background:var(--db-surface-sunken); border:1px solid var(--db-border); }
         .hd-item { display:flex; align-items:center; gap:8px; padding:9px 10px; font-size:14px;
           border:1px solid var(--db-border); background:var(--db-surface-raised); color:var(--db-text-soft); border-radius:8px;
           cursor:pointer; text-align:left; }

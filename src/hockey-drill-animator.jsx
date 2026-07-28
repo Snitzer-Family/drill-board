@@ -43,6 +43,60 @@ const TOOL_GLYPH = {
   stick: { vb: "-6.4 -2.4 13.4 4.8", color: "#8a929c" },
   light: { vb: "-3.7 -3.7 7.4 7.4", color: "#2ea043" },
 };
+// What stays drawn on the ice once the drill is running. Two independent
+// things — the skaters' routes and the puck's passes/shots — so the four modes
+// are just their combinations. The stored names are the original three plus
+// "puck"; keeping them means a session that already chose one still resolves.
+const ROUTE_VIS = [
+  ["hide", "None", "nothing — just the skaters moving"],
+  ["puck", "Puck", "the puck's passes and shots only"],
+  ["player", "Skaters", "the skating routes only"],
+  ["all", "Both", "skating routes and the puck's path"],
+];
+const routeVis = m => ({ skaters: m === "player" || m === "all", puck: m === "puck" || m === "all" });
+
+/* ---- settings rows -------------------------------------------------------
+   Every preference reads the same way: what it's called, a line saying what it
+   actually does (and what OFF means, which is the part that was missing), then
+   the control. Most of these are things you set once and forget, several change
+   how the SIMULATION behaves rather than how it looks, and the old panel gave
+   them a bare toggle label and a fragment of a hint — you had to already know
+   what "Tidy arrowheads" or "Preview all branches" meant to use them.
+
+   A toggle is the whole row, not just the switch: a 44px-tall target beats a
+   30px one on a bench phone, and the description is part of what you're
+   pressing. Rows with a stepper, slider or pills can't be one button (a button
+   can't contain buttons), so those put the control beside the title or under
+   the description. */
+const PrefToggle = ({ title, desc, on, set, dim }) => (
+  <button className={`hd-pref toggle${dim ? " dim" : ""}`} role="switch" aria-checked={on}
+    onClick={() => set(v => !v)}>
+    <span className="hd-prefhead">
+      <span className="hd-preftitle">{title}</span>
+      <span className={`hd-sw${on ? " on" : ""}`} />
+    </span>
+    <span className="hd-prefdesc">{desc}</span>
+  </button>
+);
+const PrefRow = ({ title, desc, control, children, dim }) => (
+  <div className={`hd-pref${dim ? " dim" : ""}`}>
+    <div className="hd-prefhead">
+      <span className="hd-preftitle">{title}</span>
+      {control}
+    </div>
+    {desc && <div className="hd-prefdesc">{desc}</div>}
+    {children && <div className="hd-prefctl">{children}</div>}
+  </div>
+);
+const Pills = ({ value, opts, set }) => (
+  <div className="hd-pills">
+    {opts.map(([v, lab]) => (
+      <button key={v} className={`hd-mini${value === v ? " on" : ""}`}
+        aria-pressed={value === v} onClick={() => set(v)}>{lab}</button>
+    ))}
+  </div>
+);
+
 // the interchangeable on-ice training tools: any one can be swapped for
 // another from its popup ("Change to" row) without re-placing it
 const TOOL_KINDS = ["cone", "tire", "bumper", "deker", "passer", "stick", "light"];
@@ -658,21 +712,18 @@ export default function DrillAnimator() {
   // corner and the panel opens nowhere near what was tapped — Tune's used to
   // open under Menu. (Must live below openMenu — reading it from higher up is a
   // temporal-dead-zone crash the build can't see.)
-  // Only the buttons that still exist in the bar get a ref. Panels reached from
-  // INSIDE another panel (Tune, opened from Menu's "App & drill settings") have
-  // no button of their own, so they borrow the one that got them there —
-  // otherwise the anchoring finds nothing and the panel falls back to the
-  // stylesheet's left edge, nowhere near what was tapped.
+  // Only the buttons that still exist in the bar get a ref — these are the
+  // corner menus, which the JS centres on whatever opened them. Panels reached
+  // from INSIDE another panel are full-screen sheets and don't anchor at all.
   const barBtnRefs = {
     settings: useRef(null), rinkmenu: useRef(null),
   };
-  const anchorFor = m => (m === "prefs" ? "settings" : m);
   const [menuLeft, setMenuLeft] = useState(null);
   useLayoutEffect(() => {
     // Below the breakpoint we write NO inline left: the stylesheet stretches the
     // panel to the bar's insets instead. Inline styles would outrank that rule.
     const place = () => {
-      const r = barBtnRefs[anchorFor(openMenu)]?.current?.getBoundingClientRect();
+      const r = barBtnRefs[openMenu]?.current?.getBoundingClientRect();
       if (!r || window.innerWidth < MENU_ANCHOR_MIN) { setMenuLeft(null); return; }
       setMenuLeft(Math.round(Math.max(MENU_PAD,
         Math.min(window.innerWidth - MENU_W - MENU_PAD, r.left + r.width / 2 - MENU_W / 2))));
@@ -1616,7 +1667,7 @@ export default function DrillAnimator() {
   // off, so shots always route on net). Only built when realistic shots are on and
   // the puck-path overlay is actually shown; otherwise the main plan already IS the
   // intent, so reuse it.
-  const wantPuckPaths = !aiPlay && (editing || whiteboard || playRoutes === "all");
+  const wantPuckPaths = !aiPlay && (editing || whiteboard || routeVis(playRoutes).puck);
   const getIntentPlan = (!effRealistic || !wantPuckPaths) ? getPlan
     : createTiming({ pieces: effPieces, pace, segRefs, planCache: intentPlanCache, seed: playSeed, realisticShots: false, detail: effDetail, odds: shotOdds }).getPlan;
 
@@ -8690,8 +8741,8 @@ export default function DrillAnimator() {
   // during playback the "Routes on play" setting controls what stays visible;
   // while editing everything shows regardless
   // whiteboard keeps the full planner picture on screen through playback
-  const showRoutes = !aiPlay && (editing || whiteboard || playRoutes !== "hide");   // player route lines + stops
-  const showPuckPaths = !aiPlay && (editing || whiteboard || playRoutes === "all"); // planned pass / shot lines
+  const showRoutes = !aiPlay && (editing || whiteboard || routeVis(playRoutes).skaters);   // player route lines + stops
+  const showPuckPaths = !aiPlay && (editing || whiteboard || routeVis(playRoutes).puck);    // planned pass / shot lines
   // converging-waypoint arrow pull-backs; the "Tidy arrowheads" setting turns the
   // whole feature off, landing every mark exactly where its waypoint was drawn
   const endStagger = showRoutes && arrowStagger ? routeEndStagger() : {};
@@ -10008,6 +10059,24 @@ export default function DrillAnimator() {
             <Icon name="loop" size={17} /></button>
           <button className={`hd-scrubbtn${presentation ? " on" : ""}`} onClick={togglePresentation} title="Presentation mode">
             <Icon name="presentation" size={17} /></button>
+          {/* What stays drawn while it plays. It belongs here rather than in a
+              settings panel: it's something you change WHILE showing a drill —
+              lines on to explain the pattern, off to watch it move — and the
+              glyph is the answer itself, a route line over a puck path, each
+              lit or dimmed. Tapping cycles the four. */}
+          {(() => {
+            const i = Math.max(0, ROUTE_VIS.findIndex(([v]) => v === playRoutes));
+            const [, label, what] = ROUTE_VIS[i];
+            const vis = routeVis(playRoutes);
+            return (
+              <button className="hd-scrubbtn rv" title={`Lines while playing: ${label} — ${what}. Tap to change.`}
+                aria-label={`Lines while playing: ${label}`}
+                onClick={() => setPlayRoutes(ROUTE_VIS[(i + 1) % ROUTE_VIS.length][0])}>
+                <span className={`hd-rvline${vis.skaters ? " on" : ""}`} />
+                <span className={`hd-rvpuck${vis.puck ? " on" : ""}`} />
+              </button>
+            );
+          })()}
           <button className="hd-scrubbtn" disabled={playing} onClick={addStepHere}
             title="Add a description at this point"><Icon name="note" size={17} /></button>
           <div className="hd-scrubtrack">
@@ -10159,193 +10228,153 @@ export default function DrillAnimator() {
       )}
 
       {openMenu === "prefs" && (
-        <div className="hd-menu" style={menuAnchor}>
+        /* A sheet, not a corner menu. Every row now carries a sentence of
+           explanation, and 18 of them in a 230px column wrap to five lines
+           each — unreadable. Notes, Inventory and Steps are all sheets for the
+           same reason. The body scrolls and the measure is capped so the prose
+           stays a comfortable width on a desktop. */
+        <div className="hd-sheet">
           <div className="hd-mh">App &amp; drill settings</div>
-          <div className="hd-mh" style={{ marginTop: 2, color: "var(--db-text-faint)" }}>Display</div>
-          <div className="hd-poprow">
-            <span className="hd-sectitle" style={{ width: "100%" }}>Theme</span>
-            {THEME_ORDER.map(v => (
-              <button key={v} className={`hd-mini${themePref === v ? " on" : ""}`}
-                onClick={() => setThemePref(v)}>
-                {THEME_LABEL[v] || v}
-              </button>
-            ))}
-            <span className="hd-sechint">
-              {themePref === "auto"
-                ? `follows your phone’s appearance — currently ${themeName}`
-                : `pinned to ${themePref}, ignoring your phone’s appearance`}
-            </span>
-          </div>
-          <div className="hd-poprow">
-            <button className={`hd-mini${realisticShots ? " on" : ""}`}
-              onClick={() => setRealisticShots(v => !v)}>{realisticShots ? "✓ Realistic shots" : "Realistic shots"}</button>
-            <span className="hd-sechint">shots randomly score, hit the post, or miss — off: every shot goes in along the ice</span>
-          </div>
-          <div className="hd-poprow">
-            <button className={`hd-mini${showResult ? " on" : ""}`}
-              onClick={() => setShowResult(v => !v)}>{showResult ? "✓ Goal splashes" : "Goal splashes"}</button>
-            <span className="hd-sechint">GOAL! / SAVE! / POST! calls over the net</span>
-          </div>
-          <div className="hd-poprow">
-            <button className={`hd-mini${detailAnim ? " on" : ""}`}
-              onClick={() => setDetailAnim(v => !v)}>{detailAnim ? "✓ Detailed animations" : "Detailed animations"}</button>
-            <span className="hd-sechint">skater stride, stick swing, puck cradle, airborne shots</span>
-          </div>
-          <div className="hd-poprow">
-            <button className={`hd-mini${stretchFill ? " on" : ""}`}
-              onClick={() => setStretchFill(v => !v)}>{stretchFill ? "✓ Stretch to fill" : "Stretch to fill"}</button>
-            <span className="hd-sechint">full ice fills the screen — off letterboxes it to true 200′×85′ proportions</span>
-          </div>
-          <div className="hd-poprow">
-            <button className={`hd-mini${whiteboard ? " on" : ""}`}
-              onClick={() => setWhiteboard(v => !v)}>{whiteboard ? "✓ Whiteboard mode" : "Whiteboard mode"}</button>
-            <span className="hd-sechint">classic X &amp; O player symbols, plain arrowed routes; shots stay on the ice, no splashes or detail animations</span>
-          </div>
+          <div className="hd-prefbody">
+
+          <div className="hd-mh hd-prefsec">Display</div>
+          <PrefRow title="Theme"
+            desc={themePref === "auto"
+              ? `Which palette the board and chrome use. Auto follows your device's appearance — currently ${themeName}.`
+              : `Which palette the board and chrome use. Pinned to ${themePref}, ignoring your device's appearance.`}>
+            <Pills value={themePref} set={setThemePref}
+              opts={THEME_ORDER.map(v => [v, THEME_LABEL[v] || v])} />
+          </PrefRow>
+          <PrefToggle title="Whiteboard mode" on={whiteboard} set={setWhiteboard}
+            desc="Draw players as classic X and O symbols with plain arrowed routes, the way a coach's board looks. Shots stay flat on the ice, and splashes and detailed animation are suppressed." />
           {whiteboard && (
             <>
-              <div className="hd-poprow">
-                <button className={`hd-mini${wbCircle ? " on" : ""}`}
-                  onClick={() => setWbCircle(v => !v)}>{wbCircle ? "✓ Circled symbols" : "Circled symbols"}</button>
-                <span className="hd-sechint">draw each X / O on an opaque white disc, like the action circles</span>
-              </div>
-              <div className="hd-poprow">
-                <button className={`hd-mini${wbNames ? " on" : ""}`}
-                  onClick={() => setWbNames(v => !v)}>{wbNames ? "✓ Player names" : "Player names"}</button>
-                <span className="hd-sechint">name tag under each X / O — off still shows them while a player's popup is open</span>
-              </div>
+              <PrefToggle title="Circled symbols" on={wbCircle} set={setWbCircle}
+                desc="Put each X or O on an opaque disc so it stays readable where it crosses a rink line." />
+              <PrefToggle title="Player names" on={wbNames} set={setWbNames}
+                desc="Show a name tag under every symbol. Off still names a player while their panel is open." />
             </>
           )}
-          <div className="hd-poprow">
-            <span>Line thickness</span>
-            <Stepper value={lineScale} onChange={setLineScale} step={0.25} min={0.5} max={3} suffix="×" />
-          </div>
-          <div className="hd-poprow">
-            <span>Mark opacity <b style={{ color: "var(--db-text-soft)" }}>{Math.round(markOpacity * 100)}%</b></span>
-            <input type="range" min={0.1} max={1} step={0.05} value={markOpacity} style={{ flex: 1, minWidth: 80 }}
+          <PrefToggle title="Stretch to fill" on={stretchFill} set={setStretchFill}
+            desc="Full ice stretches to fill the screen. Off letterboxes it to true 200′ × 85′ proportions, so distances on the board match distances on the rink." />
+          <PrefToggle title="Detailed animations" on={detailAnim} set={setDetailAnim}
+            desc="Skater stride, stick swing, puck cradle and airborne shots. Turn off for a plainer picture, or if playback stutters on an older device." />
+          <PrefToggle title="Goal splashes" on={showResult} set={setShowResult}
+            desc="Call GOAL! / SAVE! / POST! over the net as each shot resolves." />
+          <PrefRow title="Line thickness"
+            desc="Scales every route line, arrow and mark. Worth raising when projecting to a room."
+            control={<Stepper value={lineScale} onChange={setLineScale} step={0.25} min={0.5} max={3} suffix="×" />} />
+          <PrefRow title="Mark opacity"
+            desc={`How solid freehand marker ink and shapes are drawn — ${Math.round(markOpacity * 100)}% now. Lower lets rink markings read through your annotations.`}>
+            <input type="range" min={0.1} max={1} step={0.05} value={markOpacity} style={{ width: "100%" }}
               onChange={e => setMarkOpacity(parseFloat(e.target.value))} />
-          </div>
+          </PrefRow>
+
           {/* Smart pen — settings that outlive a sketch, so they belong with the
               standing preferences rather than inside the Draw palette (which is
               a strip, not a settings panel, and only exists while drawing). */}
-          <div className="hd-mh" style={{ marginTop: 4, color: "var(--db-text-faint)" }}>Smart pen</div>
-          <div className="hd-poprow">
-            <span>Apple Pencil</span>
-            <button className={`hd-mini${palmReject ? " on" : ""}`} onClick={() => setPalmReject(v => !v)}
-              title="Ignore fingers on the ice while a Pencil is in use">
-              <Icon name={palmReject ? "check" : "close"} size={13} /> Palm rejection
-            </button>
-            <button className={`hd-mini${pencilPress ? " on" : ""}`} onClick={() => setPencilPress(v => !v)}
-              title="Pressure varies line weight — off draws every stroke at the chosen width">
-              <Icon name={pencilPress ? "check" : "close"} size={13} /> Pressure
-            </button>
-          </div>
-          <div className="hd-poprow">
-            <span>Won&rsquo;t convert?</span>
-            <button className="hd-mini" onClick={copyPenDiag}>Copy diagnostics</button>
-            <span className="hd-sechint">dumps what the recogniser saw for the last burst of ink</span>
-          </div>
-          <div className="hd-mh" style={{ marginTop: 4, color: "var(--db-text-faint)" }}>Routes &amp; playback</div>
-          <div className="hd-poprow">
-            <button className={`hd-mini${collisions ? " on" : ""}`}
-              onClick={() => setCollisions(v => !v)}>{collisions ? "✓ Route avoidance" : "Route avoidance"}</button>
-            <span className="hd-sechint">curve routes around nets / goalie / players</span>
-          </div>
+          <div className="hd-mh hd-prefsec">Smart pen</div>
+          <PrefToggle title="Palm rejection" on={palmReject} set={setPalmReject}
+            desc="While an Apple Pencil is in use, ignore fingers on the ice so a resting hand can't draw or drag a piece." />
+          <PrefToggle title="Pencil pressure" on={pencilPress} set={setPencilPress}
+            desc="Vary line weight with how hard you press. Off draws every stroke at the chosen width, and flattens ink already on the board." />
+          <PrefRow title="Won't convert?"
+            desc="Copies what the recogniser saw for the last burst of ink. Paste it into a bug report when a stroke refuses to become a piece."
+            control={<button className="hd-mini" onClick={copyPenDiag}>Copy diagnostics</button>} />
+
+          <div className="hd-mh hd-prefsec">Routes &amp; playback</div>
+          <PrefToggle title="Route avoidance" on={collisions} set={setCollisions}
+            desc="Skaters curve around nets, the goalie and each other instead of passing through them." />
           {collisions && (
-            <div className="hd-poprow">
-              <button className={`hd-mini${avoidanceVisuals ? " on" : ""}`}
-                onClick={() => setAvoidanceVisuals(v => !v)}>{avoidanceVisuals ? "✓ Route avoidance visuals" : "Route avoidance visuals"}</button>
-              <span className="hd-sechint">draw the curved detour + ghost (off = straight lines; the skater still avoids)</span>
-            </div>
+            <PrefToggle title="Show the detour" on={avoidanceVisuals} set={setAvoidanceVisuals}
+              desc="Draw the curved path around an obstacle, with a ghost of the line you drew. Off keeps the drawn line straight while the skater still avoids." />
           )}
-          <div className="hd-poprow">
-            <button className={`hd-mini${arrowStagger ? " on" : ""}`}
-              onClick={() => setArrowStagger(v => !v)}>{arrowStagger ? "✓ Tidy arrowheads" : "Tidy arrowheads"}</button>
-            <span className="hd-sechint">nudges overlapping arrows apart so every arrowhead stays readable — off lands them exactly where drawn</span>
-          </div>
-          <div className="hd-poprow">
-            <button className={`hd-mini${previewAllBranches ? " on" : ""}`}
-              onClick={() => setPreviewAllBranches(v => !v)}>{previewAllBranches ? "✓ Preview all branches" : "Preview all branches"}</button>
-            <span className="hd-sechint">on play, ghost the player through every possible reaction at once</span>
-          </div>
-          <div className="hd-poprow">
-            <span>Route lines</span>
-            {[["player", "Player"], ["hide", "None"], ["all", "All + puck"]].map(([v, lab]) => (
-              <button key={v} className={`hd-mini${playRoutes === v ? " on" : ""}`}
-                onClick={() => setPlayRoutes(v)}>{lab}</button>
-            ))}
-            <span style={{ fontSize: 11, color: "var(--db-text-muted)", width: "100%" }}>which route lines stay visible while the drill plays</span>
-          </div>
-          <div className="hd-poprow">
-            <span>New player speed</span>
-            <Stepper value={defaultSpeed} onChange={setDefaultSpeed} step={0.1} min={0.5} max={3} suffix="×" />
-          </div>
-          <div className="hd-poprow">
-            <span>Loop end pause</span>
-            <Stepper value={loopPause} onChange={setLoopPause} step={0.5} min={0} suffix="s" />
-          </div>
-          <div className="hd-mh" style={{ marginTop: 4 }}>Default drill pace</div>
-          <div style={{ fontSize: 12, color: "var(--db-text-muted)" }}>
-            {pace} ft/s · run {totalTime.toFixed(1)}s
+          <PrefToggle title="Tidy arrowheads" on={arrowStagger} set={setArrowStagger}
+            desc="Nudge arrowheads apart where routes end close together, so each one stays readable. Off lands every arrow exactly where it was drawn." />
+          <PrefToggle title="Preview all branches" on={previewAllBranches} set={setPreviewAllBranches}
+            desc="Where a player has reactions to a cue, play ghosts them through every option at once instead of picking one at random." />
+          {/* "Lines while playing" is deliberately NOT here — it lives on the
+              transport, where you change it mid-presentation. One setting, one
+              control. */}
+          <PrefRow title="New player speed"
+            desc="The skating speed given to players you add from now on. Players already on the board keep theirs."
+            control={<Stepper value={defaultSpeed} onChange={setDefaultSpeed} step={0.1} min={0.5} max={3} suffix="×" />} />
+          <PrefRow title="Loop end pause"
+            desc="How long a looping drill holds on the last frame before it starts again."
+            control={<Stepper value={loopPause} onChange={setLoopPause} step={0.5} min={0} suffix="s" />} />
+          <PrefRow title="Drill pace"
+            desc={`Base skating speed for the whole drill — ${pace} ft/s, a ${totalTime.toFixed(1)}s run. Every player's own speed multiplies this, and all timing follows from it.`}>
             <input type="range" min={6} max={30} step={1} value={pace} style={{ width: "100%" }}
               onChange={e => setPace(parseFloat(e.target.value))} />
-          </div>
-          <div className="hd-mh" style={{ marginTop: 4, color: "var(--db-text-faint)" }}>App</div>
+          </PrefRow>
+
+          <div className="hd-mh hd-prefsec">App</div>
           {keyEdit == null ? (
-            <div className="hd-poprow">
-              <button className="hd-mini" onClick={() => setKeyEdit(localStorage.getItem(ANTHROPIC_KEY_STORE) || "")}>Claude API key…</button>
-              <span className="hd-sechint">{localStorage.getItem(ANTHROPIC_KEY_STORE) ? "set — used by Import from photo" : "needed for Import from photo"}</span>
-            </div>
+            <PrefRow title="Claude API key"
+              desc={`Used by Import from photo to read a drill off a whiteboard or sheet. Stored only on this device — ${localStorage.getItem(ANTHROPIC_KEY_STORE) ? "one is set." : "none set yet."}`}
+              control={<button className="hd-mini" onClick={() => setKeyEdit(localStorage.getItem(ANTHROPIC_KEY_STORE) || "")}>
+                {localStorage.getItem(ANTHROPIC_KEY_STORE) ? "Change…" : "Set…"}</button>} />
           ) : (
-            <div className="hd-poprow">
-              <input className="hd-input" type="password" autoFocus placeholder="sk-ant-…" value={keyEdit}
-                autoComplete="off" style={{ flex: 1, minWidth: 0, fontFamily: "ui-monospace, monospace", fontSize: 12 }}
-                onChange={e => setKeyEdit(e.target.value)} />
-              <button className="hd-mini" onClick={() => {
-                if (keyEdit.trim()) { localStorage.setItem(ANTHROPIC_KEY_STORE, keyEdit.trim()); flash("API key saved"); }
-                else { localStorage.removeItem(ANTHROPIC_KEY_STORE); flash("API key cleared"); }
-                setKeyEdit(null);
-              }}>Save</button>
-              <button className="hd-mini" onClick={() => setKeyEdit(null)}><Icon name="close" size={13} /></button>
-              <span style={{ fontSize: 11, color: "var(--db-text-muted)", width: "100%" }}>
-                Stored only on this device — use a spend-capped key. Empty + Save clears it.</span>
-            </div>
+            <PrefRow title="Claude API key"
+              desc="Use a spend-capped key. Saving an empty box clears it.">
+              <div className="hd-poprow">
+                <input className="hd-input" type="password" autoFocus placeholder="sk-ant-…" value={keyEdit}
+                  autoComplete="off" style={{ flex: 1, minWidth: 0, fontFamily: "ui-monospace, monospace", fontSize: 12 }}
+                  onChange={e => setKeyEdit(e.target.value)} />
+                <button className="hd-mini" onClick={() => {
+                  if (keyEdit.trim()) { localStorage.setItem(ANTHROPIC_KEY_STORE, keyEdit.trim()); flash("API key saved"); }
+                  else { localStorage.removeItem(ANTHROPIC_KEY_STORE); flash("API key cleared"); }
+                  setKeyEdit(null);
+                }}>Save</button>
+                <button className="hd-mini" onClick={() => setKeyEdit(null)}><Icon name="close" size={13} /></button>
+              </div>
+            </PrefRow>
           )}
+
           <button className={`hd-item${showAdvanced ? " on" : ""}`} style={{ marginTop: 4 }}
-            onClick={() => setShowAdvanced(v => !v)}>
-            <Icon name="target" size={16} /> {showAdvanced ? "▾" : "▸"} Advanced · shot odds
+            aria-expanded={showAdvanced} onClick={() => setShowAdvanced(v => !v)}>
+            <Icon name="target" size={16} /> Advanced · shot odds
+            <span className="hd-chev"><Icon name={showAdvanced ? "chevronDown" : "chevronRight"} size={14} /></span>
           </button>
           {showAdvanced && (() => {
             const pct = v => Math.round(v * 100);
             const goalPct = Math.max(0, 1 - shotOdds.post - shotOdds.wide - shotOdds.over);
-            const odd = (label, key, hint) => (
-              <div style={{ fontSize: 11, color: "var(--db-text-muted)", marginTop: 2 }}>
-                {label} <b style={{ color: "var(--db-text-soft)" }}>{pct(shotOdds[key])}%</b>{hint ? ` · ${hint}` : ""}
+            const odd = (title, key, desc) => (
+              <PrefRow key={key} title={`${title} · ${pct(shotOdds[key])}%`} desc={desc} dim={!realisticShots}>
                 <input type="range" min={0} max={1} step={0.05} value={shotOdds[key]} style={{ width: "100%" }}
                   onChange={e => setShotOdds(o => ({ ...o, [key]: parseFloat(e.target.value) }))} />
-              </div>
+              </PrefRow>
             );
             return (
-              <div style={{ opacity: realisticShots ? 1 : 0.5 }}>
-                {!realisticShots && <div style={{ fontSize: 11, color: "#c98b3a", marginTop: 2 }}>Turn on “Realistic shots” for these to apply.</div>}
-                {odd("Goalie save", "save", "else a goal on net")}
-                <div className="hd-mh" style={{ marginTop: 4 }}>Empty net · miss odds</div>
-                {odd("Off the post", "post")}
-                {odd("Wide", "wide")}
-                {odd("Over the net", "over")}
-                <div style={{ fontSize: 11, color: "var(--db-text-muted)", marginTop: 2 }}>
-                  Goal <b style={{ color: goalPct > 0 ? "#3ecf7a" : "#e05a5a" }}>{pct(goalPct)}%</b>
-                  {goalPct > 0 ? " — the remainder" : " — misses exceed 100%"}
+              <>
+                {!realisticShots && (
+                  <div className="hd-prefwarn">
+                    These only apply with <b>Realistic shots</b> on — right now every shot goes in along the ice.
+                    <button className="hd-mini" style={{ marginLeft: 6 }} onClick={() => setRealisticShots(true)}>Turn it on</button>
+                  </div>
+                )}
+                {odd("Goalie save", "save", "Chance a shot on a net WITH a goalie is stopped. The rest beat them.")}
+                <div className="hd-mh hd-prefsec">Empty net · how a shot misses</div>
+                {odd("Off the post", "post", "Rings the post and rebounds back into play.")}
+                {odd("Wide", "wide", "Sails wide and runs into the corner.")}
+                {odd("Over the net", "over", "Flies over — always an airborne shot.")}
+                <div className="hd-prefdesc" style={{ padding: "0 2px" }}>
+                  Goal <b style={{ color: goalPct > 0 ? "var(--db-good)" : "var(--db-danger)" }}>{pct(goalPct)}%</b>
+                  {goalPct > 0 ? " — whatever the three misses leave." : " — the misses add up past 100%, so nothing scores."}
                 </div>
-                <div className="hd-mh" style={{ marginTop: 4 }}>Any shot</div>
-                {odd("Airborne", "air", "sauce-style rise + shadow")}
-                <div className="hd-mh" style={{ marginTop: 4 }}>Miss physics</div>
-                {odd("Board / post bounce", "bounce", "speed kept per carom — lower absorbs more")}
+                <div className="hd-mh hd-prefsec">Any shot</div>
+                {odd("Airborne", "air", "Chance a shot is lifted rather than kept flat — a sauce-style rise with a shadow, dropping at the net.")}
+                {odd("Board / post bounce", "bounce", "How much speed a missed puck keeps each time it caroms. Lower boards absorb more.")}
                 <button className="hd-mini" style={{ marginTop: 4 }}
-                  onClick={() => setShotOdds({ save: SAVE_PROB, post: MISS_POST, wide: MISS_WIDE, over: MISS_OVER, air: SHOT_AIR_PROB, bounce: BOUNCE_REST })}>Reset to defaults</button>
-              </div>
+                  onClick={() => setShotOdds({ save: SAVE_PROB, post: MISS_POST, wide: MISS_WIDE, over: MISS_OVER, air: SHOT_AIR_PROB, bounce: BOUNCE_REST })}>Reset shot odds</button>
+              </>
             );
           })()}
-          <div className="hd-note">Preferences apply to this session and to how new pieces are added.</div>
+            <div className="hd-note">These are saved for this device, not with the drill — except the pace and shot odds, which belong to the drill you're editing.</div>
+          </div>
+          <div className="hd-row">
+            <button className="hd-btn primary" onClick={() => setOpenMenu(null)}>Done</button>
+          </div>
         </div>
       )}
 
