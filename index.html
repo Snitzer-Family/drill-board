@@ -27,6 +27,10 @@
          by React, which is far too late for the first paint. -->
     <!--theme-css-->
     <!--theme-boot-->
+    <!-- lang="en" above is only the pre-boot default; this script overwrites it
+         from ?lang= / localStorage / navigator.languages before first paint, so
+         the :root[lang=…] escapes in styles.js are live for the first frame. -->
+    <!--i18n-boot-->
   </head>
   <body>
     <div id="root"></div>

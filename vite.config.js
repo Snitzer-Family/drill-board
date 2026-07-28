@@ -3,26 +3,31 @@ import react from "@vitejs/plugin-react";
 import { copyFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { themeCss, BOOT_SCRIPT } from "./src/theme.js";
+import { I18N_BOOT } from "./src/i18n.js";
 
-// Inline the theme tokens into index.html. transformIndexHtml runs in the dev
-// middleware AND in build, so there is exactly one definition of the palette
-// (src/theme.js) and no hand-maintained copy that can drift.
+// Inline the theme tokens and the language boot into index.html.
+// transformIndexHtml runs in the dev middleware AND in build, so there is
+// exactly one definition of the palette (src/theme.js) and of the language
+// list (src/i18n.js), with no hand-maintained copy that can drift.
 //
-// Both must land in <head> before <body>: the tokens so the first paint has
-// them, and the boot script so a persisted override is applied before anything
-// is drawn. The boot script is deliberately a CLASSIC script — type="module"
-// is deferred and would run after first paint, reintroducing the flash.
+// All three must land in <head> before <body>: the tokens so the first paint
+// has them, and the boot scripts so a persisted override is applied before
+// anything is drawn. Both boot scripts are deliberately CLASSIC scripts —
+// type="module" is deferred and would run after first paint, reintroducing
+// the flash. This is also why src/theme.js and src/i18n.js must stay
+// import-free: Node loads them here, at config time, unbundled.
 function injectTheme() {
   return {
     name: "inject-theme",
     transformIndexHtml(html) {
-      for (const marker of ["<!--theme-css-->", "<!--theme-boot-->"]) {
+      for (const marker of ["<!--theme-css-->", "<!--theme-boot-->", "<!--i18n-boot-->"]) {
         if (!html.includes(marker))
           throw new Error(`index.html is missing the ${marker} marker`);
       }
       return html
         .replace("<!--theme-css-->", `<style>${themeCss()}</style>`)
-        .replace("<!--theme-boot-->", `<script>${BOOT_SCRIPT}</script>`);
+        .replace("<!--theme-boot-->", `<script>${BOOT_SCRIPT}</script>`)
+        .replace("<!--i18n-boot-->", `<script>${I18N_BOOT}</script>`);
     },
   };
 }

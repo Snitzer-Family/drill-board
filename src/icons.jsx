@@ -79,6 +79,9 @@ const ICONS = {
   lock: <><rect x="4.5" y="10.5" width="15" height="10" rx="2" /><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" /></>,
   unlock: <><rect x="4.5" y="10.5" width="15" height="10" rx="2" /><path d="M8 10.5V7.5a4 4 0 0 1 7.7-1.5" /></>,
   gauge: <><path d="M4 18a8 8 0 1 1 16 0" /><path d="M12 18l4-5" /></>,
+  // globe: outline + equator + one meridian ellipse. The usual three-meridian
+  // globe turns to mud at the 16px these render at; one reads.
+  globe: <><circle cx="12" cy="12" r="8.5" /><path d="M3.5 12h17" /><ellipse cx="12" cy="12" rx="3.7" ry="8.5" /></>,
   sliders: <><path d="M5 5v14M12 5v14M19 5v14" /><circle cx="5" cy="9" r="1.9" {...F} /><circle cx="12" cy="14" r="1.9" {...F} /><circle cx="19" cy="8" r="1.9" {...F} /></>,
   // line-segment types (player/waypoint popups)
   segLine: <path d="M4.5 19.5L19.5 4.5" />,

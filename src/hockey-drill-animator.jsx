@@ -19,6 +19,9 @@ import { newGame, stepGame } from "./ai-game.js";
 import { STYLES } from "./styles.js";
 import { THEME_KEY, THEME_ATTR, THEME_ORDER, THEME_LABEL, resolveTheme, tokens, teamInk } from "./theme.js";
 import { ThemeCtx, InkCtx } from "./theme-react.jsx";
+import { LANG_KEY, LANG_ORDER, LANG_AUTONYM, resolveLang, readLangOverride } from "./i18n.js";
+import { makeT } from "./i18n/index.js";
+import { LangCtx } from "./i18n-react.jsx";
 import { SAVE_KEY, peekBackup, clearBackup } from "./storage.js";
 
 // Pen inks. These double as PIECE colours — a symbol you draw becomes a player
@@ -737,6 +740,30 @@ export default function DrillAnimator() {
   }, []);
   const themeName = resolveTheme(themePref, prefersDark);
   const T = tokens(themeName);
+  // Language: "auto" (follow the phone) | one of LANGS. Same shape as the theme
+  // block above — the inline boot script has already set <html lang> before
+  // first paint, so this only keeps it in sync once React owns the state.
+  //
+  // Deliberately NO live listener to match the prefers-color-scheme one above:
+  // navigator.languages is a static list with no change event, so there is
+  // nothing to subscribe to. That's an absence of signal, not an oversight.
+  const [langPref, setLangPref] = useState(() => {
+    const url = readLangOverride();
+    if (url) return url;
+    try { return localStorage.getItem(LANG_KEY) || "auto"; } catch { return "auto"; }
+  });
+  const lang = resolveLang(langPref, typeof navigator !== "undefined" ? navigator.languages : null);
+  useEffect(() => {
+    // A shared ?lang= link must not permanently repoint someone's app, so the
+    // override drives this session without being written back.
+    if (!readLangOverride()) {
+      try { localStorage.setItem(LANG_KEY, langPref); } catch { /* private mode */ }
+    }
+    // unlike the theme attribute this is ALWAYS set, never removed: auto still
+    // resolves to a concrete language, and <html lang> must never be a lie
+    document.documentElement.setAttribute("lang", lang);
+  }, [langPref, lang]);
+  const t = useMemo(() => makeT(lang), [lang]);
   // stored piece colour -> what this theme paints. Identity for every theme that
   // declares no lift table, so this is inert unless a scheme opts in.
   const ink = useMemo(() => (c => teamInk(themeName, c)), [themeName]);
@@ -8670,6 +8697,7 @@ export default function DrillAnimator() {
     // ice ever disagree, a wrong-shade rim shows at the loupe's corners
     <ThemeCtx.Provider value={T}>
     <InkCtx.Provider value={ink}>
+    <LangCtx.Provider value={t}>
     <div className={`hd-root${penMode && !aiPlay ? " pen-on" : aiPlay || !hasTimeline ? "" : " scrub-on"}${docked ? " dock-open" : ""}${
       tool === "pen" || tool === "marker" ? (eraser && tool === "pen" ? " erase-cursor" : " draw-cursor") : ""}`} ref={rootRef}>
       <style>{STYLES}</style>
@@ -9776,6 +9804,12 @@ export default function DrillAnimator() {
             onClick={() => setShowDiag(s => !s)}>
             <Icon name="gauge" size={16} /> Diagnostics<span className={`hd-sw${showDiag ? " on" : ""}`} />
           </button>
+          {/* Labelled with the autonym rather than the word "Language", so the
+              row is self-describing whatever language the app is currently in —
+              the one entry point that must work when nothing else is readable. */}
+          <button className="hd-item" lang={lang} onClick={() => setOpenMenu("prefs")}>
+            <Icon name="globe" size={16} /> {LANG_AUTONYM[lang]}<span className="hd-chev"><Icon name="chevronRight" size={14} /></span>
+          </button>
           <button className="hd-item" onClick={() => setOpenMenu("prefs")}>
             <Icon name="sliders" size={16} /> App &amp; drill settings<span className="hd-chev"><Icon name="chevronRight" size={14} /></span>
           </button>
@@ -9823,6 +9857,25 @@ export default function DrillAnimator() {
         <div className="hd-menu" style={menuAnchor}>
           <div className="hd-mh">App &amp; drill settings</div>
           <div className="hd-mh" style={{ marginTop: 2, color: "var(--db-text-faint)" }}>Display</div>
+          {/* Language sits ABOVE Theme deliberately: it's the one setting a
+              coach who can't read the current UI has to be able to find, so it
+              goes first in the first section. Chips are labelled with autonyms
+              for the same reason — "Čeština", never "Czech". */}
+          <div className="hd-poprow">
+            <span className="hd-sectitle" style={{ width: "100%" }}>{t("prefs.language")}</span>
+            {LANG_ORDER.map(v => (
+              <button key={v} className={`hd-mini${langPref === v ? " on" : ""}`}
+                lang={v === "auto" ? undefined : v}
+                onClick={() => setLangPref(v)}>
+                {v === "auto" ? t("prefs.lang.auto") : LANG_AUTONYM[v]}
+              </button>
+            ))}
+            <span className="hd-sechint">
+              {langPref === "auto"
+                ? t("prefs.lang.hint.auto", { lang: LANG_AUTONYM[lang] })
+                : t("prefs.lang.hint.pinned", { lang: LANG_AUTONYM[lang] })}
+            </span>
+          </div>
           <div className="hd-poprow">
             <span className="hd-sectitle" style={{ width: "100%" }}>Theme</span>
             {THEME_ORDER.map(v => (
@@ -10367,6 +10420,7 @@ export default function DrillAnimator() {
       )}
       {showDiag && <DiagPanel drillVersion={drillVersion} />}
     </div>
+    </LangCtx.Provider>
     </InkCtx.Provider>
     </ThemeCtx.Provider>
   );
