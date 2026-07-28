@@ -70,6 +70,16 @@ const LIGHT = {
     "ui-select": "#a06400",
     "brand-red": "#d7263d",
 
+    /* what a puck ACTION does, as a stripe down the side of its step card.
+       Named for the move, not the hue: the puck arrives (gain), goes to a
+       teammate (pass), goes at the net (shot), or goes to space off the boards
+       or glass (loose). Decorative — every step also states its type in text —
+       so these carry no contrast pair. */
+    "act-gain": "#1657c4",
+    "act-pass": "#177a41",
+    "act-shot": "#c0182b",
+    "act-loose": "#b4610d",
+
     /* ice / diagram — the only tier the SVG reads */
     ice: "#f5fafd",
     "ice-surround": "#eef5f9",
@@ -129,6 +139,12 @@ const DARK = {
     "track-thumb": "#e8eef4",
     "ui-select": "#ffd447",
     "brand-red": "#d7263d",
+
+    /* see the light theme for what these mean */
+    "act-gain": "#6ea8ff",
+    "act-pass": "#3ecf7a",
+    "act-shot": "#ff5a6a",
+    "act-loose": "#e0731d",
 
     ice: "#0d151c",
     "ice-surround": "#0d151c",

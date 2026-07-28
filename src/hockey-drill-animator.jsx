@@ -3199,8 +3199,10 @@ export default function DrillAnimator() {
     const cueLights = pieces.filter(q => q.kind === "light" && (q.cues || []).length);
     const cueCols = light ? [...new Set((light.cues || []).map(c => c.color))] : [];
     const others = pieces.filter(q => q.kind === "player" && q.id !== p.id);
-    const selStyle = { background: "#1b2530", color: "#eaf0f6", border: "1px solid rgba(255,255,255,0.16)",
-      borderRadius: 6, padding: "3px 6px", fontSize: 13, cursor: "pointer" };
+    // (the reaction dropdowns wear .hd-select like every other select. They used
+    // to carry a hardcoded dark inline style, which rendered them as black boxes
+    // on a light theme — inline styles skip the token layer, and the no-raw-hex
+    // guard only reads styles.js, so nothing caught it.)
     const COND_LABEL = { light: "On cue", random: "Random", sequence: "Sequence", always: "Always",
       possession: "If holding…", link: "If route…", event: "When player…" };
     const sibs = parentRef ? (forkAt(p, parentRef)?.forks || []) : (p.forks || []);
@@ -3211,11 +3213,13 @@ export default function DrillAnimator() {
       const ct = condOf(fk).type;
       const isEditing = editingFork && editingFork.id === p.id && forkEq(editingFork.color, ref);
       return (
-        <div key={ref} style={{ margin: "5px 0", padding: "5px 7px", borderRadius: 8,
-          background: "rgba(20,26,34,0.6)", border: "1px solid #2c3846", borderLeft: `3px solid ${fk.color}` }}>
+        // same card as a puck action step; the stripe is the CUE COLOUR here, so
+        // it stays a literal — it's drill data, not chrome, and must match the
+        // light on the ice exactly
+        <div key={ref} className="hd-step" style={{ borderLeftColor: fk.color }}>
           <div className="hd-poprow">
             <div className="hd-swatch on" style={{ background: fk.color, cursor: "default" }} />
-            <select value={ct} style={selStyle} title="condition — how this route is chosen"
+            <select value={ct} className="hd-select" title="condition — how this route is chosen"
               onChange={e => setForkCond(p.id, ref, e.target.value)}>
               {Object.entries(COND_LABEL).map(([t, lbl]) => <option key={t} value={t}>{lbl}</option>)}
             </select>
@@ -3229,7 +3233,7 @@ export default function DrillAnimator() {
               const sel = (cd.color || fk.color).toLowerCase();
               return (<>
                 {cueLights.length > 1 && (
-                  <select value={cd.lightId || ""} style={selStyle} title="cue device this route reads"
+                  <select value={cd.lightId || ""} className="hd-select" title="cue device this route reads"
                     onChange={e => updateForkCond(p.id, ref, { type: "light", color: cd.color || fk.color, lightId: e.target.value || undefined })}>
                     <option value="">Auto ({governingLightNear(pieces, branchPt)?.id || "—"})</option>
                     {cueLights.map(l => <option key={l.id} value={l.id}>{l.id}</option>)}
@@ -3246,11 +3250,11 @@ export default function DrillAnimator() {
               const routes = tgt ? enumerateRoutes(tgt).filter(r => r.ref) : [];
               const nums = tgt ? forkNumbers(tgt) : new Map();   // matches the faint R-numbers on the ice
               return (<>
-                <select value={condOf(fk).player || ""} style={selStyle} title="react to this player"
+                <select value={condOf(fk).player || ""} className="hd-select" title="react to this player"
                   onChange={e => { const t2 = pieces.find(q => q.id === e.target.value); updateForkCond(p.id, ref, { player: e.target.value, route: t2 ? (enumerateRoutes(t2).find(r => r.ref)?.ref || "") : "" }); }}>
                   {others.map(o => <option key={o.id} value={o.id}>{o.id}</option>)}
                 </select>
-                <select value={(condOf(fk).route || "").toLowerCase()} style={selStyle} title="…taking this route (numbers match the labels on the ice)"
+                <select value={(condOf(fk).route || "").toLowerCase()} className="hd-select" title="…taking this route (numbers match the labels on the ice)"
                   onChange={e => updateForkCond(p.id, ref, { route: e.target.value })}>
                   {routes.map(r => <option key={r.ref} value={r.ref.toLowerCase()}>{`R${nums.get(r.ref.toLowerCase()) ?? "?"} · ${r.ref.replace(/#/g, "")}`}</option>)}
                   {!routes.length && <option value="">(no branches)</option>}
@@ -3262,17 +3266,17 @@ export default function DrillAnimator() {
               const tgt = pieces.find(q => q.id === c.on);
               const wps = tgt ? (tgt.path || []) : [];
               return (<>
-                <select value={c.on || ""} style={selStyle} title="watch this player"
+                <select value={c.on || ""} className="hd-select" title="watch this player"
                   onChange={e => { const t2 = pieces.find(q => q.id === e.target.value); updateForkCond(p.id, ref, { on: e.target.value, ...(c.mode === "waypoint" ? { at: Math.max(0, ((t2?.path || []).length) - 1) } : {}) }); }}>
                   {others.map(o => <option key={o.id} value={o.id}>{o.id}</option>)}
                 </select>
-                <select value={c.mode || "action"} style={selStyle} title="trigger"
+                <select value={c.mode || "action"} className="hd-select" title="trigger"
                   onChange={e => { const m = e.target.value; updateForkCond(p.id, ref, { mode: m, ...(m === "waypoint" && c.at == null ? { at: Math.max(0, (wps.length) - 1) } : {}) }); }}>
                   <option value="action">releases puck</option>
                   <option value="waypoint">reaches point</option>
                 </select>
                 {c.mode === "waypoint" && (
-                  <select value={c.at != null ? c.at : Math.max(0, wps.length - 1)} style={selStyle} title="…reaches this waypoint"
+                  <select value={c.at != null ? c.at : Math.max(0, wps.length - 1)} className="hd-select" title="…reaches this waypoint"
                     onChange={e => updateForkCond(p.id, ref, { at: parseInt(e.target.value, 10) })}>
                     {wps.length ? wps.map((_, wi) => <option key={wi} value={wi}>@{wi + 1}</option>) : <option value="0">@1</option>}
                   </select>
@@ -3282,7 +3286,7 @@ export default function DrillAnimator() {
             {ct === "possession" && (
               // whose possession fires this route: mine (default) or another player's —
               // e.g. a defender collapses while the attacker still has the puck
-              <select value={condOf(fk).player || ""} style={selStyle} title="whose possession fires this route"
+              <select value={condOf(fk).player || ""} className="hd-select" title="whose possession fires this route"
                 onChange={e => updateForkCond(p.id, ref, { player: e.target.value || undefined })}>
                 <option value="">I&apos;m holding</option>
                 {others.map(o => <option key={o.id} value={o.id}>{nameOf(o.id)} holding</option>)}
@@ -3292,12 +3296,12 @@ export default function DrillAnimator() {
               onClick={() => { if (isEditing) setEditingFork(null); clearFork(p.id, ref); }}>✕</button>
           </div>
           <div className="hd-poprow">
-            <span style={{ minWidth: 46, fontSize: 11, color: "#8b99a8" }}>Route</span>
+            <span className="hd-steplbl">Route</span>
             {curveButtons(t => addForkSegment(p.id, ref, t), () => beginForkDraw(p.id, ref))}
             <button className={`hd-mini${isEditing ? " on" : ""}`}
               onClick={() => setEditingFork(isEditing ? null : { id: p.id, color: ref })}>{isEditing ? "✓ Editing" : "Edit"}</button>
             {!parentRef && p.path.length > 1 && (
-              <select value={fk.at != null ? fk.at : p.path.length - 1} style={selStyle} title="departs from this waypoint"
+              <select value={fk.at != null ? fk.at : p.path.length - 1} className="hd-select" title="departs from this waypoint"
                 onChange={e => setForkAt(p.id, ref, parseInt(e.target.value, 10))}>
                 {p.path.map((_, wi) => <option key={wi} value={wi}>@{wi + 1}</option>)}
               </select>
@@ -3313,8 +3317,8 @@ export default function DrillAnimator() {
         </div>
         {sibs.map(card)}
         <div className="hd-poprow">
-          <span style={{ minWidth: 46, fontSize: 11, color: "#8b99a8" }}>＋ Add</span>
-          <select value="none" style={selStyle} title="add a condition"
+          <span className="hd-steplbl">＋ Add</span>
+          <select value="none" className="hd-select" title="add a condition"
             onChange={e => { if (e.target.value !== "none") addForkCond(p.id, parentRef, e.target.value); }}>
             <option value="none">condition…</option>
             {addTypes.map(t => <option key={t} value={t}>{COND_LABEL[t]}</option>)}
@@ -3998,7 +4002,7 @@ export default function DrillAnimator() {
         </div>
         {evs.map((ev, n) => (
           <div key={n} style={{ display: "flex", alignItems: "center", gap: 8, padding: "2px 0" }}>
-            <span style={{ minWidth: 16, textAlign: "right", fontWeight: 700, color: "#8b99a8", fontVariantNumeric: "tabular-nums" }}>{n + 1}</span>
+            <span style={{ minWidth: 16, textAlign: "right", fontWeight: 700, color: "var(--db-text-muted)", fontVariantNumeric: "tabular-nums" }}>{n + 1}</span>
             <span style={{ flex: 1, fontSize: 12.5 }}>{forPlayer ? ev.self : ev.desc}</span>
             <button className="hd-mini danger" style={{ padding: "2px 7px", minHeight: 0 }}
               title="Delete this action (and any that follow it)" onClick={ev.del}>✕</button>
@@ -4249,13 +4253,6 @@ export default function DrillAnimator() {
     // action chain, in build order, instead of bunching behind an earlier action
     setPieces(ps => { const k = ps.findIndex(q => q.id === target.id); if (k < 0) return ps; const c = ps.slice(); const [t] = c.splice(k, 1); c.push(t); return c; });
     setSelectedId(playerId);
-  }
-  function setRecvAt(pkId, trIdx, idx) {
-    update(q => {
-      if (q.id !== pkId) return q;
-      const ts = (q.transfers || []).map((t, k) => (k === trIdx ? { ...t, recvAt: idx } : t));
-      return { ...q, transfers: ts };
-    });
   }
   // manual "Receive Pass": the chosen source player passes to `receiverId` at
   // waypoint `at`. Appends the pass onto a puck the source holds; if they hold
@@ -6742,7 +6739,7 @@ export default function DrillAnimator() {
             <button className="hd-x" title="Close" onPointerDown={e => e.stopPropagation()}
               onClick={() => { setPopup(null); setPinMode(null); }}><Icon name="close" size={15} /></button>
           </div>
-          <div className="hd-poprow" style={{ color: "#8b99a8", fontSize: 12 }}>
+          <div className="hd-poprow" className="hd-stephint">
             Tap a player, puck, or point to edit it here.
           </div>
         </div>
@@ -6772,19 +6769,16 @@ export default function DrillAnimator() {
       const rec = pieces.find(q => q.id === tr.to && q.kind === "player");
       const isSauce = !!tr.sauce;
       const doSauce = () => update(q => q.id !== pk.id ? q : { ...q, transfers: (q.transfers || []).map((x, s) => s === st.stage ? { ...x, sauce: !x.sauce } : x) });
+      // No "caught at [auto][1][2]…" chip row here any more: the step's own
+      // "Catch:" dropdown already sets exactly this, and does it better — the
+      // chips could only address the receiver's BASE path, while the dropdown
+      // also reaches waypoints on their reaction forks. Two controls writing one
+      // field, one of them a strict subset, and on a long route the chips ran to
+      // eight buttons that wrapped across the panel.
       return (
-        <>
-          {rec && rec.path.length >= 2 && (
-            <div className="hd-poprow">
-              <span style={{ fontSize: 11 }}>{tr.via ? "back at" : "caught at"}</span>
-              <button className={`hd-mini${tr.recvAt == null ? " on" : ""}`} onClick={() => setRecvAt(pk.id, st.stage, null)}>auto</button>
-              {rec.path.map((s, wi) => <button key={wi} className={`hd-mini${tr.recvAt === wi ? " on" : ""}`} onClick={() => setRecvAt(pk.id, st.stage, tr.recvAt === wi ? null : wi)}>{wi + 1}</button>)}
-            </div>
-          )}
-          <div className="hd-poprow">
-            <button className={`hd-mini${isSauce ? " on" : ""}`} onClick={doSauce}><Icon name={isSauce ? "check" : "sauce"} size={14} /> Sauce pass</button>
-          </div>
-        </>
+        <div className="hd-poprow">
+          <button className={`hd-mini${isSauce ? " on" : ""}`} onClick={doSauce}><Icon name={isSauce ? "check" : "sauce"} size={14} /> Sauce pass</button>
+        </div>
       );
     };
 
@@ -7012,41 +7006,37 @@ export default function DrillAnimator() {
       );
       const addRow = key => (
         <div key={key} className="hd-poprow">
-          <span style={{ minWidth: 46, fontSize: 11, color: "#8b99a8" }}>＋ Add</span>
+          <span className="hd-steplbl">＋ Add</span>
           {typeSelect("none", addOpts, t => t !== "none" && createType(t), key)}
         </div>
       );
       return (
-        <div style={{ margin: "6px 0", padding: "7px 8px", background: "rgba(120,140,160,0.12)", borderRadius: 8,
-          opacity: startLocked ? 0.5 : 1, pointerEvents: startLocked ? "none" : "auto" }}>
+        <div className={`hd-actions${startLocked ? " locked" : ""}`}>
           <div className="hd-mh" style={{ marginBottom: 5 }}>Actions</div>
           {startLocked && (
-            <div className="hd-poprow"><span style={{ fontSize: 10.5, color: "#c98a2b" }}>
+            <div className="hd-poprow"><span className="hd-stepwarn">
               This puck is passed or shot at a later route point — set that action there.
             </span></div>
           )}
           {rows.length > 0 && addRow("addtop")}
           {rows.map(({ st, opts }, n) => {
             const t = typeOfStep(st);
-            const accent = t === "shoot" ? "#d7263d" : t === "pass" ? "#1f8a4c" : t === "chip" || t === "rim" ? "#e0731d" : "#2f7fd6";
             return (
-              <div key={n} style={{ margin: "5px 0", padding: "5px 7px 5px 8px", borderRadius: 8,
-                background: "rgba(20,26,34,0.6)", border: "1px solid #2c3846", borderLeft: `3px solid ${accent}`,
-                opacity: st.warn ? 0.7 : 1 }}>
+              <div key={n} className={`hd-step ${t}${st.warn ? " warn" : ""}`}>
                 <div className="hd-poprow">
-                  <span style={{ minWidth: 46, fontWeight: 700, color: "#9fb0c0", fontSize: 11.5 }}>Step {n + 1}</span>
+                  <span className="hd-steplbl">Step {n + 1}</span>
                   {typeSelect(t, opts, v => changeType(st, v), n)}
                   {secondary(st)}
-                  <button className="hd-mini danger" style={{ padding: "3px 8px", minHeight: 0 }} title="Remove step" onClick={st.del}>✕</button>
+                  <button className="hd-mini danger hd-stepx" title="Remove step" onClick={st.del}>✕</button>
                 </div>
-                {st.warn && <div className="hd-poprow"><span style={{ fontSize: 10.5, color: "#c98a2b" }}>⚠ {st.warn}</span></div>}
+                {st.warn && <div className="hd-poprow"><span className="hd-stepwarn">⚠ {st.warn}</span></div>}
                 {t === "pass" && passSubRows(p, i, st)}
-                {(t === "chip" || t === "rim") && <div className="hd-poprow"><span style={{ fontSize: 10.5, color: "#8b99a8" }}>drag the on-ice handle to aim &amp; set distance</span></div>}
+                {(t === "chip" || t === "rim") && <div className="hd-poprow"><span className="hd-stephint">drag the on-ice handle to aim &amp; set distance</span></div>}
               </div>
             );
           })}
           {rows.length === 0
-            ? <div className="hd-poprow"><span style={{ minWidth: 46, fontWeight: 700, color: "#8b99a8", fontSize: 12 }}>Step 1</span>{typeSelect("none", addOpts, t => t !== "none" && createType(t), "s1")}</div>
+            ? <div className="hd-poprow"><span className="hd-steplbl">Step 1</span>{typeSelect("none", addOpts, t => t !== "none" && createType(t), "s1")}</div>
             : addRow("addbot")}
         </div>
       );
@@ -7889,7 +7879,7 @@ export default function DrillAnimator() {
               <div className="hd-poprow">{curveButtons(t => addSegment(p.id, t, fork), () => drawRouteMode(p.id, fork))}</div>
             </div>
           ) : (
-            <div className="hd-poprow" style={{ color: "#8b99a8", fontSize: 12 }}>End of {fork ? "reaction" : "route"}</div>
+            <div className="hd-poprow" className="hd-stephint">End of {fork ? "reaction" : "route"}</div>
           )}
           {/* route end: mark that the player stops here → a ‖ stop mark replaces
               the direction arrowhead (skating-diagram convention). Offered on a base
@@ -9989,7 +9979,7 @@ export default function DrillAnimator() {
             <span className="hd-sechint">{drillSteps.length ? `${drillSteps.length} step${drillSteps.length > 1 ? "s" : ""} — play pauses at each` : "scrub, pause, add your own"}</span>
           </div>
           {/* destructive action lives alone at the very bottom, behind a divider */}
-          <div style={{ height: 1, background: "#2c3846", margin: "4px 0" }} />
+          <div className="hd-rule" />
           <button className="hd-item danger"
             onClick={() => {
               setPlaying(false); resetAnim();
@@ -10068,7 +10058,7 @@ export default function DrillAnimator() {
             <Stepper value={lineScale} onChange={setLineScale} step={0.25} min={0.5} max={3} suffix="×" />
           </div>
           <div className="hd-poprow">
-            <span>Mark opacity <b style={{ color: "#c8d2dc" }}>{Math.round(markOpacity * 100)}%</b></span>
+            <span>Mark opacity <b style={{ color: "var(--db-text-soft)" }}>{Math.round(markOpacity * 100)}%</b></span>
             <input type="range" min={0.1} max={1} step={0.05} value={markOpacity} style={{ flex: 1, minWidth: 80 }}
               onChange={e => setMarkOpacity(parseFloat(e.target.value))} />
           </div>
@@ -10092,7 +10082,7 @@ export default function DrillAnimator() {
             <button className="hd-mini" onClick={copyPenDiag}>Copy diagnostics</button>
             <span className="hd-sechint">dumps what the recogniser saw for the last burst of ink</span>
           </div>
-          <div className="hd-mh" style={{ marginTop: 4, color: "#6b7a8c" }}>Routes &amp; playback</div>
+          <div className="hd-mh" style={{ marginTop: 4, color: "var(--db-text-faint)" }}>Routes &amp; playback</div>
           <div className="hd-poprow">
             <button className={`hd-mini${collisions ? " on" : ""}`}
               onClick={() => setCollisions(v => !v)}>{collisions ? "✓ Route avoidance" : "Route avoidance"}</button>
@@ -10121,7 +10111,7 @@ export default function DrillAnimator() {
               <button key={v} className={`hd-mini${playRoutes === v ? " on" : ""}`}
                 onClick={() => setPlayRoutes(v)}>{lab}</button>
             ))}
-            <span style={{ fontSize: 11, color: "#8b99a8", width: "100%" }}>which route lines stay visible while the drill plays</span>
+            <span style={{ fontSize: 11, color: "var(--db-text-muted)", width: "100%" }}>which route lines stay visible while the drill plays</span>
           </div>
           <div className="hd-poprow">
             <span>New player speed</span>
@@ -10132,12 +10122,12 @@ export default function DrillAnimator() {
             <Stepper value={loopPause} onChange={setLoopPause} step={0.5} min={0} suffix="s" />
           </div>
           <div className="hd-mh" style={{ marginTop: 4 }}>Default drill pace</div>
-          <div style={{ fontSize: 12, color: "#8b99a8" }}>
+          <div style={{ fontSize: 12, color: "var(--db-text-muted)" }}>
             {pace} ft/s · run {totalTime.toFixed(1)}s
             <input type="range" min={6} max={30} step={1} value={pace} style={{ width: "100%" }}
               onChange={e => setPace(parseFloat(e.target.value))} />
           </div>
-          <div className="hd-mh" style={{ marginTop: 4, color: "#6b7a8c" }}>App</div>
+          <div className="hd-mh" style={{ marginTop: 4, color: "var(--db-text-faint)" }}>App</div>
           {keyEdit == null ? (
             <div className="hd-poprow">
               <button className="hd-mini" onClick={() => setKeyEdit(localStorage.getItem(ANTHROPIC_KEY_STORE) || "")}>Claude API key…</button>
@@ -10154,7 +10144,7 @@ export default function DrillAnimator() {
                 setKeyEdit(null);
               }}>Save</button>
               <button className="hd-mini" onClick={() => setKeyEdit(null)}><Icon name="close" size={13} /></button>
-              <span style={{ fontSize: 11, color: "#8b99a8", width: "100%" }}>
+              <span style={{ fontSize: 11, color: "var(--db-text-muted)", width: "100%" }}>
                 Stored only on this device — use a spend-capped key. Empty + Save clears it.</span>
             </div>
           )}
@@ -10166,8 +10156,8 @@ export default function DrillAnimator() {
             const pct = v => Math.round(v * 100);
             const goalPct = Math.max(0, 1 - shotOdds.post - shotOdds.wide - shotOdds.over);
             const odd = (label, key, hint) => (
-              <div style={{ fontSize: 11, color: "#8b99a8", marginTop: 2 }}>
-                {label} <b style={{ color: "#c8d2dc" }}>{pct(shotOdds[key])}%</b>{hint ? ` · ${hint}` : ""}
+              <div style={{ fontSize: 11, color: "var(--db-text-muted)", marginTop: 2 }}>
+                {label} <b style={{ color: "var(--db-text-soft)" }}>{pct(shotOdds[key])}%</b>{hint ? ` · ${hint}` : ""}
                 <input type="range" min={0} max={1} step={0.05} value={shotOdds[key]} style={{ width: "100%" }}
                   onChange={e => setShotOdds(o => ({ ...o, [key]: parseFloat(e.target.value) }))} />
               </div>
@@ -10180,7 +10170,7 @@ export default function DrillAnimator() {
                 {odd("Off the post", "post")}
                 {odd("Wide", "wide")}
                 {odd("Over the net", "over")}
-                <div style={{ fontSize: 11, color: "#8b99a8", marginTop: 2 }}>
+                <div style={{ fontSize: 11, color: "var(--db-text-muted)", marginTop: 2 }}>
                   Goal <b style={{ color: goalPct > 0 ? "#3ecf7a" : "#e05a5a" }}>{pct(goalPct)}%</b>
                   {goalPct > 0 ? " — the remainder" : " — misses exceed 100%"}
                 </div>
@@ -10218,7 +10208,7 @@ export default function DrillAnimator() {
 
       {openMenu === "notes" && (
         <div className="hd-sheet">
-          <div className="hd-mh">Coaching notes <span style={{ fontWeight: 400, color: "#8b99a8", textTransform: "none", letterSpacing: 0 }}>· markdown</span></div>
+          <div className="hd-mh">Coaching notes <span style={{ fontWeight: 400, color: "var(--db-text-muted)", textTransform: "none", letterSpacing: 0 }}>· markdown</span></div>
           <textarea className="hd-ta" value={drillNotes} placeholder={"# Setup\n\n1. F1 carries out of the corner\n2. **Chip** off the glass past the D\n\n- Coach cue: head up through the neutral zone"}
             onChange={e => setDrillNotes(e.target.value)} spellCheck={false} />
           {drillNotes.trim() && (
@@ -10242,7 +10232,7 @@ export default function DrillAnimator() {
         const rows = deriveInventory(pieces, drillItems);
         return (
           <div className="hd-sheet">
-            <div className="hd-mh">Inventory <span style={{ fontWeight: 400, color: "#8b99a8", textTransform: "none", letterSpacing: 0 }}>· what you need</span></div>
+            <div className="hd-mh">Inventory <span style={{ fontWeight: 400, color: "var(--db-text-muted)", textTransform: "none", letterSpacing: 0 }}>· what you need</span></div>
             {/* capped width so label · count · action read as columns, not opposite screen edges */}
             <div className="hd-steplist" style={{ maxWidth: 560 }}>
               {rows.length === 0 ? (
@@ -10253,7 +10243,7 @@ export default function DrillAnimator() {
                     ? <input className="hd-input" style={{ flex: 1, minWidth: 0 }} value={r.label}
                         placeholder="Gear…" onChange={e => setCustomItem(r, { label: e.target.value })} />
                     : <span style={{ flex: 1, minWidth: 0 }}>{r.label}
-                        {r.count !== r.autoCount && <span style={{ color: "#8b99a8", fontSize: 11 }}> · {r.autoCount} on ice</span>}</span>}
+                        {r.count !== r.autoCount && <span style={{ color: "var(--db-text-muted)", fontSize: 11 }}> · {r.autoCount} on ice</span>}</span>}
                   <Stepper value={r.count} min={0} step={1} suffix=""
                     onChange={n => (r.custom ? setCustomItem(r, { count: n }) : setCanonItem(r, { count: n }))} />
                   {r.custom
@@ -10305,7 +10295,7 @@ export default function DrillAnimator() {
             </div>
           )}
           <div className="hd-row" style={{ alignItems: "center" }}>
-            <span style={{ fontSize: 12, color: "#8b99a8" }}>Export</span>
+            <span style={{ fontSize: 12, color: "var(--db-text-muted)" }}>Export</span>
             <button className="hd-btn" onClick={exportTxt}>.txt</button>
             <button className="hd-btn" onClick={exportMd}>.md</button>
             <button className="hd-btn" onClick={exportImage}>Image</button>

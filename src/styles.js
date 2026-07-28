@@ -645,6 +645,31 @@ export const STYLES = `
           background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' stroke='%236b7a8a' stroke-width='1.4' fill='none' stroke-linecap='round'/></svg>");
           background-repeat:no-repeat; background-position:right 8px center; padding-right:22px; }
         .hd-select.on { border-color:var(--db-accent); }
+        /* ---- the puck-actions editor (a waypoint's ordered step list) ----
+           This was ~14 inline colour literals — a dark card, dark dropdowns and
+           grey label text baked in — so on a light theme it rendered as a black
+           box full of black dropdowns. Tokens now, which also brings it under
+           the no-raw-hex guard that only reads THIS file. */
+        .hd-actions { margin:6px 0; padding:7px 8px; border-radius:8px;
+          background:var(--db-surface-sunken); border:1px solid var(--db-border-hair); }
+        .hd-actions.locked { opacity:.5; pointer-events:none; }
+        /* one step. The left stripe says what the puck DOES at a glance; the
+           step also names its type in the dropdown beside it, so the stripe is
+           a scanning aid rather than the only signal. */
+        .hd-step { margin:5px 0; padding:5px 7px 5px 8px; border-radius:8px;
+          background:var(--db-surface-panel); border:1px solid var(--db-border);
+          border-left:3px solid var(--db-act-gain); }
+        .hd-step.pass  { border-left-color:var(--db-act-pass); }
+        .hd-step.shoot { border-left-color:var(--db-act-shot); }
+        .hd-step.chip, .hd-step.rim { border-left-color:var(--db-act-loose); }
+        .hd-step.warn { opacity:.7; }
+        .hd-steplbl { flex:none; min-width:46px; font-size:11.5px; font-weight:700; color:var(--db-text-muted); }
+        /* a step's own ✕ sits tight to it rather than wearing full button padding */
+        .hd-step .hd-mini.hd-stepx { padding:3px 8px; min-height:0; }
+        .hd-stepwarn { font-size:10.5px; color:var(--db-warn); }
+        .hd-stephint { font-size:10.5px; color:var(--db-text-muted); }
+        /* a divider inside a panel — e.g. above Menu's destructive Clear all */
+        .hd-rule { height:1px; margin:4px 0; background:var(--db-border); }
         .hd-stepper { display:inline-flex; align-items:center; gap:2px;
           background:var(--db-surface-sunken); border:1px solid var(--db-border); border-radius:7px; overflow:hidden; }
         .hd-stepper button { width:32px; min-height:32px; border:none; background:var(--db-surface-raised); color:var(--db-text);
