@@ -201,12 +201,6 @@ export const STYLES = `
            block at .hd-act, so its bottom:100% then measures the bar. */
         .hd-root:not(.dense) .hd-act .hd-penwrap { position:static; }
         .hd-root:not(.dense) .hd-act .hd-penpop.grid { left:8px; right:8px; transform:none; }
-        /* …and at ANY width, a popover hanging off a chip at the start of the bar
-           has no room to centre on it — it is several times the chip's width, so
-           it ran ~108px off the left of a 1440px screen. Pin it to the edge it
-           is closest to instead. (Only matters at dense; below the breakpoint the
-           rule above already spans the bar.) */
-        .hd-penpop.grid.edge { left:0; transform:none; }
         .hd-penpop .hd-penrule { width:100%; height:1px; background:var(--db-border-strong); margin:2px 0; }
         .hd-penpoptip { font-size:10px; font-weight:700; color:var(--db-text-muted); }
         /* Vertical range: the modern property first, then the WebKit one older
@@ -551,7 +545,14 @@ export const STYLES = `
         .hd-x { background:none; border:none; color:var(--db-text-muted); cursor:pointer;
           font-size:16px; padding:2px 5px; display:inline-flex; align-items:center; justify-content:center; }
         .hd-x:first-of-type { margin-left:auto; }
-        .hd-x.on { color:var(--db-focus); }   /* an active toggle (pinned / docked) */
+        /* An active toggle (pinned / docked). Colour ALONE was too weak to read
+           on the light theme — its "on" teal and its resting grey are both
+           mid-dark, so a pinned panel looked unpinned. The icons now differ in
+           silhouette too (pinOff/pinOn, sidebar/sidebarOn); this adds the
+           pressed-chip fill, so the state survives a glance from any of three
+           cues rather than one. */
+        .hd-x.on { color:var(--db-focus); background:var(--db-info-bg);
+          border-radius:6px; box-shadow:inset 0 0 0 1px var(--db-info-border); }
         .hd-grip { display:inline-flex; align-items:center; }
         input[type=range] { accent-color:var(--db-accent); height:30px; }
         .hd-pop.pinned { z-index:43; }   /* just under the play dock, never behind it */

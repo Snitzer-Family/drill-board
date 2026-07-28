@@ -64,7 +64,18 @@ const ICONS = {
   grip: <><circle cx="9" cy="7" r="1.4" {...F} /><circle cx="15" cy="7" r="1.4" {...F} /><circle cx="9" cy="12" r="1.4" {...F} /><circle cx="15" cy="12" r="1.4" {...F} /><circle cx="9" cy="17" r="1.4" {...F} /><circle cx="15" cy="17" r="1.4" {...F} /></>,
   // a pushpin (keep the editor floating) + a panel with a right column (dock to sidebar)
   pin: <><path d="M9.5 3.5h5l-.8 5 2.8 2.8v1.7H7.5v-1.7l2.8-2.8-.8-5z" /><path d="M12 13v7.5" /></>,
+  /* Toggle pairs. A state shown ONLY by colour is a weak signal — on the light
+     theme the "on" teal and the resting grey are both mid-dark, so a pinned
+     panel looked the same as an unpinned one. These differ in silhouette AND
+     fill, so the state survives at 15px whatever the theme.
+     Not pinned: the pin lies over at an angle, outlined — loose, not driven in.
+     Pinned: upright and solid. */
+  pinOff: <g transform="rotate(-42 12 12)"><path d="M9.5 3.5h5l-.8 5 2.8 2.8v1.7H7.5v-1.7l2.8-2.8-.8-5z" /><path d="M12 13v7.5" /></g>,
+  pinOn: <><path d="M9.5 3.5h5l-.8 5 2.8 2.8v1.7H7.5v-1.7l2.8-2.8-.8-5z" {...F} /><path d="M12 13v7.5" /></>,
   sidebar: <><rect x="3.5" y="4.5" width="17" height="15" rx="2" /><path d="M14.5 4.5v15" /></>,
+  /* …same for the dock, which sits right beside the pin with the same problem:
+     the sidebar column fills in once the panel is actually docked into it. */
+  sidebarOn: <><rect x="3.5" y="4.5" width="17" height="15" rx="2" /><path d="M14.5 4.5v15" /><rect x="14.5" y="4.5" width="6" height="15" {...F} /></>,
   share: <><circle cx="6" cy="12" r="2.6" /><circle cx="17.5" cy="6" r="2.6" /><circle cx="17.5" cy="18" r="2.6" /><path d="M8.3 10.8l7-3.6M8.3 13.2l7 3.6" /></>,
   download: <><path d="M12 3.5v11" /><path d="M7.5 10l4.5 4.5L16.5 10" /><path d="M4.5 19.5h15" /></>,
   upload: <><path d="M12 20.5v-11" /><path d="M7.5 14l4.5-4.5L16.5 14" /><path d="M4.5 4.5h15" /></>,

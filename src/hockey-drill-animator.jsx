@@ -6739,7 +6739,8 @@ export default function DrillAnimator() {
           <div className="hd-pophead">
             <span className="hd-poptitle">Edit</span>
             <button className="hd-x on" title="Un-dock" onPointerDown={e => e.stopPropagation()}
-              onClick={toggleDock}><Icon name="sidebar" size={15} /></button>
+              aria-pressed={docked}
+              onClick={toggleDock}><Icon name={docked ? "sidebarOn" : "sidebar"} size={15} /></button>
             <button className="hd-x" title="Close" onPointerDown={e => e.stopPropagation()}
               onClick={() => { setPopup(null); setPinMode(null); }}><Icon name="close" size={15} /></button>
           </div>
@@ -8011,11 +8012,13 @@ export default function DrillAnimator() {
               margin-left:auto, right-aligning the whole control cluster */}
           <button className={`hd-x${pinMode === "float" ? " on" : ""}`} onPointerDown={e => e.stopPropagation()}
             title={pinMode === "float" ? "Un-pin" : "Pin (floating)"}
-            onClick={togglePin}><Icon name="pin" size={15} /></button>
+            aria-pressed={pinMode === "float"}
+            onClick={togglePin}><Icon name={pinMode === "float" ? "pinOn" : "pinOff"} size={15} /></button>
           {isWide && (
             <button className={`hd-x${docked ? " on" : ""}`} onPointerDown={e => e.stopPropagation()}
               title={docked ? "Un-dock" : "Dock to sidebar"}
-              onClick={toggleDock}><Icon name="sidebar" size={15} /></button>
+              aria-pressed={docked}
+              onClick={toggleDock}><Icon name={docked ? "sidebarOn" : "sidebar"} size={15} /></button>
           )}
           {!docked && !collapsed && (
             <button className="hd-x" onPointerDown={e => e.stopPropagation()} title="Minimize"
@@ -8739,22 +8742,15 @@ export default function DrillAnimator() {
       <span>{lbl}</span>
     </button>
   );
-  // Everything, in one popover. Used when a selection takes the bar over: you
-  // shouldn't have to deselect to add the next piece.
-  const ADD_ALL = { key: "all", label: "Add", tip: "Add a piece", icon: "plus",
-    kinds: ADD_GROUPS.flatMap(g => g.kinds) };
-  // the same kinds as a grid, for a group that had to collapse into a popover.
-  // `edge` pins the panel to the bar's left edge instead of centring it on its
-  // button: a popover is far wider than the chip it hangs off, so one sitting at
-  // the start of the bar hung ~108px off the left of a 1440px screen.
-  const addGroupPop = (g, edge) => (
+  // the same kinds as a grid, for a group that had to collapse into a popover
+  const addGroupPop = g => (
     <div key={g.key} className="hd-penwrap">
       <button className={`hd-pentool${penPop === g.key ? " on" : ""}`} title={g.tip}
         onClick={() => setPenPop(v => (v === g.key ? null : g.key))}>
         <Icon name={g.icon} size={17} /><span>{g.label}</span>
       </button>
       {penPop === g.key && (
-        <div className={`hd-penpop grid${edge ? " edge" : ""}`}>
+        <div className="hd-penpop grid">
           <div className="hd-toolgrid compact">
             {g.kinds.map(([k, lbl, glyph]) => (
               <button key={k} className={`hd-tool${tool === k ? " on" : ""}`} title={lbl}
@@ -9754,10 +9750,13 @@ export default function DrillAnimator() {
           and inlining them would push the common pieces off the line. */}
       {actOn && mode === "edit" && (
         <div className="hd-act edit">
-          {/* A selection takes the bar over — what you want next is almost always
-              something to DO with it, not another piece. Adding stays one tap
-              away behind the collapsed palette, so you needn't deselect first. */}
-          {selected || multiSel?.size ? addGroupPop(ADD_ALL, true) : (
+          {/* A selection takes the bar over completely — what you want next is
+              something to DO with the thing you just picked, not another piece.
+              There is deliberately no collapsed [+ Add] here: it assumed you'd
+              add from a selection, when the way back to the palette is to tap
+              the ice, which deselects. That's one tap either way, and it's the
+              tap you were going to make anyway. */}
+          {!selected && !multiSel?.size && (
             <>
               {ADD_GROUPS[0].kinds.map(addChip)}
               <div className="hd-pensep" />
