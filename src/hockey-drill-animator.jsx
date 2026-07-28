@@ -3578,8 +3578,17 @@ export default function DrillAnimator() {
       if (leg.type !== "fly" || (!leg.sauce && !leg.rise)) continue;
       const span = (leg.t1 - leg.t0) || 1;
       if (leg.rise) {
-        if (e >= leg.t0 && e <= leg.t1) return Math.sin(((e - leg.t0) / span) * Math.PI / 2);       // climb to a peak at the net
-        if (e > leg.t1 && e < leg.t1 + 0.16) return Math.cos(((e - leg.t1) / 0.16) * Math.PI / 2);  // drop into the net
+        // Climb, then drop back ONTO the contact point. Height is faked by offsetting
+        // the puck away from its ground shadow, and a top-down rink has no spare axis
+        // for it — so a puck still lifted when it reaches the net is drawn feet to the
+        // SIDE of where it actually hit. That read as posts struck wide of the mesh and
+        // goals hanging in mid-air beside the net. Peaked late (u^1.5) so it still
+        // reads as rising, but it is back on the ice by the time it arrives.
+        // ...and down BEFORE it gets there, not just at the instant of impact: the
+        // last stretch of the approach has to be at ice level or the puck is still
+        // drawn a foot or two to the side of the post it is about to hit.
+        const uu = ((e - leg.t0) / span) / 0.82;
+        if (e >= leg.t0 && e <= leg.t1) return uu >= 1 ? 0 : Math.sin(Math.PI * Math.pow(uu, 1.2));
       } else {
         if (e >= leg.t0 && e <= leg.t1) return Math.sin(Math.PI * ((e - leg.t0) / span));           // sauce arc up and down
         if (e > leg.t1 && e < leg.t1 + 0.22) return Math.sin(Math.PI * ((e - leg.t1) / 0.22)) * 0.22; // landing bounce
