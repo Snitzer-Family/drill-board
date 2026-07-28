@@ -164,20 +164,71 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
 
   // how far the body is turned out of its route heading by an open-up, at
   // route-local elapsed `eLoc` (0 outside a window)
-  function openAt(p, eLoc) {
-    if (planPhase) return 0;
+  // the turn AND how far into it we are — a standing player blends its idle gaze
+  // against this, so the weight has to come out too, not just the product
+  function openPart(p, eLoc) {
+    if (planPhase) return { deg: 0, k: 0 };
     const list = currentOpens[p.id];
-    if (!list) return 0;
-    let best = 0;
+    if (!list) return { deg: 0, k: 0 };
+    let best = { deg: 0, k: 0 };
     for (const w of list) {
       if (eLoc <= w.t0 || eLoc >= w.t3) continue;
       const k = eLoc < w.t1 ? smooth01((eLoc - w.t0) / (w.t1 - w.t0))
         : eLoc <= w.t2 ? 1
         : 1 - smooth01((eLoc - w.t2) / (w.t3 - w.t2));
-      const v = w.deg * k;
-      if (Math.abs(v) > Math.abs(best)) best = v;
+      if (Math.abs(w.deg * k) > Math.abs(best.deg * best.k)) best = { deg: w.deg, k };
     }
     return best;
+  }
+  const openAt = (p, eLoc) => { const o = openPart(p, eLoc); return o.deg * o.k; };
+
+  /* ---- idle gaze ----
+     A player standing still watches the play. Rather than snapping between whoever
+     is momentarily "nearest" — which jumps every time the ranking changes — each
+     moving thing pulls on the gaze by how fast and how close it is, and the player
+     looks down the sum. That drifts smoothly with the action and lands naturally on
+     whichever end of the ice is busiest. Display only, and a pure function of t.  */
+  const GAZE_IN = 0.6;       // ease off the authored facing over the first beat
+  const GAZE_MIN_SPD = 2;    // ft/s — slower than this is not "activity"
+  const GAZE_NEAR = 5;       // ft — ignore what is already on their own stick
+  const GAZE_PUCK = 2.4;     // the puck pulls harder than a body: you watch the puck
+  let gazeE = null, gazeSnap = null, gazeBusy = false;
+  // one pass per frame, shared by every standing player
+  function activityAt(e) {
+    if (gazeE === e && gazeSnap) return gazeSnap;
+    gazeBusy = true;                       // nested position lookups must not re-enter
+    try {
+      const out = [];
+      for (const q of pieces) {
+        if (q.kind !== "player" && q.kind !== "puck") continue;
+        if (q.kind === "player" && q.defense) continue;
+        const a = displayPosAt(q, Math.max(0, e - 0.12)), b2 = displayPosAt(q, e + 0.12);
+        out.push({ id: q.id, kind: q.kind, x: b2.x, y: b2.y,
+          spd: Math.hypot(b2.x - a.x, b2.y - a.y) / 0.24 });
+      }
+      gazeSnap = out; gazeE = e;
+    } finally { gazeBusy = false; }
+    return gazeSnap;
+  }
+  // Where a standing player should be looking, and how strongly. `conf` matters as
+  // much as the bearing: a hard "is it moving?" cutoff makes the head snap round the
+  // instant a skater crosses the threshold, so activity fades IN with speed and the
+  // gaze eases back to the authored pose as the rink goes quiet.
+  const GAZE_REF = 0.004;    // pull at which the player is fully watching
+  function gazeAt(p, e) {
+    if (gazeBusy || planPhase || !detail || e <= 0) return null;
+    let vx = 0, vy = 0, tot = 0;
+    for (const q of activityAt(e)) {
+      if (q.id === p.id) continue;
+      const dx = q.x - p.x, dy = q.y - p.y, d2 = dx * dx + dy * dy;
+      if (d2 < GAZE_NEAR * GAZE_NEAR) continue;
+      const moving = smooth01((q.spd - GAZE_MIN_SPD) / GAZE_MIN_SPD);
+      if (moving <= 0) continue;
+      const d = Math.sqrt(d2), w = (q.kind === "puck" ? GAZE_PUCK : 1) * moving * q.spd / d2;
+      vx += (dx / d) * w; vy += (dy / d) * w; tot += w;
+    }
+    if (!tot) return null;
+    return { deg: (Math.atan2(vy, vx) * 180) / Math.PI, conf: smooth01(tot / GAZE_REF) };
   }
 
   // the flip (deg) to add to leg i's tangent at route-local elapsed `eLoc` — the
@@ -1180,9 +1231,20 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
   // Also returns v (normalized speed) and dist (feet travelled) for stride FX.
   function routePosAt(p, e, warp) {
     if (!p.path.length) {
-      // standing pieces still turn: openAt carries the square-up into a catch
-      const base = p.facing || 0, o = openAt(p, e - startWaitOf(p));
-      return { x: p.x, y: p.y, a: base + o, aStep: base, flip: o, v: 0, dist: 0 };
+      // A standing piece is not furniture: it watches the play, and squares up to a
+      // pass it is taking or making. aStep stays the AUTHORED facing, so every
+      // planned launch/catch point is unmoved — the plan adds its own turn explicitly.
+      const base = p.facing || 0;
+      const o = openPart(p, e - startWaitOf(p));
+      let show = base;
+      if (p.kind === "player") {
+        const g = gazeAt(p, e);
+        // ease off the authored pose rather than starting the drill mid-turn
+        if (g) show = base + wrapDeg(g.deg - base) * g.conf * smooth01(e / GAZE_IN);
+        // ...and a catch or release takes precedence over idle watching as it peaks
+        if (o.k > 0) show += wrapDeg(base + o.deg - show) * o.k;
+      } else show = base + o.deg * o.k;
+      return { x: p.x, y: p.y, a: show, aStep: base, flip: wrapDeg(show - base), v: 0, dist: 0 };
     }
     e -= startWaitOf(p);   // hold at the start until the trigger fires (e<=0 → start pose below)
     // `a` is the DISPLAY heading — smoothed through a fwd↔bwd pivot; `aStep` keeps
