@@ -1,7 +1,7 @@
 // Timing & pass-planning engine: leg times, receiver warps, transfer chains,
 // shots, releases, and warp-aware positions. Pure functions over the pieces
 // array; the React component passes its refs in each render.
-import { SPEED, ICON_SCALE, SAVE_PROB, MISS_POST, MISS_WIDE, MISS_OVER, SHOT_AIR_PROB, BOUNCE_REST } from "./constants.js";
+import { SPEED, ICON_SCALE, PLAYER_SCALE, SAVE_PROB, MISS_POST, MISS_WIDE, MISS_OVER, SHOT_AIR_PROB, BOUNCE_REST } from "./constants.js";
 import { clampX, clampY, segEnd, segTangentAngle } from "./geometry.js";
 import * as boards from "./boards.js";
 import { netShapes, solidShapes, bumperShapes, reflectPath, segCrossesNet, bounceOffNets } from "./net-collide.js";
@@ -62,6 +62,17 @@ const PIVOT_SEC = 0.4;
 // and skates on. Times are relative to the catch.
 const OPEN_IN = 0.7, OPEN_SET = 0.15, OPEN_HELD = 0.2, OPEN_OUT = 0.45;
 const OPEN_BACK_FT = 15;   // how far back down the puck's path counts as "where it came from"
+const CRADLE_IN = 0.3;     // seconds for the stickhandle to wind up after a catch
+// icons.jsx rotates the whole stick group about (1, 0) in icon units, so a point on
+// the blade travels with it. Swinging the puck's lever by the SAME angle is what
+// keeps the puck welded to the blade instead of orbiting it on its own cradle.
+const STICK_PIVOT = 1;
+const swungLever = (fwd, lat, deg) => {
+  if (!deg) return { fwd, lat };
+  const r = (deg * Math.PI) / 180, c = Math.cos(r), sn = Math.sin(r);
+  const dx = fwd - STICK_PIVOT, dy = lat;
+  return { fwd: STICK_PIVOT + dx * c - dy * sn, lat: dx * sn + dy * c };
+};
 
 // A shot or pass is released a stride's width off to the strong side and only just
 // in front of the near foot — NOT off the toe of a stick pointed down the barrel.
@@ -196,23 +207,13 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
   }
 
   // the carried puck's DISPLAY position: rides the blade, plus a dribble cradle
-  // so it stickhandles. Display-only — planning geometry keeps using bladeAt.
+  // Display-only — planning geometry keeps using bladeAt. The stickhandle lives in
+  // the LEVER now (stickSpot swings it with the stick), so the puck is welded to the
+  // blade rather than orbiting it on a cradle of its own. Uses the display heading:
+  // the puck has to stay on the stick through a pivot or an open-up too.
   function carriedPuckAt(car, e, warp) {
     const te = Math.min(e, routeTimeW(car, warp));
-    // display blade: the puck has to stay ON the stick as the body pivots, or it
-    // detaches for the whole turn (displayPos re-matches carrier by proximity)
-    const spot = stickSpot(car.id, e);
-    const base = bladeAt(car, te, warp, true, spot);
-    const rad = ((routePosAt(car, te, warp).a || 0) * Math.PI) / 180;
-    const side = car.hand === "L" ? -1 : 1;
-    const ph = e * DRIB_W;
-    // no cradle wobble when detailed animations are off — the puck just rides the blade,
-    // and it settles out entirely as a shot or pass winds up
-    const cr = detail ? 1 - (spot.k || 0) : 0;
-    const fore = Math.sin(ph) * DRIB_FORE * cr;
-    const lat = Math.sin(ph / 2) * DRIB_LAT * side * cr;
-    return { x: clampX(base.x + Math.cos(rad) * fore - Math.sin(rad) * lat),
-             y: clampY(base.y + Math.sin(rad) * fore + Math.cos(rad) * lat), a: 0 };
+    return bladeAt(car, te, warp, true, stickSpot(car.id, e));
   }
   // `disp` picks the display heading (pivot-smoothed); everything that PLANS puck
   // geometry leaves it off and rides the stepped heading, so a pivot can never
@@ -223,7 +224,10 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
     const cp = routePosAt(pl, e, warp);
     const rad = (((disp ? cp.a : cp.aStep) || 0) * Math.PI) / 180;
     const side = pl.hand === "L" ? -1 : 1;
-    const lx = (off ? off.fwd : 4.9) * ICON_SCALE, ly = (off ? off.lat : 2.55) * ICON_SCALE * side;
+    // PLAYER_SCALE: the levers are in the glyph's own units, and the glyph draws
+    // under full icon scale — leave it out and the puck floats past the blade
+    const k = ICON_SCALE * PLAYER_SCALE;
+    const lx = (off ? off.fwd : 4.9) * k, ly = (off ? off.lat : 2.55) * k * side;
     return {
       x: clampX(cp.x + Math.cos(rad) * lx - Math.sin(rad) * ly),
       y: clampY(cp.y + Math.sin(rad) * lx + Math.cos(rad) * ly),
@@ -240,9 +244,9 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
   // position and the renderer's blade tip, so the two can't drift apart.
   function stickSpot(id, e) {
     const base = { fwd: 5.6, lat: 2.45 };        // TIP_FWD / TIP_LAT — the drawn blade tip
-    if (!detail) return base;
+    if (!detail) return { ...base, k: 0, cradle: 0 };
     const { plans } = getPlan();
-    let best = Infinity, k = 0;
+    let best = Infinity, k = 0, cradle = 1;
     for (const pid in plans) {
       for (const leg of plans[pid].legs) {
         if (leg.type !== "fly" || leg.by !== id) continue;
@@ -255,12 +259,23 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
         k = tau <= 0 ? smooth01(1 + tau / WU)    // 0 at the top of the wind-up → 1 at release
           : 1 - smooth01(tau / TH);              // ...then recover to the carry blade
       }
+      // just gathered it: the stickhandle winds UP from rest. Snapping straight to
+      // full swing leaves the cradle's whole offset behind as a jump at the catch.
+      for (const leg of plans[pid].legs) {
+        if (leg.type !== "ride" || !leg.catch || leg.id !== id) continue;
+        const tau = e - leg.t0;
+        if (tau >= 0 && tau < CRADLE_IN) cradle = Math.min(cradle, smooth01(tau / CRADLE_IN));
+      }
     }
-    if (!k) return { ...base, k: 0 };
+    // the idle stickhandle: the same waggle stickSwing gives the stick, so the puck
+    // rides the blade through it rather than swinging on a cradle of its own
+    const waggle = Math.sin((e * DRIB_W) / 2) * DRIB_SWING * cradle * (1 - k);
+    if (!k) return { ...swungLever(base.fwd, base.lat, waggle), k: 0 };
     // `k` also fades the stickhandling cradle out: you don't dangle the puck while
     // you are shooting it, and letting the cradle survive to the release frame just
     // leaves its offset behind as a jump the moment the puck goes
-    return { fwd: base.fwd + (RELEASE_FWD - base.fwd) * k, lat: base.lat + (RELEASE_LAT - base.lat) * k, k };
+    return { ...swungLever(base.fwd + (RELEASE_FWD - base.fwd) * k,
+      base.lat + (RELEASE_LAT - base.lat) * k, waggle), k };
   }
 
   function getPlan() {
@@ -1247,6 +1262,22 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
       brakeAt: dist, brake: brakeRelax(e) };
   }
 
+  // A puck in the closing stretch of a delivery that ends in a catch: who takes it,
+  // and how far through that stretch it is. timing can only steer onto the ROUTE-pose
+  // blade; the renderer owns the body lean, hockey-stop plant and puck shield, so it
+  // finishes the job onto the blade actually on screen.
+  function catchApproach(pkId, e) {
+    const { plans } = getPlan();
+    const pl = plans[pkId];
+    if (!pl) return null;
+    let li = 0;
+    for (let k = 0; k < pl.legs.length; k++) { if (e >= pl.legs[k].t0) li = k; else break; }
+    const leg = pl.legs[li], nx = pl.legs[li + 1];
+    if (!leg || leg.type !== "fly" || e >= leg.t1 || !nx || nx.type !== "ride" || !nx.catch) return null;
+    const w = smooth01(((e - leg.t0) / Math.max(0.001, leg.t1 - leg.t0) - 0.65) / 0.35);
+    return w > 0 ? { id: nx.id, w } : null;
+  }
+
   function displayPosAt(p, e) {
     const { warp, plans, rel } = getPlan();
     if (p.kind === "puck") {
@@ -1256,29 +1287,43 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
         if (p.path.length && e >= relT) return routePosAt(p, e - relT, warp);
         let leg = pl.legs[0], li = 0;
         for (let k = 0; k < pl.legs.length; k++) { if (e >= pl.legs[k].t0) { leg = pl.legs[k]; li = k; } else break; }
-        // A catch was planned against the receiver's STEPPED heading, but a body
-        // mid-pivot or opened up has carried the stick away from that spot — so the
-        // last stretch of the delivery steers onto where the blade actually is.
-        // Only engages when the two headings differ, so ordinary drills are untouched.
+        // Both ENDS of a flight are planned off the stepped heading, while the puck
+        // is drawn riding a live, leaning, pivoting body — so the planned launch and
+        // landing points are both a foot or two from where the stick really is. The
+        // rendered path is nudged onto the real thing at each end (display only: the
+        // plan's own endpoints, and every time derived from them, are untouched).
         const catchPull = tEnd => {
           const nx = pl.legs[li + 1];
           if (planPhase || !nx || nx.type !== "ride" || !nx.catch) return null;
+          // a route-less player is a perfectly good receiver — they just stand and
+          // take it, and bladeAt reads their blade off `facing` all the same
           const car = pieces.find(q => q.id === nx.id && q.kind === "player");
-          if (!car || !car.path.length) return null;
-          const cp = routePosAt(car, tEnd, warp);
-          if (Math.abs(wrapDeg((cp.a || 0) - (cp.aStep || 0))) < 0.5) return null;
-          // aim at the lever the caught puck will actually sit on, not the blade
-          // mid-point the flight was planned against
+          if (!car) return null;
+          // Aim at the lever the caught puck will actually sit on — the blade TIP on
+          // the live display pose — rather than the blade mid-point on the stepped
+          // heading the flight was planned against. Those differ even when nobody is
+          // turning, which is the pop every plain catch used to end on.
           return bladeAt(car, tEnd, warp, true, stickSpot(car.id, tEnd));
         };
         const pull = (x, y, ex, ey, w) => {
           const b = w > 0 ? catchPull(pl.legs[li + 1].t0) : null;
           return b ? { x: x + (b.x - ex) * w, y: y + (b.y - ey) * w, a: 0 } : { x, y, a: 0 };
         };
+        // ...and the launch end: leave from the stick that actually fired it
+        const releasePush = () => {
+          const prev = pl.legs[li - 1];
+          if (planPhase || !leg.by || !prev || prev.type !== "ride" || prev.id !== leg.by) return null;
+          const sh = pieces.find(q => q.id === leg.by && q.kind === "player");
+          if (!sh) return null;
+          return bladeAt(sh, leg.t0, warp, true, { fwd: RELEASE_FWD, lat: RELEASE_LAT });
+        };
         if (leg.type === "fly" && e < leg.t1) {
           const k = Math.max(0, Math.min(1, (e - leg.t0) / Math.max(0.001, leg.t1 - leg.t0)));
-          return pull(leg.x0 + (leg.x1 - leg.x0) * k, leg.y0 + (leg.y1 - leg.y0) * k,
-            leg.x1, leg.y1, smooth01((k - 0.65) / 0.35));
+          let x = leg.x0 + (leg.x1 - leg.x0) * k, y = leg.y0 + (leg.y1 - leg.y0) * k;
+          const wOut = 1 - smooth01(k / 0.35);
+          if (wOut > 0) { const r = releasePush();
+            if (r) { x += (r.x - leg.x0) * wOut; y += (r.y - leg.y0) * wOut; } }
+          return pull(x, y, leg.x1, leg.y1, smooth01((k - 0.65) / 0.35));
         }
         if (leg.type === "skid" && e < leg.t1) {
           const u = Math.max(0, Math.min(1, (e - leg.t0) / Math.max(0.001, leg.t1 - leg.t0)));
@@ -1373,5 +1418,5 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
   // warped arrival time at a player's waypoint index (for movement captions)
   function waypointTime(p, i) { const { warp } = getPlan(); return routeTimeW(p, warp, i); }
 
-  return { getPlan, pieceTime, displayPosAt, stickSwing, stickSpot, waypointTime, puckInGoal };
+  return { getPlan, pieceTime, displayPosAt, stickSwing, stickSpot, catchApproach, waypointTime, puckInGoal };
 }

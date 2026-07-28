@@ -1,6 +1,6 @@
 // Piece icons (screen-true frames), stepper control, diagnostics overlay.
 import { useState, useRef, useEffect } from "react";
-import { APP_VERSION, BUILD_STAMP, ICON_SCALE, DSL_VERSION, symOf } from "./constants.js";
+import { APP_VERSION, BUILD_STAMP, ICON_SCALE, DSL_VERSION, symOf, PLAYER_SCALE } from "./constants.js";
 
 /* ---------------- unified action icons ----------------
    One monochrome, stroke-based set drawn on a 24×24 grid in currentColor, so
@@ -367,7 +367,7 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
   }
   // nets and tires come in sizes — scale the drawn body + its grab area;
   // players draw a touch under full scale so they crowd the ice less
-  const sz = (p.kind === "net" || p.kind === "tire") && p.size ? p.size : p.kind === "player" ? 0.93 : 1;
+  const sz = (p.kind === "net" || p.kind === "tire") && p.size ? p.size : p.kind === "player" ? PLAYER_SCALE : 1;
   // a locked, non-selectable piece is click-through: its transparent grab shape
   // hit-tests unless pointer-events is switched off, so taps fall to nearby
   // unlocked items instead of the locked one stealing them
@@ -389,7 +389,7 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
     <g opacity={dim ? 0.92 : 1} transform={frame}>
       {sz !== 1 ? <g transform={`scale(${sz})`}>{body}{grab}</g> : <>{body}{grab}</>}
       {onStickDown && p.kind === "player" && !wb && (
-        <circle cx={4.7} cy={p.hand === "L" ? -2.55 : 2.55} r={3.3} fill="transparent"
+        <circle cx={4.7 * PLAYER_SCALE} cy={(p.hand === "L" ? -2.55 : 2.55) * PLAYER_SCALE} r={3.3} fill="transparent"
           pointerEvents={hPE} style={{ cursor: "grab" }} onPointerDown={onStickDown} />
       )}
     </g>

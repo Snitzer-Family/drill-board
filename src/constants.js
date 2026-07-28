@@ -20,7 +20,7 @@ export const symOf = p => {
   return l && !/^P\d+$/.test(l) ? l.slice(0, 3) : "X";
 };
 
-export const APP_VERSION = "6.52";
+export const APP_VERSION = "6.53";
 // DSL schema version, stamped into every serialized drill (`DSL <n>` header) so
 // production builds can eventually render a drill per the version that wrote it.
 // Bump ONLY on a breaking DSL change (new kinds/modifiers that older builds would
@@ -28,6 +28,11 @@ export const APP_VERSION = "6.52";
 export const DSL_VERSION = 9;
 // visual size of players/pucks/cones relative to true rink-feet scale
 export const ICON_SCALE = 0.8;
+// ...and the player glyph draws a touch under that, so skaters crowd the ice less.
+// Anything converting a point ON the drawn player (the stick, the blade, the puck
+// riding it) into rink feet must fold this in too, or the puck floats off the end
+// of the blade — the glyph shrank but the lever it hangs off did not.
+export const PLAYER_SCALE = 0.93;
 // a route line starts this many rink feet clear of the player icon (drawing only —
 // timing still measures from the true start point)
 export const ROUTE_START_GAP = 3;

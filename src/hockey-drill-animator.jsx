@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo, Fragment } from "react";
-import { VIEWS, COLORS, vb, APP_VERSION, ICON_SCALE, ROUTE_START_GAP, BUILD_STAMP, DEFAULT_TEXT, SPEED,
+import { VIEWS, COLORS, vb, APP_VERSION, ICON_SCALE, PLAYER_SCALE, ROUTE_START_GAP, BUILD_STAMP, DEFAULT_TEXT, SPEED,
   SAVE_PROB, MISS_POST, MISS_WIDE, MISS_OVER, SHOT_AIR_PROB, BOUNCE_REST, WB_SYMS, symOf } from "./constants.js";
 import { parseDrill, serializeDrill, extractDrill, deriveInventory, ensureShotNet } from "./drill-format.js";
 import { prepareImage, drillFromImage, ANTHROPIC_KEY_STORE } from "./drill-vision.js";
@@ -1467,7 +1467,7 @@ export default function DrillAnimator() {
   // → effective piece so position sampling follows the reaction, not the base end
   const effById = new Map(effPieces.map(p => [p.id, p]));
   const effOf = p => p && p.kind === "player" && (p.forks || []).length ? (effById.get(p.id) || p) : p;
-  const { getPlan, pieceTime, displayPosAt, stickSwing, stickSpot, waypointTime, puckInGoal } = createTiming({ pieces: effPieces, pace, segRefs, planCache, seed: playSeed, realisticShots: effRealistic, detail: effDetail, odds: shotOdds });
+  const { getPlan, pieceTime, displayPosAt, stickSwing, stickSpot, catchApproach, waypointTime, puckInGoal } = createTiming({ pieces: effPieces, pace, segRefs, planCache, seed: playSeed, realisticShots: effRealistic, detail: effDetail, odds: shotOdds });
   // intent plan for the route preview (identical to the main plan but with misses
   // off, so shots always route on net). Only built when realistic shots are on and
   // the puck-path overlay is actually shown; otherwise the main plan already IS the
@@ -2145,8 +2145,11 @@ export default function DrillAnimator() {
   }
   // where a carried puck sits: the drawn blade tip, forward + strong side (icon
   // units × ICON_SCALE), and the timing blade the puck rides in the plan
-  const TIP_FWD = 5.6 * ICON_SCALE, TIP_LAT = 2.45 * ICON_SCALE;
-  const BLADE_FWD = 4.9 * ICON_SCALE, BLADE_LAT = 2.55 * ICON_SCALE;
+  // ...in RINK FEET. PLAYER_SCALE is the glyph's own draw scale: without it these
+  // levers describe a stick 7% longer than the one on screen, and the puck hangs
+  // about four inches off the end of the blade.
+  const TIP_FWD = 5.6 * ICON_SCALE * PLAYER_SCALE, TIP_LAT = 2.45 * ICON_SCALE * PLAYER_SCALE;
+  const BLADE_FWD = 4.9 * ICON_SCALE * PLAYER_SCALE, BLADE_LAT = 2.55 * ICON_SCALE * PLAYER_SCALE;
   const bladeAtWorld = (x, y, aDeg, fwd, lat, side) => {
     const a = (aDeg * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a);
     return { x: x + c * fwd - s * lat * side, y: y + s * fwd + c * lat * side };
@@ -3263,7 +3266,7 @@ export default function DrillAnimator() {
       // puck by several feet at a detour's apex and would cut the shield off
       // exactly when the carrier is rounding the obstacle.
       const spSelf = stickSpot(p.id, animT <= 0 ? 0 : animT * totalTime);
-      const rawBlade = bladeAtWorld(res.x, res.y, res.a || 0, spSelf.fwd * ICON_SCALE, spSelf.lat * ICON_SCALE, side);
+      const rawBlade = bladeAtWorld(res.x, res.y, res.a || 0, spSelf.fwd * ICON_SCALE * PLAYER_SCALE, spSelf.lat * ICON_SCALE * PLAYER_SCALE, side);
       const carries = collisions && pieces.some(q => q.kind === "puck"
         && Math.hypot(displayPosRaw(q).x - rawBlade.x, displayPosRaw(q).y - rawBlade.y) < 2.2);
       if (carries) {
@@ -3296,9 +3299,20 @@ export default function DrillAnimator() {
         // wind-up that lever swings out to the release spot, which would otherwise
         // carry the puck straight out of this gate's reach mid-wind-up
         const sp = stickSpot(q.id, e);
-        const bladeRaw = bladeAtWorld(raw.x, raw.y, raw.a || 0, sp.fwd * ICON_SCALE, sp.lat * ICON_SCALE, side);
+        const bladeRaw = bladeAtWorld(raw.x, raw.y, raw.a || 0, sp.fwd * ICON_SCALE * PLAYER_SCALE, sp.lat * ICON_SCALE * PLAYER_SCALE, side);
         const d = Math.hypot(res.x - bladeRaw.x, res.y - bladeRaw.y);
         if (d < cd) { cd = d; cq = q; cSide = side; }
+      }
+      // ...or it is the last stretch of a pass on its way to them. The plan already
+      // steers the flight onto the receiver's route-pose blade; only here do we know
+      // where that blade really is once the body lean, plant and shield are on it, so
+      // ease the rest of the way in. `w` is 1 by the time it lands, which is what
+      // makes the catch continuous instead of a hop onto the stick.
+      let approachW = 1;
+      if (!cq) {
+        const ap = catchApproach(p.id, animT <= 0 ? 0 : animT * totalTime);
+        const rec = ap && pieces.find(x => x.id === ap.id && x.kind === "player" && !x.defense);
+        if (rec) { cq = rec; cSide = rec.hand === "L" ? -1 : 1; approachW = ap.w; }
       }
       {
         const q = cq, side = cSide;
@@ -3312,22 +3326,11 @@ export default function DrillAnimator() {
           const sp = stickSpot(q.id, animT <= 0 ? 0 : animT * totalTime);
           const tip = whiteboard
             ? bladeAtWorld(qd.x, qd.y, qd.a || 0, 2.4, 0, side)
-            : bladeAtWorld(qd.x, qd.y, qd.a || 0, sp.fwd * ICON_SCALE, sp.lat * ICON_SCALE, side);
-          // carry stickhandle: the puck cradles side-to-side on the blade —
-          // more at low speed, less (with a forward push) when skating hard
-          const e = animT * totalTime;
-          const a2 = displayPosAt(q, Math.max(0, e - 0.07)), b2 = displayPosAt(q, Math.min(totalTime, e + 0.07));
-          const spd = Math.hypot(b2.x - a2.x, b2.y - a2.y) / 0.14;
-          const fast = Math.min(1, spd / 24);
-          const w = Math.sin(e * 8.5);
-          // the cradle settles out as a shot or pass winds up (sp.k) — carrying it all
-          // the way to the release frame just leaves its offset behind as a jump
-          const cr = effDetail ? 1 - (sp.k || 0) : 0;
-          const lat = w * 1.2 * (1 - 0.5 * fast) * cr;                    // side-to-side cradle
-          const push = (0.5 + 0.5 * Math.sin(e * 8.5 + 1.3)) * 1.1 * fast * cr; // slight fore-push when moving fast
-          const hd = ((qd.a || 0) * Math.PI) / 180;
-          const lx = -Math.sin(hd), ly = Math.cos(hd), fx = Math.cos(hd), fy = Math.sin(hd);
-          return { ...res, x: tip.x + lx * lat + fx * push, y: tip.y + ly * lat + fy * push };
+            : bladeAtWorld(qd.x, qd.y, qd.a || 0, sp.fwd * ICON_SCALE * PLAYER_SCALE, sp.lat * ICON_SCALE * PLAYER_SCALE, side);
+          // the stickhandle is already in `sp` — it swings the lever with the stick,
+          // so the puck rides the blade instead of orbiting it on a separate cradle
+          return { ...res, x: res.x + (tip.x - res.x) * approachW,
+            y: res.y + (tip.y - res.y) * approachW };
         }
       }
     }
