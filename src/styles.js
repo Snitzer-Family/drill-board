@@ -376,7 +376,15 @@ export const STYLES = `
              over the button that opened it. */
           bottom:calc(var(--hd-menubar) + 8px + var(--hd-b) + var(--hd-act));
           left:calc(10px + env(safe-area-inset-left, 0px));
-          display:flex; flex-direction:column; gap:8px; width:var(--hd-menu-w); max-height:70vh; overflow-y:auto;
+          display:flex; flex-direction:column; gap:8px; width:var(--hd-menu-w);
+          /* Never let the panel climb past the status bar. 70vh alone doesn't
+             know about the notch or about how much the bars below have already
+             taken, so on a short screen (a phone in landscape especially) the
+             top of the list ended up above the safe area and simply couldn't be
+             read. This is the height actually available over the bars. */
+          max-height:min(70vh, calc(100vh - var(--hd-menubar) - 8px - var(--hd-b)
+            - var(--hd-act) - env(safe-area-inset-top, 0px) - 10px));
+          overflow-y:auto;
           scrollbar-width:none; -ms-overflow-style:none;
           background-color:var(--db-surface-panel);
           background-image:
@@ -488,10 +496,23 @@ export const STYLES = `
         .hd-mdprev a { color:var(--db-info); }
         .hd-err { color:var(--db-danger); font-size:12px; white-space:pre-wrap; }
         .hd-row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
-        .hd-btn { padding:9px 16px; font-size:13.5px; font-weight:600; border:1px solid var(--db-border);
+        /* inline-flex so an icon and its label sit on one line — as a plain
+           block the Icon's display:block pushed the text onto a second row */
+        .hd-btn { display:inline-flex; align-items:center; justify-content:center; gap:6px;
+          padding:9px 16px; font-size:13.5px; font-weight:600; border:1px solid var(--db-border);
           background:var(--db-surface-raised); color:var(--db-text); border-radius:8px; cursor:pointer; min-height:40px; }
         .hd-btn.primary { background:var(--db-accent); border-color:var(--db-accent); color:var(--db-text-on-accent); }
         .hd-btn.danger { color:var(--db-danger); border-color:var(--db-danger-border); }
+        /* A button that LEAVES the surface you're on. Kept apart from whatever
+           sits beside it — margin-left:auto throws it to the far end of the row
+           — and filled, so it can't be confused with the actions next to it. A
+           mis-tap here abandons what you were doing, so proximity is the risk,
+           not visibility. */
+        .hd-btn.exit { margin-left:auto; min-width:92px; font-weight:700;
+          background:var(--db-accent); border-color:var(--db-accent); color:var(--db-text-on-accent); }
+        /* the same idea on the action bar: an exit chip sits clear of the run of
+           controls, with a rule between it and them */
+        .hd-pentool.exit { margin-left:8px; border-color:var(--db-focus); color:var(--db-focus); }
         /* presentation steps editor */
         .hd-steplist { flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:7px; }
         .hd-stepitem { display:flex; flex-direction:column; gap:6px; }
@@ -765,6 +786,15 @@ export const STYLES = `
           background:var(--db-fx-glass); border:1px solid var(--db-border-strong); border-radius:13px;
           box-shadow:var(--db-fx-shadow-lg); color:var(--db-text-soft); font-size:13.5px; line-height:1.55; }
         .hd-emptyhint b { color:var(--db-text); }
+        /* the phone's hint line: over the ice just above the action bar, where
+           it has the width the bar couldn't give it. Never intercepts taps. */
+        .hd-floathint { position:absolute; z-index:43; left:50%; transform:translateX(-50%);
+          bottom:calc(var(--hd-menubar) + var(--hd-b) + var(--hd-act) + 6px);
+          max-width:calc(100vw - 24px); padding:6px 12px; pointer-events:none;
+          white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+          font-size:12px; color:var(--db-text-soft);
+          background:var(--db-fx-glass); border:1px solid var(--db-border);
+          border-radius:999px; box-shadow:var(--db-fx-shadow); backdrop-filter:blur(4px); }
         .hd-emptyhint .hd-ehsub { display:block; margin-top:4px; font-size:12px; color:var(--db-text-muted); }
         /* the loupe shows magnified ICE, so its backdrop is the ice token — it
            must match RinkMarkings' fill exactly or a wrong-shade rim shows at

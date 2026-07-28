@@ -5066,6 +5066,13 @@ export default function DrillAnimator() {
     // route ends) — keep sketching, never grab the piece
     if (tool === "pen") { setPopup(null); beginPen(e); return; }
     if (wakeEdit()) return;
+    // Grabbing a piece is a different intent from placing one, so it disarms
+    // whatever was armed. Leaving it armed made a HIDDEN mode: a selection
+    // hides the add palette, so the armed chip wasn't on screen any more, yet
+    // the bar still carried its Cancel — two exits at once, one of them for a
+    // tool you could no longer see. ("draw" and "pen" return above; they mean
+    // to act ON this piece.)
+    if (tool !== "select") setTool("select");
     const pt = svgPt(e);
     // a locked piece is grabbed only to select it (so it can open its popup and
     // be unlocked) — never moved. onSvgMove bails on d.locked, keeping d.moved
@@ -5160,6 +5167,9 @@ export default function DrillAnimator() {
     e.stopPropagation();
     if (wakeEdit()) return;
     setOpenMenu(null);
+    // same as pieceDown: taking hold of a waypoint is not placing a piece, so
+    // it disarms the tool rather than leaving it armed but off screen
+    if (tool !== "select" && tool !== "draw") setTool("select");
     if (payload.id) setSelectedId(payload.id);
     const pt = svgPt(e);
     // resize handle: remember the pointer's starting distance from the label
@@ -8620,6 +8630,11 @@ export default function DrillAnimator() {
       // gestures are rather than leaving the strip blank
       : selected ? `${selected.id} selected — drag to move, tap for its settings`
       : "Tap a piece to edit it · double-tap the ice to add";
+  // The subset worth interrupting the ice for: something is armed or in
+  // progress and the hint tells you how to finish it. Everything else is the
+  // idle standing hint, which on a phone is just noise over the rink.
+  const transientHint =
+    (!playing && !aiPlay && animT > 0) || editingFork || tool !== "select" ? toolHint : null;
 
   // ---- presentation: the EDITOR chrome gets out of the way ----------------
   // Showing a drill to a room, you still want play/pause and the scrubber —
@@ -9936,6 +9951,16 @@ export default function DrillAnimator() {
         </div>
       )}
 
+      {/* On a phone the bar has no room for a readable hint, so the ones that
+          say what's happening RIGHT NOW float over the ice instead — where they
+          have the width to be read, and clear of the bar. Only transient
+          states: an armed tool, a route being drawn, a paused animation. The
+          standing "tap a piece to edit it" is dropped, since a hint you've seen
+          a hundred times is just something covering the rink. */}
+      {actOn && !dense && !presoFull && transientHint && (
+        <div className="hd-floathint">{transientHint}</div>
+      )}
+
       {/* ---------- action bar · EDIT: the add palette ----------
           What used to be a full-screen sheet you opened, picked from, and closed
           again. Groups expand onto the bar as the screen earns the room:
@@ -10000,7 +10025,8 @@ export default function DrillAnimator() {
               )}
               <button className="hd-pentool danger" title="Delete the selection" onClick={deleteGroup}>
                 <Icon name="trash" size={17} /><span>Delete</span></button>
-              <button className="hd-pentool" title="Clear selection"
+              <div className="hd-pensep" />
+              <button className="hd-pentool exit" title="Clear selection"
                 onClick={() => { setMultiSel(null); setGroupInput(null); }}>
                 <Icon name="close" size={17} /><span>Done</span></button>
             </>
@@ -10012,7 +10038,8 @@ export default function DrillAnimator() {
               <div className="hd-pensep" />
               <span className="hd-selchip">{selected.id}</span>
               {pieceActions(selected, true).map(actionChip)}
-              <button className="hd-pentool" title="Deselect"
+              <div className="hd-pensep" />
+              <button className="hd-pentool exit" title="Deselect"
                 onClick={() => { setSelectedId(null); setPopup(null); }}>
                 <Icon name="close" size={17} /><span>Done</span></button>
             </>
@@ -10039,15 +10066,19 @@ export default function DrillAnimator() {
             </div>
           )}
           {tool !== "select" && (
-            <button className="hd-pentool danger" title="Cancel the armed tool — nothing will be placed"
-              onClick={() => setTool("select")}>
-              <Icon name="close" size={17} /><span>Cancel</span>
-            </button>
+            <>
+              <div className="hd-pensep" />
+              <button className="hd-pentool exit" title="Cancel the armed tool — nothing will be placed"
+                onClick={() => setTool("select")}>
+                <Icon name="close" size={17} /><span>Cancel</span>
+              </button>
+            </>
           )}
-          {/* the hint fills the slack when there's nothing selected; with a
-              selection the chip already says what the bar is acting on, and the
-              hint only survives as an ellipsis */}
-          {!selected && !multiSel?.size
+          {/* The hint only earns bar space where it can be READ. On a phone it
+              truncated to "Tap a piece to ..." — worse than nothing — so there
+              it moves over the ice (see .hd-floathint) and only for hints that
+              say what's happening RIGHT NOW, not the standing idle one. */}
+          {dense && !selected && !multiSel?.size
             ? <div className="hd-acthint">{toolHint || ""}</div>
             : <div className="hd-actspacer" />}
         </div>
@@ -10129,11 +10160,14 @@ export default function DrillAnimator() {
             </button>
           ))}
         </div>
+        {/* Undo/redo sit in the MIDDLE, between the flows on the left and the
+            menu on the right — a spacer either side. They belong to neither
+            half, and centring them keeps both thumbs' reach uncluttered. */}
+        <div className="hd-barspacer" />
         <button className="hd-barbtn" title="Undo last change" disabled={!undoCount}
           onClick={undoLast}><Icon name="undo" size={16} /><span className="hd-blbl">Undo</span></button>
         <button className="hd-barbtn" title="Redo" disabled={!redoCount}
           onClick={redoLast}><Icon name="redo" size={16} /><span className="hd-blbl">Redo</span></button>
-        {/* the ice, not a control: pushes the "where things live" half right */}
         <div className="hd-barspacer" />
         <button ref={barBtnRefs.rinkmenu} className={`hd-barbtn${openMenu === "rinkmenu" ? " on" : ""}`} title="Rink"
           onClick={() => setOpenMenu(m => (m === "rinkmenu" ? null : "rinkmenu"))}>
@@ -10286,7 +10320,8 @@ export default function DrillAnimator() {
             </div>
           </div>
           <div className="hd-row">
-            <button className="hd-btn primary" onClick={() => setOpenMenu("settings")}>Back</button>
+            <button className="hd-btn" onClick={() => setOpenMenu("settings")}><Icon name="chevronLeft" size={14} /> Menu</button>
+            <button className="hd-btn exit" onClick={() => setOpenMenu(null)}>Done</button>
           </div>
         </div>
       )}
@@ -10455,7 +10490,8 @@ export default function DrillAnimator() {
             <div className="hd-note">These are saved for this device, not with the drill — except the pace and shot odds, which belong to the drill you're editing.</div>
           </div>
           <div className="hd-row">
-            <button className="hd-btn primary" onClick={() => setOpenMenu(null)}>Done</button>
+            <button className="hd-btn" onClick={() => setOpenMenu("settings")}><Icon name="chevronLeft" size={14} /> Menu</button>
+            <button className="hd-btn exit" onClick={() => setOpenMenu(null)}>Done</button>
           </div>
         </div>
       )}
@@ -10488,9 +10524,10 @@ export default function DrillAnimator() {
             <div className="hd-mdprev" dangerouslySetInnerHTML={{ __html: mdBlock(drillNotes) }} />
           )}
           <div className="hd-row">
-            <button className="hd-btn primary" onClick={() => setOpenMenu(null)}>Done</button>
-            <button className="hd-btn danger" style={{ marginLeft: "auto" }}
+            <button className="hd-btn" onClick={() => setOpenMenu("settings")}><Icon name="chevronLeft" size={14} /> Menu</button>
+            <button className="hd-btn danger"
               onClick={() => { setDrillNotes(""); flash("Notes cleared — Undo restores them"); }}>Clear</button>
+            <button className="hd-btn exit" onClick={() => setOpenMenu(null)}>Done</button>
           </div>
           <div className="hd-note">
             A written writeup shown on the print sheet and preview page. Supports markdown:
@@ -10527,8 +10564,9 @@ export default function DrillAnimator() {
               ))}
             </div>
             <div className="hd-row">
+              <button className="hd-btn" onClick={() => setOpenMenu("settings")}><Icon name="chevronLeft" size={14} /> Menu</button>
               <button className="hd-btn" onClick={addCustomItem}>＋ Add gear</button>
-              <button className="hd-btn primary" onClick={() => setOpenMenu(null)}>Done</button>
+              <button className="hd-btn exit" onClick={() => setOpenMenu(null)}>Done</button>
             </div>
             <div className="hd-note">
               Auto-counted from the pieces on the ice. Edit a count to override it, <b>hide</b> a row to
@@ -10704,9 +10742,10 @@ export default function DrillAnimator() {
             </div>
           )}
           <div className="hd-row">
-            <button className="hd-btn primary" onClick={() => { setOpenMenu(null); setEditAnchor(null); }}>Done</button>
+            <button className="hd-btn" onClick={() => setOpenMenu("settings")}><Icon name="chevronLeft" size={14} /> Menu</button>
             <button className={`hd-btn${presentation ? " primary" : ""}`}
               onClick={togglePresentation}>Presentation: {presentation ? "On" : "Off"}</button>
+            <button className="hd-btn exit" onClick={() => { setOpenMenu(null); setEditAnchor(null); }}>Done</button>
           </div>
           <div className="hd-note">
             Scrub the timeline, pause, then “＋ Add here” drops a note — near a route point it

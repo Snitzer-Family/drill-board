@@ -32,6 +32,7 @@ const ICONS = {
   chevronUp: <path d="M6 15l6-6 6 6" />,
   chevronDown: <path d="M6 9.5l6 6 6-6" />,
   chevronRight: <path d="M9.5 6l6 6-6 6" />,
+  chevronLeft: <path d="M14.5 6l-6 6 6 6" />,
   printer: <><path d="M7 8V4h10v4" /><rect x="4" y="8" width="16" height="8" rx="2" /><path d="M7 13h10v7H7z" /></>,
   camera: <><path d="M4 7h3l2-2.5h6L17 7h3a1.5 1.5 0 0 1 1.5 1.5V18a1.5 1.5 0 0 1-1.5 1.5H4A1.5 1.5 0 0 1 2.5 18V8.5A1.5 1.5 0 0 1 4 7z" /><circle cx="12" cy="13" r="3.4" /></>,
   // corner arrows out = maximize; corner arrows in = restore
