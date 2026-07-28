@@ -141,6 +141,17 @@ export const STYLES = `
            it has to come down to icon scale. */
         .hd-pentool .hd-toolimg { width:24px; height:20px; flex:none; }
         .hd-actglyph { font-size:17px; line-height:1; }
+        /* what the bar is currently acting ON — a piece id, or the size of a
+           box-selection. Reads as a label, not a button, so it must not look
+           tappable; it shrinks before any control does. */
+        .hd-selchip { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis;
+          white-space:nowrap; padding:0 7px; font-size:11.5px; font-weight:700;
+          letter-spacing:.02em; color:var(--db-text); }
+        /* naming a box-selection, inline on the bar (it used to be a hand-rolled
+           input in the floating toolbar, with its own hardcoded colours) */
+        .hd-groupname { flex:0 1 96px; min-width:64px; padding:6px 8px; font-size:12px;
+          border-radius:7px; border:1px solid var(--db-border-strong);
+          background:var(--db-surface-sunken); color:var(--db-text); }
         .hd-pentool.on { background:var(--db-accent); border-color:var(--db-accent); color:var(--db-text-on-accent); }
         .hd-pentool.on > span:last-child { opacity:1; }
         .hd-pentool.danger { color:var(--db-danger); }

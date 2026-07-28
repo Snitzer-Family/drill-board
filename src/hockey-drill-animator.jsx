@@ -4765,8 +4765,13 @@ export default function DrillAnimator() {
     if (tool !== "select") {
       const np = makePiece(tool, pt);
       setPieces(ps => [...ps, np]);
-      setSelectedId(np.id);
-      setPopup(tool === "label" ? { type: "piece", id: np.id } : null);   // labels open for text entry
+      // Deliberately NOT selected. A selection takes the Edit bar over with the
+      // modify strip, so auto-selecting what you just placed hid the palette and
+      // you had to tap empty ice before you could place the next one. You can
+      // still tap the piece to select it; a LABEL is the exception, since it's
+      // useless until you type something into it.
+      if (tool === "label") { setSelectedId(np.id); setPopup({ type: "piece", id: np.id }); }
+      else setPopup(null);
       setTool("select");
       return;
     }
@@ -4971,13 +4976,17 @@ export default function DrillAnimator() {
     setPieces(ps => [...ps, ...extra]);
   }
 
+  // showPopup also decides whether to SELECT: the quick-add popup wants the new
+  // player open for editing, but a drop from the Edit bar must leave the bar on
+  // its add palette (a selection swaps it for the modify strip) so you can place
+  // the next one without tapping empty ice first.
   function addPlayerWithPuck(pt, showPopup) {
     const pl = makePiece("player", pt);
     const pk = makePiece("puck", pt);
     pk.carrier = pl.id;
     setPieces(ps => [...ps, pl, pk]);
-    setSelectedId(pl.id);
-    setPopup(showPopup ? { type: "piece", id: pl.id } : null);
+    if (showPopup) { setSelectedId(pl.id); setPopup({ type: "piece", id: pl.id }); }
+    else setPopup(null);
   }
 
   function pieceDown(e, id) {
@@ -7660,16 +7669,14 @@ export default function DrillAnimator() {
               </div>
             </div>
           )}
+          {/* same table the Edit bar's selection strip renders, so the panel and
+              the bar can't offer different things for the same piece */}
           <div className="hd-poprow" style={{ marginTop: 2 }}>
-            {p.path.length > 0 && (
-              <button className="hd-mini" onClick={() => { updateById(p.id, { path: [] }); setPopup(null); flash("Route cleared — Undo restores it"); }}>Clear route</button>
-            )}
-            <button className="hd-mini" onClick={() => duplicatePiece(p.id)}><Icon name="duplicate" size={15} /> Duplicate</button>
-            <button className="hd-mini" title="Pin in place so it can't be moved or edited by accident."
-              onClick={() => updateById(p.id, { lock: true })}>🔒 Lock</button>
-            <button className="hd-mini danger" onClick={() => deletePiece(p.id)}>
-              <Icon name="trash" size={15} /> Delete
-            </button>
+            {pieceActions(p, false).map(a => (
+              <button key={a.key} className={`hd-mini${a.danger ? " danger" : ""}`} title={a.title} onClick={a.on}>
+                {a.icon && <Icon name={a.icon} size={15} />} {a.label}
+              </button>
+            ))}
           </div>
         </>
       );
@@ -8502,12 +8509,6 @@ export default function DrillAnimator() {
       : selected ? `${selected.id} selected — drag to move, tap for its settings`
       : "Tap a piece to edit it · double-tap the ice to add";
 
-  const mlbl = { fontSize: 8, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase",
-    lineHeight: 1, opacity: 0.8, marginTop: 2 };
-  const mbtn = { display: "flex", alignItems: "center", justifyContent: "center", minWidth: 34, height: 34,
-    padding: "0 8px", borderRadius: 999, border: "1px solid rgba(255,255,255,0.14)", background: "rgba(255,255,255,0.06)",
-    color: "#eaf0f6", fontSize: 14, fontWeight: 700, cursor: "pointer" };
-
   // Switch editor flows. Every clause here is lifted from a place that already
   // did exactly this before there was a mode to name — the Add sheet's pen rows,
   // togglePlay, wakeEdit — so this is one definition replacing five copies.
@@ -8677,6 +8678,38 @@ export default function DrillAnimator() {
     </button>
   ));
 
+  // ---- what you can do to the selected piece ----------------------------
+  // ONE definition, rendered two ways: as .hd-mini rows at the foot of the
+  // inspector, and as chips on the Edit bar. They were written separately, so
+  // the two surfaces could quietly offer different things for the same piece.
+  // `bar` picks the variant: the bar offers a door INTO the inspector, the
+  // inspector offers the route-clearing the bar has no room for.
+  const ROUTABLE = new Set(["player", "puck"]);
+  const pieceActions = (p, bar) => {
+    const a = [];
+    if (bar && ROUTABLE.has(p.kind)) a.push({ key: "route", icon: "pencil",
+      label: p.path?.length ? "Redraw" : "Route",
+      title: `Draw ${p.id}'s route — drag across the ice`, on: () => drawRouteMode(p.id) });
+    if (!bar && p.path?.length) a.push({ key: "clear", label: "Clear route",
+      on: () => { updateById(p.id, { path: [] }); setPopup(null); flash("Route cleared — Undo restores it"); } });
+    a.push({ key: "dup", icon: "duplicate", label: "Duplicate", short: "Copy",
+      title: `Duplicate ${p.id}`, on: () => duplicatePiece(p.id) });
+    a.push({ key: "lock", icon: "lock", label: "Lock",
+      title: "Pin in place so it can't be moved or edited by accident.",
+      on: () => updateById(p.id, { lock: true }) });
+    if (bar) a.push({ key: "more", icon: "sliders", label: "More",
+      title: `Everything else about ${p.id}`, on: () => setPopup({ type: "piece", id: p.id }) });
+    a.push({ key: "del", icon: "trash", label: "Delete", danger: true,
+      title: `Delete ${p.id}`, on: () => deletePiece(p.id) });
+    return a;
+  };
+  const actionChip = a => (
+    <button key={a.key} className={`hd-pentool${a.danger ? " danger" : ""}`} title={a.title}
+      onClick={a.on}>
+      <Icon name={a.icon} size={17} /><span>{dense ? a.label : (a.short || a.label)}</span>
+    </button>
+  );
+
   // ---- Edit mode's add palette ------------------------------------------
   // Arm a tool (tap the ice to place it), except shapes, which land straight on
   // the board — the same two behaviours the Add sheet has always had.
@@ -8697,6 +8730,10 @@ export default function DrillAnimator() {
       <span>{lbl}</span>
     </button>
   );
+  // Everything, in one popover. Used when a selection takes the bar over: you
+  // shouldn't have to deselect to add the next piece.
+  const ADD_ALL = { key: "all", label: "Add", tip: "Add a piece", icon: "plus",
+    kinds: ADD_GROUPS.flatMap(g => g.kinds) };
   // the same kinds as a grid, for a group that had to collapse into a popover
   const addGroupPop = g => (
     <div key={g.key} className="hd-penwrap">
@@ -9529,43 +9566,6 @@ export default function DrillAnimator() {
           </svg>
           {renderPopout()}
           {renderLoupe()}
-          {multiSel && multiSel.size > 0 && !playing && (
-            <div style={{ position: "absolute", left: "50%", bottom: "calc(74px + env(safe-area-inset-bottom))",
-              transform: "translateX(-50%)", zIndex: 48, display: "flex", alignItems: "center", justifyContent: "center",
-              flexWrap: "wrap", gap: 5, maxWidth: "calc(100vw - 16px)", boxSizing: "border-box",
-              padding: "7px 9px", background: "rgba(20,24,30,0.94)", border: "1px solid rgba(255,255,255,0.12)",
-              borderRadius: 16, boxShadow: "0 6px 22px rgba(0,0,0,0.45)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)" }}>
-              <span style={{ color: "#cdd6df", fontSize: 12, fontWeight: 700, padding: "0 4px", whiteSpace: "nowrap" }}>
-                {selGroupName() ? `◇ ${selGroupName()}` : `${multiSel.size} selected`}
-              </span>
-              <button style={{ ...mbtn, flexDirection: "column", height: 40 }} onClick={() => rotateGroup(-15)} title="Rotate left 15°">
-                <Icon name="rotateCcw" size={15} /><span style={mlbl}>-15°</span></button>
-              <button style={{ ...mbtn, flexDirection: "column", height: 40 }} onClick={() => rotateGroup(15)} title="Rotate right 15°">
-                <Icon name="rotateCw" size={15} /><span style={mlbl}>+15°</span></button>
-              <button style={{ ...mbtn, fontSize: 12, height: 40 }} onClick={() => rotateGroup(90)} title="Rotate 90°">90°</button>
-              <button style={{ ...mbtn, flexDirection: "column", height: 40 }} onClick={duplicateGroup} title="Duplicate the selection">
-                <Icon name="duplicate" size={15} /><span style={mlbl}>Copy</span></button>
-              {/* named-group controls: name the selection, or ungroup it */}
-              {groupInput != null ? (
-                <>
-                  <input autoFocus value={groupInput} onChange={e => setGroupInput(e.target.value)}
-                    onKeyDown={e => { if (e.key === "Enter") { createGroup(groupInput); setGroupInput(null); } if (e.key === "Escape") setGroupInput(null); }}
-                    placeholder="group name" style={{ width: 96, padding: "5px 7px", fontSize: 12, borderRadius: 7, border: "1px solid #33404f", background: "#0f141a", color: "#e8edf2" }} />
-                  <button style={{ ...mbtn, color: "#7fe0a3" }} title="Create group"
-                    onClick={() => { createGroup(groupInput); setGroupInput(null); }}><Icon name="check" size={15} /></button>
-                </>
-              ) : selGroupName() ? (
-                <button style={{ ...mbtn, fontSize: 11.5 }} title="Ungroup" onClick={() => { ungroup(selGroupName()); }}>Ungroup</button>
-              ) : (
-                <button style={{ ...mbtn, fontSize: 11.5 }} title="Group the selection" onClick={() => setGroupInput(selGroupName() || "")}>◇ Group</button>
-              )}
-              <span style={{ width: 1, alignSelf: "stretch", margin: "3px 3px", background: "rgba(255,255,255,0.14)" }} />
-              <button style={{ ...mbtn, flexDirection: "column", height: 40, color: "#ff7a7a", borderColor: "rgba(255,90,90,0.35)" }}
-                onClick={deleteGroup} title="Delete the selection"><Icon name="trash" size={15} /><span style={mlbl}>Delete</span></button>
-              <button style={{ ...mbtn, flexDirection: "column", height: 40 }} onClick={() => { setMultiSel(null); setGroupInput(null); }}
-                title="Clear selection"><Icon name="close" size={15} /><span style={mlbl}>Done</span></button>
-            </div>
-          )}
           {view.s > 1.02 && (
             <button onClick={resetView} title="Reset zoom"
               style={{ position: "absolute", top: "calc(8px + env(safe-area-inset-top))", right: 8, zIndex: 46,
@@ -9742,10 +9742,71 @@ export default function DrillAnimator() {
           and inlining them would push the common pieces off the line. */}
       {actOn && mode === "edit" && (
         <div className="hd-act edit">
-          {ADD_GROUPS[0].kinds.map(addChip)}
-          <div className="hd-pensep" />
-          {dense ? <>{ADD_GROUPS[1].kinds.map(addChip)}</> : addGroupPop(ADD_GROUPS[1])}
-          {addGroupPop(ADD_GROUPS[2])}
+          {/* A selection takes the bar over — what you want next is almost always
+              something to DO with it, not another piece. Adding stays one tap
+              away behind the collapsed palette, so you needn't deselect first. */}
+          {selected || multiSel?.size ? addGroupPop(ADD_ALL) : (
+            <>
+              {ADD_GROUPS[0].kinds.map(addChip)}
+              <div className="hd-pensep" />
+              {dense ? <>{ADD_GROUPS[1].kinds.map(addChip)}</> : addGroupPop(ADD_GROUPS[1])}
+              {addGroupPop(ADD_GROUPS[2])}
+            </>
+          )}
+          {/* ---- multi-select: was a third floating toolbar over the ice, with
+              its own hand-rolled palette of raw hexes. It's the same kind of
+              thing the bar exists for, so it lives here now. ---- */}
+          {multiSel?.size > 0 && (
+            <>
+              <div className="hd-pensep" />
+              <span className="hd-selchip">{selGroupName() ? `◇ ${selGroupName()}` : `${multiSel.size} selected`}</span>
+              {dense && <>
+                <button className="hd-pentool" title="Rotate left 15°" onClick={() => rotateGroup(-15)}>
+                  <Icon name="rotateCcw" size={17} /><span>-15°</span></button>
+                <button className="hd-pentool" title="Rotate right 15°" onClick={() => rotateGroup(15)}>
+                  <Icon name="rotateCw" size={17} /><span>+15°</span></button>
+                <button className="hd-pentool" title="Rotate 90°" onClick={() => rotateGroup(90)}>
+                  <Icon name="rotateCw" size={17} /><span>90°</span></button>
+              </>}
+              <button className="hd-pentool" title="Duplicate the selection" onClick={duplicateGroup}>
+                <Icon name="duplicate" size={17} /><span>Copy</span></button>
+              {groupInput != null ? (
+                <>
+                  <input className="hd-groupname" autoFocus value={groupInput} placeholder="group name"
+                    onChange={e => setGroupInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter") { createGroup(groupInput); setGroupInput(null); }
+                      if (e.key === "Escape") setGroupInput(null); }} />
+                  <button className="hd-pentool" title="Create group"
+                    onClick={() => { createGroup(groupInput); setGroupInput(null); }}>
+                    <Icon name="check" size={17} /><span>OK</span></button>
+                </>
+              ) : selGroupName() ? (
+                <button className="hd-pentool" title="Ungroup" onClick={() => ungroup(selGroupName())}>
+                  <Icon name="close" size={17} /><span>Ungroup</span></button>
+              ) : (
+                <button className="hd-pentool" title="Group the selection"
+                  onClick={() => setGroupInput(selGroupName() || "")}>
+                  <Icon name="grid" size={17} /><span>Group</span></button>
+              )}
+              <button className="hd-pentool danger" title="Delete the selection" onClick={deleteGroup}>
+                <Icon name="trash" size={17} /><span>Delete</span></button>
+              <button className="hd-pentool" title="Clear selection"
+                onClick={() => { setMultiSel(null); setGroupInput(null); }}>
+                <Icon name="close" size={17} /><span>Done</span></button>
+            </>
+          )}
+          {/* ---- one piece selected: the four things you reach for without
+              opening anything. "More" is the door to the full inspector. ---- */}
+          {selected && !multiSel?.size && (
+            <>
+              <div className="hd-pensep" />
+              <span className="hd-selchip">{selected.id}</span>
+              {pieceActions(selected, true).map(actionChip)}
+              <button className="hd-pentool" title="Deselect"
+                onClick={() => { setSelectedId(null); setPopup(null); }}>
+                <Icon name="close" size={17} /><span>Done</span></button>
+            </>
+          )}
           {/* the marker's own ink settings, surfaced only while it's armed —
               they came off the deleted Add sheet, where they appeared under the
               same condition */}
@@ -9773,7 +9834,12 @@ export default function DrillAnimator() {
               <Icon name="close" size={17} /><span>Cancel</span>
             </button>
           )}
-          <div className="hd-acthint">{toolHint || ""}</div>
+          {/* the hint fills the slack when there's nothing selected; with a
+              selection the chip already says what the bar is acting on, and the
+              hint only survives as an ellipsis */}
+          {!selected && !multiSel?.size
+            ? <div className="hd-acthint">{toolHint || ""}</div>
+            : <div className="hd-actspacer" />}
         </div>
       )}
 
