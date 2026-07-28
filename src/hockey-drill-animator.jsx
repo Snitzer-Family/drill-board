@@ -8849,6 +8849,9 @@ export default function DrillAnimator() {
   // which is the moment a coach most wants to. The caption clears the bar on its
   // own (.hd-preso offsets by --hd-act) and tapping it still advances the hold.
   const actOn = !aiPlay;
+  // exactly what clearInk would remove, so the button can't promise something
+  // different from what it does
+  const inkCount = pieces.reduce((n, p) => n + (p.kind === "mark" && !p.lock ? 1 : 0), 0);
 
   // Which players should wear waypoint numbers: the receivers of any PASS step
   // shown in the action panel that's currently open. Derived rather than stored,
@@ -9942,8 +9945,19 @@ export default function DrillAnimator() {
               onClick={() => setAutoConv(v => !v)}>
               <Icon name="brain" size={18} /><span>Auto</span>
             </button>
-            <button className="hd-pentool danger" title="Clear all ink (Undo restores it)" onClick={clearInk}>
-              <Icon name="trash" size={17} /><span>Clear</span>
+            {/* "Clear" beside a trash can, in red, read as "clear the BOARD" —
+                it only ever removes ink. Three things say so now: the label
+                names what goes, the count says how much, and with no ink on
+                the sheet the button is dead, which is the strongest signal of
+                all — a board full of players showing a greyed-out button
+                plainly isn't offering to delete them. */}
+            <div className="hd-pensep" />
+            <button className="hd-pentool danger" disabled={!inkCount} onClick={clearInk}
+              title={inkCount
+                ? `Remove ${inkCount} ink mark${inkCount > 1 ? "s" : ""} — players, routes and props are untouched. Undo restores them.`
+                : "No ink on the sheet to clear"}>
+              <Icon name="trash" size={17} />
+              <span>Clear ink{inkCount ? ` ${inkCount}` : ""}</span>
             </button>
             {/* no Done either: tapping EDIT or PLAY below is what finishes a
                 sketch, and it commits the buffered ink on the way out */}

@@ -180,7 +180,9 @@ export const STYLES = `
           border-radius:9px; background:var(--db-surface-raised); border:1px solid var(--db-border-strong); color:var(--db-text-soft);
           cursor:pointer; font-size:8.5px; font-weight:700; letter-spacing:.03em;
           text-transform:uppercase; line-height:1; }
-        .hd-pentool > span:last-child { opacity:.75; }
+        /* a two-word caption stays on ONE line — wrapping would blow the
+           chip's fixed 42px height and with it the bar's single-line promise */
+        .hd-pentool > span:last-child { opacity:.75; white-space:nowrap; }
         /* a piece sprite used as a bar chip's icon. .hd-toolimg is sized for the
            big grid tiles (46px tall, full width); inside a 42px-tall bar button
            it has to come down to icon scale. */
