@@ -10150,23 +10150,44 @@ export default function DrillAnimator() {
       {/* ---------- menus ---------- */}
       {openMenu === "settings" && (
         <div className="hd-menu" style={menuAnchor}>
-          <div className="hd-mh">Drill</div>
+          {/* Sectioned by what a row DOES, and it keeps one grammar throughout:
+              a chevron means the row opens another surface, a switch means it
+              toggles something here, and a bare row acts immediately. The
+              settings that used to sit in this list (ice zones, locked-item
+              selection, the caption pause) moved to App & drill settings, where
+              every row gets a line explaining it — a menu is for verbs. */}
+          <div className="hd-mh">This drill</div>
           <input className="hd-input" placeholder="Drill name" value={drillTitle}
             onChange={e => setDrillTitle(e.target.value)} />
           {/* 62, not 46: under border-box the padding and border are inside the
               min-height, and 46 would render 16px shorter than it always has */}
           <textarea className="hd-input" style={{ minHeight: 62, resize: "vertical", fontFamily: "inherit" }}
             placeholder="Description" value={drillDesc} onChange={e => setDrillDesc(e.target.value)} spellCheck={false} />
-          <button className="hd-item" onClick={() => setOpenMenu("notes")}><Icon name="note" size={16} /> Notes / writeup{drillNotes.trim() ? " ✓" : ""}<span className="hd-chev"><Icon name="chevronRight" size={14} /></span></button>
-          <button className="hd-item" onClick={() => setOpenMenu("inventory")}><Icon name="grid" size={16} /> Inventory / gear<span className="hd-chev"><Icon name="chevronRight" size={14} /></span></button>
+          <button className="hd-item" onClick={() => setOpenMenu("notes")}>
+            <Icon name="note" size={16} /> Notes / writeup{drillNotes.trim() ? " ✓" : ""}
+            <span className="hd-chev"><Icon name="chevronRight" size={14} /></span></button>
+          <button className="hd-item" onClick={() => setOpenMenu("steps")}>
+            <Icon name="presentation" size={16} /> Steps &amp; captions
+            {drillSteps.length ? ` · ${drillSteps.length}` : ""}
+            <span className="hd-chev"><Icon name="chevronRight" size={14} /></span></button>
+          <button className="hd-item" onClick={() => setOpenMenu("inventory")}>
+            <Icon name="grid" size={16} /> Inventory / gear
+            <span className="hd-chev"><Icon name="chevronRight" size={14} /></span></button>
+
+          <div className="hd-mh hd-prefsec">Share</div>
+          <button className="hd-item" onClick={() => { previewLink(); setOpenMenu(null); }}><Icon name="share" size={16} /> Share preview link</button>
+          <button className="hd-item" onClick={() => { copyMd(); setOpenMenu(null); }}><Icon name="duplicate" size={16} /> Copy markdown</button>
           <button className="hd-item" onClick={() => { printSheet(); setOpenMenu(null); }}><Icon name="printer" size={16} /> Print sheet…</button>
-          <button className="hd-item" onClick={openText}><Icon name="keyboard" size={16} /> Text editor<span className="hd-chev"><Icon name="chevronRight" size={14} /></span></button>
+          <button className="hd-item" onClick={() => { exportImage(); setOpenMenu(null); }}><Icon name="image" size={16} /> Export image</button>
           <button className="hd-item" onClick={() => { exportTxt(); setOpenMenu(null); }}><Icon name="download" size={16} /> Export .txt</button>
           <button className="hd-item" onClick={() => { exportMd(); setOpenMenu(null); }}><Icon name="download" size={16} /> Export .md</button>
-          <button className="hd-item" onClick={() => { exportImage(); setOpenMenu(null); }}><Icon name="image" size={16} /> Export image</button>
-          <button className="hd-item" onClick={() => { copyMd(); setOpenMenu(null); }}><Icon name="duplicate" size={16} /> Copy markdown</button>
-          <button className="hd-item" onClick={() => { previewLink(); setOpenMenu(null); }}><Icon name="share" size={16} /> Share preview link</button>
+
+          <div className="hd-mh hd-prefsec">Open</div>
           <button className="hd-item" onClick={() => fileRef.current?.click()}><Icon name="upload" size={16} /> Load .txt / .md</button>
+          <button className="hd-item" disabled={!!photoBusy} onClick={() => { setOpenMenu(null); photoRef.current?.click(); }}><Icon name="camera" size={16} /> Import from photo…</button>
+          <button className="hd-item" onClick={openText}>
+            <Icon name="keyboard" size={16} /> Text editor
+            <span className="hd-chev"><Icon name="chevronRight" size={14} /></span></button>
           {crashBackup && (
             <button className="hd-item" onClick={() => {
               const r = parseDrill(crashBackup);
@@ -10180,48 +10201,34 @@ export default function DrillAnimator() {
               flash("Board restored", 2600);
             }}><Icon name="reset" size={16} /> Restore last board</button>
           )}
-          <button className="hd-item" disabled={!!photoBusy} onClick={() => { setOpenMenu(null); photoRef.current?.click(); }}><Icon name="camera" size={16} /> Import from photo…</button>
-          <button className="hd-item"
-            onClick={() => setShowZones(s => !s)}>
-            <Icon name="grid" size={16} /> Ice zones<span className={`hd-sw${showZones ? " on" : ""}`} />
+
+          <div className="hd-mh hd-prefsec">Board</div>
+          <button className="hd-item" onClick={toggleLockAll}>
+            <Icon name={anyLocked ? "unlock" : "lock"} size={16} /> {anyLocked ? "Unlock all" : "Lock board"}
+            <span className={`hd-sw${anyLocked ? " on" : ""}`} />
           </button>
-          <button className="hd-item"
-            onClick={toggleLockAll}>
-            <Icon name={anyLocked ? "unlock" : "lock"} size={16} /> {anyLocked ? "Unlock all" : "Lock board"}<span className={`hd-sw${anyLocked ? " on" : ""}`} />
-          </button>
-          <button className="hd-item"
-            onClick={() => setLockedSelectable(s => !s)}>
-            <Icon name="lock" size={16} /> Allow selecting locked items<span className={`hd-sw${lockedSelectable ? " on" : ""}`} />
-          </button>
-          <button className="hd-item"
-            onClick={() => setShowDiag(s => !s)}>
-            <Icon name="gauge" size={16} /> Diagnostics<span className={`hd-sw${showDiag ? " on" : ""}`} />
-          </button>
-          <button className="hd-item" onClick={() => setOpenMenu("prefs")}>
-            <Icon name="sliders" size={16} /> App &amp; drill settings<span className="hd-chev"><Icon name="chevronRight" size={14} /></span>
-          </button>
-          <div className="hd-mh" style={{ marginTop: 4 }}>Let AI play</div>
           <div className="hd-poprow">
-            <span>5v5 for</span>
+            <span>Let AI play 5v5 for</span>
             <Stepper value={aiMins} onChange={setAiMins} step={1} min={1} suffix="m" />
             <button className="hd-mini" onClick={startAiPlay}><Icon name="play" size={13} /> Start</button>
           </div>
-          <div className="hd-mh" style={{ marginTop: 4 }}>Presentation</div>
-          <div className="hd-poprow">
-            <button className={`hd-mini${presentation ? " on" : ""}`}
-              onClick={togglePresentation}>{presentation ? "✓ On" : "Off"}</button>
-            <span>Pause</span>
-            <Stepper value={presoDelay} onChange={setPresoDelay} step={0.5} min={0} />
-          </div>
-          <div className="hd-poprow">
-            <button className={`hd-mini${minorDesc ? " on" : ""}`}
-              onClick={() => setMinorDesc(v => !v)}>{minorDesc ? "✓ Minor steps" : "Minor steps"}</button>
-            <span className="hd-sechint">auto-caption the areas each player skates through</span>
-          </div>
-          <div className="hd-poprow">
-            <button className="hd-mini" onClick={() => setOpenMenu("steps")}><Icon name="pencil" size={13} /> Edit steps</button>
-            <span className="hd-sechint">{drillSteps.length ? `${drillSteps.length} step${drillSteps.length > 1 ? "s" : ""} — play pauses at each` : "scrub, pause, add your own"}</span>
-          </div>
+
+          <div className="hd-mh hd-prefsec">App</div>
+          <button className="hd-item" onClick={() => setOpenMenu("prefs")}>
+            <Icon name="sliders" size={16} /> App &amp; drill settings
+            <span className="hd-chev"><Icon name="chevronRight" size={14} /></span>
+          </button>
+          {/* The version watermark used to sit in the bottom bar. It moved in
+              here so the bar could be controls only — it's the build stamp you
+              check after a deploy, so it stays a tap away rather than being
+              buried, and it doubles as the way into About. */}
+          <button className="hd-item hd-verrow" onClick={() => setOpenMenu("about")}>
+            <Icon name="info" size={16} />
+            <span className="hd-vernum">v{APP_VERSION}</span>
+            <span className="hd-verstamp">{BUILD_STAMP}</span>
+            <span className="hd-chev"><Icon name="chevronRight" size={14} /></span>
+          </button>
+
           {/* destructive action lives alone at the very bottom, behind a divider */}
           <div className="hd-rule" />
           <button className="hd-item danger"
@@ -10233,20 +10240,6 @@ export default function DrillAnimator() {
               setSelectedId(null); setPopup(null); setOpenMenu(null);
               flash("Board cleared — Undo restores it", 3000);
             }}><Icon name="trash" size={16} /> Clear all</button>
-          <div className="hd-note">
-            Tap a piece, route point, or line for its settings.
-            Double-tap a line to add a point. Drag to move; touch drags show a magnifier.
-          </div>
-          {/* The version watermark used to sit in the bottom bar. It moved in
-              here so the bar could be controls only — it's the build stamp you
-              check after a deploy, so it stays a tap away rather than being
-              buried, and it doubles as the way into About. */}
-          <button className="hd-item hd-verrow" onClick={() => setOpenMenu("about")}>
-            <Icon name="info" size={16} />
-            <span className="hd-vernum">v{APP_VERSION}</span>
-            <span className="hd-verstamp">{BUILD_STAMP}</span>
-            <span className="hd-chev"><Icon name="chevronRight" size={14} /></span>
-          </button>
         </div>
       )}
 
@@ -10337,6 +10330,8 @@ export default function DrillAnimator() {
             desc="Skater stride, stick swing, puck cradle and airborne shots. Turn off for a plainer picture, or if playback stutters on an older device." />
           <PrefToggle title="Goal splashes" on={showResult} set={setShowResult}
             desc="Call GOAL! / SAVE! / POST! over the net as each shot resolves." />
+          <PrefToggle title="Ice zones" on={showZones} set={setShowZones}
+            desc="Name the areas of the sheet over the rink — slot, half wall, neutral zone. Useful when writing captions that refer to them." />
           <PrefRow title="Line thickness"
             desc="Scales every route line, arrow and mark. Worth raising when projecting to a room."
             control={<Stepper value={lineScale} onChange={setLineScale} step={0.25} min={0.5} max={3} suffix="×" />} />
@@ -10349,6 +10344,17 @@ export default function DrillAnimator() {
           {/* Smart pen — settings that outlive a sketch, so they belong with the
               standing preferences rather than inside the Draw palette (which is
               a strip, not a settings panel, and only exists while drawing). */}
+          <div className="hd-mh hd-prefsec">Board</div>
+          <PrefToggle title="Allow selecting locked items" on={lockedSelectable} set={setLockedSelectable}
+            desc="A locked piece normally ignores taps entirely, so you can draw over it freely. Turn this on to still select one — its panel opens with an Unlock button instead of its settings." />
+
+          <div className="hd-mh hd-prefsec">Presentation</div>
+          <PrefRow title="Caption pause"
+            desc={`How long play holds at each caption before carrying on — ${presoDelay}s. Tapping the ice skips ahead without waiting.`}
+            control={<Stepper value={presoDelay} onChange={setPresoDelay} step={0.5} min={0} suffix="s" />} />
+          <PrefToggle title="Minor steps" on={minorDesc} set={setMinorDesc}
+            desc="Auto-caption the areas each player skates through, on top of the steps you wrote yourself. A quick way to narrate a drill you haven't annotated." />
+
           <div className="hd-mh hd-prefsec">Smart pen</div>
           <PrefToggle title="Palm rejection" on={palmReject} set={setPalmReject}
             desc="While an Apple Pencil is in use, ignore fingers on the ice so a resting hand can't draw or drag a piece." />
