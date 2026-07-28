@@ -8649,11 +8649,17 @@ export default function DrillAnimator() {
   }
 
   // Whether the action bar is showing. ONE expression, read by both the bar's
-  // own render and the root class that reserves its band — those used to be
-  // written separately and disagreed during a presentation hold, which kept a
-  // strip of ice reserved for a bar that wasn't there. The bar is otherwise
-  // present in every mode at one height, so switching flows never jogs the ice.
-  const actOn = !aiPlay && !holdStep;
+  // own render and the root class that reserves its band, so the two can't
+  // disagree about how much ice is spoken for.
+  //
+  // A presentation caption does NOT hide it. The bar used to vanish while a
+  // caption was held, and pulling its band with it resized the ice by 68px on
+  // every beat of a presentation — a jump precisely where the drill is meant to
+  // be sitting still in front of a team. Keeping it up also keeps the transport
+  // reachable, so you can pause or scrub back while a caption is on screen,
+  // which is the moment a coach most wants to. The caption clears the bar on its
+  // own (.hd-preso offsets by --hd-act) and tapping it still advances the hold.
+  const actOn = !aiPlay;
 
   // The pen's three line settings — colour, thickness, style. Wide screens lay
   // them out inline, ready at the click; narrow ones stack all three inside a
