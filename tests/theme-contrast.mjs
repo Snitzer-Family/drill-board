@@ -313,7 +313,9 @@ check("DENSE_MIN drives both the bar tier and the menu anchoring", () => {
 // dark-on-teal the moment a light theme existed. Pair contrast can't catch
 // this: both tokens are individually fine, the rule just never opts in.
 const ACCENT_FILL_NO_TEXT = new Set([
-  ".hd-modeknob",    // the sliding mode knob; its labels live on .hd-modeopt
+  // the sliding knob shared by the mode switch and the pen segment; the labels
+  // it slides under live on .hd-modeopt / .hd-segopt, which do set on-accent
+  ".hd-modeknob, .hd-segknob",
   ".hd-sw.on",       // switch track, no text at all
 ]);
 check("every accent-filled rule sets the on-accent text colour", () => {

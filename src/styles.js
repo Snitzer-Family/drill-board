@@ -187,7 +187,8 @@ export const STYLES = `
            ink/size/style for one popover button rather than wrapping. */
         .hd-pengroup { display:flex; align-items:center; gap:4px; flex-wrap:nowrap; }
         .hd-pensep { flex:none; width:1px; height:26px; background:var(--db-border-strong); margin:0 3px; }
-        .hd-penspacer { flex:1 1 auto; min-width:0; }
+        .hd-penspacer { flex:1 1 auto; min-width:0; display:flex; align-items:center;
+          overflow:hidden; padding:0 4px; }
         /* labelled tool: icon over a caption, like the bottom bar */
         .hd-pentool { flex:none; min-width:44px; height:42px; padding:3px 5px 2px;
           display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px;
@@ -347,16 +348,21 @@ export const STYLES = `
            content-box each cell measured --mw PLUS its padding while the knob
            only travelled --mw, so it stopped short and dragged the labels off
            centre. */
-        .hd-mode, .hd-modeknob, .hd-modeopt { box-sizing:border-box; }
-        .hd-mode { --mw:44px; position:relative; flex:none; display:flex; height:44px;
+        /* Shared by the bottom bar's DRAW/EDIT/PLAY switch and the draw bar's
+           pen segment. The mode switch keeps its own class names because the
+           browser suites select .hd-modeopt.draw by name; the two share these
+           rules rather than a second copy of the knob maths. */
+        .hd-mode, .hd-modeknob, .hd-modeopt,
+        .hd-seg, .hd-segknob, .hd-segopt { box-sizing:border-box; }
+        .hd-mode, .hd-seg { --mw:44px; position:relative; flex:none; display:flex; height:44px;
           padding:3px; border-radius:10px; background:var(--db-surface-sunken);
           border:1px solid var(--db-border-strong); }
-        .hd-modeknob { position:absolute; top:3px; bottom:3px; left:3px; width:var(--mw);
+        .hd-modeknob, .hd-segknob { position:absolute; top:3px; bottom:3px; left:3px; width:var(--mw);
           border-radius:8px; background:var(--db-accent); transition:transform .16s ease;
           pointer-events:none; }
         .hd-mode.edit .hd-modeknob { transform:translateX(var(--mw)); }
         .hd-mode.play .hd-modeknob { transform:translateX(calc(var(--mw) * 2)); }
-        .hd-modeopt { position:relative; z-index:1; flex:none; width:var(--mw);
+        .hd-modeopt, .hd-segopt { position:relative; z-index:1; flex:none; width:var(--mw);
           display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px;
           padding:2px; background:none; border:none; color:var(--db-text-muted); cursor:pointer; }
         /* Match on the cell's OWN class, never its position: the knob is a
@@ -366,7 +372,21 @@ export const STYLES = `
         .hd-mode.play .hd-modeopt.play { color:var(--db-text-on-accent); }
         /* the knob is what shows "you are here", so a dimmed PLAY cell must not
            also dim the knob sitting under it */
-        .hd-modeopt:disabled { opacity:.4; cursor:default; }
+        .hd-modeopt:disabled, .hd-segopt:disabled { opacity:.4; cursor:default; }
+        /* the pen segment: what the pen does with your ink. Sized to sit level
+           with the .hd-pentool buttons beside it (42px), with cells wide enough
+           for a word rather than a four-letter caption. */
+        .hd-penseg { --mw:52px; height:42px; }
+        .hd-penseg .hd-segopt { font-size:8.5px; font-weight:700; letter-spacing:.03em; }
+        .hd-penseg.sketch .hd-segknob { transform:none; }
+        .hd-penseg.manual .hd-segknob { transform:translateX(var(--mw)); }
+        .hd-penseg.auto .hd-segknob { transform:translateX(calc(var(--mw) * 2)); }
+        .hd-penseg.sketch .hd-segopt.sketch,
+        .hd-penseg.manual .hd-segopt.manual,
+        .hd-penseg.auto .hd-segopt.auto { color:var(--db-text-on-accent); }
+        /* what the pen will do, in words, in the bar's flexible slack */
+        .hd-pensays { flex:1 1 auto; min-width:0; font-size:11.5px; color:var(--db-text-muted);
+          white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
         /* caption under each bar icon — tooltips don't exist on touch */
         .hd-blbl { font-size:8.5px; font-weight:700; letter-spacing:.05em; line-height:1;
           text-transform:uppercase; opacity:.8; white-space:nowrap; }

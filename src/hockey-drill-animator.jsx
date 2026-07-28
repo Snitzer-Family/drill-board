@@ -57,6 +57,17 @@ const ROUTE_VIS = [
 ];
 const routeVis = m => ({ skaters: m === "player" || m === "all", puck: m === "puck" || m === "all" });
 
+// What the Smart pen does with a stroke. One row per state: the stored value,
+// the bar's label, its glyph, and — the point of the table — a plain sentence
+// about the NEXT stroke. That sentence is the tooltip, the hint over the ice
+// and the line on the bar, so those three can never drift apart.
+const PEN_READ = [
+  ["sketch", "Sketch", "pencil", "Ink stays exactly as you drew it."],
+  ["manual", "Manual", "wand", "Ink waits until you tap Convert."],
+  ["auto", "Auto", "brain", "Every stroke is read as you draw."],
+];
+const penReadRow = v => PEN_READ.find(([k]) => k === v) || PEN_READ[2];
+
 // How fast the whole drill runs, as a multiple of the base skating pace. This
 // is the SAME value the old "Drill pace" slider set in ft/s — it just belongs
 // on the transport, because slowing a drill down is something you do WHILE
@@ -580,10 +591,17 @@ export default function DrillAnimator() {
     penBuf.current = [];
     clearTimeout(penTimer.current);
     if (pending.length) setPenInk([]);
+    // ...but fold them in as whatever the pen is currently laying down. This
+    // used to hardcode ordinary ink, so tapping Convert inside the 1s settle
+    // window while sketching re-laid the buffered strokes at route fidelity —
+    // losing their per-point pressure — and then fed them to the classifier,
+    // which could turn handwriting into a player. commitPen honours the pen
+    // state; this path has to as well.
+    const buffered = penReadRef.current === "sketch";
     const board = pending.length
-      ? materializePenOps(piecesRef.current, pending.map(s => ({ op: "mark", pts: s.pts, press: s.press })))
+      ? materializePenOps(piecesRef.current, pending.map(s => ({ op: "mark", pts: s.pts, press: s.press, ...(buffered ? { sketch: true } : {}) })))
       : piecesRef.current;
-    // note ink and locked ink are deliberately off-limits to the sweep
+    // sketch ink and locked ink are deliberately off-limits to the sweep
     const marks = board.filter(p => p.kind === "mark" && !p.lock && !p.sketch && (p.pts || []).length >= 2);
     if (!marks.length) { if (pending.length) setPieces(board); flash("No ink to convert"); return; }
     const ops = classifyPenGroup(marks.map(m => ({ pts: m.pts })), penCtx(board));
@@ -692,17 +710,23 @@ export default function DrillAnimator() {
   eraserRef.current = eraser;
   // auto: every settled burst is read straight away. Off: strokes stay ink
   // until Convert reads the whole drawing at once.
-  // Note mode: ink that opts out of recognition for good. Strokes skip the
-  // classifier and are stamped note=true, which Convert then steps over — so a
-  // scribbled reminder survives both auto and manual conversion. Still ordinary
-  // ink otherwise: selectable, restylable, erasable.
-  const [noteMode, setNoteMode] = useState(false);
-  const noteRef = useRef(false);
-  noteRef.current = noteMode;
+  // What the pen does with what you draw — ONE setting with three states, not
+  // two toggles. As two (note × auto) it implied four combinations, and the
+  // fourth is meaningless: sketch ink is never read, so "auto" had nothing to
+  // act on and the lit Auto button did nothing at all. Three states, and the
+  // impossible one can't be expressed.
+  //   sketch — never read. Also a different pen: finer capture, gentler
+  //            simplification, per-point pressure kept, drawn through its own
+  //            points instead of a fitted curve (see inkStepFt/inkEpsFt).
+  //   manual — ordinary ink; it waits on the board until Convert is tapped.
+  //   auto   — every stroke is read once the burst settles.
+  // Not persisted (neither half was), and deliberately NOT reset by setMode or
+  // by arming the eraser: it's a pen setting like colour, width and style.
+  const [penRead, setPenRead] = useState("auto");
+  const penReadRef = useRef("auto");
+  penReadRef.current = penRead;
+  const isSketch = penRead === "sketch";
   const [penPop, setPenPop] = useState(null);   // "size" | "style" popover, or null
-  const [autoConv, setAutoConv] = useState(true);
-  const autoRef = useRef(true);
-  autoRef.current = autoConv;
   const [stylusOn, setStylusOn] = useState(false);   // drives the hint text only
   // NB the `> 0` guard: performance.now() starts near zero, so without it a
   // never-touched-by-a-Pencil session would reject fingers for its first 5 min
@@ -4740,14 +4764,14 @@ export default function DrillAnimator() {
     setPenInk([]);
     if (!fresh.length) return;
     const board = piecesRef.current;
-    // Note mode: never read, now or later — the ink is the point.
-    if (noteRef.current) {
+    // Sketch: never read, now or later — the ink is the point.
+    if (penReadRef.current === "sketch") {
       setPieces(ps => materializePenOps(ps, fresh.map(s => ({ op: "mark", pts: s.pts, press: s.press, sketch: true }))));
       return;
     }
     // Manual mode: strokes just lay down as ink. Nothing is read until you hit
     // Convert, which looks at the whole drawing at once.
-    if (!autoRef.current) {
+    if (penReadRef.current === "manual") {
       setPieces(ps => materializePenOps(ps, fresh.map(s => ({ op: "mark", pts: s.pts, press: s.press }))));
       return;
     }
@@ -5376,7 +5400,7 @@ export default function DrillAnimator() {
     const pt = svgPt(e);
     if (d.kind === "drawing") {
       const last = drawRaw.current[drawRaw.current.length - 1];
-      if (Math.hypot(pt.x - last.x, pt.y - last.y) > (d.pen ? inkStepFt(noteRef.current) : 1.1)) {
+      if (Math.hypot(pt.x - last.x, pt.y - last.y) > (d.pen ? inkStepFt(penReadRef.current === "sketch") : 1.1)) {
         if (e.pointerType === "pen" && e.pressure > 0) pt.p = e.pressure;
         drawRaw.current.push(pt);
         setDrawPreview(drawRaw.current.slice());
@@ -8891,6 +8915,25 @@ export default function DrillAnimator() {
     );
   }
 
+  // Changing what the pen does COMMITS what you have already drawn first, so a
+  // stroke always lands under the mode it was drawn in. Without this, sketching
+  // and then switching to Manual inside the 1s settle window re-laid those
+  // strokes as ordinary ink — at route fidelity, without their per-point
+  // pressure — and the next Convert could read your handwriting as a player.
+  // Same reason every tool change and setMode already flush.
+  const setPen = v => {
+    if (v !== penRead) flushPen();
+    setPenRead(v);
+    setEraser(false);
+    if (tool !== "pen") setTool("pen");
+  };
+  // "Manual — ink waits until you tap Convert." The stored sentence stands
+  // alone on the bar, so it is sentence-case; joined after the label it reads
+  // as one clause, hence the lowercased first letter.
+  const penSays = () => {
+    const [, label, , says] = penReadRow(penRead);
+    return `${label} — ${says.charAt(0).toLowerCase()}${says.slice(1)}`;
+  };
   const toolHint =
     !playing && !aiPlay && animT > 0
       ? "Paused — tap the ice or a piece to edit (jumps to start)"
@@ -8901,9 +8944,12 @@ export default function DrillAnimator() {
       : tool === "draw"
       ? (selected ? `Drawing ${selected.id}'s route — drag across the ice` : "Drag on the ice — creates a player")
       : tool === "marker" ? "Marker — drag on the ice to draw"
+      // Say what the pen will do with the NEXT stroke, from the same sentence
+      // the bar shows. It used to say "ink becomes pieces" unconditionally —
+      // which was flatly untrue in Sketch, on the one surface a phone has.
       : tool === "pen" ? (stylusOn && stylusMode()
-          ? "Smart pen — Apple Pencil (palm rejection on; fingers ignored on the ice)"
-          : "Smart pen — sketch X's, routes & dashed passes; ink becomes pieces")
+          ? `${penSays()} Apple Pencil: palm rejection on.`
+          : penSays())
       : tool !== "select" ? "Tap the ice to place"
       // Edit mode's bar has room for a standing hint, so say what the two
       // gestures are rather than leaving the strip blank
@@ -8998,7 +9044,7 @@ export default function DrillAnimator() {
       if (animT > 0) { resetAnim(); flash("Back to start — editing"); }
     }
     if (next === "draw") { setTool("pen"); setEraser(false); }
-    else { setTool("select"); setEraser(false); setNoteMode(false); }
+    else { setTool("select"); setEraser(false); }
     if (next !== "edit") { setSelectedId(null); setMultiSel(null); setEditingFork(null); }
     setModeRaw(next);
   };
@@ -10150,25 +10196,59 @@ export default function DrillAnimator() {
             {/* No Draw|Edit switch here any more — the bottom bar's DRAW·EDIT·PLAY
                 segment owns that, and it's the ~90px this palette needed to fit
                 on one line at phone widths. */}
-            {/* "Sketch", not "Note": the point isn't that you're annotating,
-                it's that the stroke is left exactly as drawn instead of being
-                read as a player or a route. Note implied writing something
-                down; what this actually buys you is free drawing.
-                The DSL writes `sketch` on a mark too (DSL 10); the old
-                `note` spelling is still read, so drills saved before the
-                rename keep their ink unconverted. */}
-            <button className={`hd-pentool${noteMode ? " on" : ""}`}
-              title={noteMode ? "Sketch — this ink stays exactly as drawn; tap to let the pen read it again"
-                : "Sketch — draw freely, and the pen won't turn it into players or routes"}
-              onClick={() => { setNoteMode(v => !v); setEraser(false); if (tool !== "pen") setTool("pen"); }}>
-              <Icon name="pencil" size={18} /><span>Sketch</span>
-            </button>
+            {/* What the pen does with your ink, as ONE control. It used to be
+                a Sketch toggle here and an Auto toggle 100px away in the other
+                group, with Convert next to that — three controls for one idea,
+                split across the bar, and the pair implied a fourth state that
+                does not exist. Each cell says what happens to the NEXT stroke;
+                the sentence under PEN_READ says it in words.
+                On a phone there is no room for three cells, so it cycles —
+                the same idiom as Speed and Lines on the transport.
+                The DSL writes `sketch` on a mark (DSL 10); the old `note`
+                spelling is still read, so older drills keep their ink. */}
+            {dense ? (
+              <div className={`hd-seg hd-penseg ${penRead}`} role="group" aria-label="What the pen does">
+                <span className="hd-segknob" />
+                {PEN_READ.map(([v, label, icon, says]) => (
+                  <button key={v} className={`hd-segopt ${v}`} title={`${label} — ${says}`}
+                    aria-pressed={penRead === v}
+                    onClick={() => { setPen(v); }}>
+                    <Icon name={icon} size={15} /><span>{label}</span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              (() => {
+                const i = PEN_READ.findIndex(([v]) => v === penRead);
+                const [, label, icon, says] = penReadRow(penRead);
+                return (
+                  <button className={`hd-pentool${isSketch ? " on" : ""}`}
+                    title={`${label} — ${says} Tap to change.`}
+                    aria-label={`Pen: ${label}`}
+                    onClick={() => setPen(PEN_READ[(i + 1) % PEN_READ.length][0])}>
+                    <Icon name={icon} size={18} /><span>{label}</span>
+                  </button>
+                );
+              })()
+            )}
+            {/* Convert lives beside the state it belongs to, and ONLY in
+                manual — it is what makes conversion happen there. In sketch
+                nothing is ever read, and in auto it already has been, so a
+                button that swept older ink from either was just a surprise. */}
+            {penRead === "manual" && (
+              <button className="hd-pentool" title="Convert — read the whole drawing now" onClick={convertInk}>
+                <Icon name="wand" size={18} /><span>Convert</span>
+              </button>
+            )}
+            <div className="hd-pensep" />
             {/* a toggle, not a one-way latch — with Draw folded into the mode
-                switch, this is the only way back to inking */}
+                switch, this is the only way back to inking. It does NOT touch
+                what the pen does: arming the eraser used to silently drop you
+                out of Sketch, with no way back but noticing. */}
             <button className={`hd-pentool${eraser ? " on" : ""}`}
               title={eraser ? "Erasing — tap to ink again"
                 : "Erase — stroke over ink, routes or pieces to remove them"}
-              onClick={() => { setEraser(v => !v); setNoteMode(false); if (tool !== "pen") setTool("pen"); }}>
+              onClick={() => { setEraser(v => !v); if (tool !== "pen") setTool("pen"); }}>
               <Icon name="eraser" size={18} /><span>Erase</span>
             </button>
             <div className="hd-pensep" />
@@ -10221,18 +10301,17 @@ export default function DrillAnimator() {
             )}
           </div>
 
-          <div className="hd-penspacer" />
+          {/* The bar's one flexible child, and until now 450px of dead space on
+              a desktop. It says in plain words what the pen will do with the
+              next stroke — the labels name the state, this says what the state
+              MEANS. On a phone there's no room, so the same sentence goes over
+              the ice through toolHint instead. */}
+          <div className="hd-penspacer">
+            {dense && <span className="hd-pensays">{penReadRow(penRead)[3]}</span>}
+          </div>
 
           {/* what happens to the BOARD */}
           <div className="hd-pengroup">
-            <button className="hd-pentool" title="Convert — read the whole drawing now" onClick={convertInk}>
-              <Icon name="wand" size={18} /><span>Convert</span>
-            </button>
-            <button className={`hd-pentool${autoConv ? " on" : ""}`}
-              title={autoConv ? "Auto: every stroke is read as you draw" : "Manual: ink stays ink until you tap Convert"}
-              onClick={() => setAutoConv(v => !v)}>
-              <Icon name="brain" size={18} /><span>Auto</span>
-            </button>
             {/* "Clear" beside a trash can, in red, read as "clear the BOARD" —
                 it only ever removes ink. Three things say so now: the label
                 names what goes, the count says how much, and with no ink on
