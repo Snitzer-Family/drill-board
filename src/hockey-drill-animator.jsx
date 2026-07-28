@@ -2913,9 +2913,9 @@ export default function DrillAnimator() {
           const a = flatOf(lastTo, t.ref, t.at);
           if (a != null) { win = t; winAt = a; break; }
         }
-        const tp = { shotAt: null, rimAt: null, chipAt: null, rimAim: null, chipAim: null, rimDist: null, chipDist: null };
+        const tp = { shotAt: null, rimAt: null, chipAt: null, rimAim: null, chipAim: null, rimDist: null, chipDist: null, shand: null };
         if (win) {
-          if (win.kind === "shot") { tp.shotAt = winAt; tp.net = win.net ?? null; }   // the terminal's OWN net (absent = nearest)
+          if (win.kind === "shot") { tp.shotAt = winAt; tp.net = win.net ?? null; tp.shand = win.shand ?? null; }   // the terminal's OWN net (absent = nearest) + forehand/backhand call
           else if (win.kind === "rim") { tp.rimAt = winAt; tp.rimAim = win.aim ?? null; tp.rimDist = win.dist ?? null; }
           else { tp.chipAt = winAt; tp.chipAim = win.aim ?? null; tp.chipDist = win.dist ?? null; }
           tp._winTerm = win;   // the AUTHORING terminal that fired this run (ghost pass skips its duplicate)
@@ -6872,6 +6872,31 @@ export default function DrillAnimator() {
       );
     };
 
+    // Which hand a shot comes off. Default reads the shooter's angle to the net and
+    // takes whichever side it is already on; the coach can force either instead —
+    // a drill built around finishing on the backhand shouldn't depend on geometry.
+    const shotSubRows = (p, i, st) => {
+      const pk = st.pk, term = st.term;
+      if (!pk || !term) return null;
+      const cur = term.shand || "auto";
+      const setHand = h => update(q => q.id !== pk.id ? q
+        : { ...q, terminals: (q.terminals || []).map(x => sameTerm(x, term)
+            ? { ...x, shand: h === "auto" ? undefined : h } : x) });
+      return (
+        <>
+          <div className="hd-sectitle" style={{ marginTop: 5 }}>Shot hand</div>
+          <div className="hd-poprow">
+            {[["auto", "Default", "whichever side the net is already on"],
+              ["fore", "Forehand", "always off the strong side"],
+              ["back", "Backhand", "always off the back of the blade"]].map(([k, lbl, tip]) => (
+              <button key={k} className={`hd-mini${cur === k ? " on" : ""}`} title={`${lbl} — ${tip}`}
+                onClick={() => setHand(k)}>{lbl}</button>
+            ))}
+          </div>
+        </>
+      );
+    };
+
     const ActionSteps = (p, i, fork = null) => {
       const steps = stepsAt(p, i, fork);
       // at the START spot (i<0): if a puck the player is carrying here is passed
@@ -7126,6 +7151,7 @@ export default function DrillAnimator() {
                 {st.warn && <div className="hd-poprow"><span style={{ fontSize: 10.5, color: "#c98a2b" }}>⚠ {st.warn}</span></div>}
                 {t === "pass" && passSubRows(p, i, st)}
                 {isGain(t) && gainSubRows(p, i, st)}
+                {t === "shoot" && shotSubRows(p, i, st)}
                 {(t === "chip" || t === "rim") && <div className="hd-poprow"><span style={{ fontSize: 10.5, color: "#8b99a8" }}>drag the on-ice handle to aim &amp; set distance</span></div>}
               </div>
             );

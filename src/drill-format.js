@@ -300,8 +300,11 @@ export function parseDrill(text) {
               // shoot=[<ref>.]<pt>[^<shooter>][>net] — a terminal shot. `^<shooter>` pins
               // WHICH player shoots (when several conditional receivers could each be the
               // final holder). Each terminal is its own independent entry in terminals[].
-              const ms = /^(?:([0-9a-fA-F/]+)\.)?(\d+)(?:\^([^>\s]+))?(?:>(\S+))?$/.exec(v);
-              if (ms) terminals.push({ kind: "shot", at: parseInt(ms[2], 10) - 1, ref: ms[1] ? wireToMemRef(ms[1]) : "", ...(ms[3] ? { by: ms[3] } : {}), ...(ms[4] ? { net: ms[4] } : {}) });
+              // ...and a trailing &f / &b forces the shot onto the forehand or the
+              // backhand; absent = whichever side the net is already on
+              const ms = /^(?:([0-9a-fA-F/]+)\.)?(\d+)(?:\^([^>&\s]+))?(?:>([^&\s]+))?(?:&([fb]))?$/.exec(v);
+              if (ms) terminals.push({ kind: "shot", at: parseInt(ms[2], 10) - 1, ref: ms[1] ? wireToMemRef(ms[1]) : "", ...(ms[3] ? { by: ms[3] } : {}), ...(ms[4] ? { net: ms[4] } : {}),
+                ...(ms[5] ? { shand: ms[5] === "f" ? "fore" : "back" } : {}) });
             } else if (key === "rim" || key === "chip") {
               // rim=[<ref>.]<pt> / chip=… is a terminal release into space; a handle
               // sets its direction (~<deg>) and distance (*<ft>). The player-handoff
@@ -625,7 +628,7 @@ export function serializeDrill(rink, pieces, title = "", desc = "", steps = [], 
     // >net for a shot, so sibling-branch terminals never overwrite each other.
     const byTag = a => a ? "^" + a : "";
     const terms = head && (p.terminals || []).length
-      ? (p.terminals || []).map(t => t.kind === "shot" ? ` shoot=${ixRef(t.at, t.ref)}${byTag(t.by)}${t.net ? ">" + t.net : ""}`
+      ? (p.terminals || []).map(t => t.kind === "shot" ? ` shoot=${ixRef(t.at, t.ref)}${byTag(t.by)}${t.net ? ">" + t.net : ""}${t.shand === "fore" ? "&f" : t.shand === "back" ? "&b" : ""}`
           : ` ${t.kind}=${ixRef(t.at, t.ref)}${byTag(t.by)}${t.aim != null ? "~" + f1(t.aim) : ""}${t.dist != null ? "*" + f1(t.dist) : ""}`).join("")
       : "";
     // no bare net= is written: a shot terminal carries its own >net (absence = nearest,
