@@ -37,12 +37,12 @@ export const TYPEFACES = [
 ];
 export const TYPEFACE_KEY = "drillboard:typeface";
 
-export const APP_VERSION = "6.91";
+export const APP_VERSION = "6.92";
 // DSL schema version, stamped into every serialized drill (`DSL <n>` header) so
 // production builds can eventually render a drill per the version that wrote it.
 // Bump ONLY on a breaking DSL change (new kinds/modifiers that older builds would
 // misread). Compatibility gating is not implemented yet — this just records intent.
-export const DSL_VERSION = 9;
+export const DSL_VERSION = 10;
 // visual size of players/pucks/cones relative to true rink-feet scale
 export const ICON_SCALE = 0.8;
 // ...and the player glyph draws a touch under that, so skaters crowd the ice less.
