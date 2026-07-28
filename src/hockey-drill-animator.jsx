@@ -5283,9 +5283,13 @@ export default function DrillAnimator() {
         if (d.kind === "anchor") {
           const dx = cp.x - s.x, dy = cp.y - s.y;
           s.x = cp.x; s.y = cp.y; path[d.seg] = s;
-          // a linked waypoint carries its tangent handles as it slides
-          if ((s.join === "smooth" || s.join === "sym") && d.wp != null)
-            path = translateJointHandles(path, d.wp, dx, dy);
+          // A waypoint carries its curve handles, whatever its join type. This
+          // used to be gated on smooth/sym, so dragging a CORNER waypoint left
+          // its control points behind — a Bézier control is defined relative to
+          // its anchor, so the curve reshaped itself around the move instead of
+          // travelling with it. jointControls returns null for a straight leg or
+          // a route end, so there's nothing to carry in those cases anyway.
+          if (d.wp != null) path = translateJointHandles(path, d.wp, dx, dy);
           return path;
         }
         if (d.kind === "q") { s.cx = cp.x; s.cy = cp.y; }
