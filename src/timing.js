@@ -263,7 +263,11 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
   // blade rather than orbiting it on a cradle of its own. Uses the display heading:
   // the puck has to stay on the stick through a pivot or an open-up too.
   function carriedPuckAt(car, e, warp) {
-    const te = Math.min(e, routeTimeW(car, warp));
+    // The clamp keeps the puck from walking past the end of the carrier's ROUTE. A
+    // carrier with no route has no such end — clamping them to t=0 froze the blade at
+    // the authored facing while the body turned to watch the play, and the puck sat
+    // off the stick for the whole drill.
+    const te = car.path.length ? Math.min(e, routeTimeW(car, warp)) : e;
     return bladeAt(car, te, warp, true, stickSpot(car.id, e));
   }
   // `disp` picks the display heading (pivot-smoothed); everything that PLANS puck
