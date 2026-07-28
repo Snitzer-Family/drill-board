@@ -46,11 +46,10 @@ export function resolveNearest(pieces) {
 }
 
 const GOALIE_DEPTH = 2.5; // how far out front of the net the goalie plays
-// stickhandling cradle: the carried puck (and the stick, in unison) oscillate as
-// the player dribbles. Same phase drives both so they move together.
+// stickhandling cradle: ONE oscillation, applied to the stick's rotation — the puck
+// rides the blade tip through it, so they move together by construction rather than
+// by two amplitudes being kept in step by hand.
 const DRIB_W = 2 * Math.PI * 2.0;          // ~2 cradles per second
-const DRIB_FORE = 0.55 * ICON_SCALE;       // fore-aft cradle (ft)
-const DRIB_LAT = 0.8 * ICON_SCALE;         // lateral sweep (ft)
 const DRIB_SWING = 7;                       // matching stick sweep (deg)
 
 // A forward↔backward transition is a PIVOT, not a teleport: the skater sweeps
@@ -62,7 +61,6 @@ const PIVOT_SEC = 0.4;
 // and skates on. Times are relative to the catch.
 const OPEN_IN = 0.7, OPEN_SET = 0.15, OPEN_HELD = 0.2, OPEN_OUT = 0.45;
 const OPEN_BACK_FT = 15;   // how far back down the puck's path counts as "where it came from"
-const CRADLE_IN = 0.3;     // seconds for the stickhandle to wind up after a catch
 // icons.jsx rotates the whole stick group about (1, 0) in icon units, so a point on
 // the blade travels with it. Swinging the puck's lever by the SAME angle is what
 // keeps the puck welded to the blade instead of orbiting it on its own cradle.
@@ -80,9 +78,20 @@ const swungLever = (fwd, lat, deg) => {
 // around NE→E and a left shot's around NW→W; the icon mirrors the stick group by
 // hand, so one set of (forward, lateral) numbers covers both. Icon units, ×ICON_SCALE
 // to get feet — the same convention as BLADE_/TIP_ in the animator.
-const RELEASE_FWD = 2.6, RELEASE_LAT = 5.0;      // ≈ 2.1ft ahead, 4.0ft to the side → 62° off the nose
-// how far the stick group has to swing from its drawn rest pose to put the blade there
-const RELEASE_SWING = 44;
+const TIP_FWD_U = 5.6, TIP_LAT_U = 2.45;         // the drawn blade tip, in icon units
+// How far the stick group swings from its drawn rest pose to release. The release
+// SPOT is derived from the swing rather than specified alongside it — that is what
+// guarantees the puck is exactly on the blade at the moment it leaves.
+const RELEASE_SWING = 44;                        // forehand: blade round to ~72° off the nose
+const BACK_SWING = -75;                          // backhand: round the other way, off the far face
+// A backhand is not an arms shot. The shoulders come round into it and the whole body
+// turns with the release, then unwinds. Applied to the heading, so the stick and the
+// puck riding it come along by construction — and folded into the launch point too,
+// or the puck would leave from a blade the body had already turned away from.
+const BACK_TWIST = 28;
+// ...and the release spots themselves, derived rather than declared alongside
+const FORE_LEVER = swungLever(TIP_FWD_U, TIP_LAT_U, RELEASE_SWING);
+const BACK_LEVER = swungLever(TIP_FWD_U, TIP_LAT_U, BACK_SWING);
 // piecewise smoothstep through [t, value] keyframes — reads as an animation curve
 const keyframe = (ks, t) => {
   if (t <= ks[0][0]) return ks[0][1];
@@ -164,20 +173,71 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
 
   // how far the body is turned out of its route heading by an open-up, at
   // route-local elapsed `eLoc` (0 outside a window)
-  function openAt(p, eLoc) {
-    if (planPhase) return 0;
+  // the turn AND how far into it we are — a standing player blends its idle gaze
+  // against this, so the weight has to come out too, not just the product
+  function openPart(p, eLoc) {
+    if (planPhase) return { deg: 0, k: 0 };
     const list = currentOpens[p.id];
-    if (!list) return 0;
-    let best = 0;
+    if (!list) return { deg: 0, k: 0 };
+    let best = { deg: 0, k: 0 };
     for (const w of list) {
       if (eLoc <= w.t0 || eLoc >= w.t3) continue;
       const k = eLoc < w.t1 ? smooth01((eLoc - w.t0) / (w.t1 - w.t0))
         : eLoc <= w.t2 ? 1
         : 1 - smooth01((eLoc - w.t2) / (w.t3 - w.t2));
-      const v = w.deg * k;
-      if (Math.abs(v) > Math.abs(best)) best = v;
+      if (Math.abs(w.deg * k) > Math.abs(best.deg * best.k)) best = { deg: w.deg, k };
     }
     return best;
+  }
+  const openAt = (p, eLoc) => { const o = openPart(p, eLoc); return o.deg * o.k; };
+
+  /* ---- idle gaze ----
+     A player standing still watches the play. Rather than snapping between whoever
+     is momentarily "nearest" — which jumps every time the ranking changes — each
+     moving thing pulls on the gaze by how fast and how close it is, and the player
+     looks down the sum. That drifts smoothly with the action and lands naturally on
+     whichever end of the ice is busiest. Display only, and a pure function of t.  */
+  const GAZE_IN = 0.6;       // ease off the authored facing over the first beat
+  const GAZE_MIN_SPD = 2;    // ft/s — slower than this is not "activity"
+  const GAZE_NEAR = 5;       // ft — ignore what is already on their own stick
+  const GAZE_PUCK = 2.4;     // the puck pulls harder than a body: you watch the puck
+  let gazeE = null, gazeSnap = null, gazeBusy = false;
+  // one pass per frame, shared by every standing player
+  function activityAt(e) {
+    if (gazeE === e && gazeSnap) return gazeSnap;
+    gazeBusy = true;                       // nested position lookups must not re-enter
+    try {
+      const out = [];
+      for (const q of pieces) {
+        if (q.kind !== "player" && q.kind !== "puck") continue;
+        if (q.kind === "player" && q.defense) continue;
+        const a = displayPosAt(q, Math.max(0, e - 0.12)), b2 = displayPosAt(q, e + 0.12);
+        out.push({ id: q.id, kind: q.kind, x: b2.x, y: b2.y,
+          spd: Math.hypot(b2.x - a.x, b2.y - a.y) / 0.24 });
+      }
+      gazeSnap = out; gazeE = e;
+    } finally { gazeBusy = false; }
+    return gazeSnap;
+  }
+  // Where a standing player should be looking, and how strongly. `conf` matters as
+  // much as the bearing: a hard "is it moving?" cutoff makes the head snap round the
+  // instant a skater crosses the threshold, so activity fades IN with speed and the
+  // gaze eases back to the authored pose as the rink goes quiet.
+  const GAZE_REF = 0.004;    // pull at which the player is fully watching
+  function gazeAt(p, e) {
+    if (gazeBusy || planPhase || !detail || e <= 0) return null;
+    let vx = 0, vy = 0, tot = 0;
+    for (const q of activityAt(e)) {
+      if (q.id === p.id) continue;
+      const dx = q.x - p.x, dy = q.y - p.y, d2 = dx * dx + dy * dy;
+      if (d2 < GAZE_NEAR * GAZE_NEAR) continue;
+      const moving = smooth01((q.spd - GAZE_MIN_SPD) / GAZE_MIN_SPD);
+      if (moving <= 0) continue;
+      const d = Math.sqrt(d2), w = (q.kind === "puck" ? GAZE_PUCK : 1) * moving * q.spd / d2;
+      vx += (dx / d) * w; vy += (dy / d) * w; tot += w;
+    }
+    if (!tot) return null;
+    return { deg: (Math.atan2(vy, vx) * 180) / Math.PI, conf: smooth01(tot / GAZE_REF) };
   }
 
   // the flip (deg) to add to leg i's tangent at route-local elapsed `eLoc` — the
@@ -212,7 +272,11 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
   // blade rather than orbiting it on a cradle of its own. Uses the display heading:
   // the puck has to stay on the stick through a pivot or an open-up too.
   function carriedPuckAt(car, e, warp) {
-    const te = Math.min(e, routeTimeW(car, warp));
+    // The clamp keeps the puck from walking past the end of the carrier's ROUTE. A
+    // carrier with no route has no such end — clamping them to t=0 froze the blade at
+    // the authored facing while the body turned to watch the play, and the puck sat
+    // off the stick for the whole drill.
+    const te = car.path.length ? Math.min(e, routeTimeW(car, warp)) : e;
     return bladeAt(car, te, warp, true, stickSpot(car.id, e));
   }
   // `disp` picks the display heading (pivot-smoothed); everything that PLANS puck
@@ -220,9 +284,9 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
   // move a launch point — and therefore never change a flight time.
   // `off` overrides the local (forward, lateral) lever — the carry blade by default,
   // the release spot out beside the foot for a shot or pass.
-  function bladeAt(pl, e, warp, disp = false, off = null) {
+  function bladeAt(pl, e, warp, disp = false, off = null, turn = 0) {
     const cp = routePosAt(pl, e, warp);
-    const rad = (((disp ? cp.a : cp.aStep) || 0) * Math.PI) / 180;
+    const rad = ((((disp ? cp.a : cp.aStep) || 0) + turn) * Math.PI) / 180;
     const side = pl.hand === "L" ? -1 : 1;
     // PLAYER_SCALE: the levers are in the glyph's own units, and the glyph draws
     // under full icon scale — leave it out and the puck floats past the blade
@@ -235,7 +299,23 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
     };
   }
   // The puck leaves from here, not off the toe of the blade.
-  const releaseAt = (pl, e, warp) => bladeAt(pl, e, warp, false, { fwd: RELEASE_FWD, lat: RELEASE_LAT });
+  // A backhand comes off the OTHER face of the blade: the puck leaves from in front
+  // of the body and round to the weak side, where a forehand leaves out beside the
+  // strong-side foot. (Compass, nose at N: right shot's forehand NE→E, backhand N→NW.)
+  const releaseAt = (pl, e, warp, turn = 0, back = false) =>
+    bladeAt(pl, e, warp, false, back ? BACK_LEVER : FORE_LEVER, turn);
+  // Which hand a shot comes off. "fore"/"back" are the coach's call; with no call it
+  // is whichever side the target is already on — you do not reach across your body
+  // for a net sitting on your backhand.
+  function shotBack(sh, e, warp, aimPt, forced) {
+    if (forced === "fore") return false;
+    if (forced === "back") return true;
+    if (!sh || !aimPt) return false;
+    const cp = routePosAt(sh, e, warp);
+    const rel = wrapDeg((Math.atan2(aimPt.y - cp.y, aimPt.x - cp.x) * 180) / Math.PI - (cp.aStep || 0));
+    const side = sh.hand === "L" ? -1 : 1;
+    return rel * side < -20;                 // clearly across the body → backhand
+  }
 
   // Where the puck sits on the stick at time e, as a local (forward, lateral) lever
   // in icon units: the blade tip while carrying, sweeping round to the release spot
@@ -243,39 +323,13 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
   // teleporting there the frame it is fired. Shared by the plan's carried-puck
   // position and the renderer's blade tip, so the two can't drift apart.
   function stickSpot(id, e) {
-    const base = { fwd: 5.6, lat: 2.45 };        // TIP_FWD / TIP_LAT — the drawn blade tip
-    if (!detail) return { ...base, k: 0, cradle: 0 };
-    const { plans } = getPlan();
-    let best = Infinity, k = 0, cradle = 1;
-    for (const pid in plans) {
-      for (const leg of plans[pid].legs) {
-        if (leg.type !== "fly" || leg.by !== id) continue;
-        // hold the lever out through the follow-through as well: the ride leg and the
-        // flight can straddle the release frame, and snapping the lever back at tau=0
-        // flicks the puck back to the blade for a frame right as it leaves
-        const WU = leg.shot ? 0.26 : 0.17, TH = leg.shot ? 0.14 : 0.09, tau = e - leg.t0;
-        if (tau < -WU || tau > TH || Math.abs(tau) >= best) continue;
-        best = Math.abs(tau);
-        k = tau <= 0 ? smooth01(1 + tau / WU)    // 0 at the top of the wind-up → 1 at release
-          : 1 - smooth01(tau / TH);              // ...then recover to the carry blade
-      }
-      // just gathered it: the stickhandle winds UP from rest. Snapping straight to
-      // full swing leaves the cradle's whole offset behind as a jump at the catch.
-      for (const leg of plans[pid].legs) {
-        if (leg.type !== "ride" || !leg.catch || leg.id !== id) continue;
-        const tau = e - leg.t0;
-        if (tau >= 0 && tau < CRADLE_IN) cradle = Math.min(cradle, smooth01(tau / CRADLE_IN));
-      }
-    }
-    // the idle stickhandle: the same waggle stickSwing gives the stick, so the puck
-    // rides the blade through it rather than swinging on a cradle of its own
-    const waggle = Math.sin((e * DRIB_W) / 2) * DRIB_SWING * cradle * (1 - k);
-    if (!k) return { ...swungLever(base.fwd, base.lat, waggle), k: 0 };
-    // `k` also fades the stickhandling cradle out: you don't dangle the puck while
-    // you are shooting it, and letting the cradle survive to the release frame just
-    // leaves its offset behind as a jump the moment the puck goes
-    return { ...swungLever(base.fwd + (RELEASE_FWD - base.fwd) * k,
-      base.lat + (RELEASE_LAT - base.lat) * k, waggle), k };
+    if (!detail) return { fwd: TIP_FWD_U, lat: TIP_LAT_U };
+    // The puck sits on the blade tip — wherever the stick actually is. Swinging it by
+    // the same curve that DRAWS the stick is the whole point: the previous version
+    // slid the puck straight to the release spot while the stick drew back off it, so
+    // for the length of a wind-up the two were pulling in opposite directions and the
+    // puck visibly left the blade before the shot.
+    return swungLever(TIP_FWD_U, TIP_LAT_U, swingDeg(id, e));
   }
 
   function getPlan() {
@@ -487,12 +541,15 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
       // Path-less (stationary) shooters release immediately at tBase.
       // netId targets THIS shot's net (each shot in a chain aims independently:
       // the terminal uses pk.net, a rebound transfer its own tr.net)
-      const doShot = (shootIdx, aimPt, netId = pk.net) => {
+      const doShot = (shootIdx, aimPt, netId = pk.net, shand = null) => {
         const launchT = (cur.path.length && shootIdx >= 0)
           ? Math.max(tBase, routeTimeW(cur, warp, Math.min(shootIdx, cur.path.length - 1)))
           : tBase;
         newEvents.push({ by: cur.id, at: shootIdx, t: launchT, kind: "shot" });
-        const launch = releaseAt(cur, launchT, warp);
+        // Provisional launch, only so the nearest net can be picked: the fore/back
+        // choice moves the release ~4ft, nowhere near enough to change WHICH net is
+        // closest, and the real launch is re-taken off the chosen hand below.
+        let launch = releaseAt(cur, launchT, warp);
         // target the nearest net or passer (respecting a forced side), else default;
         // a passer has no goalie, so shots at it always take the carom/rebound path.
         // A bumper or tire can also be an EXPLICIT target (netId = its id) — a
@@ -511,6 +568,13 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
         if (netPiece) net = { x: netPiece.x, y: netPiece.y };
         else net = netId === "left" ? { x: 11, y: 42.5 } : netId === "right" ? { x: 189, y: 42.5 }
           : launch.x < 100 ? { x: 11, y: 42.5 } : { x: 189, y: 42.5 };   // crease centers — where an auto-net would sit
+        // now the target is known, so the hand is too: the coach's call if they made
+        // one, else whichever side the net is already on — nobody reaches across their
+        // body for a net sitting on their backhand
+        const back = shotBack(cur, launchT, warp, aimPt || net, shand);
+        // twist toward the backhand side — the way their shoulders actually go
+        const twist = back ? -BACK_TWIST * (cur.hand === "L" ? -1 : 1) : 0;
+        if (back) launch = releaseAt(cur, launchT, warp, twist, true);
         const vShot = pace * SPEED.shot * (pk.speed || 1);
         const inx = net.x - launch.x, iny = net.y - launch.y;
         const mag = Math.hypot(inx, iny) || 1;
@@ -561,7 +625,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           const tArr = launchT + Math.hypot(contact.x - launch.x, contact.y - launch.y) / vShot;
           // a shot that reaches the net plane (post) climbs into it (rise); a puck
           // that sails wide/over arcs like a sauce and comes back down to land
-          legs.push({ type: "fly", shot: true, [flagKey]: true, ...(air ? (rise ? { rise: true } : { sauce: true }) : {}), by: cur.id,
+          legs.push({ type: "fly", shot: true, [flagKey]: true, ...(air ? (rise ? { rise: true } : { sauce: true }) : {}), by: cur.id, ...(back ? { back: true, relTurn: twist } : {}),
             x0: launch.x, y0: launch.y, x1: contact.x, y1: contact.y, t0: launchT, t1: tArr });
           const dm = Math.hypot(rollDir.x, rollDir.y) || 1;
           // integrate the roll step by step, caroming off BOTH the rink boards and
@@ -628,7 +692,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           const tArr = launchT + Math.hypot(endPt.x - launch.x, endPt.y - launch.y) / vShot;
           // goal=true rides through the rest too: the puck sits BEHIND the net
           // plane, so render (via puckInGoal) sinks it under the cage
-          legs.push({ type: "fly", shot: true, goal: true, rise: airborne, by: cur.id, x0: launch.x, y0: launch.y, x1: endPt.x, y1: endPt.y, t0: launchT, t1: tArr });
+          legs.push({ type: "fly", shot: true, goal: true, rise: airborne, by: cur.id, ...(back ? { back: true, relTurn: twist } : {}), x0: launch.x, y0: launch.y, x1: endPt.x, y1: endPt.y, t0: launchT, t1: tArr });
           legs.push({ type: "rest", goal: true, x: endPt.x, y: endPt.y, t0: tArr });
           tBase = tArr;
           // if a collector was expecting this shot's rebound (aimPt) but it went in
@@ -665,7 +729,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
         const saved = (goalie && !isGoal) || (onNet && !!aimPt);
         // a blocked designated rebound stays flat (its carom is cut off at the net);
         // an airborne save/shot climbs into the net (rise), not a sauce arc
-        const flyLeg = { type: "fly", shot: true, save: saved, goal: false, rise: airborne && !aimPt, by: cur.id, x0: launch.x, y0: launch.y, x1: hit.x, y1: hit.y, t0: launchT, t1: tArr };
+        const flyLeg = { type: "fly", shot: true, save: saved, goal: false, rise: airborne && !aimPt, by: cur.id, ...(back ? { back: true, relTurn: twist } : {}), x0: launch.x, y0: launch.y, x1: hit.x, y1: hit.y, t0: launchT, t1: tArr };
         legs.push(flyLeg);
         // a designated rebound whose collection spot sits behind/through the net
         // can never get there — stop the puck dead at the net and break the chain
@@ -778,7 +842,17 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
         const launch0T = (cur.path.length && tr.at >= 0)
           ? Math.max(tBase, routeTimeW(cur, warp, Math.min(tr.at, cur.path.length - 1)))
           : tBase;
-        const launch0 = releaseAt(cur, launch0T, warp);
+        // A standing passer squares up to whoever they are feeding before they let it
+        // go — a give-and-go aims at the board it is banked off, not the eventual
+        // receiver. Skaters are unaffected (aimTurn only moves a stationary body).
+        const viaPc = tr.via ? pieces.find(q => q.id === tr.via
+          && (q.kind === "passer" || q.kind === "net" || q.kind === "player" || q.kind === "tire" || q.kind === "bumper")) : null;
+        const aimPt = viaPc ? { x: viaPc.x, y: viaPc.y }
+          : rec.path.length
+            ? segEnd(rec, tr.recvAt != null ? Math.max(0, Math.min(tr.recvAt, rec.path.length - 1)) : rec.path.length - 1)
+            : { x: rec.x, y: rec.y };
+        const rTurn = aimTurn(cur, launch0T, aimPt, warp);
+        const launch0 = releaseAt(cur, launch0T, warp, rTurn);
         // a give-and-go bounced off a stationary passer: the puck flies to the
         // passer first, then returns to the receiver from the passer's face; a
         // plain pass launches straight from the carrier's blade
@@ -788,7 +862,8 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           if (!passer) return;                                  // the passer was removed → drop the play
           const pPt = { x: passer.x, y: passer.y };
           const tHit = launch0T + Math.hypot(pPt.x - launch0.x, pPt.y - launch0.y) / vPass();
-          legs.push({ type: "fly", by: cur.id, x0: launch0.x, y0: launch0.y, x1: pPt.x, y1: pPt.y, t0: launch0T, t1: tHit });
+          legs.push({ type: "fly", by: cur.id, x0: launch0.x, y0: launch0.y, x1: pPt.x, y1: pPt.y, t0: launch0T, t1: tHit,
+            ...(rTurn ? { relTurn: rTurn } : {}) });
           launchMin = tHit; launchT = tHit; launch = pPt; byId = tr.via; viaFrom = true;
         }
         let target, tArr;
@@ -807,7 +882,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           for (let k = 0; k < 3; k++) {
             const flight = Math.hypot(anchor.x - launch.x, anchor.y - launch.y) / vPass();
             launchT = Math.max(launchMin, tRecvNat - flight);
-            if (!viaFrom) launch = releaseAt(cur, launchT, warp);  // a via return launches from the fixed passer
+            if (!viaFrom) launch = releaseAt(cur, launchT, warp, rTurn);  // a via return launches from the fixed passer
           }
           tArr = launchT + Math.hypot(anchor.x - launch.x, anchor.y - launch.y) / vPass();
           // warp only to SLOW an early receiver; never speed them up (f ≤ 1)
@@ -816,19 +891,21 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
             if (moving > 0 && avail > 0.05)
               warp[rec.id] = { upto: rj, f: Math.min(1, Math.max(0.25, moving / avail)) };
           }
-          target = bladeAt(rec, routeTimeW(rec, warp, rj), warp);
+          const tRj = routeTimeW(rec, warp, rj);
+          target = bladeAt(rec, tRj, warp, false, null, openIn(tr, rec) ? openTurn(rec, tRj, launch, warp) : 0);
           tArr = launchT + Math.hypot(target.x - launch.x, target.y - launch.y) / vPass();
         } else {
           tArr = launchT;
           for (let k = 0; k < 3; k++) {
-            target = bladeAt(rec, tArr, warp);
+            target = bladeAt(rec, tArr, warp, false, null, openIn(tr, rec) ? openTurn(rec, tArr, launch, warp) : 0);
             tArr = launchT + Math.hypot(target.x - launch.x, target.y - launch.y) / vPass();
           }
-          target = bladeAt(rec, tArr, warp);
+          target = bladeAt(rec, tArr, warp, false, null, openIn(tr, rec) ? openTurn(rec, tArr, launch, warp) : 0);
         }
         // a flat pass that would cut through a bumper lifts over it automatically
         const sauce = !!tr.sauce || (bumpSh.length > 0 && segCrossesNet(launch, target, bumpSh));
-        legs.push({ type: "fly", by: byId, x0: launch.x, y0: launch.y, x1: target.x, y1: target.y, t0: launchT, t1: tArr, sauce });
+        legs.push({ type: "fly", by: byId, x0: launch.x, y0: launch.y, x1: target.x, y1: target.y, t0: launchT, t1: tArr, sauce,
+          ...(byId === cur.id && rTurn ? { relTurn: rTurn } : {}) });
         legs.push({ type: "ride", id: rec.id, t0: tArr, catch: true, ...(tr.open ? { open: true } : {}) });
         // the carrier's own release (a `via` bounces off a passer first, so the
         // carrier lets go earlier, at launch0T)
@@ -838,7 +915,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
       });
       if (chainBlocked) { /* chain died at a net — no terminal action */ }
       else if (pk.termBy && cur && pk.termBy !== cur.id) { /* intended shooter never got it */ }
-      else if (pk.shotAt != null && cur) doShot(pk.shotAt); // terminal shot (no collector)
+      else if (pk.shotAt != null && cur) doShot(pk.shotAt, null, pk.net, pk.shand || null); // terminal shot (no collector)
       else if (pk.rimAt != null && cur) {              // terminal hard rim around the boards
         const at = pk.rimAt;
         const launchT = (cur.path.length && at >= 0) ? Math.max(tBase, routeTimeW(cur, warp, Math.min(at, cur.path.length - 1))) : tBase;
@@ -957,6 +1034,45 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
     return planCache.current;
   }
 
+  // How far a receiver has turned to face the puck at the moment they take it.
+  // Used in TWO places that must agree: the plan aims the pass at the blade this
+  // puts the stick on, and buildOpens turns the body through it. If only the body
+  // knew, the pass would fly at the un-opened stick and then visibly hook across at
+  // the last moment to find the real one.
+  // A fwd↔bwd reversal AT the catch waypoint already turns the receiver right round,
+  // and that pivot IS the opening-up — they turn to take the pass and keep turning
+  // into the backward stride. Layering a catch turn on top of it swings them most of
+  // the way round and then back, which reads as a wild spin. Read straight off the
+  // path so the planner and the renderer reach the same answer without either
+  // needing the other's timing.
+  const reversesAtCatch = (rec, at) =>
+    !!(rec && rec.path && at != null && at >= 0 && at + 1 < rec.path.length
+       && stepFlip(rec.path[at]) !== stepFlip(rec.path[at + 1]));
+  // does this delivery turn its receiver? — flagged by the coach, or a standing
+  // player, who always squares up to what is coming at them
+  const openIn = (tr, rec) => (!!(tr && tr.open) || !!(rec && !rec.path.length))
+    && !reversesAtCatch(rec, tr && tr.recvAt);
+  // The mirror of openTurn: a player standing still squares up to what they are
+  // about to play the puck at, so it leaves off their forehand instead of off
+  // whatever angle they were parked at. A skater is already going somewhere — their
+  // route is the aim — so this only moves a stationary body.
+  function aimTurn(rel, tAt, to, warp) {
+    if (!rel || rel.path.length || !to) return 0;
+    const here = routePosAt(rel, tAt, warp);
+    if (Math.hypot(to.x - here.x, to.y - here.y) < 1) return 0;
+    const deg = wrapDeg((Math.atan2(to.y - here.y, to.x - here.x) * 180) / Math.PI - (here.aStep || 0));
+    return Math.abs(deg) < 1 ? 0 : deg;
+  }
+  function openTurn(rec, tAt, from, warp) {
+    const here = routePosAt(rec, tAt, warp);
+    if (!from || Math.hypot(from.x - here.x, from.y - here.y) < 1) return 0;
+    let deg = wrapDeg((Math.atan2(from.y - here.y, from.x - here.x) * 180) / Math.PI - (here.aStep || 0));
+    if (Math.abs(deg) < 1) return 0;                    // already looking right at it
+    // dead astern is a coin flip — open over the shoulder that presents the forehand
+    if (Math.abs(deg) > 179) deg = 180 * (rec.hand === "L" ? -1 : 1);
+    return deg;
+  }
+
   // Opening up. At every catch flagged `open`, the receiver turns to face where the
   // puck is coming FROM — walked back down the puck's own planned legs until it is
   // OPEN_BACK_FT away, so a pass points at the passer, a rim back along the boards,
@@ -971,9 +1087,26 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
         const pl = plans[pk.id];
         if (!pl) continue;
         pl.legs.forEach((leg, k) => {
-          if (leg.type !== "ride" || !leg.open) return;
+          // a standing passer squaring up to their receiver: the plan already aimed
+          // the release off this exact turn (relTurn), so the body and the puck agree
+          if (leg.type === "fly" && leg.relTurn) {
+            const sh = pieces.find(q => q.id === leg.by && q.kind === "player");
+            if (sh) {
+              const t = leg.t0 - startWaitOf(sh);
+              (out[sh.id] = out[sh.id] || []).push({ t0: t - OPEN_IN - OPEN_SET, t1: t - OPEN_SET,
+                t2: t + OPEN_HELD, t3: t + OPEN_HELD + OPEN_OUT, deg: leg.relTurn });
+            }
+            return;
+          }
           const rec = pieces.find(q => q.id === leg.id && q.kind === "player");
-          if (!rec || !rec.path.length) return;
+          if (!rec || leg.type !== "ride") return;
+          // A player who is standing still turns to take it on their forehand as a
+          // matter of course — nobody waits square while a pass arrives over their
+          // shoulder. A skater only does it when the coach asked for it.
+          if (!leg.open && rec.path.length) return;
+          // the pivot at this waypoint is already doing the turning (see reversesAtCatch)
+          const pv = currentPivots[rec.id];
+          if (pv && [...pv.byIdx.values()].some(w => Math.abs(w.tc - (leg.t0 - startWaitOf(rec))) < 0.6)) return;
           const here = routePosAt(rec, leg.t0, warp);
           let sx = null, sy = null;
           for (let j = k - 1; j >= 0; j--) {
@@ -983,11 +1116,10 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
             sx = px; sy = py;
             if (Math.hypot(px - here.x, py - here.y) >= OPEN_BACK_FT) break;
           }
-          if (sx == null || Math.hypot(sx - here.x, sy - here.y) < 1) return;
-          let deg = wrapDeg((Math.atan2(sy - here.y, sx - here.x) * 180) / Math.PI - (here.aStep || 0));
-          if (Math.abs(deg) < 1) return;                    // already looking right at it
-          // dead astern is a coin flip — open over the shoulder that presents the forehand
-          if (Math.abs(deg) > 179) deg = 180 * (rec.hand === "L" ? -1 : 1);
+          // the SAME turn the plan aimed the delivery at (openTurn), so the stick is
+          // where the puck was sent and the flight stays straight
+          const deg = openTurn(rec, leg.t0, sx == null ? null : { x: sx, y: sy }, warp);
+          if (!deg) return;
           const t = leg.t0 - startWaitOf(rec);              // route-local, to match routePosAt
           (out[rec.id] = out[rec.id] || []).push({ t0: t - OPEN_IN - OPEN_SET, t1: t - OPEN_SET,
             t2: t + OPEN_HELD, t3: t + OPEN_HELD + OPEN_OUT, deg });
@@ -1040,6 +1172,12 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
     for (const p of pieces) {
       if (p.kind !== "player" || !p.path || p.path.length < 2) continue;
       const sw = startWaitOf(p);
+      // when this player takes a puck (route-local), so a reversal landing on a catch
+      // can lead into it rather than starting as the puck arrives
+      const catches = [];
+      for (const pid in plans)
+        for (const L of plans[pid].legs)
+          if (L.type === "ride" && L.catch && L.id === p.id) catches.push(L.t0 - sw);
       const list = [];
       for (let i = 0; i < p.path.length - 1; i++) {
         const from = stepFlip(p.path[i]), to = stepFlip(p.path[i + 1]);
@@ -1053,8 +1191,15 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
         } else {                                               // straddle the waypoint, clamped so a
           const inT = effMove(p, p.path[i], i, warp);          // very short leg isn't swallowed whole
           const outT = effMove(p, p.path[i + 1], i + 1, warp);
-          t0 = tc - Math.min(PIVOT_SEC / 2, 0.4 * inT);
-          t1 = tc + Math.min(PIVOT_SEC / 2, 0.4 * outT);
+          // A reversal that lands on a catch starts EARLY and runs long: the skater
+          // opens toward the pass before it arrives, takes it side-on, and settles the
+          // rest of the way into the backward stride. Centred on the waypoint instead,
+          // the turn only begins as the puck lands and reads as a reaction to it.
+          const meets = catches.some(ct => Math.abs(ct - tc) < 0.35);
+          const lead = meets ? Math.min(PIVOT_SEC * 1.1, 0.55 * inT) : Math.min(PIVOT_SEC / 2, 0.4 * inT);
+          const tail = meets ? Math.min(PIVOT_SEC * 0.9, 0.5 * outT) : Math.min(PIVOT_SEC / 2, 0.4 * outT);
+          t0 = tc - lead;
+          t1 = tc + tail;
         }
         list.push({ i, from, to, tc, tAbs: tc + sw, t0, t1, sign: 1 });
       }
@@ -1124,7 +1269,22 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
   // position/heading along a piece's own route at elapsed e (warp-aware).
   // Also returns v (normalized speed) and dist (feet travelled) for stride FX.
   function routePosAt(p, e, warp) {
-    if (!p.path.length) return { x: p.x, y: p.y, a: p.facing || 0, aStep: p.facing || 0, flip: 0, v: 0, dist: 0 };
+    if (!p.path.length) {
+      // A standing piece is not furniture: it watches the play, and squares up to a
+      // pass it is taking or making. aStep stays the AUTHORED facing, so every
+      // planned launch/catch point is unmoved — the plan adds its own turn explicitly.
+      const base = p.facing || 0;
+      const o = openPart(p, e - startWaitOf(p));
+      let show = base;
+      if (p.kind === "player") {
+        const g = gazeAt(p, e);
+        // ease off the authored pose rather than starting the drill mid-turn
+        if (g) show = base + wrapDeg(g.deg - base) * g.conf * smooth01(e / GAZE_IN);
+        // ...and a catch or release takes precedence over idle watching as it peaks
+        if (o.k > 0) show += wrapDeg(base + o.deg - show) * o.k;
+      } else show = base + o.deg * o.k;
+      return { x: p.x, y: p.y, a: show, aStep: base, flip: wrapDeg(show - base), v: 0, dist: 0 };
+    }
     e -= startWaitOf(p);   // hold at the start until the trigger fires (e<=0 → start pose below)
     // `a` is the DISPLAY heading — smoothed through a fwd↔bwd pivot; `aStep` keeps
     // the old instant flip, and everything that plans puck geometry (blade spots,
@@ -1169,7 +1329,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
       return { x: pt.x, y: pt.y, a: a + f, aStep: a + stepFlip(s), flip: f };
     };
     let prev = { x: p.x, y: p.y };
-    let dist = 0;
+    let dist = 0, lastSpd = 0;   // cruise speed of the leg just skated (for the stop spray)
     for (let i = 0; i < p.path.length; i++) {
       const s = p.path[i];
       const stop = (s.stop || 0) + trigPauseOf(p, i);
@@ -1189,7 +1349,8 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
         return { ...prev, a: tan + f, aStep: tOut + stepFlip(s), flip: f, v: 0, dist,
           // only a real STOP braked the previous leg (exitRest tests s.stop, not a
           // trigger pause) — relaxing a plant they never took would snap it on
-          brakeAt: dist, brake: i > 0 && (s.stop || 0) > 0 ? brakeRelax(e) : 0 };
+          brakeAt: dist, brakeUp: false, brakeSpd: lastSpd,
+          brake: i > 0 && (s.stop || 0) > 0 ? brakeRelax(e) : 0 };
       }
       e -= stop;
       const mt = effMove(p, s, i, warp);
@@ -1248,18 +1409,19 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           const braking = exitRest && e / mt > 1 - RAMP_DOWN;   // biting into a stop
           const smul = mt > 0 ? ((L / mt) / pace) * v : 0;
           return { ...atArc(el, L, L * sf, s, i), v, smul, dist: dist + L * sf, brakeAt: dist + L,
-            brake: braking ? 1 - v : 0 };
+            brake: braking ? 1 - v : 0, brakeUp: braking, brakeSpd: mt > 0 ? (L / mt) / pace : 0 };
         } catch { return { ...prev, a: 0, aStep: 0, flip: 0, v: 0, dist }; }
       }
       e -= mt;
       dist += L;
+      lastSpd = mt > 0 ? (L / mt) / pace : 0;
       prev = { x: s.x, y: s.y };
     }
     const last = p.path[p.path.length - 1], li = p.path.length - 1;
     const lp = segEnd(p, li - 1);
     const ta = segTangentAngle(lp, last, 0.98), fl = flip(li);
     return { x: last.x, y: last.y, a: ta + fl, aStep: ta + stepFlip(last), flip: fl, v: 0, dist,
-      brakeAt: dist, brake: brakeRelax(e) };
+      brakeAt: dist, brakeUp: false, brakeSpd: lastSpd, brake: brakeRelax(e) };
   }
 
   // A puck in the closing stretch of a delivery that ends in a catch: who takes it,
@@ -1276,6 +1438,19 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
     if (!leg || leg.type !== "fly" || e >= leg.t1 || !nx || nx.type !== "ride" || !nx.catch) return null;
     const w = smooth01(((e - leg.t0) / Math.max(0.001, leg.t1 - leg.t0) - 0.65) / 0.35);
     return w > 0 ? { id: nx.id, w } : null;
+  }
+
+  // Is this puck in the air (or skidding) right now? The renderer attaches a puck to
+  // the nearest blade by proximity, which is right for a carry but wrong the instant
+  // one is fired: for a frame or two the puck is still within reach of the stick that
+  // just shot it, so it gets snapped back onto the blade and then let go all at once.
+  function puckInFlight(pkId, e) {
+    const { plans } = getPlan();
+    const pl = plans[pkId];
+    if (!pl) return false;
+    let leg = pl.legs[0];
+    for (const L of pl.legs) { if (e >= L.t0) leg = L; else break; }
+    return !!leg && (leg.type === "fly" || leg.type === "skid") && e < leg.t1;
   }
 
   function displayPosAt(p, e) {
@@ -1315,7 +1490,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           if (planPhase || !leg.by || !prev || prev.type !== "ride" || prev.id !== leg.by) return null;
           const sh = pieces.find(q => q.id === leg.by && q.kind === "player");
           if (!sh) return null;
-          return bladeAt(sh, leg.t0, warp, true, { fwd: RELEASE_FWD, lat: RELEASE_LAT });
+          return bladeAt(sh, leg.t0, warp, true, leg.back ? BACK_LEVER : FORE_LEVER);
         };
         if (leg.type === "fly" && e < leg.t1) {
           const k = Math.max(0, Math.min(1, (e - leg.t0) / Math.max(0.001, leg.t1 - leg.t0)));
@@ -1371,8 +1546,10 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
   // mirrors the whole stick group for a left shot, so one sign serves both hands.
   // At the release frame the blade sits at RELEASE_SWING — out beside the near
   // foot, where the puck actually leaves — not swept across the nose.
-  function stickSwing(id, e) {
-    if (!detail) return 0;        // detailed animations off → sticks stay still
+  const stickSwing = (id, e) => (detail ? swingDeg(id, e) : 0);
+  // the stick's rotation (deg) at time e — one curve, drawn on the stick AND carried
+  // by the puck, so the two can never come apart
+  function swingDeg(id, e) {
     const { plans } = getPlan();
     let ang = 0, best = Infinity; // pick the most-centered event when several overlap
     let carrying = false;         // no shot/catch nearby → cradle the puck instead
@@ -1387,15 +1564,20 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
       for (const leg of plans[pid].legs) {
         if (leg.type === "fly" && leg.by === id) {
           const shot = !!leg.shot;
-          const WU = shot ? 0.26 : 0.17, FT = shot ? 0.34 : 0.22;
-          const BACK = shot ? RELEASE_SWING + 34 : RELEASE_SWING + 20;   // drawn back off the puck
-          const THRU = shot ? RELEASE_SWING - 52 : RELEASE_SWING - 34;   // follow through across
+          const WU = shot ? 0.22 : 0.15, FT = shot ? 0.32 : 0.2;
+          // The blade sits at ~28° off the nose at rest and at ~72° when it releases.
+          // The wind-up must stay INSIDE the player's own side: +34 swung it round to
+          // ~106°, i.e. behind them, and the stick read as flailing rather than loading.
+          // A backhand loads and follows through the OTHER way round, so the whole
+          // curve mirrors about its own release angle rather than being bolted on.
+          const REL = leg.back ? BACK_SWING : RELEASE_SWING, dir = leg.back ? -1 : 1;
+          const BACK = REL + dir * (shot ? 18 : 12);    // drawn back off the puck
+          const THRU = REL - dir * (shot ? 50 : 34);    // follow through across
           const tau = e - leg.t0;
           if (tau < -WU || tau > FT || Math.abs(tau) >= best) continue;
           best = Math.abs(tau);
           // 0 → back → (release, blade on the puck out beside the foot) → through → 0
-          ang = keyframe([[-WU, 0], [-0.55 * WU, BACK], [0, RELEASE_SWING],
-            [0.4 * FT, THRU], [FT, 0]], tau);
+          ang = keyframe([[-WU, 0], [-0.55 * WU, BACK], [0, REL], [0.4 * FT, THRU], [FT, 0]], tau);
         }
         if (leg.catch && leg.id === id) {
           const IN = 0.12, OUT = 0.24, MAX = 15;
@@ -1418,5 +1600,5 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
   // warped arrival time at a player's waypoint index (for movement captions)
   function waypointTime(p, i) { const { warp } = getPlan(); return routeTimeW(p, warp, i); }
 
-  return { getPlan, pieceTime, displayPosAt, stickSwing, stickSpot, catchApproach, waypointTime, puckInGoal };
+  return { getPlan, pieceTime, displayPosAt, stickSwing, stickSpot, catchApproach, puckInFlight, waypointTime, puckInGoal };
 }

@@ -1546,7 +1546,7 @@ export default function DrillAnimator() {
   // → effective piece so position sampling follows the reaction, not the base end
   const effById = new Map(effPieces.map(p => [p.id, p]));
   const effOf = p => p && p.kind === "player" && (p.forks || []).length ? (effById.get(p.id) || p) : p;
-  const { getPlan, pieceTime, displayPosAt, stickSwing, stickSpot, catchApproach, waypointTime, puckInGoal } = createTiming({ pieces: effPieces, pace, segRefs, planCache, seed: playSeed, realisticShots: effRealistic, detail: effDetail, odds: shotOdds });
+  const { getPlan, pieceTime, displayPosAt, stickSwing, stickSpot, catchApproach, puckInFlight, waypointTime, puckInGoal } = createTiming({ pieces: effPieces, pace, segRefs, planCache, seed: playSeed, realisticShots: effRealistic, detail: effDetail, odds: shotOdds });
   // intent plan for the route preview (identical to the main plan but with misses
   // off, so shots always route on net). Only built when realistic shots are on and
   // the puck-path overlay is actually shown; otherwise the main plan already IS the
@@ -1558,7 +1558,16 @@ export default function DrillAnimator() {
   // a light's cue timeline can outlast every route — keep the drill running long
   // enough to show every cue (so a "read the light" reaction has time to resolve)
   const cueSpan = p => p.kind === "light" && p.cues ? p.cues.reduce((a, c) => a + Math.max(0.1, c.dur || 0), 0) : 0;
-  const totalTime = Math.max(0.1, ...effPieces.map(pieceTime), ...effPieces.map(cueSpan));
+  // How long the DRILL is — what a coach reads off the panel.
+  const drillTime = Math.max(0.1, ...effPieces.map(pieceTime), ...effPieces.map(cueSpan));
+  // ...and how long the ANIMATION runs. The last thing to happen in most drills is a
+  // skater stopping, and a stop is not instant: the hockey-stop plant settles back
+  // square and the snow it throws drifts out and fades. With the clock ending on the
+  // same frame the last leg does, none of that ever played — it was cut off mid-bite
+  // and the loop snapped straight back to the start. A short tail lets it finish.
+  // Idle time only: every leg time is absolute, so nothing in the drill moves.
+  const END_HOLD = 0.8;
+  const totalTime = drillTime + END_HOLD;
   const hasTimeline = totalTime > 0.1001; // static board (no routes/cues) → no player bar
   totalRef.current = totalTime;
 
@@ -2051,6 +2060,47 @@ export default function DrillAnimator() {
   const FIDGET_BOB = 0.07;  // ft of fore-aft drift while standing
   const FIDGET_LEAN = 2.2;  // deg of body wobble while standing
   const FIDGET_FADE = 0.35; // ×base pace at which the fidget has fully faded out
+  // Ice spray: a skater who bites the ice hard throws a little puff of shavings off
+  // their edges. Only worth drawing when they actually arrive with speed — a glide
+  // into a stop shaves nothing. Display-only and, like everything else in playback, a
+  // pure function of t: the specks are placed off a hash of the piece id, never a
+  // live random, so scrubbing back retraces the same puff.
+  // Painted in ice-ink (the puck's colour) rather than white: light ice is #f5fafd,
+  // so white shavings on it are invisible. ice-ink is the one colour the theme
+  // guarantees against the ice in BOTH modes — dark scuff on a white sheet, bright
+  // spray on a dark one.
+  const SPRAY_AT = 1.15;    // ×base pace: below this the stop is a glide, no snow
+  const SPRAY_FULL = 2.0;   // ×base pace: a full-blooded hockey stop
+  const SPRAY_N = 16;       // specks
+  function snowSpray(p, dp) {
+    if (p.kind !== "player" || !effDetail || animT <= 0 || whiteboard) return null;
+    const amt = dp.brake || 0;
+    if (amt <= 0.02) return null;
+    const hard = Math.max(0, Math.min(1, ((dp.brakeSpd || 0) - SPRAY_AT) / (SPRAY_FULL - SPRAY_AT)));
+    if (hard <= 0.02) return null;
+    // the puff keeps expanding as it fades — it is thrown, not breathed in again.
+    // `brakeUp` says which half of the bite we are in, so the throw grows straight
+    // through the stop instead of tracking `amt` back down.
+    const grow = dp.brakeUp ? 0.45 * amt : 0.45 + 0.55 * (1 - amt);
+    // ...off the edge they planted on, and forward along the way they were going
+    const side = Math.sin((2 * Math.PI * (dp.brakeAt || 0)) / STRIDE_LAMBDA) >= 0 ? 1 : -1;
+    const hd = ((dp.a || 0) - PLANT_DEG * amt * side) * Math.PI / 180;   // travel, before the plant turned them
+    const fx0 = Math.cos(hd), fy0 = Math.sin(hd), lx0 = -Math.sin(hd), ly0 = Math.cos(hd);
+    let h = 0;
+    for (let i = 0; i < String(p.id).length; i++) h = (h * 31 + String(p.id).charCodeAt(i)) | 0;
+    const els = [];
+    for (let i = 0; i < SPRAY_N; i++) {
+      const r1 = ((Math.sin((h + i * 97) * 12.9898) * 43758.5453) % 1 + 1) % 1;
+      const r2 = ((Math.sin((h + i * 313) * 78.233) * 43758.5453) % 1 + 1) % 1;
+      const reach = (0.7 + 5.4 * ((i + r1) / SPRAY_N)) * grow * (0.6 + 0.4 * hard);
+      const fan = (r2 - 0.5) * 2.4 * reach * 0.5;             // widens as it flies out
+      const cx = dp.x + (fx0 * reach + lx0 * (fan + 1.5 * side)) ;
+      const cy = dp.y + (fy0 * reach + ly0 * (fan + 1.5 * side));
+      els.push(<circle key={i} cx={cx} cy={cy} r={(0.42 + 0.66 * r1) * (0.55 + 0.7 * grow)}
+        fill={T["ice-ink"]} opacity={0.92 * amt * hard * (1 - 0.45 * grow)} />);
+    }
+    return <g pointerEvents="none">{els}</g>;
+  }
   function displaySwing(p) {
     return p.kind === "player" && animT > 0 ? stickSwing(p.id, animT * totalTime) : 0;
   }
@@ -2863,9 +2913,9 @@ export default function DrillAnimator() {
           const a = flatOf(lastTo, t.ref, t.at);
           if (a != null) { win = t; winAt = a; break; }
         }
-        const tp = { shotAt: null, rimAt: null, chipAt: null, rimAim: null, chipAim: null, rimDist: null, chipDist: null };
+        const tp = { shotAt: null, rimAt: null, chipAt: null, rimAim: null, chipAim: null, rimDist: null, chipDist: null, shand: null };
         if (win) {
-          if (win.kind === "shot") { tp.shotAt = winAt; tp.net = win.net ?? null; }   // the terminal's OWN net (absent = nearest)
+          if (win.kind === "shot") { tp.shotAt = winAt; tp.net = win.net ?? null; tp.shand = win.shand ?? null; }   // the terminal's OWN net (absent = nearest) + forehand/backhand call
           else if (win.kind === "rim") { tp.rimAt = winAt; tp.rimAim = win.aim ?? null; tp.rimDist = win.dist ?? null; }
           else { tp.chipAt = winAt; tp.chipAim = win.aim ?? null; tp.chipDist = win.dist ?? null; }
           tp._winTerm = win;   // the AUTHORING terminal that fired this run (ghost pass skips its duplicate)
@@ -3364,7 +3414,12 @@ export default function DrillAnimator() {
     // spot and steal the puck for a few frames as they pass by.
     if (p.kind === "puck") {
       let cq = null, cSide = 1, cd = 2.2;
-      for (const q of pieces) {
+      // A puck the plan says is in the air is NOT on anyone's stick, however close it
+      // still is to the one that fired it — only the catch approach below may claim
+      // it. Without this the proximity match holds a just-released puck on the blade
+      // for a frame or two and then hands over the whole gap at once.
+      const inAir = puckInFlight(p.id, animT <= 0 ? 0 : animT * totalTime);
+      for (const q of inAir ? [] : pieces) {
         if (q.kind !== "player" || q.defense) continue;   // (defense never carries; avoids recursion)
         // Match against the ROUTE pose, not displayPosRaw: the puck's own position
         // comes off that same pose (carriedPuckAt), while displayPosRaw adds the
@@ -3523,8 +3578,17 @@ export default function DrillAnimator() {
       if (leg.type !== "fly" || (!leg.sauce && !leg.rise)) continue;
       const span = (leg.t1 - leg.t0) || 1;
       if (leg.rise) {
-        if (e >= leg.t0 && e <= leg.t1) return Math.sin(((e - leg.t0) / span) * Math.PI / 2);       // climb to a peak at the net
-        if (e > leg.t1 && e < leg.t1 + 0.16) return Math.cos(((e - leg.t1) / 0.16) * Math.PI / 2);  // drop into the net
+        // Climb, then drop back ONTO the contact point. Height is faked by offsetting
+        // the puck away from its ground shadow, and a top-down rink has no spare axis
+        // for it — so a puck still lifted when it reaches the net is drawn feet to the
+        // SIDE of where it actually hit. That read as posts struck wide of the mesh and
+        // goals hanging in mid-air beside the net. Peaked late (u^1.5) so it still
+        // reads as rising, but it is back on the ice by the time it arrives.
+        // ...and down BEFORE it gets there, not just at the instant of impact: the
+        // last stretch of the approach has to be at ice level or the puck is still
+        // drawn a foot or two to the side of the post it is about to hit.
+        const uu = ((e - leg.t0) / span) / 0.82;
+        if (e >= leg.t0 && e <= leg.t1) return uu >= 1 ? 0 : Math.sin(Math.PI * Math.pow(uu, 1.2));
       } else {
         if (e >= leg.t0 && e <= leg.t1) return Math.sin(Math.PI * ((e - leg.t0) / span));           // sauce arc up and down
         if (e > leg.t1 && e < leg.t1 + 0.22) return Math.sin(Math.PI * ((e - leg.t1) / 0.22)) * 0.22; // landing bounce
@@ -5759,6 +5823,13 @@ export default function DrillAnimator() {
   // rotated to read upright under rink rotation) and an optional count bubble. Shared
   // by base-route action marks, reaction-light branch badges, and reaction-fork ends,
   // so every action circle in the app is identical.
+  // the little filled disc with a bold number. One tally style, shared by the action
+  // circles and by a merged shot mark, so they can't drift apart.
+  const tallyBubble = (n, r, fill, ink) => (<>
+    <circle cx={0} cy={0} r={r} fill={fill} />
+    <text x={0} y={0} textAnchor="middle" dominantBaseline="central" fontSize={r * 1.4}
+      fontWeight={800} fill={ink} style={{ fontFamily: "system-ui, sans-serif" }}>{n}</text>
+  </>);
   function iconBadge(pt, iconName, color, key, opacity = 1, count = 0, dy = 0) {
     const cfx = iconXf({ x: pt.x, y: pt.y, a: 0 });
     return (
@@ -5771,9 +5842,7 @@ export default function DrillAnimator() {
           </g>
           {count > 1 && (
             <g transform={`translate(${ACT_R * 0.74} ${-ACT_R * 0.74})`}>
-              <circle cx={0} cy={0} r={1.55} fill={color} />
-              <text x={0} y={0} textAnchor="middle" dominantBaseline="central" fontSize={2.2}
-                fontWeight={800} fill="#fff" style={{ fontFamily: "system-ui, sans-serif" }}>{count}</text>
+              {tallyBubble(count, 1.55, color, "#fff")}
             </g>
           )}
         </g>
@@ -6817,6 +6886,31 @@ export default function DrillAnimator() {
       );
     };
 
+    // Which hand a shot comes off. Default reads the shooter's angle to the net and
+    // takes whichever side it is already on; the coach can force either instead —
+    // a drill built around finishing on the backhand shouldn't depend on geometry.
+    const shotSubRows = (p, i, st) => {
+      const pk = st.pk, term = st.term;
+      if (!pk || !term) return null;
+      const cur = term.shand || "auto";
+      const setHand = h => update(q => q.id !== pk.id ? q
+        : { ...q, terminals: (q.terminals || []).map(x => sameTerm(x, term)
+            ? { ...x, shand: h === "auto" ? undefined : h } : x) });
+      return (
+        <>
+          <div className="hd-sectitle" style={{ marginTop: 5 }}>Shot hand</div>
+          <div className="hd-poprow">
+            {[["auto", "Default", "whichever side the net is already on"],
+              ["fore", "Forehand", "always off the strong side"],
+              ["back", "Backhand", "always off the back of the blade"]].map(([k, lbl, tip]) => (
+              <button key={k} className={`hd-mini${cur === k ? " on" : ""}`} title={`${lbl} — ${tip}`}
+                onClick={() => setHand(k)}>{lbl}</button>
+            ))}
+          </div>
+        </>
+      );
+    };
+
     const ActionSteps = (p, i, fork = null) => {
       const steps = stepsAt(p, i, fork);
       // at the START spot (i<0): if a puck the player is carrying here is passed
@@ -7071,6 +7165,7 @@ export default function DrillAnimator() {
                 {st.warn && <div className="hd-poprow"><span style={{ fontSize: 10.5, color: "#c98a2b" }}>⚠ {st.warn}</span></div>}
                 {t === "pass" && passSubRows(p, i, st)}
                 {isGain(t) && gainSubRows(p, i, st)}
+                {t === "shoot" && shotSubRows(p, i, st)}
                 {(t === "chip" || t === "rim") && <div className="hd-poprow"><span style={{ fontSize: 10.5, color: "#8b99a8" }}>drag the on-ice handle to aim &amp; set distance</span></div>}
               </div>
             );
@@ -8139,9 +8234,32 @@ export default function DrillAnimator() {
     // shots step back — so nothing overlaps and short shots still read accurately
     const shotTargets = pieces.filter(q => q.kind === "net" || q.kind === "passer" || q.kind === "bumper" || q.kind === "tire");
     const nearNet = (x, y) => { let best = "?", bd = 24; for (const nt of shotTargets) { const d = Math.hypot(nt.x - x, nt.y - y); if (d < bd) { bd = d; best = nt.id; } } return best; };
-    const byNet = {}, shotStagger = {};   // `${pk}/${k}` → extra feet in front of the net
+    // A player firing a pile of pucks from one spot at one net draws the same arrow
+    // over and over. Collapse those into ONE mark carrying a count, the way an action
+    // circle already tallies repeats, instead of a stack of identical lines. Bucketed
+    // by release point (~3ft) rather than exact coordinates: the blade shifts a little
+    // between shots as the body settles, and they are still visually the same mark.
+    const shotOne = {}, shotN = {};      // `${pk}/${k}` → is the drawn one / how many it stands for
+    const byNet = {}, shotStagger = {};  // `${pk}/${k}` → extra feet in front of the net
+    const groups = {};
     pieces.filter(q => q.kind === "puck" && plans[q.id]).forEach(q => plans[q.id].legs.forEach((L, k, legs) => {
       if (L.type === "fly" && L.shot && (!legs[k + 1] || legs[k + 1].type !== "fly")) {
+        // keyed on the SHOOTER as well as the spot: two players standing within a
+        // yard of each other are still two marks, not one attributed to whoever
+        // happened to shoot shortest
+        const g = `${L.by || "?"}|${Math.round(L.x0 / 3)},${Math.round(L.y0 / 3)}|${nearNet(L.x1, L.y1)}`;
+        (groups[g] = groups[g] || []).push({ id: `${q.id}/${k}`, len: Math.hypot(L.x1 - L.x0, L.y1 - L.y0) });
+      }
+    }));
+    // the shortest of a group is the one drawn — it reads truest against the net
+    Object.values(groups).forEach(list => {
+      const lead = list.reduce((a, c) => (c.len < a.len ? c : a));
+      list.forEach(sIt => { shotN[sIt.id] = list.length; });
+      shotOne[lead.id] = true;
+    });
+    // ...and only the drawn ones queue for room in front of the net
+    pieces.filter(q => q.kind === "puck" && plans[q.id]).forEach(q => plans[q.id].legs.forEach((L, k, legs) => {
+      if (L.type === "fly" && L.shot && (!legs[k + 1] || legs[k + 1].type !== "fly") && shotOne[`${q.id}/${k}`]) {
         const net = nearNet(L.x1, L.y1);
         (byNet[net] = byNet[net] || []).push({ id: `${q.id}/${k}`, len: Math.hypot(L.x1 - L.x0, L.y1 - L.y0) });
       }
@@ -8257,6 +8375,9 @@ export default function DrillAnimator() {
             </g>
           );
         }
+        // one of a pile of identical shots — the group draws once, on its shortest
+        if (L.shot && runEnd && shotN[`${q.id}/${k}`] > 1 && !shotOne[`${q.id}/${k}`]) return null;
+        const nShots = L.shot && runEnd ? (shotN[`${q.id}/${k}`] || 1) : 1;
         const dx = L.x1 - L.x0, dy = L.y1 - L.y0;
         // start: released AT an action badge → begin just outside its round edge,
         // measured from the badge CENTRE (not the stick); off a standing stick → start there.
@@ -8320,6 +8441,15 @@ export default function DrillAnimator() {
                         end in the standard open ">" like skating routes */}
                     <path d="M -3.3 -2.2 L 0 0 L -3.3 2.2" fill="none" stroke={INK} strokeWidth={casing ? 2.1 : 0.95} strokeLinecap="round" strokeLinejoin="round" />
                   </g></g>; })())}
+            {/* how many shots this one mark stands for — same tally an action circle
+                uses for repeats, sat just off the shoulder of the caret */}
+            {nShots > 1 && !casing && !flat && (() => {
+              const b0 = gmMove(ex, ey, -ux, -uy, 3.1);          // back off the caret...
+              const bp = gmMove(b0.x, b0.y, -uy, ux, 2.6);        // ...and off its shoulder
+              const bfx = iconXf({ x: bp.x, y: bp.y, a: 0 });
+              return <g transform={bfx.t}><g transform={`rotate(${-bfx.th})`}>
+                {tallyBubble(nShots, 1.75, INK, T.ice)}
+              </g></g>; })()}
             {ghostLand && !casing && (() => {
               // ghost puck resting where the chip/rim lands
               const fx = iconXf({ x: L.x1, y: L.y1, a: 0 });
@@ -9439,7 +9569,7 @@ export default function DrillAnimator() {
                 );
               }
               const fx = iconXf(dp);
-              return (
+              const icon = (
                 <PieceIcon key={p.id} p={p} pos={dp} xf={fx.t} thDeg={fx.th} wb={whiteboard} wbCircle={wbCircle}
                   selected={editing && p.id === selectedId} swing={displaySwing(p)}
                   dim={animT > 0} onDown={e => pieceDown(e, p.id)}
@@ -9447,6 +9577,8 @@ export default function DrillAnimator() {
                   onStickDown={editing && tool !== "draw" && p.kind === "player" && !p.path.length && !(p.lock && !lockedSelectable)
                     ? e => stickDown(e, p) : undefined} />
               );
+              const spray = snowSpray(p, dp);
+              return spray ? <g key={p.id}>{spray}{icon}</g> : icon;
             })}
             {/* editing handles ON TOP of all piece icons: a waypoint's grab target
                 must beat any prop (stick/cone/…) stacked over it, so these paint
@@ -9696,7 +9828,7 @@ export default function DrillAnimator() {
               onPointerDown={() => { if (playing) setPlaying(false); setHoldStep(null); holdRef.current = 0; }}
               onChange={e => scrubTo(+e.target.value)} />
           </div>
-          <span className="hd-scrubtime">{(animT * totalTime).toFixed(1)}/{totalTime.toFixed(1)}s</span>
+          <span className="hd-scrubtime">{Math.min(animT * totalTime, drillTime).toFixed(1)}/{drillTime.toFixed(1)}s</span>
         </div>
       )}
 
@@ -9926,7 +10058,7 @@ export default function DrillAnimator() {
           </div>
           <div className="hd-mh" style={{ marginTop: 4 }}>Default drill pace</div>
           <div style={{ fontSize: 12, color: "#8b99a8" }}>
-            {pace} ft/s · run {totalTime.toFixed(1)}s
+            {pace} ft/s · run {drillTime.toFixed(1)}s
             <input type="range" min={6} max={30} step={1} value={pace} style={{ width: "100%" }}
               onChange={e => setPace(parseFloat(e.target.value))} />
           </div>
