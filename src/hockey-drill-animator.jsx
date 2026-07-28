@@ -5845,6 +5845,34 @@ export default function DrillAnimator() {
   // ghosted, with NO hit area — the spot is derived from the pass plan, so it
   // can't be grabbed, moved, or edited.
   const GHOST_OP = 0.55;
+  // Number a receiver's waypoints on the ice. A pass step's "Catch:" list offers
+  // "@1, @2, @3…", which names points the coach has no way to identify on the
+  // board — so while that step is on screen, its target wears the same numbers.
+  // Base route only: the list also reaches a receiver's reaction forks ("↳ ref
+  // @2"), and those would need per-branch badges to stay unambiguous.
+  function renderWpNumbers(p) {
+    const route = p.path || [];
+    if (!route.length) return null;
+    const col = ink(p.color);
+    return (
+      <g key={`wpn-${p.id}`} pointerEvents="none">
+        {route.map((s, i) => {
+          const cfx = iconXf({ x: s.x, y: s.y, a: 0 });
+          return (
+            <g key={i} transform={cfx.t}>
+              <circle cx={0} cy={0} r={2.2} fill={T["surface-panel"]} stroke={col} strokeWidth={0.5} />
+              {/* un-rotate so the digit reads upright whatever the sheet does */}
+              <g transform={`rotate(${-cfx.th})`}>
+                <text x={0} y={0} textAnchor="middle" dominantBaseline="central" fontSize={2.9}
+                  fontWeight={800} fill={col} style={{ fontFamily: "system-ui, sans-serif" }}>{i + 1}</text>
+              </g>
+            </g>
+          );
+        })}
+      </g>
+    );
+  }
+
   function renderLedCatchMarks(p, ledCs) {
     if (!ledCs || !ledCs.length) return null;
     const els = [];
@@ -8658,6 +8686,23 @@ export default function DrillAnimator() {
   // own (.hd-preso offsets by --hd-act) and tapping it still advances the hold.
   const actOn = !aiPlay;
 
+  // Which players should wear waypoint numbers: the receivers of any PASS step
+  // shown in the action panel that's currently open. Derived rather than stored,
+  // so it can't get out of step with the panel — it appears when a pass is
+  // showing and goes when the panel closes or the step changes.
+  const numberedIds = (() => {
+    if (!editing || !popup || (popup.type !== "piece" && popup.type !== "point")) return null;
+    const src = pieces.find(q => q.id === popup.id);
+    if (!src || src.kind !== "player") return null;
+    const ids = new Set();
+    for (const st of stepsAt(src, popup.type === "point" ? popup.seg : -1, popup.fork || null)) {
+      if (st.kind !== "pass") continue;
+      const to = ((st.pk?.transfers || [])[st.stage] || {}).to;
+      if (to && to !== src.id) ids.add(to);
+    }
+    return ids.size ? ids : null;
+  })();
+
   // The pen's three line settings — colour, thickness, style. Wide screens lay
   // them out inline, ready at the click; narrow ones stack all three inside a
   // single "Ink" popover so the bar keeps its one line. Built once here and
@@ -9561,6 +9606,9 @@ export default function DrillAnimator() {
                 {/* a reaction fork open for editing gets its own handles */}
                 {editingFork && editingFork.id === p.id && forkOf(p, editingFork.color)
                   ? renderHandles(p, yFix, editingFork.color) : null}
+                {/* a pass receiver wears its waypoint numbers while the step
+                    naming them is on screen */}
+                {numberedIds?.has(p.id) ? renderWpNumbers(p) : null}
               </g>
             ))}
             {renderMarkHandles()}
