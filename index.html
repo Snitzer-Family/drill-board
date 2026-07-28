@@ -12,13 +12,23 @@
          stranding a dead band at the bottom; opaque makes size and
          position coherent so the viewport reaches the physical bottom -->
     <meta name="apple-mobile-web-app-status-bar-style" content="black" />
-    <meta name="theme-color" content="#0c1014" />
+    <!-- opt into both schemes so the UA renders form controls, scrollbars and
+         the pre-mount canvas to match; the per-theme pin lives in theme.js -->
+    <meta name="color-scheme" content="light dark" />
+    <!-- media-scoped so the launch paint is right with no script at all. iOS
+         only consults these AT launch, and in standalone the status-bar-style
+         above outranks them — so light mode keeps a black status band. That is
+         accepted: reverting to "default" risks the iOS 26 dead-band bug. -->
+    <meta name="theme-color" content="#e7edf3" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0c1014" media="(prefers-color-scheme: dark)" />
     <title>DrillBoard</title>
-    <style>
-      html, body { margin: 0; padding: 0; background: #0c1014; overflow: hidden; }
-    </style>
+    <!-- filled by the injectTheme() plugin in vite.config.js, in dev AND build.
+         The tokens must be here rather than in styles.js: styles.js is injected
+         by React, which is far too late for the first paint. -->
+    <!--theme-css-->
+    <!--theme-boot-->
   </head>
-  <body style="margin: 0; background: #0c1014">
+  <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>

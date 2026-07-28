@@ -17,6 +17,9 @@ import { buildLedger, mayHoldOn, mayHoldEntering, orderTransfers } from "./posse
 import { classifyPenGroup, SYMBOL_MAX, SYMBOL_MAX_PX } from "./sketch-recognize.js";
 import { newGame, stepGame } from "./ai-game.js";
 import { STYLES } from "./styles.js";
+import { THEME_KEY, THEME_ATTR, THEME_ORDER, THEME_LABEL, resolveTheme, tokens, teamInk } from "./theme.js";
+import { ThemeCtx, InkCtx } from "./theme-react.jsx";
+import { SAVE_KEY, peekBackup, clearBackup } from "./storage.js";
 
 // Pen inks. These double as PIECE colours — a symbol you draw becomes a player
 // in the ink you drew it with — so they're the team colours plus the classic
@@ -320,7 +323,8 @@ function DelayTrigger({ value, onChange, sub, players, actorIds, nameOf }) {
    drag to move; touch drags show a magnifier loupe.
    ============================================================ */
 
-const SAVE_KEY = "drillboard:autosave";   // the whole board, persisted across refreshes
+// SAVE_KEY lives in storage.js: main.jsx's crash boundary needs the same key,
+// and it renders outside this component so it can't reach a const in here.
 const WB_KEY = "drillboard:whiteboard";   // whiteboard-mode view pref, persisted on its own
 const WBC_KEY = "drillboard:whiteboard-circle";   // circled X/O symbols sub-pref
 const WBN_KEY = "drillboard:whiteboard-names";    // always-on player name tags sub-pref
@@ -328,6 +332,15 @@ const HALFNS_KEY = "drillboard:half-ns";  // half-ice shown north-south (vertica
 const HALFFLIP_KEY = "drillboard:half-flip";  // half-ice net at the far end (left / top)
 const STRETCH_KEY = "drillboard:stretch-fill";  // full ice stretches to fill the screen
 const PRESS_KEY = "drillboard:pencil-pressure";  // Apple Pencil pressure → line weight
+// Corner-menu anchoring. MENU_W must equal --hd-menu-w in styles.js (asserted by
+// tests/theme-contrast.mjs) — the panel is sized by CSS but centred by JS, so a
+// mismatch silently offsets every menu by half the difference. Below
+// MENU_ANCHOR_MIN the stylesheet stretches the panel instead and JS stands down;
+// it matches the pen palette's breakpoint so a device doesn't change personality
+// between the two.
+const MENU_W = 230, MENU_PAD = 10, MENU_ANCHOR_MIN = 700;
+// THEME_KEY ("drillboard:theme") lives in theme.js — the pre-paint boot script
+// in index.html reads the same constant, and they must not drift.
 
 export default function DrillAnimator() {
   // a shared drill link (#d=<url-safe base64 DSL> — the preview-link format from
@@ -506,7 +519,11 @@ export default function DrillAnimator() {
       // the board the strokes were read against: without it, "why didn't this
       // become a pass" can't be answered — the answer is usually how far the
       // nearest player was
-      players: (d.ctx.players || []).map(p => [p.id, round(p.x), round(p.y), p.hasPath ? 1 : 0]),
+      // …including where a route ENDS, not just that there is one: a pass or
+      // shot binds to the route end, so "is there a shooter in reach" can't be
+      // read off the player's own position once they have a path
+      players: (d.ctx.players || []).map(p => [p.id, round(p.x), round(p.y),
+        p.hasPath ? 1 : 0, ...(p.hasPath && p.end ? [round(p.end.x), round(p.end.y)] : [])]),
       nets: (d.ctx.nets || []).map(n => [n.id, round(n.x), round(n.y)]),
       ops: d.ops.map(o => ({ op: o.op, sym: o.sym, srcs: o.srcs })),
       strokes: d.strokes.map(s => s.pts.map(p => [round(p.x), round(p.y)])),
@@ -593,21 +610,41 @@ export default function DrillAnimator() {
   const piecesRef = useRef(pieces);
   piecesRef.current = pieces;
   const [openMenu, setOpenMenu] = useState(null); // settings | rinkmenu | tools | text
-  // The Add menu hangs off the Add button rather than the screen's right edge.
-  // Corner-pinning reads fine on a phone, where the bar spans the whole width,
-  // but on desktop or landscape the button sits well left of that corner and
-  // the menu opens nowhere near what was tapped. (Must live below openMenu —
-  // reading it from higher up is a temporal-dead-zone crash the build can't see.)
-  const addBtnRef = useRef(null);
-  const [addMenuLeft, setAddMenuLeft] = useState(null);
+  // Every corner menu hangs off the button that opens it, rather than off a
+  // screen corner. Corner-pinning reads fine on a phone, where the bar spans the
+  // whole width, but in landscape or on desktop the buttons sit well left of the
+  // corner and the panel opens nowhere near what was tapped — Tune's used to
+  // open under Menu. (Must live below openMenu — reading it from higher up is a
+  // temporal-dead-zone crash the build can't see.)
+  const barBtnRefs = {
+    settings: useRef(null), rinkmenu: useRef(null),
+    tools: useRef(null), prefs: useRef(null),
+  };
+  const [menuLeft, setMenuLeft] = useState(null);
   useLayoutEffect(() => {
-    if (openMenu !== "tools") { setAddMenuLeft(null); return; }
-    const r = addBtnRef.current?.getBoundingClientRect();
-    if (!r) return;
-    const W = 230, pad = 10;                     // menu width is fixed in styles.js
-    setAddMenuLeft(Math.round(Math.max(pad,
-      Math.min(window.innerWidth - W - pad, r.left + r.width / 2 - W / 2))));
+    // Below the breakpoint we write NO inline left: the stylesheet stretches the
+    // panel to the bar's insets instead. Inline styles would outrank that rule.
+    const place = () => {
+      const r = barBtnRefs[openMenu]?.current?.getBoundingClientRect();
+      if (!r || window.innerWidth < MENU_ANCHOR_MIN) { setMenuLeft(null); return; }
+      setMenuLeft(Math.round(Math.max(MENU_PAD,
+        Math.min(window.innerWidth - MENU_W - MENU_PAD, r.left + r.width / 2 - MENU_W / 2))));
+    };
+    place();
+    if (!openMenu) return;
+    // a rotation with a menu open crosses the breakpoint in both directions
+    window.addEventListener("resize", place);
+    window.addEventListener("orientationchange", place);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("orientationchange", place);
+    };
   }, [openMenu]);
+  const menuAnchor = menuLeft != null ? { left: menuLeft, right: "auto" } : undefined;
+  // A board stashed by the crash boundary's "Reset drill & reload", if any.
+  // Read once at mount: it can only be written by a crash, which reloads the
+  // page anyway, so there is nothing to react to mid-session.
+  const [crashBackup, setCrashBackup] = useState(() => peekBackup());
   const [textDraft, setTextDraft] = useState(DEFAULT_TEXT);
   const [textError, setTextError] = useState("");
   const [textCloseAsk, setTextCloseAsk] = useState(false);  // "unapplied edits" guard on Done
@@ -671,6 +708,48 @@ export default function DrillAnimator() {
     try { return localStorage.getItem(STRETCH_KEY) !== "0"; } catch { return true; }
   });
   useEffect(() => { try { localStorage.setItem(STRETCH_KEY, stretchFill ? "1" : "0"); } catch { /* private mode */ } }, [stretchFill]);
+  // Theme: "auto" (follow the phone) | "light" | "dark". The inline boot script
+  // in index.html has already applied a saved override before first paint —
+  // this just keeps the attribute in sync once React owns the state.
+  const [themePref, setThemePref] = useState(() => {
+    try { return localStorage.getItem(THEME_KEY) || "auto"; } catch { return "auto"; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(THEME_KEY, themePref); } catch { /* private mode */ }
+    const el = document.documentElement;
+    // no attribute at all in auto: that's what lets the prefers-color-scheme
+    // media block in the emitted CSS take over
+    if (themePref === "auto") el.removeAttribute(THEME_ATTR);
+    else el.setAttribute(THEME_ATTR, themePref);
+  }, [themePref]);
+  // the OS preference has to be tracked LIVE, not just read once: in auto the
+  // SVG token object below must follow the phone flipping to dark at sunset
+  // while the app is open.
+  const [prefersDark, setPrefersDark] = useState(() => {
+    try { return matchMedia("(prefers-color-scheme: dark)").matches; } catch { return true; }
+  });
+  useEffect(() => {
+    let mq;
+    try { mq = matchMedia("(prefers-color-scheme: dark)"); } catch { return; }
+    const on = e => setPrefersDark(e.matches);
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
+  const themeName = resolveTheme(themePref, prefersDark);
+  const T = tokens(themeName);
+  // stored piece colour -> what this theme paints. Identity for every theme that
+  // declares no lift table, so this is inert unless a scheme opts in.
+  const ink = useMemo(() => (c => teamInk(themeName, c)), [themeName]);
+  // Keep the address-bar / task-switcher colour on the resolved theme. iOS only
+  // consults theme-color at LAUNCH, so this is for Safari tabs, Android, and the
+  // next standalone launch; the media-scoped metas in index.html cover the
+  // pre-JS paint and are replaced here once JS has an authoritative answer.
+  useEffect(() => {
+    document.querySelectorAll('meta[name="theme-color"][media]').forEach(m => m.remove());
+    let m = document.querySelector('meta[name="theme-color"]:not([media])');
+    if (!m) { m = document.createElement("meta"); m.name = "theme-color"; document.head.appendChild(m); }
+    m.content = T["surface-app"];
+  }, [T]);
   const effDetail = detailAnim && !whiteboard;
   // whiteboard also drops the shot theatrics: no random miss/post/air rolls
   // (shots bury flat) and no GOAL!/SAVE! splashes — a diagram, not a broadcast
@@ -5357,7 +5436,11 @@ export default function DrillAnimator() {
       const canvas = document.createElement("canvas");
       canvas.width = W; canvas.height = H;
       const ctx = canvas.getContext("2d");
-      ctx.fillStyle = "#eef5f9"; ctx.fillRect(0, 0, W, H);         // ice surround (var fallback theme)
+      // Exports are ALWAYS light, whatever the app is set to: an <img>-loaded
+      // SVG gets no host cascade, so drillSvg() renders on its var() fallbacks
+      // — which are THEMES.light. This surround must come from the same table
+      // or the PNG gets a mismatched border around the rink.
+      ctx.fillStyle = tokens("light")["ice-surround"]; ctx.fillRect(0, 0, W, H);
       ctx.drawImage(img, 0, 0, W, H);
       URL.revokeObjectURL(url);
       canvas.toBlob(b => {
@@ -5600,12 +5683,14 @@ export default function DrillAnimator() {
   // crosses the rink's red/blue markings it reads as a clean channel of ice, and
   // because the casing matches the ice, the ink over it keeps its exact colour.
   // Pure vector — no filter raster, no compositing lightening.
-  const caseOf = st => ({ ...st, stroke: "#f5fafd", opacity: 1,
+  // T.ice, not a literal: the casing only reads as a clean channel cut through
+  // the rink markings if it is EXACTLY the ice fill. Two literals would drift.
+  const caseOf = st => ({ ...st, stroke: T.ice, opacity: 1,
     strokeWidth: (st.strokeWidth || 1) * 2.1 });
   function segStroke(p, s, isLast, flat) {
     const W = w => (flat ? w : sw(w)) * lineScale;   // global route line-thickness scale
     const D = d => (flat ? d : sdash(d));
-    const base = { stroke: p.color, fill: "none", strokeLinecap: "round", opacity: 0.78,
+    const base = { stroke: ink(p.color), fill: "none", strokeLinecap: "round", opacity: 0.78,
       ...(flat ? {} : { vectorEffect: "non-scaling-stroke" }) };
     if (p.kind !== "puck") return { ...base, strokeWidth: W(0.7) };
     if (s.mode === "pass") return { ...base, strokeWidth: W(0.7), strokeDasharray: D("2.4 1.8") };
@@ -5755,7 +5840,7 @@ export default function DrillAnimator() {
     }
     return <g>{els}</g>;
   }
-  function renderActionMarks(p, bentPts, acts) { return routeActionMarks(p.path, { x: p.x, y: p.y }, acts, p.color, bentPts, ""); }
+  function renderActionMarks(p, bentPts, acts) { return routeActionMarks(p.path, { x: p.x, y: p.y }, acts, ink(p.color), bentPts, ""); }
   // the marks of a GHOST catch waypoint (a led pass's computed mid-curve catch):
   // the same incoming carat + receive badge as a real action circle, slightly
   // ghosted, with NO hit area — the spot is derived from the pass plan, so it
@@ -5775,7 +5860,7 @@ export default function DrillAnimator() {
       const mp0 = gmMove(e.x, e.y, -tx / tl, -ty / tl, actGap);
       const back = arrivalBack("main", mp0.x, mp0.y);
       const mp = back ? gmMove(e.x, e.y, -tx / tl, -ty / tl, actGap + back) : mp0;
-      els.push(routeMark(`lcm-${p.id}-${k}`, mp, ang, false, p.color, GHOST_OP));
+      els.push(routeMark(`lcm-${p.id}-${k}`, mp, ang, false, ink(p.color), GHOST_OP));
       if (!whiteboard) els.push(iconBadge({ x: e.x, y: e.y }, "collect", p.color, `lcb-${p.id}-${k}`, GHOST_OP));
     });
     return els.length ? <g>{els}</g> : null;
@@ -5934,7 +6019,7 @@ export default function DrillAnimator() {
     const tip0 = base ? gmMove(endPt.x, endPt.y, -tx / tl, -ty / tl, base) : endPt;
     const back = arrivalBack("main", tip0.x, tip0.y);
     const pt2 = back ? gmMove(endPt.x, endPt.y, -tx / tl, -ty / tl, base + back) : tip0;
-    return routeMark(`arw-${p.id}`, pt2, ang, branchAtEnd ? false : !!(p.path[n - 1] && p.path[n - 1].endStop), p.color);
+    return routeMark(`arw-${p.id}`, pt2, ang, branchAtEnd ? false : !!(p.path[n - 1] && p.path[n - 1].endStop), ink(p.color));
   }
   // end point + heading (deg) of a route path array that begins at `start`; null
   // if empty or degenerate. Shared by base routes and reaction forks.
@@ -5961,7 +6046,7 @@ export default function DrillAnimator() {
     const rp = routePiece(p, fork);           // fork ? branch-origin route piece : p
     const route = rp.path;
     // colour the fork's handles by its cue colour so overlapping routes stay legible
-    const dotFill = fork || "#ffd447", dotStroke = fork ? "#0b1116" : "#7a5c00";
+    const dotFill = fork || T["ice-select"], dotStroke = fork ? "#0b1116" : "#7a5c00";
     // the selected waypoint = the leg/point popup that's open (tapping the anchor
     // opens a "point" popup, the line a "line" popup — both carry its seg). Its
     // handles show only for it, not every waypoint. A handle being dragged stays
@@ -6072,8 +6157,8 @@ export default function DrillAnimator() {
     const kx = p.x + Math.cos(a) * R, ky = p.y + Math.sin(a) * R * yf;
     return (
       <g>
-        {hd(p.x, p.y, R, { fill: "none", stroke: "#ffd447", strokeWidth: 0.25, strokeDasharray: "1 1", opacity: 0.75, pointerEvents: "none" })}
-        {hd(kx, ky, 1.6, { fill: "#ffd447", stroke: "#7a5c00", strokeWidth: 0.35, pointerEvents: "none" })}
+        {hd(p.x, p.y, R, { fill: "none", stroke: T["ice-select"], strokeWidth: 0.25, strokeDasharray: "1 1", opacity: 0.75, pointerEvents: "none" })}
+        {hd(kx, ky, 1.6, { fill: T["ice-select"], stroke: "#7a5c00", strokeWidth: 0.35, pointerEvents: "none" })}
         {hd(kx, ky, 4.2, { fill: "transparent", style: { cursor: "grab" }, onPointerDown: e => handleDown(e, { kind: "rotate", id: p.id, offset: 0 }) })}
       </g>
     );
@@ -6202,7 +6287,7 @@ export default function DrillAnimator() {
             // selection = a dashed halo OUTSIDE the box, so the label's own
             // border colour/opacity stays visible while it's being edited
             <rect x={-w / 2 - fs * 0.22} y={-h / 2 - fs * 0.22} width={w + fs * 0.44} height={h + fs * 0.44}
-              rx={fs * 0.28 + fs * 0.22} fill="none" stroke="#ffd447" strokeWidth={0.55}
+              rx={fs * 0.28 + fs * 0.22} fill="none" stroke={T["ice-select"]} strokeWidth={0.55}
               strokeDasharray={`${fs * 0.3} ${fs * 0.22}`} pointerEvents="none" />
           )}
           <text textAnchor="middle" fontSize={fs} fontWeight={800} fill={st.color || "#14202b"}
@@ -6217,7 +6302,7 @@ export default function DrillAnimator() {
           {sel && resizeDown && (
             <>
               <rect x={w / 2 - fs * 0.42} y={h / 2 - fs * 0.42} width={fs * 0.84} height={fs * 0.84}
-                rx={fs * 0.15} fill="#ffd447" stroke="#7a5c00" strokeWidth={0.3} pointerEvents="none" />
+                rx={fs * 0.15} fill={T["ice-select"]} stroke="#7a5c00" strokeWidth={0.3} pointerEvents="none" />
               <rect x={w / 2 - fs * 0.7} y={h / 2 - fs * 0.7} width={fs * 1.4} height={fs * 1.4}
                 fill="transparent" style={{ cursor: "nwse-resize" }} onPointerDown={resizeDown} />
             </>
@@ -6358,7 +6443,7 @@ export default function DrillAnimator() {
             pointerEvents={hit ? "none" : undefined} />
         )}
         {m.id === selectedId && (
-          <polyline points={line} fill="none" stroke="#ffd447" strokeWidth={w + 1.1}
+          <polyline points={line} fill="none" stroke={T["ice-select"]} strokeWidth={w + 1.1}
             strokeLinecap="round" strokeLinejoin="round" opacity={0.35} pointerEvents="none" />
         )}
         {hit && editing && !markEdit && (
@@ -6382,9 +6467,9 @@ export default function DrillAnimator() {
             sharp corner (break handle). Tap to toggle, drag to re-shape. */}
         {q.c
           ? <rect x={clampX(q.x) - 1.5} y={clampY(q.y) - 1.5 * yf} width={3} height={3 * yf}
-              fill="#ffd447" stroke="#14171a" strokeWidth={0.35} pointerEvents="none" />
+              fill={T["ice-select"]} stroke="#14171a" strokeWidth={0.35} pointerEvents="none" />
           : hdot(clampX(q.x), clampY(q.y), 1.7, {
-              fill: "#ffd447", stroke: "#14171a", strokeWidth: 0.35, pointerEvents: "none" }, yf)}
+              fill: T["ice-select"], stroke: "#14171a", strokeWidth: 0.35, pointerEvents: "none" }, yf)}
         {/* a larger transparent target so a fingertip can grab the point */}
         {hdot(clampX(q.x), clampY(q.y), 4.5, {
           fill: "transparent", style: { cursor: "grab" },
@@ -6406,13 +6491,13 @@ export default function DrillAnimator() {
     return (
       <g key={`mkrs-${m.id}`}>
         <rect x={x1} y={y1} width={Math.max(0.1, x2 - x1)} height={Math.max(0.1, y2 - y1)}
-          fill="none" stroke="#ffd447" strokeWidth={sw(0.35)} strokeDasharray={sdash("1.6 1.2")}
+          fill="none" stroke={T["ice-select"]} strokeWidth={sw(0.35)} strokeDasharray={sdash("1.6 1.2")}
           vectorEffect="non-scaling-stroke" opacity={0.8} pointerEvents="none" />
         {corners.map(([cx, cy, ax, ay], i) => {
           const down = e => handleDown(e, { kind: "markscale", id: m.id, x0: cx, y0: cy, ax, ay,
             pts0: m.pts.map(q => ({ ...q })) });
           return <g key={`c${i}`}>
-            {hdot(cx, cy, 1.3, { fill: "#ffd447", stroke: "#14202b", strokeWidth: 0.28, pointerEvents: "none" }, yf)}
+            {hdot(cx, cy, 1.3, { fill: T["ice-select"], stroke: "#14202b", strokeWidth: 0.28, pointerEvents: "none" }, yf)}
             {/* generous invisible touch target over the visible dot */}
             {hdot(cx, cy, 3.4, { fill: "transparent", style: { cursor: "grab" }, onPointerDown: down }, yf)}
           </g>;
@@ -6430,9 +6515,9 @@ export default function DrillAnimator() {
               a0: Math.atan2(pt0.y - cy, pt0.x - cx),
               pts0: m.pts.map(q => ({ ...q })) }); };
           return <g key="rot">
-            <line x1={mx} y1={y1} x2={mx} y2={hy} stroke="#ffd447" strokeWidth={sw(0.35)}
+            <line x1={mx} y1={y1} x2={mx} y2={hy} stroke={T["ice-select"]} strokeWidth={sw(0.35)}
               vectorEffect="non-scaling-stroke" opacity={0.8} pointerEvents="none" />
-            {hdot(mx, hy, 1.5, { fill: "#14202b", stroke: "#ffd447", strokeWidth: 0.35, pointerEvents: "none" }, yf)}
+            {hdot(mx, hy, 1.5, { fill: "#14202b", stroke: T["ice-select"], strokeWidth: 0.35, pointerEvents: "none" }, yf)}
             {hdot(mx, hy, 4.2, { fill: "transparent", style: { cursor: "grab" }, onPointerDown: down }, yf)}
           </g>;
         })()}
@@ -6460,7 +6545,7 @@ export default function DrillAnimator() {
         const off = p.kind === "net" ? 6.5 : p.kind === "player" ? 4.6 : 5;
         const spot = p.kind === "player" ? tagSpotFor(p, off) : { x: p.x, y: p.y + off };
         els.push(p.kind === "player"
-          ? labelNode(`nm-${p.id}`, spot.x, spot.y, p.label, 0.62, { color: p.color }, false, null, null)
+          ? labelNode(`nm-${p.id}`, spot.x, spot.y, p.label, 0.62, { color: ink(p.color) }, false, null, null)
           : labelNode(`nm-${p.id}`, spot.x, spot.y, p.label, 0.5, { color: "#33414f" }, false, null, null));
       }
       (p.path || []).forEach((s, i) => {
@@ -6610,7 +6695,7 @@ export default function DrillAnimator() {
       const pt = segEnd(p, i - 1);
       els.push(
         <g key={`st${p.id}${i}`} opacity={0.9} pointerEvents="none">
-          {hd(pt.x, pt.y, 2, { fill: "#fff", stroke: p.color, strokeWidth: 0.35 })}
+          {hd(pt.x, pt.y, 2, { fill: "#fff", stroke: ink(p.color), strokeWidth: 0.35 })}
           <line x1={pt.x - 0.6} y1={pt.y - 1} x2={pt.x - 0.6} y2={pt.y + 1} stroke={p.color} strokeWidth={0.5} />
           <line x1={pt.x + 0.6} y1={pt.y - 1} x2={pt.x + 0.6} y2={pt.y + 1} stroke={p.color} strokeWidth={0.5} />
         </g>
@@ -8027,7 +8112,7 @@ export default function DrillAnimator() {
     // the ink pass so pass/shot/chip/rim lines stay readable over rink markings
     const W = w => (flat ? w : sw(w)) * lineScale * (casing ? 2.1 : 1);
     const D = d => (flat ? d : sdash(d));
-    const INK = casing ? "#f5fafd" : "#14171a";
+    const INK = casing ? T.ice : T["ice-ink"];
     const ve = flat ? undefined : "non-scaling-stroke";
     // the casing pass runs this whole renderer a second time — it must register
     // its arrival tips in its OWN channel, or the ink pass would count them as
@@ -8166,7 +8251,7 @@ export default function DrillAnimator() {
               {gl && !casing && (() => {
                 const fx = iconXf({ x: land.x, y: land.y, a: 0 });
                 return <g opacity={0.55}>
-                  <PieceIcon p={{ kind: "puck", color: "#14171a" }} pos={{ x: land.x, y: land.y, a: 0 }}
+                  <PieceIcon p={{ kind: "puck", color: T["ice-ink"] }} pos={{ x: land.x, y: land.y, a: 0 }}
                     xf={fx.t} thDeg={fx.th} noShadow hitOff onDown={() => {}} />
                 </g>; })()}
             </g>
@@ -8239,7 +8324,7 @@ export default function DrillAnimator() {
               // ghost puck resting where the chip/rim lands
               const fx = iconXf({ x: L.x1, y: L.y1, a: 0 });
               return <g opacity={0.55}>
-                <PieceIcon p={{ kind: "puck", color: "#14171a" }} pos={{ x: L.x1, y: L.y1, a: 0 }}
+                <PieceIcon p={{ kind: "puck", color: T["ice-ink"] }} pos={{ x: L.x1, y: L.y1, a: 0 }}
                   xf={fx.t} thDeg={fx.th} noShadow hitOff onDown={() => {}} />
               </g>; })()}
           </g>
@@ -8323,17 +8408,17 @@ export default function DrillAnimator() {
                 const a1 = gmMove(sp.x, sp.y, -uy, ux, sep), a2 = gmMove(le.x, le.y, -uy, ux, sep);
                 const b1 = gmMove(sp.x, sp.y, uy, -ux, sep), b2 = gmMove(le.x, le.y, uy, -ux, sep);
                 return <>
-                  <line x1={a1.x} y1={a1.y} x2={a2.x} y2={a2.y} vectorEffect="non-scaling-stroke" stroke="#14171a" strokeWidth={sw(0.55) * lineScale} />
-                  <line x1={b1.x} y1={b1.y} x2={b2.x} y2={b2.y} vectorEffect="non-scaling-stroke" stroke="#14171a" strokeWidth={sw(0.55) * lineScale} />
+                  <line x1={a1.x} y1={a1.y} x2={a2.x} y2={a2.y} vectorEffect="non-scaling-stroke" stroke={T["ice-ink"]} strokeWidth={sw(0.55) * lineScale} />
+                  <line x1={b1.x} y1={b1.y} x2={b2.x} y2={b2.y} vectorEffect="non-scaling-stroke" stroke={T["ice-ink"]} strokeWidth={sw(0.55) * lineScale} />
                 </>;
               })()
             : (() => {
                 const lg = gmMove(ep.x, ep.y, -ux, -uy, 2.9 * z * lineScale);
                 return <line x1={sp.x} y1={sp.y} x2={lg.x} y2={lg.y} vectorEffect="non-scaling-stroke"
-                  stroke="#14171a" strokeWidth={sw(0.55) * lineScale} strokeDasharray={sdash("2.4 1.8")} />;
+                  stroke={T["ice-ink"]} strokeWidth={sw(0.55) * lineScale} strokeDasharray={sdash("2.4 1.8")} />;
               })()}
           <g transform={fx.t}><g transform={`scale(${z * lineScale})`}>
-            <path d="M -3.3 -2.2 L 0 0 L -3.3 2.2" fill="none" stroke="#14171a" strokeWidth={0.95} strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M -3.3 -2.2 L 0 0 L -3.3 2.2" fill="none" stroke={T["ice-ink"]} strokeWidth={0.95} strokeLinecap="round" strokeLinejoin="round" />
           </g></g>
         </g>
       );
@@ -8430,7 +8515,7 @@ export default function DrillAnimator() {
           {pieces.map(p => <g key={`ls${p.id}`}>{renderStops(p, 1)}</g>)}
           {drawPreview && drawPreview.length > 1 && (
             <polyline points={drawPreview.map(q => `${q.x},${q.y}`).join(" ")}
-              fill="none" stroke="#ffd447" strokeWidth={0.6} strokeDasharray="1.4 1" opacity={0.9} />
+              fill="none" stroke={T["ice-select"]} strokeWidth={0.6} strokeDasharray="1.4 1" opacity={0.9} />
           )}
           {puckPathNodes(true)}
           {selected && renderHandles(selected, 1)}
@@ -8580,6 +8665,11 @@ export default function DrillAnimator() {
   }
 
   return (
+    // wraps the WHOLE return, so renderLoupe()'s second <RinkMarkings/> subtree
+    // gets the same tokens as the main sheet — if the loupe's ice and the board's
+    // ice ever disagree, a wrong-shade rim shows at the loupe's corners
+    <ThemeCtx.Provider value={T}>
+    <InkCtx.Provider value={ink}>
     <div className={`hd-root${penMode && !aiPlay ? " pen-on" : aiPlay || !hasTimeline ? "" : " scrub-on"}${docked ? " dock-open" : ""}${
       tool === "pen" || tool === "marker" ? (eraser && tool === "pen" ? " erase-cursor" : " draw-cursor") : ""}`} ref={rootRef}>
       <style>{STYLES}</style>
@@ -8668,7 +8758,7 @@ export default function DrillAnimator() {
                   );
                 })}
                 {(() => { const fx = iconXf({ x: aiRef.current.puck.x, y: aiRef.current.puck.y }); return (
-                  <g transform={fx.t}><circle cx={0} cy={0} r={1.5} fill="#14171a" stroke="#fff" strokeWidth={0.4} /></g>); })()}
+                  <g transform={fx.t}><circle cx={0} cy={0} r={1.5} fill={T["ice-ink"]} stroke={T.ice} strokeWidth={0.4} /></g>); })()}
                 {aiRef.current.players.map(pl => {
                   const dp = { x: pl.x, y: pl.y, a: pl.a };
                   const fx = iconXf(dp);
@@ -8772,7 +8862,7 @@ export default function DrillAnimator() {
                             waypoints / edit); the transparent hit path below drives
                             the interaction, so the ghost stays pointer-transparent */}
                         {!cas && showRoutes && bent && (
-                          <path d={vD} fill="none" stroke={p.color}
+                          <path d={vD} fill="none" stroke={ink(p.color)}
                             strokeWidth={sw(0.5)} strokeDasharray={sdash("1.4 1.6")}
                             strokeLinecap="round" vectorEffect="non-scaling-stroke"
                             opacity={0.22} pointerEvents="none" />
@@ -8922,7 +9012,7 @@ export default function DrillAnimator() {
                   // sequence / always / possession / link / event) keeps the player's own
                   // colour — it's a decision, not a colour-coded read.
                   const cd = condOf(f);
-                  const routeCol = cd.type === "light" ? (cd.color || f.color) : p.color;
+                  const routeCol = cd.type === "light" ? (cd.color || f.color) : ink(p.color);
                   // same stroke as a base route (segStroke: thickness setting × lineScale,
                   // 0.78 opacity, non-scaling) with the cue colour swapped in; non-chosen
                   // alternatives dim to half the base opacity and keep their dash
@@ -9060,7 +9150,7 @@ export default function DrillAnimator() {
 
             {editing && pieces.map(p =>
               p.kind === "puck" && p.carrier && p.path.length > 0
-                ? hdot(p.x, p.y, 2.1, { key: `rel-${p.id}`, fill: "none", stroke: "#14171a",
+                ? hdot(p.x, p.y, 2.1, { key: `rel-${p.id}`, fill: "none", stroke: T["ice-ink"],
                     strokeWidth: 0.35, strokeDasharray: "0.9 0.7", opacity: 0.6, pointerEvents: "none" })
                 : null
             )}
@@ -9107,7 +9197,7 @@ export default function DrillAnimator() {
                     strokeWidth={tool === "pen" ? penW : markWidth} strokeLinecap="round" strokeLinejoin="round"
                     opacity={0.9} pointerEvents="none" />
                 : <polyline points={drawPreview.map(q => `${q.x},${q.y}`).join(" ")} vectorEffect="non-scaling-stroke"
-                    fill="none" stroke="#ffd447" strokeWidth={sw(0.6)} strokeDasharray={sdash("1.4 1")} opacity={0.9} />
+                    fill="none" stroke={T["ice-select"]} strokeWidth={sw(0.6)} strokeDasharray={sdash("1.4 1")} opacity={0.9} />
             )}
             </g>
 
@@ -9178,9 +9268,9 @@ export default function DrillAnimator() {
               }
               return (
                 <g key="addtarget" pointerEvents="none">
-                  {hdot(pt.x, pt.y, 2.4, { fill: "none", stroke: "#0f766e", strokeWidth: sw(0.55),
+                  {hdot(pt.x, pt.y, 2.4, { fill: "none", stroke: T.accent, strokeWidth: sw(0.55),
                     strokeDasharray: sdash("1.2 1"), vectorEffect: "non-scaling-stroke" })}
-                  {hdot(pt.x, pt.y, 0.45, { fill: "#0f766e" })}
+                  {hdot(pt.x, pt.y, 0.45, { fill: T.accent })}
                 </g>
               );
             })()}
@@ -9612,20 +9702,20 @@ export default function DrillAnimator() {
 
       {/* ---------- bottom menu bar ---------- */}
       <div className="hd-bar">
-        <button className={`hd-barbtn${openMenu === "settings" ? " on" : ""}`} title="Menu"
+        <button ref={barBtnRefs.settings} className={`hd-barbtn${openMenu === "settings" ? " on" : ""}`} title="Menu"
           onClick={() => setOpenMenu(m => (m === "settings" ? null : "settings"))}>
           <Icon name="menu" size={16} /><span className="hd-blbl">Menu</span></button>
-        <button className={`hd-barbtn${openMenu === "rinkmenu" ? " on" : ""}`} title="Rink"
+        <button ref={barBtnRefs.rinkmenu} className={`hd-barbtn${openMenu === "rinkmenu" ? " on" : ""}`} title="Rink"
           onClick={() => setOpenMenu(m => (m === "rinkmenu" ? null : "rinkmenu"))}>
           <Icon name="rink" size={16} />
           <span className="hd-blbl">{rink === "full" ? "Full"
             : rink === "half" ? `Half ${halfNS ? (halfFlip ? "↑" : "↓") : (halfFlip ? "←" : "→")}`
             : "¼ ice"}</span>
         </button>
-        <button ref={addBtnRef} className={`hd-barbtn${tool !== "select" || openMenu === "tools" ? " on" : ""}`} title="Add / draw"
+        <button ref={barBtnRefs.tools} className={`hd-barbtn${tool !== "select" || openMenu === "tools" ? " on" : ""}`} title="Add / draw"
           onClick={() => setOpenMenu(m => (m === "tools" ? null : "tools"))}>
           <Icon name="pencil" size={16} /><span className="hd-blbl">Add</span></button>
-        <button className={`hd-barbtn${openMenu === "prefs" ? " on" : ""}`} title="Settings"
+        <button ref={barBtnRefs.prefs} className={`hd-barbtn${openMenu === "prefs" ? " on" : ""}`} title="Settings"
           onClick={() => setOpenMenu(m => (m === "prefs" ? null : "prefs"))}>
           <Icon name="sliders" size={16} /><span className="hd-blbl">Tune</span></button>
         <button className="hd-barbtn" title="Undo last change" disabled={!undoCount}
@@ -9638,11 +9728,13 @@ export default function DrillAnimator() {
 
       {/* ---------- menus ---------- */}
       {openMenu === "settings" && (
-        <div className="hd-menu tl">
+        <div className="hd-menu" style={menuAnchor}>
           <div className="hd-mh">Drill</div>
           <input className="hd-input" placeholder="Drill name" value={drillTitle}
             onChange={e => setDrillTitle(e.target.value)} />
-          <textarea className="hd-input" style={{ minHeight: 46, resize: "vertical", fontFamily: "inherit" }}
+          {/* 62, not 46: under border-box the padding and border are inside the
+              min-height, and 46 would render 16px shorter than it always has */}
+          <textarea className="hd-input" style={{ minHeight: 62, resize: "vertical", fontFamily: "inherit" }}
             placeholder="Description" value={drillDesc} onChange={e => setDrillDesc(e.target.value)} spellCheck={false} />
           <button className="hd-item" onClick={() => setOpenMenu("notes")}><Icon name="note" size={16} /> Notes / writeup{drillNotes.trim() ? " ✓" : ""}<span className="hd-chev"><Icon name="chevronRight" size={14} /></span></button>
           <button className="hd-item" onClick={() => setOpenMenu("inventory")}><Icon name="grid" size={16} /> Inventory / gear<span className="hd-chev"><Icon name="chevronRight" size={14} /></span></button>
@@ -9654,6 +9746,19 @@ export default function DrillAnimator() {
           <button className="hd-item" onClick={() => { copyMd(); setOpenMenu(null); }}><Icon name="duplicate" size={16} /> Copy markdown</button>
           <button className="hd-item" onClick={() => { previewLink(); setOpenMenu(null); }}><Icon name="share" size={16} /> Share preview link</button>
           <button className="hd-item" onClick={() => fileRef.current?.click()}><Icon name="upload" size={16} /> Load .txt / .md</button>
+          {crashBackup && (
+            <button className="hd-item" onClick={() => {
+              const r = parseDrill(crashBackup);
+              if (r.errors.length) { flash("That saved board can't be read", 3200); return; }
+              // no explicit undo push: the doc-watching effect records a
+              // snapshot whenever pieces/rink/steps change, so a restore is
+              // already as undoable as a file Load
+              applyDrillPreview(r);
+              clearBackup(); setCrashBackup(null);
+              setOpenMenu(null);
+              flash("Board restored", 2600);
+            }}><Icon name="reset" size={16} /> Restore last board</button>
+          )}
           <button className="hd-item" disabled={!!photoBusy} onClick={() => { setOpenMenu(null); photoRef.current?.click(); }}><Icon name="camera" size={16} /> Import from photo…</button>
           <button className="hd-item"
             onClick={() => setShowZones(s => !s)}>
@@ -9715,9 +9820,23 @@ export default function DrillAnimator() {
       )}
 
       {openMenu === "prefs" && (
-        <div className="hd-menu tl">
+        <div className="hd-menu" style={menuAnchor}>
           <div className="hd-mh">App &amp; drill settings</div>
-          <div className="hd-mh" style={{ marginTop: 2, color: "#6b7a8c" }}>Display</div>
+          <div className="hd-mh" style={{ marginTop: 2, color: "var(--db-text-faint)" }}>Display</div>
+          <div className="hd-poprow">
+            <span className="hd-sectitle" style={{ width: "100%" }}>Theme</span>
+            {THEME_ORDER.map(v => (
+              <button key={v} className={`hd-mini${themePref === v ? " on" : ""}`}
+                onClick={() => setThemePref(v)}>
+                {THEME_LABEL[v] || v}
+              </button>
+            ))}
+            <span className="hd-sechint">
+              {themePref === "auto"
+                ? `follows your phone’s appearance — currently ${themeName}`
+                : `pinned to ${themePref}, ignoring your phone’s appearance`}
+            </span>
+          </div>
           <div className="hd-poprow">
             <button className={`hd-mini${realisticShots ? " on" : ""}`}
               onClick={() => setRealisticShots(v => !v)}>{realisticShots ? "✓ Realistic shots" : "Realistic shots"}</button>
@@ -9872,7 +9991,7 @@ export default function DrillAnimator() {
       )}
 
       {openMenu === "rinkmenu" && (
-        <div className="hd-menu bl">
+        <div className="hd-menu" style={menuAnchor}>
           <div className="hd-mh">Ice surface</div>
           <button className={`hd-item${rink === "full" ? " on" : ""}`}
             onClick={() => { setRink("full"); setOpenMenu(null); }}>Full ice</button>
@@ -9890,7 +10009,7 @@ export default function DrillAnimator() {
       )}
 
       {openMenu === "tools" && (
-        <div className="hd-menu br" style={addMenuLeft != null ? { left: addMenuLeft, right: "auto" } : undefined}>
+        <div className="hd-menu" style={menuAnchor}>
           <button className="hd-item" onClick={() => { resetAnim(); setPlaying(false); setPopup(null); setTool("pen"); setPenMode(true); setOpenMenu(null); }}>
             <Icon name="marker" size={16} /> Smart pen — sketch it
           </button>
@@ -10248,5 +10367,7 @@ export default function DrillAnimator() {
       )}
       {showDiag && <DiagPanel drillVersion={drillVersion} />}
     </div>
+    </InkCtx.Provider>
+    </ThemeCtx.Provider>
   );
 }

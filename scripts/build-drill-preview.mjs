@@ -6,6 +6,7 @@
 import { readFileSync, writeFileSync } from "fs";
 import { extractDrill } from "../src/drill-format.js";
 import { DSL_VERSION } from "../src/constants.js";
+import { themeCss } from "../src/theme.js";
 
 const src = process.argv[2] || "docs/example-drill.md";
 const out = process.argv[3] || "docs/example-drill-preview.html";
@@ -21,6 +22,9 @@ const bundle = [
   strip(read("src/geometry.js")),
   strip(read("src/net-collide.js")),
   strip(read("src/drill-format.js")),
+  // drill-svg.js reads its var() fallbacks off THEMES.light, and its import is
+  // stripped like every other — so the token table has to be in the bundle
+  strip(read("src/theme.js")),
   strip(read("src/md.js")),
   // drill-svg.js self-declares `const VIEWS` for standalone use; drop it here so
   // it doesn't collide with the bundle's own VIEWS (above).
@@ -29,7 +33,11 @@ const bundle = [
 
 const initial = extractDrill(read(src));
 
-const CSS = `
+// The app's --db-* tokens, emitted from the same source the app uses, so the
+// rink in this page and the rink in the app can't drift. The --ice/--panel/--ink
+// set below is this PAGE's own chrome (cards, code blocks, type) and stays
+// local — the two coexist; only the diagram reads --db-ice-*.
+const CSS = themeCss() + `
   :root{--ice:#eef5f9;--panel:#fff;--ink:#14202b;--muted:#5c6b78;--line:#d6e2ea;--hair:#e4edf3;--red:#d7263d;--blue:#1f4fa3;--surface:#f6fafd;--mark:#cf3346;--mark-blue:#2f5fb0;--puck:#14171a;--code-bg:#0f1a23;--code-ink:#d9e6f0;--code-dim:#7e93a4;--shadow:0 1px 2px rgba(20,32,43,.06),0 12px 34px -14px rgba(20,32,43,.28);--font-display:800 1em/1 "Helvetica Neue",Helvetica,Arial,sans-serif;--font-body:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;--font-mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace}
   @media (prefers-color-scheme:dark){:root{--ice:#0d151c;--panel:#131f28;--ink:#e8eff5;--muted:#93a4b2;--line:#26343f;--hair:#1c2831;--red:#ff5a6a;--blue:#5f92e2;--surface:#16232d;--mark:#e2475a;--mark-blue:#4f7fd6;--puck:#cdd8e2;--code-bg:#0a1219;--code-ink:#d3e2ee;--code-dim:#6f8496;--shadow:0 1px 2px rgba(0,0,0,.4),0 18px 44px -18px rgba(0,0,0,.7)}}
   :root[data-theme="light"]{--ice:#eef5f9;--panel:#fff;--ink:#14202b;--muted:#5c6b78;--line:#d6e2ea;--hair:#e4edf3;--red:#d7263d;--blue:#1f4fa3;--surface:#f6fafd;--mark:#cf3346;--mark-blue:#2f5fb0;--puck:#14171a;--code-bg:#0f1a23;--code-ink:#d9e6f0;--code-dim:#7e93a4;--shadow:0 1px 2px rgba(20,32,43,.06),0 12px 34px -14px rgba(20,32,43,.28)}

@@ -664,5 +664,31 @@ const kinds = ops => ops.map(o => o.op);
   T('s-curve still → null', recognizeSymbol([arcPts(61.5, 41.5, 1.5, 90, 270).concat(arcPts(61.5, 44.5, 1.5, -90, 90))]), null);
 }
 
+// ---- A REAL shot off Nate's board that stayed ink. The line ends 22px from
+//      the net, but it spans only 82px — under the 85px bar that stops an
+//      unrecognized letter leg becoming a spurious route — so it never reached
+//      the shot test at all. A stroke ending AT A NET is now let through
+//      however short, provided it's near-straight and a shooter resolves. ----
+{
+  const CTX = { pxFtX: 0.179856, pxFtY: 0.121429, nets: [{ id: 'N1', x: 11, y: 42.5 }, { id: 'N2', x: 189, y: 42.5 }] };
+  const line = [[28.78,40.8],[29.14,40.8],[28.42,40.8],[28.06,40.8],[27.7,40.92],[27.16,40.92],[26.62,40.92],[26.08,41.04],[25.54,41.04],[24.82,41.04],[24.28,41.16],[23.56,41.16],[22.66,41.16],[22.12,41.29],[21.58,41.29],[20.86,41.29],[20.32,41.41],[19.42,41.41],[19.06,41.53],[18.53,41.53],[18.17,41.53],[17.63,41.65],[17.09,41.65],[16.55,41.77],[16.19,41.77],[15.65,41.77],[15.29,41.89],[14.93,41.89],[14.57,41.89],[14.93,41.89]]
+    .map(([x, y]) => ({ x, y }));
+  const go = players => classifyPenGroup([stroke(line)], { ...CTX, players });
+  // a shooter standing there, and one who SKATES there first (binds to the
+  // route end, which is why the diagnostics now dump it)
+  T('short shot from a standing player', kinds(go([{ id: 'P1', x: 28.5, y: 41 }])), ['shot']);
+  const skated = go([{ id: 'P1', x: 45.5, y: 55.61, hasPath: true, end: { x: 28.5, y: 41 } }]);
+  T('short shot off a route end', kinds(skated), ['shot']);
+  T('...credited to that player', skated[0] && skated[0].by, { id: 'P1' });
+  T('...aimed at the near net', skated[0] && skated[0].net, 'N1');
+  // no shooter in reach → still honest ink, not a guessed shot
+  T('no shooter → stays ink', kinds(go([{ id: 'P1', x: 45.5, y: 55.61, hasPath: true, end: { x: 60, y: 70 } }])), ['mark']);
+  T('empty board → stays ink', kinds(go([])), ['mark']);
+  // and the bar it relaxes still holds: a short stray NOT at a net stays ink
+  const away = line.map(q => ({ x: q.x + 60, y: q.y }));      // same line, mid-ice
+  T('short stray away from net stays ink', kinds(classifyPenGroup([stroke(away)],
+    { ...CTX, players: [{ id: 'P1', x: 88.5, y: 41 }] })), ['mark']);
+}
+
 console.log(`\n${pass} passed, ${fail} failed  (accept threshold ${ACCEPT})`);
 process.exit(fail ? 1 : 0);
