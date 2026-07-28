@@ -48,20 +48,35 @@ export const LANG_AUTONYM = {
 //
 // The bar budget is the load-bearing one. .hd-barbtn is `width:50px;flex:none`
 // with `gap:6px` (styles.js), so an overlong caption doesn't wrap or ellipsize
-// — it paints straight over the neighbouring button's icon. 7 characters at
-// 8.5px uppercase is what fits. These are captions under an icon; brevity is a
-// feature, not a compromise. de "Zurück"(6), fi "Kumoa"(5), cs "Zpět"(4).
+// — it paints straight over the neighbouring button's icon.
 //
-// Longest-prefix wins, so a more specific prefix can relax a general one.
+// MEASURED, not calculated: only ~36px of each button is usable, which is five
+// uppercase characters at 8.5px. Six already overflows ("ZURÜCK" rendered 38px).
+// So captions over five characters drop to .hd-blbl.long (7px, no tracking) in
+// styles.js, and this budget is the ceiling on what that tighter type can hold.
+// /tmp/db-verify/lang-fit.mjs is what proves it, across 7 languages × 3 widths.
+//
+// Longest-prefix wins, so a more specific prefix can relax a general one —
+// which is how `bar.title.` (desktop hover tooltips, never space-constrained)
+// escapes the limit that governs the visible captions.
+//
+// Budgets measure RENDERED length: a {placeholder} counts as one character,
+// because the only placeholder on a budgeted surface is the half-ice arrow.
+// Don't put a player name in a budgeted string — the budget can't model it.
 export const BUDGET = {
-  "bar.": 7,          // .hd-blbl under a 50px fixed-width button
+  "bar.": 8,          // .hd-blbl; >5 chars drops to .long type, 8 is the hard ceiling
+  "bar.title.": 40,   // title= tooltip; desktop hover only, no layout pressure
   "pen.mode.": 7,     // .hd-penswopt inside the fixed-width knob switch
   "pen.tool.": 8,     // .hd-pentool in a nowrap row
   "pen.style.": 12,   // .hd-penopt popover
-  "menu.item.": 28,   // .hd-item in a 230px menu (wraps, so this is taste)
+  "menu.item.": 34,   // .hd-item in a 230px menu (wraps, so this is taste)
   "zone.": 16,        // on-ice overlay labels, in rink feet
   "splash.": 10,      // GOAL!/SAVE! drawn at ~4.6 rink feet
 };
+
+// What a budget actually counts: the string as it reaches the screen, with
+// each placeholder standing in for the one short glyph it carries.
+export const renderedLen = s => [...String(s).replace(/\{\w+\}/g, "▪")].length;
 
 // The budget that applies to a key, or null. Longest matching prefix wins.
 export function budgetFor(key) {
@@ -70,6 +85,29 @@ export function budgetFor(key) {
     if (key.startsWith(p) && p.length > bestLen) { best = BUDGET[p]; bestLen = p.length; }
   }
   return best;
+}
+
+// Keys that take a {count} and therefore expand into one entry per plural
+// form: `menu.preso.stepCount` is stored as `.one`/`.other` in English but
+// `.one`/`.few`/`.many`/`.other` in Czech.
+//
+// Declared explicitly rather than sniffed, because a suffix like ".one" is
+// indistinguishable from an ordinary key by inspection — and tests/i18n.mjs
+// has to know which keys are ALLOWED to differ between languages, since every
+// other key must match English exactly.
+export const PLURAL_KEYS = [
+  "menu.preso.stepCount",
+  "toast.pen.cleared",
+  "toast.deletedItems",
+];
+
+export const PLURAL_CATS = ["zero", "one", "two", "few", "many", "other"];
+
+// Which plural family a key belongs to, or null if it isn't one.
+export function pluralBase(key) {
+  const m = /^(.*)\.([a-z]+)$/.exec(key);
+  if (m && PLURAL_CATS.includes(m[2]) && PLURAL_KEYS.includes(m[1])) return m[1];
+  return null;
 }
 
 /* ------------------------------------------------------------------ */

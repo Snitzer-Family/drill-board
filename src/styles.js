@@ -155,6 +155,25 @@ export const STYLES = `
           .hd-penswatch { width:20px; height:20px; }
           .hd-peninks { gap:3px; }
           .hd-pensep { margin:0 1px; }
+          /* buy back the width a translated caption needs before the nowrap row
+             starts clipping its first button */
+          .hd-pentool > span:last-child, .hd-penswopt { font-size:8px; letter-spacing:0; }
+        }
+        /* The Draw|Edit knob is the one control here that CANNOT grow with its
+           text: the knob's travel is translateX(--sw), so the halves and the
+           slide distance are the same number. Languages whose two verbs don't
+           fit 48px get a wider one. <html lang> is set pre-paint by the boot
+           script in index.html, so this is live on the first frame — no jump on
+           mount. Same shape as the theme override: root attribute, CSS reacts. */
+        :root[lang="de"] .hd-penswitch,
+        :root[lang="cs"] .hd-penswitch,
+        :root[lang="sk"] .hd-penswitch,
+        :root[lang="fr"] .hd-penswitch { --sw:58px; }
+        @media (max-width: 480px) {
+          :root[lang="de"] .hd-penswitch,
+          :root[lang="cs"] .hd-penswitch,
+          :root[lang="sk"] .hd-penswitch,
+          :root[lang="fr"] .hd-penswitch { --sw:48px; }
         }
         /* size / style popovers spring upward from their own button */
         .hd-penwrap { position:relative; display:flex; }
@@ -171,7 +190,12 @@ export const STYLES = `
           -webkit-appearance:slider-vertical; appearance:slider-vertical;
           width:26px; height:150px; accent-color:var(--db-accent); }
         .hd-penpop.menu { padding:5px; }
-        .hd-penopt { display:flex; align-items:center; gap:8px; width:104px; padding:7px 9px;
+        /* grows rather than clips: the popover is absolutely positioned and
+           centred on its own button, so a longer translated style name
+           ("Gestrichelt") can widen it safely. Capped so it can't run off a
+           375px phone. */
+        .hd-penopt { display:flex; align-items:center; gap:8px; width:auto;
+          min-width:104px; max-width:min(180px, 58vw); white-space:nowrap; padding:7px 9px;
           border-radius:8px; background:transparent; border:1px solid transparent; color:var(--db-text-soft);
           font-size:11px; font-weight:600; cursor:pointer; text-align:left; }
         .hd-penopt.on { background:var(--db-accent); border-color:var(--db-accent); color:var(--db-text-on-accent); }
@@ -217,15 +241,31 @@ export const STYLES = `
           height:calc(54px + var(--hd-b)); padding:0 8px var(--hd-b);
           box-sizing:border-box; display:flex; align-items:center; gap:6px;
           background:var(--db-surface-bar); border-top:1px solid var(--db-border); }
+        /* overflow:hidden is the backstop for a translated caption: the buttons
+           are a fixed 50px with a 6px gap, so without it an overlong label
+           doesn't wrap or ellipsize — it paints straight over the neighbouring
+           button's icon. The real defence is the 7-character bar. budget in
+           src/i18n.js; this just makes a breach clip instead of collide.
+           (No backticks in here — this whole file is one template literal.) */
         .hd-barbtn { width:50px; height:44px; border-radius:10px; background:var(--db-surface-raised);
           border:1px solid var(--db-border-strong); color:var(--db-text-soft); font-size:17px; display:flex;
           flex-direction:column; gap:2px; align-items:center; justify-content:center;
-          cursor:pointer; flex:none; }
+          cursor:pointer; flex:none; overflow:hidden; }
         .hd-barbtn.on { background:var(--db-accent); border-color:var(--db-accent); color:var(--db-text-on-accent); }
         .hd-barbtn small { font-size:10px; font-weight:800; letter-spacing:.05em; }
         /* caption under each bar icon — tooltips don't exist on touch */
         .hd-blbl { font-size:8.5px; font-weight:700; letter-spacing:.05em; line-height:1;
-          text-transform:uppercase; opacity:.8; white-space:nowrap; }
+          text-transform:uppercase; opacity:.8; white-space:nowrap;
+          max-width:100%; overflow:hidden; }
+        /* Only ~36px of a 50px button is usable, which is about five uppercase
+           characters at the size above — English fits ("MENU", "UNDO"), and
+           every other language does not ("ZURÜCK", "VALIKKO", "COMPLET" all
+           overflowed and painted over the neighbouring icon).
+           The class is applied by length in the JSX rather than by language:
+           it's the string that's long, not the locale, and a future English
+           label of six characters needs the same treatment. Measured with
+           /tmp/db-verify/lang-fit.mjs, not calculated. */
+        .hd-blbl.long { font-size:7px; letter-spacing:0; }
         .hd-barhint { flex:1 1 0; min-width:0; font-size:12px; color:var(--db-text-muted); text-align:right;
           white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
         /* the version never runs off the edge: vN stays put, only the build
@@ -278,7 +318,13 @@ export const STYLES = `
             right:calc(8px + env(safe-area-inset-right, 0px)); width:auto; }
         }
         .hd-mh { font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:var(--db-text-muted); }
+        /* line-height carries the wrap: German and Finnish labels routinely run
+           to two lines in a 230px panel, and at the inherited leading they
+           touched. Alignment stays centred on purpose — flex-start would shift
+           the chevron and switch on every ONE-line row (the overwhelming
+           majority) to tidy the few that wrap. */
         .hd-item { display:flex; align-items:center; gap:8px; padding:9px 10px; font-size:14px;
+          line-height:1.25;
           border:1px solid var(--db-border); background:var(--db-surface-raised); color:var(--db-text-soft); border-radius:8px;
           cursor:pointer; text-align:left; }
         .hd-item.on { background:var(--db-accent); border-color:var(--db-accent); color:var(--db-text-on-accent); }

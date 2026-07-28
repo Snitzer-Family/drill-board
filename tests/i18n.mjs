@@ -17,10 +17,12 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
-  LANGS, LANG_ORDER, LANG_AUTONYM, BUDGET, budgetFor,
+  LANGS, LANG_ORDER, LANG_AUTONYM, BUDGET, budgetFor, renderedLen,
+  PLURAL_KEYS, pluralBase,
   resolveLang, readLangOverride, pluralCat, interpolate, listJoin, I18N_BOOT,
 } from "../src/i18n.js";
 import { DICTS, makeT } from "../src/i18n/index.js";
+import { THEME_ORDER } from "../src/theme.js";
 
 let passed = 0, failed = 0, known = 0;
 // Empty is the goal state. Add a check name here only to land a migration in
@@ -85,6 +87,15 @@ for (const f of ["../src/i18n.js", "../src/theme.js"]) {
   });
 }
 
+// The Theme chips render t(`prefs.theme.${v}`) straight, with no fallback — so
+// a theme added to THEME_ORDER without a label here would render the raw key
+// on screen. theme.js says "adding a theme = one new key in THEMES + one entry
+// in THEME_ORDER"; this is the third thing it now also means.
+check("every theme in THEME_ORDER has a label key", () => {
+  const missing = THEME_ORDER.filter(v => !(`prefs.theme.${v}` in DICTS.en));
+  assert.deepEqual(missing, [], `themes with no prefs.theme.* key: ${missing.join(", ")}`);
+});
+
 check("index.html carries the i18n boot marker", () => {
   const html = read("../index.html");
   assert.ok(html.includes("<!--i18n-boot-->"), "missing <!--i18n-boot--> marker");
@@ -107,6 +118,10 @@ check("the boot script is self-contained classic JS", () => {
 /* dictionary parity                                                   */
 
 const enKeys = Object.keys(DICTS.en);
+// Plural entries are the ONE thing allowed to differ between languages — Czech
+// carries .few/.many that English has no use for — so parity is checked on the
+// non-plural keys, and the plural families get their own check below.
+const flatKeys = enKeys.filter(k => !pluralBase(k));
 
 check("English is not empty", () => {
   assert.ok(enKeys.length > 0, "en.js has no keys");
@@ -114,13 +129,19 @@ check("English is not empty", () => {
 
 for (const lang of OTHERS) {
   check(`${lang}: same key set as English`, () => {
-    const keys = Object.keys(DICTS[lang]);
-    const missing = enKeys.filter(k => !(k in DICTS[lang]));
+    const keys = Object.keys(DICTS[lang]).filter(k => !pluralBase(k));
+    const missing = flatKeys.filter(k => !(k in DICTS[lang]));
     const extra = keys.filter(k => !(k in DICTS.en));
     assert.deepEqual(missing, [], `missing ${missing.length}: ${missing.slice(0, 8).join(", ")}`);
     assert.deepEqual(extra, [], `not in English: ${extra.slice(0, 8).join(", ")}`);
   });
 }
+
+check("every declared plural key actually has forms", () => {
+  const empty = PLURAL_KEYS.filter(base =>
+    !enKeys.some(k => pluralBase(k) === base));
+  assert.deepEqual(empty, [], `PLURAL_KEYS with no English forms: ${empty.join(", ")}`);
+});
 
 // The highest-value assertion here. A translation that drops {who} or invents
 // {player} produces a sentence with a hole in it, and nothing else would catch
@@ -170,8 +191,8 @@ check("every budgeted key fits, in every language", () => {
   for (const lang of LANGS) {
     for (const [k, v] of Object.entries(DICTS[lang])) {
       const max = budgetFor(k);
-      if (max != null && [...String(v)].length > max) {
-        over.push(`${lang} ${k}="${v}" is ${[...String(v)].length} > ${max}`);
+      if (max != null && renderedLen(v) > max) {
+        over.push(`${lang} ${k}="${v}" is ${renderedLen(v)} > ${max}`);
       }
     }
   }
@@ -192,11 +213,7 @@ check("every budget prefix is actually used by some key", () => {
 // only ships `one`/`other` reads as broken Czech at 2 and at 5.
 check("plural key families cover every form the language needs", () => {
   const bad = [];
-  const families = new Set();
-  for (const k of enKeys) {
-    const m = /^(.*)\.(zero|one|two|few|many|other)$/.exec(k);
-    if (m) families.add(m[1]);
-  }
+  const families = new Set(PLURAL_KEYS);
   for (const lang of LANGS) {
     let cats;
     try { cats = new Intl.PluralRules(lang).resolvedOptions().pluralCategories; }

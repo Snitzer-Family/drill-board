@@ -17,7 +17,7 @@ import { buildLedger, mayHoldOn, mayHoldEntering, orderTransfers } from "./posse
 import { classifyPenGroup, SYMBOL_MAX, SYMBOL_MAX_PX } from "./sketch-recognize.js";
 import { newGame, stepGame } from "./ai-game.js";
 import { STYLES } from "./styles.js";
-import { THEME_KEY, THEME_ATTR, THEME_ORDER, THEME_LABEL, resolveTheme, tokens, teamInk } from "./theme.js";
+import { THEME_KEY, THEME_ATTR, THEME_ORDER, resolveTheme, tokens, teamInk } from "./theme.js";
 import { ThemeCtx, InkCtx } from "./theme-react.jsx";
 import { LANG_KEY, LANG_ORDER, LANG_AUTONYM, resolveLang, readLangOverride } from "./i18n.js";
 import { makeT } from "./i18n/index.js";
@@ -28,6 +28,13 @@ import { SAVE_KEY, peekBackup, clearBackup } from "./storage.js";
 // in the ink you drew it with — so they're the team colours plus the classic
 // yellow whiteboard marker. No white: it vanishes on the ice.
 const PEN_INKS = ["#ffd447", "#d7263d", "#1f4fa3", "#1f8a4c", "#e0731d", "#7a3fa8", "#111318"];
+
+// Bottom-bar caption class. Only ~36px of each 50px button is usable — about
+// five uppercase characters — so anything longer drops to the tighter .long
+// type rather than overflowing onto the next button's icon. Length-driven, not
+// language-driven: a six-character English label would need it too.
+const BLBL_MAX = 5;
+const blbl = s => `hd-blbl${[...String(s)].length > BLBL_MAX ? " long" : ""}`;
 
 // the add-tool buttons show the SAME vector sprite the piece uses on the ice.
 // Each kind renders a mini PieceIcon in a viewBox tight to its body (raw icon
@@ -448,14 +455,14 @@ export default function DrillAnimator() {
     const bits = [];
     if (ids.size) bits.push(`${ids.size} item${ids.size > 1 ? "s" : ""}`);
     if (routed.length) bits.push(`${routed.length} route${routed.length > 1 ? "s" : ""}`);
-    flash(`Erased ${bits.join(" + ")}`);
+    flash(t("toast.pen.erased", { what: bits.join(" + ") }));
     return true;
   }
   const clearInk = () => {
     const n = piecesRef.current.filter(p => p.kind === "mark" && !p.lock).length;
-    if (!n) { flash("No ink to clear"); return; }
+    if (!n) { flash(t("toast.pen.noInkClear")); return; }
     setPieces(ps => ps.filter(p => !(p.kind === "mark" && !p.lock)));
-    flash(`Cleared ${n} ink mark${n > 1 ? "s" : ""} — Undo restores them`);
+    flash(t("toast.pen.cleared", { count: n, n }));
   };
 
   // what the classifier needs to know about the board it's reading into
@@ -486,7 +493,7 @@ export default function DrillAnimator() {
       : piecesRef.current;
     // note ink and locked ink are deliberately off-limits to the sweep
     const marks = board.filter(p => p.kind === "mark" && !p.lock && !p.note && (p.pts || []).length >= 2);
-    if (!marks.length) { if (pending.length) setPieces(board); flash("No ink to convert"); return; }
+    if (!marks.length) { if (pending.length) setPieces(board); flash(t("toast.pen.noInkConvert")); return; }
     const ops = classifyPenGroup(marks.map(m => ({ pts: m.pts })), penCtx(board));
     const consumed = new Set();
     ops.forEach(o => {
@@ -496,7 +503,7 @@ export default function DrillAnimator() {
     const made = ops.filter(o => o.op !== "mark" && o.op !== "drop");
     if (!made.length && !consumed.size) {
       if (pending.length) setPieces(board);
-      flash("Nothing recognised in the ink");
+      flash(t("toast.pen.nothingRecognised"));
       return;
     }
     setPieces(materializePenOps(board.filter(p => !consumed.has(p.id)), made));
@@ -514,7 +521,7 @@ export default function DrillAnimator() {
   const penLast = useRef(null);
   function copyPenDiag() {
     const d = penLast.current;
-    if (!d) { flash("Draw something with the pen first"); return; }
+    if (!d) { flash(t("toast.pen.drawFirst")); return; }
     const round = v => Math.round(v * 100) / 100;
     const txt = JSON.stringify({
       v: APP_VERSION, pxFtX: round(d.ctx.pxFtX * 10000) / 10000, pxFtY: round(d.ctx.pxFtY * 10000) / 10000,
@@ -1097,10 +1104,10 @@ export default function DrillAnimator() {
     setPopPos({ top: r.top - pr.top, left: r.left - pr.left });
   }
   function togglePin() {
-    if (pinMode === "float") { setPinMode(null); flash("Un-pinned — panel closes on the next ice tap"); return; }
+    if (pinMode === "float") { setPinMode(null); flash(t("toast.panel.unpinned")); return; }
     if (pinMode !== "dock") freezePopSpot();            // hold the current floating spot across re-targets
     setPinMode("float");
-    flash("Pinned — panel stays open and follows what you tap");
+    flash(t("toast.panel.pinned"));
   }
   function toggleDock() { setPinMode(m => m === "dock" ? null : "dock"); }
 
@@ -1858,7 +1865,7 @@ export default function DrillAnimator() {
       }
       return { text: s.text, at: s.t };
     }));
-    flash("Steps generated from the play");
+    flash(t("toast.stepsGenerated"));
   }
   // scrubber tick positions (fractions 0..1): player waypoint activations + steps
   const scrubDur = Math.max(0.1, totalTime);
@@ -1947,7 +1954,7 @@ export default function DrillAnimator() {
   // editing while the animation is paused/finished snaps the pieces back to their
   // start positions first — returns true if it consumed the interaction
   function wakeEdit() {
-    if (!playing && animT > 0) { resetAnim(); flash("Back to start — editing"); return true; }
+    if (!playing && animT > 0) { resetAnim(); flash(t("toast.backToStart")); return true; }
     return false;
   }
   function skipHold() { holdRef.current = 0; setHoldStep(null); }
@@ -3638,7 +3645,7 @@ export default function DrillAnimator() {
   const deletePiece = id => {
     setPieces(ps => scrubRefs(ps.filter(q => q.id !== id), id));
     setSelectedId(null); setPopup(null);
-    flash(`Deleted ${id} — Undo restores it`);
+    flash(t("toast.deletedPiece", { id }));
   };
 
   // record a coalesced undo snapshot whenever the drill DOCUMENT changes —
@@ -3759,7 +3766,7 @@ export default function DrillAnimator() {
   // ensureShotNet returns the same array when nothing's needed, so this is
   // a free no-op whenever a net or passer is already on the ice.
   const ensureNet = () => {
-    if (!pieces.some(q => q.kind === "net" || q.kind === "passer")) flash("Added a net to shoot at");
+    if (!pieces.some(q => q.kind === "net" || q.kind === "passer")) flash(t("toast.netAdded"));
     setPieces(ps => ensureShotNet(ps));
   };
 
@@ -4985,7 +4992,7 @@ export default function DrillAnimator() {
     const n = multiSel.size;
     setPieces(ps => { let list = ps.filter(q => !multiSel.has(q.id)); for (const id of multiSel) list = scrubRefs(list, id); return list; });
     setMultiSel(null); setSelectedId(null); setPopup(null);
-    flash(`Deleted ${n} item${n > 1 ? "s" : ""} — Undo restores them`);
+    flash(t("toast.deletedItems", { count: n, n }));
   }
 
   // turn one puck into a pile: scatter a few more loose, individual pucks in a
@@ -5421,7 +5428,7 @@ export default function DrillAnimator() {
     if (r.errors.length) { setTextError(r.errors.join("\n")); return; }
     setRink(r.rink); setPieces(r.pieces); setDrillTitle(r.title); setDrillDesc(r.desc); setDrillSteps(r.steps || []); setDrillNotes(r.notes || ""); setDrillItems(r.items || []); setDrillVersion(r.dslVersion); setSelectedId(null); setPopup(null);
     resetAnim(); setTextError(""); setOpenMenu(null);
-    flash("Board replaced — Undo restores the old drill");
+    flash(t("toast.boardReplaced"));
   }
   const slug = () => (drillTitle || "drill").replace(/[^\w-]+/g, "_").toLowerCase();
   // a drill as a markdown doc: title heading + description + a ```drill fenced
@@ -5446,8 +5453,8 @@ export default function DrillAnimator() {
     a.download = name; a.click();
     URL.revokeObjectURL(a.href);
   }
-  function exportTxt() { download(`${slug()}.txt`, serializeDrill(rink, pieces, drillTitle, drillDesc, drillSteps, drillNotes, drillItems), "text/plain"); flash(`Saved ${slug()}.txt`); }
-  function exportMd() { download(`${slug()}.md`, toMarkdown(), "text/markdown"); flash(`Saved ${slug()}.md`); }
+  function exportTxt() { download(`${slug()}.txt`, serializeDrill(rink, pieces, drillTitle, drillDesc, drillSteps, drillNotes, drillItems), "text/plain"); flash(t("toast.saved", { file: `${slug()}.txt` })); }
+  function exportMd() { download(`${slug()}.md`, toMarkdown(), "text/markdown"); flash(t("toast.saved", { file: `${slug()}.md` })); }
   // render the drill (via the DSL→SVG renderer) and rasterise it to a PNG
   function exportImage() {
     const dsl = serializeDrill(rink, pieces, drillTitle, drillDesc, drillSteps, drillNotes, drillItems);
@@ -5471,14 +5478,14 @@ export default function DrillAnimator() {
       ctx.drawImage(img, 0, 0, W, H);
       URL.revokeObjectURL(url);
       canvas.toBlob(b => {
-        if (!b) { flash("Image export failed"); return; }
+        if (!b) { flash(t("toast.imageExportFailed")); return; }
         const a = document.createElement("a");
         a.href = URL.createObjectURL(b); a.download = `${slug()}.png`; a.click();
         URL.revokeObjectURL(a.href);
-        flash(`Saved ${slug()}.png`);
+        flash(t("toast.saved", { file: `${slug()}.png` }));
       }, "image/png");
     };
-    img.onerror = () => { URL.revokeObjectURL(url); flash("Image export failed"); };
+    img.onerror = () => { URL.revokeObjectURL(url); flash(t("toast.imageExportFailed")); };
     img.src = url;
   }
   const flash = (msg, ms = 1400) => { setToast(msg); setTimeout(() => setToast(""), ms); };
@@ -5494,7 +5501,7 @@ export default function DrillAnimator() {
         const ok = document.execCommand("copy");
         ta.remove();
         flash(ok ? okMsg : "Copy failed — use Export or Share instead", ok ? 1400 : 3000);
-      } catch { flash("Copy failed — use Export or Share instead", 3000); }
+      } catch { flash(t("toast.copyFailed"), 3000); }
     };
     if (navigator.clipboard?.writeText)
       navigator.clipboard.writeText(text).then(() => flash(okMsg), fallback);
@@ -5502,7 +5509,7 @@ export default function DrillAnimator() {
   }
   // a #d= link that failed to parse fell back to the saved board — say so
   useEffect(() => {
-    if (linkBad) flash("Couldn't read the shared drill link — showing your saved board instead", 4200);
+    if (linkBad) flash(t("toast.linkUnreadable"), 4200);
   }, []);
   // one-time contextual tips for the gesture-only features (flagged in
   // localStorage so each shows exactly once, ever)
@@ -5590,7 +5597,7 @@ export default function DrillAnimator() {
   <div class="bar"><button onclick="window.print()">🖨 Print</button></div>
 </body></html>`;
     const w = window.open("", "_blank");
-    if (!w) { flash("Allow pop-ups to print"); return; }
+    if (!w) { flash(t("toast.allowPopups")); return; }
     w.document.open(); w.document.write(doc); w.document.close();
   }
 
@@ -5633,7 +5640,7 @@ export default function DrillAnimator() {
       if (r.errors.length) { setTextDraft(txt); setTextError(r.errors.join("\n")); setOpenMenu("text"); return; }
       setRink(r.rink); setPieces(r.pieces); setDrillTitle(r.title); setDrillDesc(r.desc); setDrillSteps(r.steps || []); setDrillNotes(r.notes || ""); setDrillItems(r.items || []); setDrillVersion(r.dslVersion); setSelectedId(null); setPopup(null);
       resetAnim(); setTextError(""); setOpenMenu(null);
-      flash("Drill loaded — Undo restores the old board");
+      flash(t("toast.drillLoaded"));
     };
     reader.readAsText(f);
     e.target.value = "";
@@ -5654,7 +5661,7 @@ export default function DrillAnimator() {
     const key = localStorage.getItem(ANTHROPIC_KEY_STORE);
     if (!key) {
       setOpenMenu("prefs"); setKeyEdit("");
-      flash("Add your Claude API key to import photos", 3000);
+      flash(t("toast.apiKeyNeeded.photo"), 3000);
       return null;
     }
     return key;
@@ -6919,9 +6926,9 @@ export default function DrillAnimator() {
         if (kind === "shot") ensureNet();
       };
       const createType = t => {
-        if (t === "receive") { const src = defaultPasser(); if (src) doReceiveFrom(p.id, i, src, fork); else flash("Add another player to pass from"); }
+        if (t === "receive") { const src = defaultPasser(); if (src) doReceiveFrom(p.id, i, src, fork); else flash(t("toast.needPasser")); }
         else if (t === "collect") collectPuckAt(p.id, i, undefined, fork);
-        else if (t === "pass") { const to = (others[0] || {}).id; if (to) addPass(to); else if (viaTargets[0]) addVia(viaTargets[0].id); else flash("Add a player, passer, tire, or bumper to pass to"); }
+        else if (t === "pass") { const to = (others[0] || {}).id; if (to) addPass(to); else if (viaTargets[0]) addVia(viaTargets[0].id); else flash(t("toast.needTarget")); }
         else if (t === "shoot") addTerminal("shot", null);
         else if (t === "chip") addTerminal("chip");
         else if (t === "rim") addTerminal("rim");
@@ -7730,7 +7737,7 @@ export default function DrillAnimator() {
           )}
           <div className="hd-poprow" style={{ marginTop: 2 }}>
             {p.path.length > 0 && (
-              <button className="hd-mini" onClick={() => { updateById(p.id, { path: [] }); setPopup(null); flash("Route cleared — Undo restores it"); }}>Clear route</button>
+              <button className="hd-mini" onClick={() => { updateById(p.id, { path: [] }); setPopup(null); flash(t("toast.routeCleared")); }}>Clear route</button>
             )}
             <button className="hd-mini" onClick={() => duplicatePiece(p.id)}><Icon name="duplicate" size={15} /> Duplicate</button>
             <button className="hd-mini" title="Pin in place so it can't be moved or edited by accident."
@@ -7760,7 +7767,7 @@ export default function DrillAnimator() {
             <button className="hd-mini" onClick={() => addPointAt(p.id, popup.seg, popup.pt, fork)}>
               ＋ Add point here
             </button>
-            <button className="hd-mini danger" onClick={() => { deleteSeg(p.id, popup.seg, fork); flash("Leg removed — Undo restores it"); }}>
+            <button className="hd-mini danger" onClick={() => { deleteSeg(p.id, popup.seg, fork); flash(t("toast.legRemoved")); }}>
               Delete leg
             </button>
           </div>
@@ -8567,6 +8574,12 @@ export default function DrillAnimator() {
       </div>
     );
   }
+
+  // bound here rather than inline in the bar so the caption and the class that
+  // sizes it read the same string exactly once
+  const rinkLabel = rink === "full" ? t("bar.rink.full")
+    : rink === "half" ? t("bar.rink.half", { dir: halfNS ? (halfFlip ? "↑" : "↓") : (halfFlip ? "←" : "→") })
+    : t("bar.rink.quarter");
 
   const toolHint =
     !playing && !aiPlay && animT > 0
@@ -9729,27 +9742,31 @@ export default function DrillAnimator() {
       )}
 
       {/* ---------- bottom menu bar ---------- */}
+      {/* data-hd is a stable test hook: title= is now translated, so any
+          harness selecting on the English tooltip finds nothing the moment the
+          app is in German. Select on data-hd instead — it never changes. */}
       <div className="hd-bar">
-        <button ref={barBtnRefs.settings} className={`hd-barbtn${openMenu === "settings" ? " on" : ""}`} title="Menu"
+        {/* Captions over five characters get tighter type — see .hd-blbl.long
+            in styles.js. Keyed on the rendered string, not the language: it is
+            the word that is long, not the locale. */}
+        <button ref={barBtnRefs.settings} data-hd="menu" className={`hd-barbtn${openMenu === "settings" ? " on" : ""}`} title={t("bar.title.menu")}
           onClick={() => setOpenMenu(m => (m === "settings" ? null : "settings"))}>
-          <Icon name="menu" size={16} /><span className="hd-blbl">Menu</span></button>
-        <button ref={barBtnRefs.rinkmenu} className={`hd-barbtn${openMenu === "rinkmenu" ? " on" : ""}`} title="Rink"
+          <Icon name="menu" size={16} /><span className={blbl(t("bar.menu"))}>{t("bar.menu")}</span></button>
+        <button ref={barBtnRefs.rinkmenu} data-hd="rink" className={`hd-barbtn${openMenu === "rinkmenu" ? " on" : ""}`} title={t("bar.title.rink")}
           onClick={() => setOpenMenu(m => (m === "rinkmenu" ? null : "rinkmenu"))}>
           <Icon name="rink" size={16} />
-          <span className="hd-blbl">{rink === "full" ? "Full"
-            : rink === "half" ? `Half ${halfNS ? (halfFlip ? "↑" : "↓") : (halfFlip ? "←" : "→")}`
-            : "¼ ice"}</span>
+          <span className={blbl(rinkLabel)}>{rinkLabel}</span>
         </button>
-        <button ref={barBtnRefs.tools} className={`hd-barbtn${tool !== "select" || openMenu === "tools" ? " on" : ""}`} title="Add / draw"
+        <button ref={barBtnRefs.tools} data-hd="add" className={`hd-barbtn${tool !== "select" || openMenu === "tools" ? " on" : ""}`} title={t("bar.title.add")}
           onClick={() => setOpenMenu(m => (m === "tools" ? null : "tools"))}>
-          <Icon name="pencil" size={16} /><span className="hd-blbl">Add</span></button>
-        <button ref={barBtnRefs.prefs} className={`hd-barbtn${openMenu === "prefs" ? " on" : ""}`} title="Settings"
+          <Icon name="pencil" size={16} /><span className={blbl(t("bar.add"))}>{t("bar.add")}</span></button>
+        <button ref={barBtnRefs.prefs} data-hd="tune" className={`hd-barbtn${openMenu === "prefs" ? " on" : ""}`} title={t("bar.title.tune")}
           onClick={() => setOpenMenu(m => (m === "prefs" ? null : "prefs"))}>
-          <Icon name="sliders" size={16} /><span className="hd-blbl">Tune</span></button>
-        <button className="hd-barbtn" title="Undo last change" disabled={!undoCount}
-          onClick={undoLast}><Icon name="undo" size={16} /><span className="hd-blbl">Undo</span></button>
-        <button className="hd-barbtn" title="Redo" disabled={!redoCount}
-          onClick={redoLast}><Icon name="redo" size={16} /><span className="hd-blbl">Redo</span></button>
+          <Icon name="sliders" size={16} /><span className={blbl(t("bar.tune"))}>{t("bar.tune")}</span></button>
+        <button className="hd-barbtn" data-hd="undo" title={t("bar.title.undo")} disabled={!undoCount}
+          onClick={undoLast}><Icon name="undo" size={16} /><span className={blbl(t("bar.undo"))}>{t("bar.undo")}</span></button>
+        <button className="hd-barbtn" data-hd="redo" title={t("bar.title.redo")} disabled={!redoCount}
+          onClick={redoLast}><Icon name="redo" size={16} /><span className={blbl(t("bar.redo"))}>{t("bar.redo")}</span></button>
         <div className="hd-barhint">{toolHint || ""}</div>
         <div className="hd-ver"><span className="hd-vernum">v{APP_VERSION}</span><span className="hd-verstamp">&nbsp;· {BUILD_STAMP}</span></div>
       </div>
@@ -9757,52 +9774,52 @@ export default function DrillAnimator() {
       {/* ---------- menus ---------- */}
       {openMenu === "settings" && (
         <div className="hd-menu" style={menuAnchor}>
-          <div className="hd-mh">Drill</div>
-          <input className="hd-input" placeholder="Drill name" value={drillTitle}
+          <div className="hd-mh">{t("menu.section.drill")}</div>
+          <input className="hd-input" placeholder={t("menu.field.name")} value={drillTitle}
             onChange={e => setDrillTitle(e.target.value)} />
           {/* 62, not 46: under border-box the padding and border are inside the
               min-height, and 46 would render 16px shorter than it always has */}
           <textarea className="hd-input" style={{ minHeight: 62, resize: "vertical", fontFamily: "inherit" }}
-            placeholder="Description" value={drillDesc} onChange={e => setDrillDesc(e.target.value)} spellCheck={false} />
-          <button className="hd-item" onClick={() => setOpenMenu("notes")}><Icon name="note" size={16} /> Notes / writeup{drillNotes.trim() ? " ✓" : ""}<span className="hd-chev"><Icon name="chevronRight" size={14} /></span></button>
-          <button className="hd-item" onClick={() => setOpenMenu("inventory")}><Icon name="grid" size={16} /> Inventory / gear<span className="hd-chev"><Icon name="chevronRight" size={14} /></span></button>
-          <button className="hd-item" onClick={() => { printSheet(); setOpenMenu(null); }}><Icon name="printer" size={16} /> Print sheet…</button>
-          <button className="hd-item" onClick={openText}><Icon name="keyboard" size={16} /> Text editor<span className="hd-chev"><Icon name="chevronRight" size={14} /></span></button>
-          <button className="hd-item" onClick={() => { exportTxt(); setOpenMenu(null); }}><Icon name="download" size={16} /> Export .txt</button>
-          <button className="hd-item" onClick={() => { exportMd(); setOpenMenu(null); }}><Icon name="download" size={16} /> Export .md</button>
-          <button className="hd-item" onClick={() => { exportImage(); setOpenMenu(null); }}><Icon name="image" size={16} /> Export image</button>
-          <button className="hd-item" onClick={() => { copyMd(); setOpenMenu(null); }}><Icon name="duplicate" size={16} /> Copy markdown</button>
-          <button className="hd-item" onClick={() => { previewLink(); setOpenMenu(null); }}><Icon name="share" size={16} /> Share preview link</button>
-          <button className="hd-item" onClick={() => fileRef.current?.click()}><Icon name="upload" size={16} /> Load .txt / .md</button>
+            placeholder={t("menu.field.desc")} value={drillDesc} onChange={e => setDrillDesc(e.target.value)} spellCheck={false} />
+          <button className="hd-item" onClick={() => setOpenMenu("notes")}><Icon name="note" size={16} /> {t("menu.item.notes")}{drillNotes.trim() ? " ✓" : ""}<span className="hd-chev"><Icon name="chevronRight" size={14} /></span></button>
+          <button className="hd-item" onClick={() => setOpenMenu("inventory")}><Icon name="grid" size={16} /> {t("menu.item.inventory")}<span className="hd-chev"><Icon name="chevronRight" size={14} /></span></button>
+          <button className="hd-item" onClick={() => { printSheet(); setOpenMenu(null); }}><Icon name="printer" size={16} /> {t("menu.item.print")}</button>
+          <button className="hd-item" onClick={openText}><Icon name="keyboard" size={16} /> {t("menu.item.textEditor")}<span className="hd-chev"><Icon name="chevronRight" size={14} /></span></button>
+          <button className="hd-item" onClick={() => { exportTxt(); setOpenMenu(null); }}><Icon name="download" size={16} /> {t("menu.item.exportTxt")}</button>
+          <button className="hd-item" onClick={() => { exportMd(); setOpenMenu(null); }}><Icon name="download" size={16} /> {t("menu.item.exportMd")}</button>
+          <button className="hd-item" onClick={() => { exportImage(); setOpenMenu(null); }}><Icon name="image" size={16} /> {t("menu.item.exportImage")}</button>
+          <button className="hd-item" onClick={() => { copyMd(); setOpenMenu(null); }}><Icon name="duplicate" size={16} /> {t("menu.item.copyMd")}</button>
+          <button className="hd-item" onClick={() => { previewLink(); setOpenMenu(null); }}><Icon name="share" size={16} /> {t("menu.item.shareLink")}</button>
+          <button className="hd-item" onClick={() => fileRef.current?.click()}><Icon name="upload" size={16} /> {t("menu.item.load")}</button>
           {crashBackup && (
             <button className="hd-item" onClick={() => {
               const r = parseDrill(crashBackup);
-              if (r.errors.length) { flash("That saved board can't be read", 3200); return; }
+              if (r.errors.length) { flash(t("toast.savedBoardUnreadable"), 3200); return; }
               // no explicit undo push: the doc-watching effect records a
               // snapshot whenever pieces/rink/steps change, so a restore is
               // already as undoable as a file Load
               applyDrillPreview(r);
               clearBackup(); setCrashBackup(null);
               setOpenMenu(null);
-              flash("Board restored", 2600);
-            }}><Icon name="reset" size={16} /> Restore last board</button>
+              flash(t("toast.boardRestored"), 2600);
+            }}><Icon name="reset" size={16} /> {t("menu.item.restore")}</button>
           )}
-          <button className="hd-item" disabled={!!photoBusy} onClick={() => { setOpenMenu(null); photoRef.current?.click(); }}><Icon name="camera" size={16} /> Import from photo…</button>
+          <button className="hd-item" disabled={!!photoBusy} onClick={() => { setOpenMenu(null); photoRef.current?.click(); }}><Icon name="camera" size={16} /> {t("menu.item.importPhoto")}</button>
           <button className="hd-item"
             onClick={() => setShowZones(s => !s)}>
-            <Icon name="grid" size={16} /> Ice zones<span className={`hd-sw${showZones ? " on" : ""}`} />
+            <Icon name="grid" size={16} /> {t("menu.item.iceZones")}<span className={`hd-sw${showZones ? " on" : ""}`} />
           </button>
           <button className="hd-item"
             onClick={toggleLockAll}>
-            <Icon name={anyLocked ? "unlock" : "lock"} size={16} /> {anyLocked ? "Unlock all" : "Lock board"}<span className={`hd-sw${anyLocked ? " on" : ""}`} />
+            <Icon name={anyLocked ? "unlock" : "lock"} size={16} /> {anyLocked ? t("menu.item.unlockAll") : t("menu.item.lockBoard")}<span className={`hd-sw${anyLocked ? " on" : ""}`} />
           </button>
           <button className="hd-item"
             onClick={() => setLockedSelectable(s => !s)}>
-            <Icon name="lock" size={16} /> Allow selecting locked items<span className={`hd-sw${lockedSelectable ? " on" : ""}`} />
+            <Icon name="lock" size={16} /> {t("menu.item.selectLocked")}<span className={`hd-sw${lockedSelectable ? " on" : ""}`} />
           </button>
           <button className="hd-item"
             onClick={() => setShowDiag(s => !s)}>
-            <Icon name="gauge" size={16} /> Diagnostics<span className={`hd-sw${showDiag ? " on" : ""}`} />
+            <Icon name="gauge" size={16} /> {t("menu.item.diagnostics")}<span className={`hd-sw${showDiag ? " on" : ""}`} />
           </button>
           {/* Labelled with the autonym rather than the word "Language", so the
               row is self-describing whatever language the app is currently in —
@@ -9811,29 +9828,31 @@ export default function DrillAnimator() {
             <Icon name="globe" size={16} /> {LANG_AUTONYM[lang]}<span className="hd-chev"><Icon name="chevronRight" size={14} /></span>
           </button>
           <button className="hd-item" onClick={() => setOpenMenu("prefs")}>
-            <Icon name="sliders" size={16} /> App &amp; drill settings<span className="hd-chev"><Icon name="chevronRight" size={14} /></span>
+            <Icon name="sliders" size={16} /> {t("menu.item.appSettings")}<span className="hd-chev"><Icon name="chevronRight" size={14} /></span>
           </button>
-          <div className="hd-mh" style={{ marginTop: 4 }}>Let AI play</div>
+          <div className="hd-mh" style={{ marginTop: 4 }}>{t("menu.section.aiPlay")}</div>
           <div className="hd-poprow">
-            <span>5v5 for</span>
+            <span>{t("menu.ai.for")}</span>
             <Stepper value={aiMins} onChange={setAiMins} step={1} min={1} suffix="m" />
-            <button className="hd-mini" onClick={startAiPlay}><Icon name="play" size={13} /> Start</button>
+            <button className="hd-mini" onClick={startAiPlay}><Icon name="play" size={13} /> {t("menu.ai.start")}</button>
           </div>
-          <div className="hd-mh" style={{ marginTop: 4 }}>Presentation</div>
+          <div className="hd-mh" style={{ marginTop: 4 }}>{t("menu.section.presentation")}</div>
           <div className="hd-poprow">
             <button className={`hd-mini${presentation ? " on" : ""}`}
-              onClick={() => setPresentation(v => !v)}>{presentation ? "✓ On" : "Off"}</button>
-            <span>Pause</span>
+              onClick={() => setPresentation(v => !v)}>{presentation ? `✓ ${t("common.on")}` : t("common.off")}</button>
+            <span>{t("menu.preso.pause")}</span>
             <Stepper value={presoDelay} onChange={setPresoDelay} step={0.5} min={0} />
           </div>
           <div className="hd-poprow">
             <button className={`hd-mini${minorDesc ? " on" : ""}`}
-              onClick={() => setMinorDesc(v => !v)}>{minorDesc ? "✓ Minor steps" : "Minor steps"}</button>
-            <span className="hd-sechint">auto-caption the areas each player skates through</span>
+              onClick={() => setMinorDesc(v => !v)}>{minorDesc ? `✓ ${t("menu.preso.minorSteps")}` : t("menu.preso.minorSteps")}</button>
+            <span className="hd-sechint">{t("menu.preso.minorSteps.hint")}</span>
           </div>
           <div className="hd-poprow">
-            <button className="hd-mini" onClick={() => setOpenMenu("steps")}><Icon name="pencil" size={13} /> Edit steps</button>
-            <span className="hd-sechint">{drillSteps.length ? `${drillSteps.length} step${drillSteps.length > 1 ? "s" : ""} — play pauses at each` : "scrub, pause, add your own"}</span>
+            <button className="hd-mini" onClick={() => setOpenMenu("steps")}><Icon name="pencil" size={13} /> {t("menu.preso.editSteps")}</button>
+            <span className="hd-sechint">{drillSteps.length
+              ? t("menu.preso.stepCount", { count: drillSteps.length, n: drillSteps.length })
+              : t("menu.preso.noSteps")}</span>
           </div>
           {/* destructive action lives alone at the very bottom, behind a divider */}
           <div style={{ height: 1, background: "#2c3846", margin: "4px 0" }} />
@@ -9844,19 +9863,16 @@ export default function DrillAnimator() {
               setDrillTitle(""); setDrillDesc(""); setDrillNotes(""); setDrillVersion(undefined);
               setPlacingStep(null); setEditAnchor(null);
               setSelectedId(null); setPopup(null); setOpenMenu(null);
-              flash("Board cleared — Undo restores it", 3000);
-            }}><Icon name="trash" size={16} /> Clear all</button>
-          <div className="hd-note">
-            Tap a piece, route point, or line for its settings.
-            Double-tap a line to add a point. Drag to move; touch drags show a magnifier.
-          </div>
+              flash(t("toast.boardCleared"), 3000);
+            }}><Icon name="trash" size={16} /> {t("menu.item.clearAll")}</button>
+          <div className="hd-note">{t("menu.note.help")}</div>
         </div>
       )}
 
       {openMenu === "prefs" && (
         <div className="hd-menu" style={menuAnchor}>
-          <div className="hd-mh">App &amp; drill settings</div>
-          <div className="hd-mh" style={{ marginTop: 2, color: "var(--db-text-faint)" }}>Display</div>
+          <div className="hd-mh">{t("menu.item.appSettings")}</div>
+          <div className="hd-mh" style={{ marginTop: 2, color: "var(--db-text-faint)" }}>{t("prefs.section.display")}</div>
           {/* Language sits ABOVE Theme deliberately: it's the one setting a
               coach who can't read the current UI has to be able to find, so it
               goes first in the first section. Chips are labelled with autonyms
@@ -9877,17 +9893,17 @@ export default function DrillAnimator() {
             </span>
           </div>
           <div className="hd-poprow">
-            <span className="hd-sectitle" style={{ width: "100%" }}>Theme</span>
+            <span className="hd-sectitle" style={{ width: "100%" }}>{t("prefs.theme")}</span>
             {THEME_ORDER.map(v => (
               <button key={v} className={`hd-mini${themePref === v ? " on" : ""}`}
                 onClick={() => setThemePref(v)}>
-                {THEME_LABEL[v] || v}
+                {t(`prefs.theme.${v}`)}
               </button>
             ))}
             <span className="hd-sechint">
               {themePref === "auto"
-                ? `follows your phone’s appearance — currently ${themeName}`
-                : `pinned to ${themePref}, ignoring your phone’s appearance`}
+                ? t("prefs.theme.hint.auto", { theme: t(`prefs.theme.${themeName}`) })
+                : t("prefs.theme.hint.pinned", { theme: t(`prefs.theme.${themePref}`) })}
             </span>
           </div>
           <div className="hd-poprow">
@@ -9995,8 +10011,8 @@ export default function DrillAnimator() {
                 autoComplete="off" style={{ flex: 1, minWidth: 0, fontFamily: "ui-monospace, monospace", fontSize: 12 }}
                 onChange={e => setKeyEdit(e.target.value)} />
               <button className="hd-mini" onClick={() => {
-                if (keyEdit.trim()) { localStorage.setItem(ANTHROPIC_KEY_STORE, keyEdit.trim()); flash("API key saved"); }
-                else { localStorage.removeItem(ANTHROPIC_KEY_STORE); flash("API key cleared"); }
+                if (keyEdit.trim()) { localStorage.setItem(ANTHROPIC_KEY_STORE, keyEdit.trim()); flash(t("toast.apiKeySaved")); }
+                else { localStorage.removeItem(ANTHROPIC_KEY_STORE); flash(t("toast.apiKeyCleared")); }
                 setKeyEdit(null);
               }}>Save</button>
               <button className="hd-mini" onClick={() => setKeyEdit(null)}><Icon name="close" size={13} /></button>
@@ -10165,7 +10181,7 @@ export default function DrillAnimator() {
           <div className="hd-row">
             <button className="hd-btn primary" onClick={() => setOpenMenu(null)}>Done</button>
             <button className="hd-btn danger" style={{ marginLeft: "auto" }}
-              onClick={() => { setDrillNotes(""); flash("Notes cleared — Undo restores them"); }}>Clear</button>
+              onClick={() => { setDrillNotes(""); flash(t("toast.notesCleared")); }}>Clear</button>
           </div>
           <div className="hd-note">
             A written writeup shown on the print sheet and preview page. Supports markdown:
