@@ -403,8 +403,16 @@ export function themeCss({ appShell = true } = {}) {
 // Applies the persisted override before first paint. Must be injected as a
 // CLASSIC inline <script> — type="module" defers past first paint and would
 // reintroduce the flash. try/catch because iOS private mode throws on access.
+//
+// localStorage is the primary store and its key is unchanged, so existing
+// installs keep their preference. The cookie is the fallback ONLY: the site and
+// the board sit on different subdomains, hence different localStorage origins,
+// so a theme chosen on coach.vision would otherwise not survive the hop to
+// board.coach.vision. Both apps write cv_theme on Domain=.coach.vision.
+export const THEME_COOKIE = "cv_theme";
 export const BOOT_SCRIPT =
   `try{var t=localStorage.getItem(${JSON.stringify(THEME_KEY)});` +
+  `if(!t){var m=/(?:^|; )${THEME_COOKIE}=([^;]+)/.exec(document.cookie);if(m)t=decodeURIComponent(m[1])}` +
   `if(t&&t!=="auto")document.documentElement.setAttribute(${JSON.stringify(THEME_ATTR)},t)}` +
   `catch(e){}`;
 

@@ -7,6 +7,21 @@
     "apps/*",
     "packages/*"
   ],
+  "//react": [
+    "The two apps are on different React majors: the board is React 18, and",
+    "Next 15's App Router wants 19. npm hoists ONE of them to the root and nests",
+    "the other — and it also hoists `next` itself, which then resolves whatever",
+    "React is at the root. Left alone npm hoisted 18, so `next` and apps/web saw",
+    "different Reacts and every render died with 'Objects are not valid as a",
+    "React child' (two copies means two $$typeof symbols).",
+    "Declaring 19 here pins the hoisted copy to the one `next` must use; the",
+    "board's 18 nests under apps/board and is unaffected. Remove this only when",
+    "both apps are on the same major."
+  ],
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
   "scripts": {
     "dev": "npm run dev -w @coachvision/web",
     "dev:board": "npm run dev -w @coachvision/board",

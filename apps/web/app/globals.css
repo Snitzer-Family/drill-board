@@ -1,0 +1,190 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------------
+   The token bridge.
+
+   Every colour on this site resolves to a --db-* custom property emitted by
+   packages/drill-core/src/theme.js. Tailwind maps names onto those properties;
+   it never owns a colour value. Two reasons, and the first is not negotiable:
+
+   1. drill-svg.js paints with `fill="var(--db-ice, <light fallback>)"`. If this
+      site declared its own palette, every drill diagram would render in the
+      board's LIGHT fallbacks while the page around it was dark. Emitting
+      themeCss() makes the page and the diagrams one system, in all five themes.
+   2. tests/theme-contrast.mjs already asserts WCAG AA on the declared token
+      pairs, in every theme. Consuming the tokens puts this site under that
+      guard for free; a private palette would be unguarded.
+
+   `@theme inline` (not plain `@theme`) is load-bearing: inline makes `bg-panel`
+   emit `background-color: var(--db-surface-panel)` rather than snapshotting the
+   literal at build time, which is what lets a runtime data-theme switch work.
+
+   Do NOT use Tailwind's `dark:` variant anywhere. There are five themes; `dark:`
+   understands two, so it produces a site that looks right in `dark` and broken
+   in sheet/barn/slate. If you reach for it, a token is missing — add it to
+   theme.js. tests/web-tokens.mjs fails the build on both mistakes.
+--------------------------------------------------------------------------- */
+
+@theme inline {
+  /* surfaces — what you put content ON */
+  --color-app: var(--db-surface-app);
+  --color-bar: var(--db-surface-bar);
+  --color-panel: var(--db-surface-panel);
+  --color-panel-0: var(--db-surface-panel-0);
+  --color-raised: var(--db-surface-raised);
+  --color-sunken: var(--db-surface-sunken);
+
+  /* text — what you put ON a surface */
+  --color-ink: var(--db-text);
+  --color-ink-soft: var(--db-text-soft);
+  --color-ink-muted: var(--db-text-muted);
+  --color-ink-faint: var(--db-text-faint);
+  --color-on-accent: var(--db-text-on-accent);
+
+  /* borders */
+  --color-line: var(--db-border);
+  --color-line-strong: var(--db-border-strong);
+  --color-hair: var(--db-border-hair);
+
+  /* state / accent — named for meaning, never for hue */
+  --color-accent: var(--db-accent);
+  --color-focus: var(--db-focus);
+  --color-danger: var(--db-danger);
+  --color-danger-border: var(--db-danger-border);
+  --color-danger-bg: var(--db-danger-bg);
+  --color-warn: var(--db-warn);
+  --color-good: var(--db-good);
+  --color-info: var(--db-info);
+  --color-info-bg: var(--db-info-bg);
+  --color-info-border: var(--db-info-border);
+  --color-track: var(--db-track);
+  --color-track-thumb: var(--db-track-thumb);
+  --color-ui-select: var(--db-ui-select);
+  --color-brand: var(--db-brand-red);
+
+  /* ice / diagram — the only tier the SVG reads */
+  --color-ice: var(--db-ice);
+  --color-ice-surround: var(--db-ice-surround);
+  --color-ice-red: var(--db-ice-line-red);
+  --color-ice-blue: var(--db-ice-line-blue);
+  --color-ice-crease: var(--db-ice-crease);
+  --color-ice-boards: var(--db-ice-boards);
+  --color-ice-dash: var(--db-ice-dash);
+  --color-ice-ink: var(--db-ice-ink);
+  --color-ice-select: var(--db-ice-select);
+
+  /* effects */
+  --color-glass: var(--db-fx-glass);
+  --color-scrim: var(--db-fx-scrim);
+  --color-edge: var(--db-fx-edge);
+  --color-edge-0: var(--db-fx-edge-0);
+
+  --shadow-panel: var(--db-fx-shadow);
+  --shadow-lift: var(--db-fx-shadow-lg);
+
+  /* type */
+  --font-display: var(--font-archivo), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, "SF Mono", monospace;
+
+  /* radii — three, and no pills. 28px matches drill-svg's ice clipPath rx. */
+  --radius-rink: 28px;
+  --radius-card: 16px;
+  --radius-chip: 9px;
+}
+
+/* ---------------------------------------------------------------------------
+   Rink Chalk primitives
+--------------------------------------------------------------------------- */
+
+/* The blueprint grid: 10ft squares of a 200x85 sheet, so the graph paper behind
+   a hero is at the same scale as the rink drawn on top of it. */
+@utility blueprint {
+  background-image:
+    linear-gradient(to right, var(--db-border-hair) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--db-border-hair) 1px, transparent 1px);
+  background-size: 5% 11.7647%;
+}
+
+/* Every ice-bearing surface is 200:85. Repeating the rink's own proportion is
+   the site's signature — heroes, drill cards, empty states, OG images. */
+@utility rink-ratio {
+  aspect-ratio: 200 / 85;
+}
+
+/* The "puck shadow": a hard offset in brand red, no blur. Not a gradient, not a
+   glow — it reads as a printed registration mark rather than a SaaS button. */
+@utility puck-shadow {
+  box-shadow: 3px 3px 0 0 var(--db-brand-red);
+}
+
+@layer base {
+  /* html/body come from themeCss({appShell:false}) in layout.tsx — same source
+     as the board — so they are deliberately NOT restated here. */
+  body {
+    font-feature-settings: "cv05", "cv11", "ss03";
+    font-optical-sizing: auto;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Numerals line up in tables, step lists and inventory counts. */
+  :where(table, .tnum) {
+    font-variant-numeric: tabular-nums;
+  }
+
+  ::selection {
+    background: var(--db-accent);
+    color: var(--db-text-on-accent);
+  }
+
+  :where(a, button, input, select, textarea, summary):focus-visible {
+    outline: 2px solid var(--db-focus);
+    outline-offset: 2px;
+    border-radius: 3px;
+  }
+}
+
+/* Prose for drill NOTES and help articles. md.js emits a small, fixed subset of
+   HTML, so this styles that subset exactly rather than pulling in a plugin. */
+.prose-rink {
+  max-width: 68ch;
+  color: var(--db-text-soft);
+  line-height: 1.7;
+}
+.prose-rink > * + * { margin-top: 1em; }
+.prose-rink h2 {
+  font-family: var(--font-display), sans-serif;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: -0.01em;
+  font-size: 1.35rem;
+  color: var(--db-text);
+  margin-top: 2em;
+  padding-top: 0.6em;
+  border-top: 2px solid var(--db-ice-line-blue);
+}
+.prose-rink h3 {
+  font-weight: 650;
+  font-size: 1.05rem;
+  color: var(--db-text);
+  margin-top: 1.6em;
+}
+.prose-rink strong { color: var(--db-text); font-weight: 650; }
+.prose-rink a { color: var(--db-accent); text-underline-offset: 3px; text-decoration: underline; }
+.prose-rink code {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.88em;
+  background: var(--db-surface-sunken);
+  border: 1px solid var(--db-border-hair);
+  border-radius: 5px;
+  padding: 0.1em 0.36em;
+}
+.prose-rink ol, .prose-rink ul { padding-left: 1.4em; }
+.prose-rink li + li { margin-top: 0.4em; }
+.prose-rink ol { list-style: decimal; }
+.prose-rink ul { list-style: disc; }
+.prose-rink blockquote {
+  border-left: 2px solid var(--db-brand-red);
+  padding-left: 1em;
+  color: var(--db-text-muted);
+}
