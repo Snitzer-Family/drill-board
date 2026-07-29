@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo, Fragment } from "react";
 import { VIEWS, isQuarter, COLORS, vb, APP_VERSION, ICON_SCALE, PLAYER_SCALE, ROUTE_START_GAP, BUILD_STAMP, DEFAULT_TEXT, SPEED,
   SAVE_PROB, MISS_POST, MISS_WIDE, MISS_OVER, SHOT_AIR_PROB, BOUNCE_REST, WB_SYMS, symOf,
-  DSL_VERSION, TYPEFACES, TYPEFACE_KEY, READ_PACES, READ_PACE_DEFAULT, captionHold, GOALIE_COLOR } from "./constants.js";
+  DSL_VERSION, TYPEFACES, TYPEFACE_KEY, READ_PACES, READ_PACE_DEFAULT, captionHold, GOALIE_COLOR,
+  GOAL_SPOTS, atGoalSpot } from "./constants.js";
 import { parseDrill, serializeDrill, extractDrill, deriveInventory, ensureShotNet } from "./drill-format.js";
 import { prepareImage, drillFromImage, ANTHROPIC_KEY_STORE } from "./drill-vision.js";
 import { drillSvg } from "./drill-svg.js";
@@ -13,7 +14,7 @@ import { netShapes, bumperShapes, solidShapes, detourRoute, segCrossesNet } from
 import { RinkMarkings } from "./rink.jsx";
 import { ZONES, zoneAt } from "./zones.js";
 import { PieceIcon, GoalieIcon, Stepper, DiagPanel, Icon, ICONS } from "./icons.jsx";
-import { createTiming, resolveNearest } from "./timing.js";
+import { createTiming, resolveNearest, goalieDepth, GOALIE_MAXREL } from "./timing.js";
 import { buildLedger, mayHoldOn, mayHoldEntering, orderTransfers } from "./possession.js";
 import { classifyPenGroup, SYMBOL_MAX, SYMBOL_MAX_PX } from "./sketch-recognize.js";
 import { newGame, stepGame } from "./ai-game.js";
@@ -3767,7 +3768,7 @@ export default function DrillAnimator() {
     const R_TIRE = 2.6 * ICON_SCALE * (net.size || 1) + 1.3;
     const f = ((net.facing || 0) * Math.PI) / 180;    // net mouth opens this way
     const e = animT <= 0 ? 0 : animT * totalTime;
-    const MAXREL = isTire ? Math.PI : (82 * Math.PI) / 180; // net: post-to-post; tire: all the way round
+    const MAXREL = isTire ? Math.PI : GOALIE_MAXREL; // net: post-to-post; tire: all the way round
     const onArc = (ang, R) => {                         // clamp an aim angle to the front hemisphere
       let rel = ang - f; rel = Math.atan2(Math.sin(rel), Math.cos(rel));
       rel = Math.max(-MAXREL, Math.min(MAXREL, rel));
@@ -3780,15 +3781,25 @@ export default function DrillAnimator() {
     const { plans } = getPlan();
     let shot = null;
     for (const pid in plans) for (const leg of plans[pid].legs) {
+      // 14 ft, not 12: a save now ends the shot at the pad face of a keeper who
+      // may be playing 6.5 ft up the crease, so the leg's endpoint sits ~9 ft
+      // out. At 12 the margin had shrunk to three feet.
       if (leg.type === "fly" && leg.shot && e >= leg.t0
-        && Math.hypot(leg.x1 - net.x, leg.y1 - net.y) < 12
+        && Math.hypot(leg.x1 - net.x, leg.y1 - net.y) < 14
         && (!shot || leg.t0 > shot.t0)) shot = leg;
     }
     if (shot) {
       // slide across the crease toward the shot's origin, but stay in front of
       // the net (post-to-post) — a wrap-around shooter must not drag the goalie
       // around behind or through the cage
-      const R = shot.save ? 2.5 : 2;                   // save depth matches the puck's stop point
+      // Depth comes off how far the SHOT was taken from, by the same ramp the
+      // tracking case uses — a point shot is met at the top of the crease, a
+      // walkout from the goal line. goalieDepth() is timing.js's, which is also
+      // what places the puck's stop point, so a save lands on the sprite.
+      // A beaten keeper is drawn a touch deeper: being beaten from distance
+      // reads as not having come out far enough.
+      const sd = Math.hypot(shot.x0 - net.x, shot.y0 - net.y);
+      const R = goalieDepth(sd) * (shot.save ? 1 : 0.8);
       return onArc(Math.atan2(shot.y0 - net.y, shot.x0 - net.x), R);
     }
     const pucks = pieces.filter(q => q.kind === "puck");
@@ -3800,9 +3811,8 @@ export default function DrillAnimator() {
     });
     const dist = best === Infinity ? 30 : best;
     // depth: deep on the line when close, out to the top of the crease when far
-    const D_NEAR = 9, D_FAR = 45, R_MIN = 0.6, R_MAX = 6;
-    const u = Math.max(0, Math.min(1, (dist - D_NEAR) / (D_FAR - D_NEAR)));
-    const R = R_MIN + (R_MAX - R_MIN) * (u * u * (3 - 2 * u)); // smoothstep
+    // (the ramp lives in timing.js — the puck's save point reads the same one)
+    const R = goalieDepth(dist);
     // track the puck aggressively, clamped to the front hemisphere (never behind)
     return onArc(Math.atan2(aim.y - net.y, aim.x - net.x), R);
   }
@@ -5653,8 +5663,7 @@ export default function DrillAnimator() {
     if (d.kind === "piece" && d.moved && d.line == null) {
       const pc = pieces.find(q => q.id === d.id);
       if (pc && pc.kind === "net") {
-        const spots = [{ x: 11, y: 42.5, facing: 0 }, { x: 189, y: 42.5, facing: 180 }];
-        const near = spots.find(s => Math.hypot(s.x - pc.x, s.y - pc.y) < 12);
+        const near = GOAL_SPOTS.find(s => Math.hypot(s.x - pc.x, s.y - pc.y) < 12);
         if (near) updateById(pc.id, near);
       }
       // a routed piece carries a start-point angle handle — reopen its editor so
@@ -7594,12 +7603,19 @@ export default function DrillAnimator() {
               <div className="hd-field">
                 <div className="hd-sectitle">Crease</div>
                 <div className="hd-poprow">
-                  <button className={`hd-mini${p.crease ? " on" : ""}`}
+                  {/* dead while the net stands in a painted crease: there is
+                      already an arc there, and drawing a second one on top of
+                      it is the only thing this button could do */}
+                  <button className={`hd-mini${p.crease && !atGoalSpot(p) ? " on" : ""}`}
+                    disabled={atGoalSpot(p)}
                     onClick={() => updateById(p.id, { crease: !p.crease })}>
-                    {p.crease ? "✓ Crease drawn" : "◗ Draw crease"}
+                    {p.crease && !atGoalSpot(p) ? "✓ Crease drawn" : "◗ Draw crease"}
                   </button>
                 </div>
-                <div className="hd-sechint">An arc in front — for a net off the goal line.</div>
+                <div className="hd-sechint">
+                  {atGoalSpot(p) ? "Already in the rink's crease — drag the net out to draw one."
+                    : "An arc in front — for a net off the goal line."}
+                </div>
               </div>
               <div className="hd-field">
                 <div className="hd-sectitle">Size</div>

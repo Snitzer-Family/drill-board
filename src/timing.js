@@ -45,7 +45,47 @@ export function resolveNearest(pieces) {
   return out;
 }
 
-const GOALIE_DEPTH = 2.5; // how far out front of the net the goalie plays
+/* ---- where the keeper stands ----
+   How far out front of the net the goalie plays, in feet from the goal line,
+   as a function of how far away the puck is. A goalie challenges: the further
+   out the shooter, the higher up the crease they come to cut the angle down,
+   and they back onto the line as the play gets close enough that lateral
+   movement matters more than depth.
+
+   These live here, and are exported, because TWO things have to agree on the
+   answer: the sprite's position on the ice, and the point a saved puck stops
+   at. They used to be a pair of hand-matched literals (2.5 in each file), so
+   any change to one silently parked the puck in open ice next to the goalie.
+
+   The ramp used to top out at 6 ft only once the puck was 45 ft away, which
+   left the keeper sitting under 3 ft out — barely off the line — for a shot
+   from the top of the circle. It now reaches the top of the crease around the
+   hash marks, which is where a goalie actually plays that shot. */
+export const GOALIE_NEAR = 7;      // at/inside this, hug the goal line
+export const GOALIE_FAR = 34;      // at/beyond this, fully out
+export const GOALIE_DEEP = 1.0;    // depth on the line
+export const GOALIE_HIGH = 6.5;    // depth at the top of the crease (6 ft radius)
+export function goalieDepth(dist) {
+  const u = Math.max(0, Math.min(1, (dist - GOALIE_NEAR) / (GOALIE_FAR - GOALIE_NEAR)));
+  return GOALIE_DEEP + (GOALIE_HIGH - GOALIE_DEEP) * (u * u * (3 - 2 * u)); // smoothstep
+}
+// …and post-to-post: a keeper never gets dragged around behind their own cage,
+// so the aim angle is clamped into the net's front hemisphere. The puck's stop
+// point has to take the SAME clamp, or a wrap-around shot stops on the far side
+// of the net from the goalie who supposedly saved it.
+export const GOALIE_MAXREL = (82 * Math.PI) / 180;
+// A shot dies on the PADS, not at the keeper's belly button. The sprite reaches
+// ~2.3 ft in front of its own centre, so a puck stopped at goalieDepth() alone
+// is drawn buried inside the body — and the higher the keeper plays, the more
+// obviously the shot line overshoots them. This pushes the stop point back out
+// to the pad face, which is where the shot visibly ends.
+export const GOALIE_FACE = 2.6;
+export function goalieAngle(facingDeg, ang) {
+  const f = ((facingDeg || 0) * Math.PI) / 180;
+  let rel = ang - f;
+  rel = Math.atan2(Math.sin(rel), Math.cos(rel));
+  return f + Math.max(-GOALIE_MAXREL, Math.min(GOALIE_MAXREL, rel));
+}
 // stickhandling cradle: ONE oscillation, applied to the stick's rotation — the puck
 // rides the blade tip through it, so they move together by construction rather than
 // by two amplitudes being kept in step by hand.
@@ -718,7 +758,11 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           const R = 2.6 * ICON_SCALE * (netPiece.size || 1);
           hit = { x: net.x - ux * (R + 1.3), y: net.y - uy * (R + 1.3) };
         } else if (goalie) {
-          hit = { x: net.x - ux * GOALIE_DEPTH, y: net.y - uy * GOALIE_DEPTH };
+          // stop the puck exactly where the sprite is standing: same depth ramp
+          // off the shot's length, same post-to-post clamp
+          const gd = goalieDepth(mag) + GOALIE_FACE;
+          const ga = goalieAngle(netPiece.facing, Math.atan2(launch.y - net.y, launch.x - net.x));
+          hit = { x: net.x + Math.cos(ga) * gd, y: net.y + Math.sin(ga) * gd };
         } else {
           hit = { x: clampX(net.x + px * place * GOAL_HALF), y: clampY(net.y + py * place * GOAL_HALF) };
         }

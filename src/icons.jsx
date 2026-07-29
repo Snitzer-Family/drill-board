@@ -1,6 +1,6 @@
 // Piece icons (screen-true frames), stepper control, diagnostics overlay.
 import { useState, useRef, useEffect } from "react";
-import { APP_VERSION, BUILD_STAMP, ICON_SCALE, DSL_VERSION, symOf, PLAYER_SCALE, GOALIE_COLOR } from "./constants.js";
+import { APP_VERSION, BUILD_STAMP, ICON_SCALE, DSL_VERSION, symOf, PLAYER_SCALE, GOALIE_COLOR, atGoalSpot } from "./constants.js";
 import { useTheme, useInk } from "./theme-react.jsx";
 
 /* ---------------- unified action icons ----------------
@@ -206,8 +206,11 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
       <g pointerEvents="none">
         {selected && <rect x={-4.8} y={-4.5} width={5.4} height={9} rx={1} fill="none" stroke={SEL} strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
         {/* a drawn goalie crease: an unfilled arch in front of the mouth (for a
-            net placed away from the standard crease). ~6 ft radius (7.5 local). */}
-        {p.crease && <path d="M 0 -7.5 A 7.5 7.5 0 0 1 0 7.5" fill="none" stroke="#d7263d" strokeWidth={0.42} opacity={0.85} strokeLinecap="round" />}
+            net placed away from the standard crease). ~6 ft radius (7.5 local).
+            Suppressed on a net standing in a painted crease — the arc would
+            just trace the paint. The stored flag is left alone, so dragging the
+            net back out into open ice brings the drawn crease back. */}
+        {p.crease && !atGoalSpot(p) && <path d="M 0 -7.5 A 7.5 7.5 0 0 1 0 7.5" fill="none" stroke="#d7263d" strokeWidth={0.42} opacity={0.85} strokeLinecap="round" />}
         {/* mesh backing + crosshatch netting + centre seam */}
         <path d={CAGE + " Z"} fill="rgba(230,238,246,0.3)" stroke="none" />
         <g stroke="#9fb0c0" strokeWidth={0.13} opacity={0.85} fill="none">
@@ -383,7 +386,15 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
       </g>
     );
   } else {
-    const dark = "#1d2126";
+    // The skater's stick and gloves. These were a flat #1d2126, which is 1.14:1
+    // on the dark sheet and 1.08:1 on slate — on those themes the player simply
+    // had no stick, and the blade is what says which way they're facing and
+    // where the puck can be. `ice-stick` is the token that already exists for
+    // exactly this (a stick lying on the ice, on either sheet): 9.0:1 on white,
+    // 8.6:1 on dark. The gloves move with it — they sit out on the ice past the
+    // body, so leaving them near-black would strand two invisible dots at the
+    // end of a visible stick.
+    const dark = T["ice-stick"];
     body = (
       <g pointerEvents="none">
         {selected && <circle cx={0} cy={0} r={4.6} fill="none" stroke={SEL} strokeWidth={0.4} strokeDasharray="1.2 0.9" />}

@@ -69,6 +69,16 @@ export const PLAYER_SCALE = 0.93;
 // This green is not new — the static export, the AI 5v5 overlay and the preview
 // legend already drew the goalie in it; the on-ice sprite was the odd one out.
 export const GOALIE_COLOR = "#2f9e57";
+// The two standard goal spots: where the rink already paints a crease, and
+// where a dropped net snaps to. A net sitting on one must NOT also draw its own
+// crease arc — that option exists for a net placed out in open ice, and on a
+// snapped net it just doubles up with the paint that's already there.
+export const GOAL_SPOTS = [{ x: 11, y: 42.5, facing: 0 }, { x: 189, y: 42.5, facing: 180 }];
+// Facing is deliberately not checked: a net turned around is still standing in
+// the painted crease. Tolerance is tight because the snap lands exactly on the
+// spot — this is "is it there", not "is it near".
+export const atGoalSpot = p =>
+  !!p && p.kind === "net" && GOAL_SPOTS.some(s => Math.hypot(s.x - p.x, s.y - p.y) < 0.75);
 // a route line starts this many rink feet clear of the player icon (drawing only —
 // timing still measures from the true start point)
 export const ROUTE_START_GAP = 3;
