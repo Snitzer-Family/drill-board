@@ -1,5 +1,5 @@
 // Drill text format: parser and serializer. See the DSL spec in App header.
-import { VIEWS, DSL_VERSION } from "./constants.js";
+import { VIEWS, RINK_ALIAS, DSL_VERSION } from "./constants.js";
 import { orderTransfers } from "./possession.js";
 
 // A puck-action index may be qualified by the branch route it lives on. On the wire
@@ -222,7 +222,9 @@ export function parseDrill(text) {
         if (isNaN(n) || n < 1) throw new Error(`DSL needs a version number, got "${tok[1] || ""}"`);
         dslVersion = n;
       } else if (cmd === "RINK") {
-        const m = (tok[1] || "").toLowerCase();
+        // legacy spellings normalize here, so nothing downstream ever sees one
+        const raw = (tok[1] || "").toLowerCase();
+        const m = RINK_ALIAS[raw] || raw;
         if (!VIEWS[m]) throw new Error(`unknown rink "${tok[1]}"`);
         rink = m;
       } else if (cmd === "PIECE") {

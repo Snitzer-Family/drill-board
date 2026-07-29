@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo, Fragment } from "react";
-import { VIEWS, COLORS, vb, APP_VERSION, ICON_SCALE, PLAYER_SCALE, ROUTE_START_GAP, BUILD_STAMP, DEFAULT_TEXT, SPEED,
+import { VIEWS, isQuarter, COLORS, vb, APP_VERSION, ICON_SCALE, PLAYER_SCALE, ROUTE_START_GAP, BUILD_STAMP, DEFAULT_TEXT, SPEED,
   SAVE_PROB, MISS_POST, MISS_WIDE, MISS_OVER, SHOT_AIR_PROB, BOUNCE_REST, WB_SYMS, symOf,
   DSL_VERSION, TYPEFACES, TYPEFACE_KEY, READ_PACES, READ_PACE_DEFAULT, captionHold } from "./constants.js";
 import { parseDrill, serializeDrill, extractDrill, deriveInventory, ensureShotNet } from "./drill-format.js";
@@ -382,7 +382,7 @@ function DelayTrigger({ value, onChange, sub, players, actorIds, nameOf }) {
    y 0..85 (board to board).
 
    Text format (one command per line, # = comment):
-     RINK full|half|quarter
+     RINK full|half|quarter-tl|quarter-tr|quarter-bl|quarter-br
      PIECE <id> <player|puck|cone> <x> <y> [#color] [label] [speed=1.2] [hand=L] [on=F1]
      PATH  <id> <segments...>
    Segments (rink feet):
@@ -461,6 +461,15 @@ const ROOMY_MIN = 1000;
 // mismatch silently offsets every menu by half the difference. Below
 // MENU_ANCHOR_MIN the stylesheet stretches the panel instead and JS stands down.
 const MENU_W = 230, MENU_PAD = 10, MENU_ANCHOR_MIN = DENSE_MIN;
+// The four quarter sheets, in reading order — which is also the order the 2x2
+// pad lays them out, so the grid mirrors the rink. [rink token, pad label, bar
+// label]. One table: the pad and the bar's label both read it.
+const QUARTERS = [
+  ["quarter-tl", "Top left", "¼ TL"],
+  ["quarter-tr", "Top right", "¼ TR"],
+  ["quarter-bl", "Bottom left", "¼ BL"],
+  ["quarter-br", "Bottom right", "¼ BR"],
+];
 // THEME_KEY ("drillboard:theme") lives in theme.js — the pre-paint boot script
 // in index.html reads the same constant, and they must not drift.
 
@@ -1578,7 +1587,7 @@ export default function DrillAnimator() {
   let canvasH = Math.max(20, stageSize.h);
   // Full and half ice fill the stage. Quarter is constrained to its true
   // proportions up to a small over-stretch (the canvas letterboxes).
-  if (rink === "quarter") {
+  if (isQuarter(rink)) {
     const vbW = swapAxes ? vhF : vwF, vbH = swapAxes ? vwF : vhF; // effective viewBox dims
     const CAP = 1.12;                                             // max stretch past true aspect
     canvasH = Math.min(canvasH, Math.round((canvasW * vbH) / vbW * CAP));
@@ -10647,7 +10656,7 @@ export default function DrillAnimator() {
           <Icon name="rink" size={16} />
           <span className="hd-blbl">{rink === "full" ? "Full"
             : rink === "half" ? `Half ${halfNS ? (halfFlip ? "↑" : "↓") : (halfFlip ? "←" : "→")}`
-            : "¼ ice"}</span>
+            : QUARTERS.find(q => q[0] === rink)?.[2] || "¼ ice"}</span>
         </button>
         <button ref={barBtnRefs.settings} className={`hd-barbtn${openMenu === "settings" ? " on" : ""}`} title="Menu"
           onClick={() => setOpenMenu(m => (m === "settings" ? null : "settings"))}>
@@ -10821,16 +10830,6 @@ export default function DrillAnimator() {
             <Pills value={typeface} set={setTypeface}
               opts={TYPEFACES.map(([v, lab]) => [v, lab])} />
           </PrefRow>
-          <PrefToggle title="Whiteboard mode" on={whiteboard} set={setWhiteboard}
-            desc="Draw players as classic X and O symbols with plain arrowed routes, the way a coach's board looks. Shots stay flat on the ice, and splashes and detailed animation are suppressed." />
-          {whiteboard && (
-            <>
-              <PrefToggle title="Circled symbols" on={wbCircle} set={setWbCircle}
-                desc="Put each X or O on an opaque disc so it stays readable where it crosses a rink line." />
-              <PrefToggle title="Player names" on={wbNames} set={setWbNames}
-                desc="Show a name tag under every symbol. Off still names a player while their panel is open." />
-            </>
-          )}
           <PrefToggle title="Stretch to fill" on={stretchFill} set={setStretchFill}
             desc="Full ice stretches to fill the screen. Off letterboxes it to true 200′ × 85′ proportions, so distances on the board match distances on the rink." />
           <PrefToggle title="Detailed animations" on={detailAnim} set={setDetailAnim}
@@ -10847,6 +10846,19 @@ export default function DrillAnimator() {
             <input type="range" min={0.1} max={1} step={0.05} value={markOpacity} style={{ width: "100%" }}
               onChange={e => setMarkOpacity(parseFloat(e.target.value))} />
           </PrefRow>
+
+          {/* Whiteboard mode itself is a board choice, not a preference — it
+              lives in the Rink menu next to full/half/quarter. What stays here
+              is how its symbols are drawn, and only while it is on. */}
+          {whiteboard && (
+            <>
+              <div className="hd-mh hd-prefsec">Whiteboard</div>
+              <PrefToggle title="Circled symbols" on={wbCircle} set={setWbCircle}
+                desc="Put each X or O on an opaque disc so it stays readable where it crosses a rink line. Whiteboard mode itself is in the Rink menu." />
+              <PrefToggle title="Player names" on={wbNames} set={setWbNames}
+                desc="Show a name tag under every symbol. Off still names a player while their panel is open." />
+            </>
+          )}
 
           {/* Smart pen — settings that outlive a sketch, so they belong with the
               standing preferences rather than inside the Draw palette (which is
@@ -11012,7 +11024,16 @@ export default function DrillAnimator() {
       )}
 
       {openMenu === "rinkmenu" && (
+        /* One menu answering "what surface, drawn which way". Style sits on top
+           because it is the same class of choice as full-vs-half — which board
+           you are drawing on — and it deliberately does NOT close the menu, so
+           the coach can see the board flip and change their mind. The surface
+           rows below do close it, as they always have. */
         <div className="hd-menu" style={menuAnchor}>
+          <div className="hd-mh">Board style</div>
+          <Pills value={whiteboard ? "wb" : "graphic"} set={v => setWhiteboard(v === "wb")}
+            opts={[["graphic", "Graphic"], ["wb", "Whiteboard"]]} />
+          <div className="hd-rule" />
           <div className="hd-mh">Ice surface</div>
           <button className={`hd-item${rink === "full" ? " on" : ""}`}
             onClick={() => { setRink("full"); setOpenMenu(null); }}>Full ice</button>
@@ -11024,8 +11045,15 @@ export default function DrillAnimator() {
             onClick={() => { setRink("half"); setHalfNS(true); setHalfFlip(false); setOpenMenu(null); }}>Half ice · net ↓</button>
           <button className={`hd-item${rink === "half" && halfNS && halfFlip ? " on" : ""}`}
             onClick={() => { setRink("half"); setHalfNS(true); setHalfFlip(true); setOpenMenu(null); }}>Half ice · net ↑</button>
-          <button className={`hd-item${rink === "quarter" ? " on" : ""}`}
-            onClick={() => { setRink("quarter"); setOpenMenu(null); }}>Quarter sheet</button>
+          {/* the pad is laid out the way the quadrants sit on the sheet, so
+              picking one is a glance rather than a read */}
+          <div className="hd-mh hd-prefsec">Quarter sheet</div>
+          <div className="hd-quadpad">
+            {QUARTERS.map(([v, label]) => (
+              <button key={v} className={`hd-mini${rink === v ? " on" : ""}`} aria-pressed={rink === v}
+                onClick={() => { setRink(v); setOpenMenu(null); }}>{label}</button>
+            ))}
+          </div>
         </div>
       )}
 
@@ -11130,7 +11158,7 @@ export default function DrillAnimator() {
             <summary style={{ cursor: "pointer", fontSize: 12.5, fontWeight: 700, color: "#93a3b5", padding: "4px 0" }}>
               DSL reference — every command, tap to expand</summary>
           <div className="hd-note">
-            Feet: x 0–200, y 0–85. <b>RINK</b> full|half|quarter ·
+            Feet: x 0–200, y 0–85. <b>RINK</b> full|half|quarter-tl|quarter-tr|quarter-bl|quarter-br ·
             <b> PIECE</b> id player|puck|cone|net|bumper|deker|passer|label|tire x y [#color] [label] [speed=1.2] [hand=L] [sym=LW] [on=F1]
             (<code>sym=</code> is a player&apos;s whiteboard symbol — ≤3 chars, shown instead of the skater when <b>Whiteboard mode</b> is on; <code>△</code>/<code>○</code>/<code>□</code> draw as real shapes; unset falls back to the player&apos;s name, or X if that&apos;s still the auto id like P1)
             (a <b>bumper</b> is a solid barrier — players skate around it and pucks carom off it; a <b>deker</b> a stickhandling gate, a <b>passer</b> a rebounder box — all take <code>face=deg</code>)

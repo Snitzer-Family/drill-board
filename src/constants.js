@@ -1,7 +1,21 @@
 // Rink dimensions, view boxes, palette, speeds, app version, defaults.
 
 export const RINK = { W: 200, H: 85 };
-export const VIEWS = { full: [0, 0, 200, 85], half: [100, 0, 100, 85], quarter: [100, 0, 100, 42.5] };
+// View boxes in rink feet: [x, y, w, h]. The four quarters tile the sheet, named
+// for where they sit on it — "tl" is the left end zone's top half. Cropping is
+// purely a viewBox; the rink itself is always drawn whole (see rink.jsx).
+export const VIEWS = {
+  full: [0, 0, 200, 85],
+  half: [100, 0, 100, 85],
+  "quarter-tl": [0, 0, 100, 42.5],
+  "quarter-tr": [100, 0, 100, 42.5],
+  "quarter-bl": [0, 42.5, 100, 42.5],
+  "quarter-br": [100, 42.5, 100, 42.5],
+};
+// Legacy DSL spelling: `RINK quarter` was the top-right quadrant before the
+// other three existed. Read on parse, rewritten to the explicit token on save.
+export const RINK_ALIAS = { quarter: "quarter-tr" };
+export const isQuarter = m => String(m).startsWith("quarter");
 export const COLORS = ["#d7263d", "#1f4fa3", "#1f8a4c", "#e0731d", "#22262b", "#7a3fa8"];
 export const SPEED = { carry: 1, pass: 7, shot: 10 };
 export const vb = m => VIEWS[m].join(" ");
@@ -37,7 +51,7 @@ export const TYPEFACES = [
 ];
 export const TYPEFACE_KEY = "drillboard:typeface";
 
-export const APP_VERSION = "6.94";
+export const APP_VERSION = "6.95";
 // DSL schema version, stamped into every serialized drill (`DSL <n>` header) so
 // production builds can eventually render a drill per the version that wrote it.
 // Bump ONLY on a breaking DSL change (new kinds/modifiers that older builds would

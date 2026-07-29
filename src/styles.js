@@ -475,6 +475,13 @@ export const STYLES = `
         .hd-prefdesc { font-size:11.5px; line-height:1.45; color:var(--db-text-muted); }
         .hd-prefctl { margin-top:6px; }
         .hd-pills { display:flex; flex-wrap:wrap; gap:4px; justify-content:flex-end; }
+        /* In a prefs row the pills trail the label, so they hug the right edge.
+           In a menu they ARE the row, so they split its full width instead. */
+        .hd-menu .hd-pills { flex-wrap:nowrap; justify-content:stretch; }
+        .hd-menu .hd-pills .hd-mini { flex:1 1 0; min-width:0; justify-content:center; }
+        /* the quarter-sheet pad: laid out the way the quadrants sit on the ice */
+        .hd-quadpad { display:grid; grid-template-columns:1fr 1fr; gap:4px; }
+        .hd-quadpad .hd-mini { justify-content:center; }
         /* a section heading inside the panel, with air above it */
         .hd-prefsec { margin-top:6px; color:var(--db-text-faint); }
         /* the settings sheet's scrolling body. max-width caps the MEASURE —

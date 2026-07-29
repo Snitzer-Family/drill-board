@@ -75,8 +75,23 @@ on a **breaking** DSL change; there is no compatibility gating yet, so today it
 is informational. Version 10 renamed the mark flag `note` to `sketch` (an older
 reader drops the unknown token and would convert that ink).
 
-### `RINK full | half | quarter`
-The ice surface shown. Defaults to `full`.
+### `RINK full | half | quarter-tl | quarter-tr | quarter-bl | quarter-br`
+The ice surface shown. Defaults to `full`. Each is a viewBox over the same
+200′ × 85′ coordinate space — nothing about the drill's coordinates changes, so
+a drill authored in one view still reads correctly in another:
+
+| token | rink feet | |
+| --- | --- | --- |
+| `full` | x 0–200, y 0–85 | the whole sheet |
+| `half` | x 100–200, y 0–85 | the right end, boards to boards |
+| `quarter-tl` | x 0–100, y 0–42.5 | left end, top half |
+| `quarter-tr` | x 100–200, y 0–42.5 | right end, top half |
+| `quarter-bl` | x 0–100, y 42.5–85 | left end, bottom half |
+| `quarter-br` | x 100–200, y 42.5–85 | right end, bottom half |
+
+Bare `quarter` is still accepted on input — it was the only quarter view before
+the other three existed — and means `quarter-tr`. It is rewritten to the
+explicit token on save.
 
 ### `TITLE <text>` · `DESC <text>`
 Drill name and description (everything to the end of the line). Optional.
@@ -132,7 +147,7 @@ Places a piece. `id` is any unique token (e.g. `F1`, `PK1`, `N2`).
 | `goalie` | net | A goalie who tracks the puck (pucks also enter only from the front — the sides/back are solid) |
 | `speed=<n>` | player, puck | Pace multiplier (1 = default; players default 1.5) |
 | `hand=L` / `hand=R` | player, stick | Shooting hand — mirrors the player's stick, or flips the on-ice stick prop's blade for a left/right-handed stick |
-| `sym=<text>` | player | Whiteboard-mode symbol (≤3 chars, e.g. `X`, `O`, `F`, `LW`, `RD`; underscores read as spaces). `△`, `○`, `□` render as drawn shapes rather than text. Shown instead of the skater when **Whiteboard mode** is on (Settings). Unset falls back to the player's name (the popup offers the same shorthand list under *Name*), or `X` if the name is still the auto id (`P1`, `P2`…). |
+| `sym=<text>` | player | Whiteboard-mode symbol (≤3 chars, e.g. `X`, `O`, `F`, `LW`, `RD`; underscores read as spaces). `△`, `○`, `□` render as drawn shapes rather than text. Shown instead of the skater when **Whiteboard mode** is on (Rink menu → Board style). Unset falls back to the player's name (the popup offers the same shorthand list under *Name*), or `X` if the name is still the auto id (`P1`, `P2`…). |
 | `face=<deg>` | route-less player, net, bumper, deker, passer | Facing angle (0 = +x / toward the right) |
 | `defense` | player | Auto-reacting defenceman (holds the slot, stays goal-side) |
 | `lock` | any | Pin the piece in place — it can't be dragged, rotated, or edited until unlocked. Toggle *🔒 Lock* on the piece popup, or lock/unlock everything via **☰ → Lock board**. (Bare word, parsed before the jersey-label catch-all.) |
