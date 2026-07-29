@@ -6045,6 +6045,29 @@ export default function DrillAnimator() {
   const SHOT_TIP_GAP = 6;         // ft a shot's caret stands off its landing point
   const SHOT_CLUSTER_R = 5;       // ft: only shot heads this close queue behind each other
   const SHOT_STAGGER_STEP = 9;    // ft each queued shot head steps back along its own axis
+  // …but 6 ft is only the right standoff for an EMPTY net. A manned one has a
+  // keeper standing in front of it who now climbs the crease to meet a long
+  // shot — right into the 6 ft slot — so the caret ends up buried under them.
+  // The caret has to back off the KEEPER, not the cage, and walk out as they do.
+  const GOALIE_CARET_CLEAR = 3.9; // ft: the sprite reaches ~3.0 ahead of its centre, plus a gap
+  // How far back from a shot's landing point the caret must sit to clear the
+  // keeper guarding it. 0 when the shot isn't at a manned net.
+  const goalieCaretGap = (L, ux, uy) => {
+    let best = null;
+    for (const q of pieces) {
+      if (!((q.kind === "net" || q.kind === "tire") && q.goalie)) continue;
+      const d = Math.hypot(q.x - L.x1, q.y - L.y1);
+      if (d < 14 && (!best || d < best.d)) best = { q, d };
+    }
+    if (!best) return 0;
+    const n = best.q;
+    // the keeper's depth off the SAME ramp the sprite is drawn with, from the
+    // same shot length, so the two move together by construction
+    const need = goalieDepth(Math.hypot(n.x - L.x0, n.y - L.y0)) + GOALIE_CARET_CLEAR;
+    // a save already lands short of the cage — credit what it's standing off by
+    const already = (L.x1 - n.x) * -ux + (L.y1 - n.y) * -uy;
+    return Math.max(0, need - already);
+  };
   // priority for picking the "main" action shown in a badge with several actions
   const ACT_PRI = { shot: 5, pass: 4, rim: 3, chip: 2, receive: 1, collect: 1, pickup: 1 };
   const stepActionType = st => st.role === "pickup" ? "pickup" : st.role === "receive" ? "receive"
@@ -8579,7 +8602,10 @@ export default function DrillAnimator() {
         const sb = (k === 0 || legs[k - 1].type !== "fly") ? nearBadge(L.x0, L.y0) : null;
         const ox = sb ? sb.x : L.x0, oy = sb ? sb.y : L.y0;
         const len = Math.hypot(L.x1 - ox, L.y1 - oy) || 1;
-        const t = gmMove(L.x1, L.y1, -(L.x1 - ox) / len, -(L.y1 - oy) / len, SHOT_TIP_GAP);
+        const ux = (L.x1 - ox) / len, uy = (L.y1 - oy) / len;
+        // the same standoff the renderer will use, keeper included — cluster on
+        // where the caret really lands, not where an empty net would put it
+        const t = gmMove(L.x1, L.y1, -ux, -uy, Math.max(SHOT_TIP_GAP, goalieCaretGap(L, ux, uy)));
         // gm space, so the cluster radius reads the same in every direction under
         // the fill-mode stretch (as the route-end clearance pass does)
         tips.push({ id: `${q.id}/${k}`, len, x: t.x * gmSar, y: t.y / gmSar });
@@ -8728,7 +8754,9 @@ export default function DrillAnimator() {
         // whiteboard: a chip/rim that lands LOOSE (no collector badge) gets a
         // ghost puck sitting on the landing spot — the line stops just short
         const ghostLand = !flat && whiteboard && runEnd && (L.rim || L.chip) && !eb;
-        let eGap = L.shot && runEnd ? SHOT_TIP_GAP + (shotStagger[`${q.id}/${k}`] || 0) : eb ? START_OFF : ghostLand ? 3.4 : 0;
+        let eGap = L.shot && runEnd
+          ? Math.max(SHOT_TIP_GAP, goalieCaretGap(L, ux, uy)) + (shotStagger[`${q.id}/${k}`] || 0)
+          : eb ? START_OFF : ghostLand ? 3.4 : 0;
         const eCap = Math.max(0, Math.hypot((L.x1 - sx) * gmSar, (L.y1 - sy) / gmSar) - 2);
         if (eGap > 0) eGap = Math.min(eGap, eCap);
         // pass/rim/chip arrivals register their natural TIP so same-direction heads at
@@ -8853,7 +8881,10 @@ export default function DrillAnimator() {
     const arrow = (a, b, shot, key, op = OP_GHOST) => {
       const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1, ux = dx / len, uy = dy / len;
       const sp = gmMove(a.x, a.y, ux, uy, Math.min(START_OFF, len / 2));
-      const base = Math.min(shot ? SHOT_TIP_GAP : START_OFF, Math.max(0, len - 2));
+      // shots stand off the keeper too (b IS the net here, so nothing is already
+      // credited) — a branch ghost must not tuck its caret under one either
+      const shotGap = shot ? Math.max(SHOT_TIP_GAP, goalieCaretGap({ x0: a.x, y0: a.y, x1: b.x, y1: b.y }, ux, uy)) : START_OFF;
+      const base = Math.min(shotGap, Math.max(0, len - 2));
       const ep0 = gmMove(b.x, b.y, -ux, -uy, base);
       const back = arrivalBack("main", ep0.x, ep0.y);
       const ep = back ? gmMove(b.x, b.y, -ux, -uy, Math.min(base + back, Math.max(0, len - 2))) : ep0;

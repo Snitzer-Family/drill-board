@@ -61,6 +61,13 @@ T('clamp follows the net facing', deg(goalieAngle(180, Math.PI)), 180);
   T('…for the tracking case AND the frozen shot', (goaliePos.match(/goalieDepth\(/g) || []).length >= 2, true);
   T('no hand-rolled smoothstep left behind', /R_MIN|R_MAX|D_NEAR|D_FAR/.test(goaliePos), false);
 
+  // …and the drawn shot caret has to back off the KEEPER, not the cage. A flat
+  // SHOT_TIP_GAP puts it exactly where a keeper meeting a long shot stands.
+  T('the caret standoff reads the keeper ramp', /const goalieCaretGap = [\s\S]{0,900}goalieDepth\(/.test(anim), true);
+  T('the drawn shot uses it', /Math\.max\(SHOT_TIP_GAP, goalieCaretGap\(L, ux, uy\)\)/.test(anim), true);
+  T('…the stagger clusters on the same point', (anim.match(/Math\.max\(SHOT_TIP_GAP, goalieCaretGap\(L, ux, uy\)\)/g) || []).length >= 2, true);
+  T('…and branch ghosts stand off too', /goalieCaretGap\(\{ x0: a\.x/.test(anim), true);
+
   const tim = src('timing.js');
   const save = tim.slice(tim.indexOf('} else if (goalie) {'), tim.indexOf('} else if (goalie) {') + 420);
   T('the save point reads the same ramp', /goalieDepth\(/.test(save), true);
