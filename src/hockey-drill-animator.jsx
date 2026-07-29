@@ -10840,7 +10840,7 @@ export default function DrillAnimator() {
           </PrefRow>
           <PrefRow title="Handedness"
             desc="Which side the bar's controls sit on. Left mirrors both bars, so Menu, Rink and the palette fall under your left thumb instead of reaching across the ice. The rink and everything on it stay exactly where they are.">
-            <Pills value={hand} set={setHand} opts={[["right", "Right"], ["left", "Left"]]} />
+            <Pills value={hand} set={setHand} opts={[["left", "Left"], ["right", "Right"]]} />
           </PrefRow>
           <PrefToggle title="Whiteboard mode" on={whiteboard} set={setWhiteboard}
             desc="Draw players as classic X and O symbols with plain arrowed routes, the way a coach's board looks. Shots stay flat on the ice, and splashes and detailed animation are suppressed." />
