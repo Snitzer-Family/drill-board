@@ -8358,7 +8358,37 @@ export default function DrillAnimator() {
             const free = pieces.filter(q => q.kind === "player" && !q.route);
             return (
               <>
+                {/* The same navigator a player's popup has. It matters more here:
+                    the line stands ON the route's head, so its icon is under a
+                    skater and all but untappable — the pager is the reliable way
+                    in and out of point 0, which is where "collect a puck before
+                    you go" lives. */}
+                {p.path.length > 0 && (
+                  <div className="hd-field">
+                    <div className="hd-sectitle">Route points</div>
+                    <div className="hd-poprow">
+                      <button className="hd-mini" disabled>‹ Prev</button>
+                      <span className="hd-sechint">Start · {p.path.length} point{p.path.length > 1 ? "s" : ""} follow</span>
+                      <button className="hd-mini" onClick={() => navPopup({ type: "point", id: p.id, seg: 0 })}>Next ›</button>
+                    </div>
+                  </div>
+                )}
                 {routeField()}
+                {/* Point 0's actions, in the same slot the pager's other points
+                    put them — "collect a puck before you go" is how most shooting
+                    lines start, and it had nowhere visible to live. */}
+                {lineProxy(p)
+                  ? (
+                    <>
+                      {ActionSteps(lineProxy(p), -1)}
+                      <div className="hd-sechint">
+                        At the start, before they move. Authored on {nameOf(lineHead(p).id)} at
+                        the head of the line; everyone behind them does the same, as long as
+                        there&rsquo;s a loose puck for them.
+                      </div>
+                    </>
+                  )
+                  : <div className="hd-poprow hd-stephint">Add a skater to this line to give it puck actions.</div>}
                 <div className="hd-field">
                   <div className="hd-sectitle">Line ({line.length})</div>
                   <div className="hd-sechint">
@@ -8504,9 +8534,6 @@ export default function DrillAnimator() {
           {/* Actions panel at the player's standing/start spot — just above the
               bottom row of buttons */}
           {p.kind === "player" && ActionSteps(p, -1)}
-          {/* the head of the line's standing spot — where "collect a puck before
-              you go" is authored, which is how most shooting lines start */}
-          {p.kind === "route" && lineProxy(p) && ActionSteps(lineProxy(p), -1)}
           {TOOL_KINDS.includes(p.kind) && (
             <div className="hd-field">
               <div className="hd-sectitle">Change to</div>
@@ -8580,7 +8607,13 @@ export default function DrillAnimator() {
             <div className="hd-field">
               <div className="hd-sectitle">Route points</div>
               <div className="hd-poprow">
-                <button className="hd-mini" onClick={() => goSeg(i - 1)}>‹ {fork && i === 0 ? "Branch" : "Prev"}</button>
+                {/* Stepping back off point 1 lands on the START spot — point 0 in
+                    the DSL's own numbering, and where a collect/receive before the
+                    skater moves is authored. It used to say "Prev", which gave no
+                    hint that the panel it opens is a route point at all. */}
+                <button className="hd-mini" onClick={() => goSeg(i - 1)}>
+                  ‹ {fork && i === 0 ? "Branch" : i === 0 ? "Start" : "Prev"}
+                </button>
                 <span className="hd-sechint">Point {i + 1} of {route.length}</span>
                 <button className="hd-mini" disabled={i >= route.length - 1}
                   onClick={() => goSeg(i + 1)}>Next ›</button>
