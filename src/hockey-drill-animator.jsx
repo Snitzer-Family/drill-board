@@ -8,7 +8,9 @@ import { drillSvg } from "./drill-svg.js";
 import { mdEscape, mdInline, mdBlock } from "./md.js";
 import { clampX, clampY, fitInside, segEnd, segD, nearestT, splitSeg, zigzagPoints, wigglePoints, wigglePoly, zigzagPoly, convertSeg, fitRoute, evalSeg, rdp, catmullToBezier, alignJoint, mirrorJoint, translateJointHandles, trimSegStart, trimSegEnd, trimPolyStart, trimPolyEnd, gapPolyAt } from "./geometry.js";
 import { dirOf, dirAtWaypoint, spreadDir } from "./route-dir.js";
-import { lowerRoutes, queueOf, stackSpot, isMobile, unbindLine, headHeadingDeg as routeHeadDeg, QUEUE_GAP, QUEUE_LEAD } from "./route-lines.js";
+import { lowerRoutes, queueOf, stackSpot, isMobile, unbindLine, transitPoly, transitObstacles,
+  headHeadingDeg as routeHeadDeg, QUEUE_GAP, QUEUE_LEAD } from "./route-lines.js";
+import { PLAYER_R, TRANSIT_RATE } from "./constants.js";
 import * as boards from "./boards.js";
 import { netShapes, bumperShapes, solidShapes, detourRoute, segCrossesNet } from "./net-collide.js";
 import { RinkMarkings } from "./rink.jsx";
@@ -2458,8 +2460,9 @@ export default function DrillAnimator() {
   // solid net footprints — players and pucks are kept out (routed around) so a
   // route or a loose puck never sits inside the sides/back of a net
   const netObstacles = netShapes(pieces);
-  // players are solid too: keep-out radius (feet) around each skater
-  const PLAYER_R = 2.9;
+  // players are solid too: keep-out radius (feet) around each skater. In
+  // constants.js because route-lines.js bakes transit legs around parked skaters
+  // with the same radius, and two copies of that number would drift.
   // stationary players (no route) act like static obstacles — routes arc around
   // them just like nets. Moving players are handled per-frame in displayPos.
   // `isMobile`, not `path.length`: a player queued on a route has no path of their
@@ -8313,6 +8316,45 @@ export default function DrillAnimator() {
                     <span className="hd-sechint">between skaters</span>
                   </div>
                 </div>
+                {/* Recycling: where this line's finishers go. Authored on the route
+                    because everyone on it recycles the same way — it's a property of
+                    the drill's shape, not of one skater. */}
+                {(() => {
+                  const others = pieces.filter(q => q.kind === "route" && q.id !== p.id);
+                  const branchy = (p.forks || []).length > 0;
+                  return (
+                    <div className="hd-field">
+                      <div className="hd-sectitle">When they finish</div>
+                      {others.length ? (
+                        <>
+                          <div className="hd-poprow">
+                            <span>go to</span>
+                            <select className="hd-select on" value={p.next || ""}
+                              onChange={e => updateById(p.id, { next: e.target.value || null })}>
+                              <option value="">— stop there —</option>
+                              {others.map(q => <option key={q.id} value={q.id}>{nameOf(q.id)}</option>)}
+                            </select>
+                          </div>
+                          {p.next && (
+                            <>
+                              <div className="hd-poprow">
+                                <span>following</span>
+                                <Stepper value={p.hops == null ? 1 : p.hops} min={0} max={8} step={1}
+                                  fmt={v => `${v} link${v === 1 ? "" : "s"}`} onChange={v => updateById(p.id, { hops: v })} />
+                              </div>
+                              <div className="hd-sechint">
+                                They cross the ice to that line&rsquo;s start, going around
+                                nets, props and anyone standing still. Two lines pointed at
+                                each other recirculate; the link count is what ends it.
+                              </div>
+                              {branchy && <div className="hd-sechint">This route branches, so only the first leg runs — branches and recycling don&rsquo;t combine yet.</div>}
+                            </>
+                          )}
+                        </>
+                      ) : <div className="hd-sechint">Add another route to send them on to.</div>}
+                    </div>
+                  );
+                })()}
                 {/* How the line takes its turns. The trigger is positional — "the
                     one ahead of me" — so unlike DelayTrigger there is no player to
                     pick; the rule is authored once and resolved per member. */}
@@ -9886,6 +9928,22 @@ export default function DrillAnimator() {
             {/* route lines, fork/branch visuals + their ref paths — drill markings,
                 dimmed by Mark opacity (players/implements below stay opaque) */}
             <g opacity={markMO}>
+            {/* The regroup link between two lines, drawn under the routes and much
+                fainter: it is travel, not a rep. Same geometry the skater's transit
+                legs are baked from, so the drawing and the timing can't diverge —
+                and drawn once per ROUTE, not once per skater, since a whole line
+                takes the same road. */}
+            {!aiPlay && showRoutes && pieces.map(p => {
+              if (p.kind !== "route" || !p.next) return null;
+              const to = pieces.find(q => q.id === p.next && q.kind === "route");
+              const poly = to && transitPoly(p, to, collisions ? transitObstacles(pieces) : []);
+              if (!poly) return null;
+              return (
+                <polyline key={`tr-${p.id}`} points={poly.map(q => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" ")}
+                  fill="none" stroke={ink(p.color)} strokeWidth={0.5} strokeDasharray="2.6 2.6"
+                  strokeLinecap="round" opacity={0.42} pointerEvents="none" />
+              );
+            })}
             {!aiPlay && pieces.map(p => {
               // DRAW the detour only when avoidance visuals are on; the animation's own
               // routeDetour (displayPos) is separate, so the skater still curves either way

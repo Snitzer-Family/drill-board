@@ -22,8 +22,9 @@
 // Kept pure — no DOM, no React, no segRefs — so it is node-testable on its own.
 // See tests/route-lines.mjs. Precedent: route-dir.js, possession.js.
 
-import { segTangentAngle, clampX, clampY } from "./geometry.js";
-import { QUEUE_GAP, QUEUE_LEAD } from "./constants.js";
+import { segTangentAngle, clampX, clampY, rdp } from "./geometry.js";
+import { netShapes, bumperShapes, detourRoute } from "./net-collide.js";
+import { QUEUE_GAP, QUEUE_LEAD, ICON_SCALE, PLAYER_R, TRANSIT_RATE, HOPS_MAX, LINE_LEG_CAP } from "./constants.js";
 
 // feet between stacked skaters, measured back along the route's entry heading,
 // and how far clear of you the skater ahead gets before you go
@@ -107,6 +108,62 @@ export function queueRelease(route, prevId) {
   return null;
 }
 
+// The static things a skater crossing the ice has to go around. Deliberately a
+// SUBSET of the animator's per-player detour set: no goalie fusion and no
+// jump-over exclusion, because both of those read displayPos, which needs the
+// lowered pieces this pass is producing — and because a transit baked off the
+// animation clock would change shape as the drill played. The display detour
+// still runs over these legs afterward and handles the rest.
+export function transitObstacles(pieces) {
+  const out = [];
+  for (const sh of netShapes(pieces)) out.push({ cx: sh.cx, cy: sh.cy, r: sh.r });
+  for (const sh of bumperShapes(pieces)) out.push({ cx: sh.cx, cy: sh.cy, r: sh.r });
+  for (const q of pieces || []) {
+    if (q.kind === "passer" || q.kind === "deker") out.push({ cx: q.x, cy: q.y, r: 2.6 });
+    else if (q.kind === "tire") out.push({ cx: q.x, cy: q.y, r: 2.6 * ICON_SCALE * (q.size || 1) + 0.6 });
+    else if (q.kind === "player" && !isMobile(q) && !q.defense) out.push({ cx: q.x, cy: q.y, r: PLAYER_R });
+  }
+  return out;
+}
+
+// Skating from one route's end to the next route's head, as REAL legs.
+//
+// It has to be real legs, not the display detour: timing measures the authored
+// segments (segLen reads the refs the raw path renders), while the detour only
+// remaps animation progress onto a bent polyline. A transit that existed only as
+// an overlay would be drawn but not timed — and over a cross-ice regroup that
+// error is the length of the rink. It would also vanish whenever the coach
+// switched avoidance off.
+//
+// Sample → arc around the obstacles → simplify back to a handful of points.
+// Without the simplify a 100-point detour becomes 100 legs, each needing its own
+// SVG ref and timing entry.
+export function transitLegs(from, to, obstacles, rate = TRANSIT_RATE) {
+  const span = Math.hypot(to.x - from.x, to.y - from.y);
+  if (span < 1) return [];
+  const n = Math.max(2, Math.min(80, Math.round(span / 2)));
+  const pts = [];
+  for (let i = 0; i <= n; i++) pts.push({ x: from.x + ((to.x - from.x) * i) / n, y: from.y + ((to.y - from.y) * i) / n });
+  const det = detourRoute(pts, obstacles || []);
+  // 1.5 ft of slack: tight enough to keep the arc, loose enough to stay a few legs
+  const simple = (det === pts ? [pts[0], pts[pts.length - 1]] : rdp(det, 1.5)).slice(1);
+  return simple.map(q => ({
+    type: "L", x: clampX(q.x), y: clampY(q.y),
+    mode: "carry", dir: "fwd", stop: 0, rate, transit: true,
+  }));
+}
+
+// The drawn link between two routes: the same points the skater will bake into
+// their path, as a polyline the board can render faintly. Shared so the line a
+// coach sees and the legs the engine times can never be different geometry.
+export function transitPoly(routeA, routeB, obstacles) {
+  const legs = (routeA.path || []).length;
+  if (!legs || !routeB) return null;
+  const end = routeA.path[legs - 1];
+  const pts = transitLegs({ x: end.x, y: end.y }, { x: routeB.x, y: routeB.y }, obstacles);
+  return pts.length ? [{ x: end.x, y: end.y }, ...pts.map(s => ({ x: s.x, y: s.y }))] : null;
+}
+
 // Materialize every line into plain players and drop the route pieces, which are
 // authoring objects the engine must never see (they would otherwise land in
 // drillTime as zero-length routes and in the timing plan as bogus skaters).
@@ -120,6 +177,41 @@ export function lowerRoutes(pieces) {
 
   const routes = new Map();
   for (const p of list) if (p.kind === "route") routes.set(p.id, p);
+  // computed once for the whole pass, not per skater — it depends only on the
+  // static furniture, which nothing in here moves
+  const obstacles = transitObstacles(list);
+
+  // Follow a route's `next` chain, skating across the ice between them, and
+  // return the whole recirculation as ONE leg array. That is the payoff of the
+  // "a lowered skater is an ordinary player" rule: a lap is just more legs, and
+  // the timing engine needs to know nothing about recycling.
+  //
+  // Bounded three independent ways, none of them a fixpoint: `hops` is a counter
+  // that strictly decreases each unfold, it is clamped to HOPS_MAX on entry, and
+  // the leg count is capped. So this is primitive recursion with a decreasing
+  // measure — it terminates even when next= points in a cycle (A -> B -> A),
+  // which is exactly how a real full-ice drill is drawn.
+  const unfold = R => {
+    const legs = (R.path || []).map(s => ({ ...s }));
+    let cur = R;
+    let hops = Math.max(0, Math.min(HOPS_MAX, R.hops == null ? 1 : R.hops));
+    while (hops > 0) {
+      const nxt = routes.get(cur.next);
+      if (!nxt || !legs.length || legs.length >= LINE_LEG_CAP) break;
+      // Branching and recycling don't compose yet: a fork's `at` is an index into
+      // the route it belongs to, and past the first lap those indices no longer
+      // mean what they say. Stop at the last fork-free route rather than splice a
+      // branch onto the wrong waypoint.
+      if ((cur.forks || []).length || (nxt.forks || []).length) break;
+      hops--;
+      const end = legs[legs.length - 1];
+      const rate = cur.regroup > 0 ? cur.regroup : TRANSIT_RATE;
+      legs.push(...transitLegs({ x: end.x, y: end.y }, { x: nxt.x, y: nxt.y }, obstacles, rate));
+      legs.push(...(nxt.path || []).map(s => ({ ...s })));
+      cur = nxt;
+    }
+    return legs.slice(0, LINE_LEG_CAP);
+  };
 
   const lowered = new Map();
   for (const [id, R] of routes) {
@@ -135,8 +227,9 @@ export function lowerRoutes(pieces) {
         x: spot.x,
         y: spot.y,
         wait,
-        // the route's legs verbatim — see the header on why nothing is prepended
-        path: (R.path || []).map(s => ({ ...s })),
+        // this route's legs verbatim — see the header on why nothing is prepended
+        // — then, if it recycles, the transit and the next route's legs after them
+        path: unfold(R),
         // shared by reference: forks are immutable here, and resolveForks picks a
         // branch per PLAYER, so three skaters on one reactive route read the light
         // independently — which is exactly what a read-and-react drill wants

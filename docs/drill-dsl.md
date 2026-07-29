@@ -155,6 +155,9 @@ Places a piece. `id` is any unique token (e.g. `F1`, `PK1`, `N2`).
 | `gap=<ft>` | route | Feet between stacked skaters (default `5`, omitted then). |
 | `queue=point:<pt>` | route | Each skater holds until the one **ahead of them** reaches point `<pt>` of the route (1-based). |
 | `queue=lead:<ft>` | route | Each skater holds until the one ahead is `<ft>` **clear of them** — the separation, not the distance travelled (they already start `gap` apart). Omit `queue=` entirely and they all go at once. |
+| `next=<routeId>` | route | When they finish, they skate to that route's head and run it — going around nets, props and anyone standing still. |
+| `hops=<n>` | route | How many `next=` links one skater follows (default `1`, omitted then). `0` draws the link without running it. Two routes pointed at each other recirculate, and this is what ends it. |
+| `regroup=<n>` | route | Pace multiplier for the skate between routes (default `0.65` — a glide, not another rep). |
 | `defense` | player | Auto-reacting defenceman (holds the slot, stays goal-side) |
 | `lock` | any | Pin the piece in place — it can't be dragged, rotated, or edited until unlocked. Toggle *🔒 Lock* on the piece popup, or lock/unlock everything via **☰ → Lock board**. (Bare word, parsed before the jersey-label catch-all.) |
 | `hold=line` | player | Wait at the blue line until the puck enters the zone |
@@ -293,6 +296,26 @@ PIECE P3 player 18 20 #d7263d F3 route=R1 q=3
   the point you can see on the route line.
 - A route may carry `BRANCH`es like a player. Every member reads them
   independently, so three skaters on one reactive route each get their own answer.
+
+**Recirculating.** `next=` sends a line's finishers to another line's head, which
+is how a full-ice drill actually runs:
+
+```drill
+PIECE R1 route 30 22 #3f7f8c Lane_A queue=lead:18 next=R2 hops=2
+PATH  R1 L 90,22 Q 130,22 165,45
+PIECE R2 route 170 66 #b06a2e Lane_B queue=lead:18 next=R1 hops=2
+PATH  R2 L 110,66 Q 70,66 35,45
+```
+
+Each skater's whole recirculation becomes one long path at load time: route A,
+then the crossing, then route B, and so on. The crossing is real route geometry —
+timed like any other leg, and arced around whatever is in the way — drawn as a
+faint dashed link so it reads as travel rather than as part of the drill.
+
+Two routes pointing at each other is a cycle, and deliberately so. `hops` is what
+bounds it: it counts down once per crossing, so the unfold always terminates.
+Branches and recycling don't combine yet — a route that carries a `BRANCH` runs
+its own legs and stops.
 
 In the app: the **Route** tool on the Edit bar places one, or *Make this a line*
 on a player you have already drawn a route for lifts it out. The route's popup

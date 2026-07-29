@@ -1,4 +1,5 @@
-import { QUEUE_GAP, QUEUE_LEAD, queueOf, isMobile, headHeading, stackSpot, queueRelease, lowerRoutes } from '../src/route-lines.js';
+import { QUEUE_GAP, QUEUE_LEAD, queueOf, isMobile, headHeading, stackSpot, queueRelease, transitObstacles, lowerRoutes } from '../src/route-lines.js';
+import { TRANSIT_RATE, HOPS_MAX, LINE_LEG_CAP } from '../src/constants.js';
 
 let pass = 0, fail = 0;
 const T = (name, got, want) => {
@@ -143,6 +144,71 @@ T('isMobile: null is not', isMobile(null), false);
 { // a line with no rule still lowers cleanly — everyone goes at once, as before
   const out = lowerRoutes([route(), skater('P1', 1), skater('P2', 2)]);
   T('no rule leaves every member unheld', out.filter(p => p.kind === 'player').every(p => p.wait === null), true);
+}
+
+// ---- recycling: next= / hops= ----
+// one "lap" = one maximal run of transit legs, since a single crossing may be
+// simplified into several
+const laps = legs => legs.reduce((n, s, i) => n + (s.transit && !(legs[i - 1] || {}).transit ? 1 : 0), 0);
+const routeB = (over = {}) => ({
+  id: 'R2', kind: 'route', x: 160, y: 70, color: '#3f7f8c', forks: [],
+  path: [{ type: 'L', x: 120, y: 70 }],
+  ...over,
+});
+{
+  const A = route({ next: 'R2' }), B = routeB();
+  const out = lowerRoutes([A, B, skater('P1', 1)]);
+  const legs = out.find(p => p.id === 'P1').path;
+  T('a recycled skater gets more legs than one route', legs.length > A.path.length, true);
+  T('the transit legs are marked', legs.some(s => s.transit), true);
+  T('transit is a regroup glide, not another rep', legs.filter(s => s.transit).every(s => s.rate === TRANSIT_RATE), true);
+  T('the last leg is the destination route\'s last waypoint',
+    [legs[legs.length - 1].x, legs[legs.length - 1].y], [120, 70]);
+  T('the destination legs are not marked transit',
+    legs[legs.length - 1].transit, undefined);
+  // the transit has to actually START where the first route ended
+  const firstTransit = legs.findIndex(s => s.transit);
+  T('transit departs from the end of route A', [legs[firstTransit - 1].x, legs[firstTransit - 1].y], [140, 60]);
+}
+{ // next= pointing at nothing is inert
+  const out = lowerRoutes([route({ next: 'R9' }), skater('P1', 1)]);
+  T('a dangling next= just ends the route', out.find(p => p.id === 'P1').path.length, 2);
+}
+{ // hops=0 draws the link but does not run it
+  const out = lowerRoutes([route({ next: 'R2', hops: 0 }), routeB(), skater('P1', 1)]);
+  T('hops=0 stops at the first route', out.find(p => p.id === 'P1').path.length, 2);
+}
+{ // THE termination case: two routes pointing at each other is how a full-ice
+  // drill is actually drawn, and it must not hang or grow without bound
+  const A = route({ next: 'R2', hops: 4 }), B = routeB({ next: 'R1', hops: 4 });
+  const out = lowerRoutes([A, B, skater('P1', 1)]);
+  const legs = out.find(p => p.id === 'P1').path;
+  T('a next= cycle terminates', legs.length > 0 && legs.length < LINE_LEG_CAP, true);
+  T('it runs the laps asked for', laps(legs), 4);
+  T('a cycle is still deterministic', JSON.stringify(lowerRoutes([A, B, skater('P1', 1)])) === JSON.stringify(out), true);
+}
+{ // hops is clamped, so a hand-written drill can't ask for a million laps
+  const A = route({ next: 'R2', hops: 9999 }), B = routeB({ next: 'R1', hops: 9999 });
+  const legs = lowerRoutes([A, B, skater('P1', 1)]).find(p => p.id === 'P1').path;
+  T('hops clamps to HOPS_MAX', laps(legs), HOPS_MAX);
+  T('the leg cap is never exceeded', legs.length <= LINE_LEG_CAP, true);
+}
+{ // a net between the two routes must be skated around, not through
+  const A = route({ x: 30, y: 42, path: [{ type: 'L', x: 60, y: 42 }], next: 'R2' });
+  const B = routeB({ x: 160, y: 42, path: [{ type: 'L', x: 180, y: 42 }] });
+  const net = { id: 'N1', kind: 'net', x: 110, y: 42, facing: 0, size: 1 };
+  const legs = lowerRoutes([A, B, net, skater('P1', 1)]).find(p => p.id === 'P1').path;
+  const discs = transitObstacles([A, B, net, skater('P1', 1)]);
+  const d = discs[0];
+  T('an obstacle disc was found for the net', !!d && d.r > 0, true);
+  T('no transit waypoint sits inside the net',
+    legs.filter(s => s.transit).every(s => Math.hypot(s.x - d.cx, s.y - d.cy) >= d.r), true);
+  T('the detour did not collapse to a straight line', legs.filter(s => s.transit).length >= 2, true);
+}
+{ // branches and recycling don't compose yet — stop rather than splice wrongly
+  const A = route({ next: 'R2', forks: [{ color: '#2ea043', at: 1, path: [{ type: 'L', x: 150, y: 20 }], forks: [] }] });
+  const legs = lowerRoutes([A, routeB(), skater('P1', 1)]).find(p => p.id === 'P1').path;
+  T('a branching route does not recycle', legs.some(s => s.transit), false);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

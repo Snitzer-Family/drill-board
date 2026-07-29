@@ -76,6 +76,16 @@ export const QUEUE_GAP = 5;
 // leaves. A new line defaults to it; a line with no rule at all sends everyone
 // at once, which is what every drill authored before this did.
 export const QUEUE_LEAD = 15;
+// Recycling: a route can send its finishers to another route's head (`next=`).
+// `hops` is how many of those links one skater follows, and it strictly decreases
+// per unfold, so a next= cycle (A -> B -> A, how a full-ice drill is actually
+// drawn) still terminates. HOPS_MAX and LINE_LEG_CAP are the backstops.
+export const HOPS_MAX = 8;
+export const LINE_LEG_CAP = 200;
+// crossing the ice to the next line is a regroup glide, not another rep
+export const TRANSIT_RATE = 0.65;
+// keep-out radius (feet) around a skater — routes arc around parked players
+export const PLAYER_R = 2.9;
 // The action badge at a pass / shoot / pickup: the gap (rink ft) the route line
 // leaves around one, and the disc's radius in icon-frame units. Out here rather
 // than in the animator because the settings sheet's preview tile draws the same

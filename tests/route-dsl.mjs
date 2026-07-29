@@ -95,5 +95,20 @@ const LINE = [
   T('a drill with no route lowers by identity', lowerRoutes(a.pieces) === a.pieces, true);
 }
 
+{ // recycling tokens
+  const rc = 'RINK full\nPIECE R1 route 30 22 #3f7f8c A next=R2 hops=2 regroup=0.8\nPATH R1 L 90,22\nPIECE R2 route 170 66 #b06a2e B next=R1\nPATH R2 L 110,66\nPIECE P1 player 30 22 #d7263d F1 route=R1 q=1';
+  const { a, b, t1, t2 } = trip(rc);
+  T('recycling round-trips identically', JSON.stringify(a) === JSON.stringify(b), true);
+  T('recycling is a byte-stable fixed point', t1 === t2, true);
+  const R = b.pieces.find(p => p.id === 'R1');
+  T('next/hops/regroup survive', [R.next, R.hops, R.regroup], ['R2', 2, 0.8]);
+  T('a default hops emits no token', / hops=/.test(ser(parseDrill(rc.replace(' hops=2', '')))), false);
+  T('hops=0 IS written (it means do not run the link)', /hops=0/.test(ser(parseDrill(rc.replace('hops=2', 'hops=0')))), true);
+  // the whole recirculation must become one path, bounded
+  const legs = lowerRoutes(a.pieces).find(p => p.id === 'P1').path;
+  T('a recirculating drill lowers to one bounded path', legs.length > 1 && legs.length < 200, true);
+  T('the crossing is in there, marked', legs.some(s => s.transit), true);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
