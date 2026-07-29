@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo, Fragment } from "react";
 import { VIEWS, isQuarter, COLORS, vb, APP_VERSION, ICON_SCALE, PLAYER_SCALE, ROUTE_START_GAP, BUILD_STAMP, DEFAULT_TEXT, SPEED,
   SAVE_PROB, MISS_POST, MISS_WIDE, MISS_OVER, SHOT_AIR_PROB, BOUNCE_REST, WB_SYMS, symOf,
-  DSL_VERSION, TYPEFACES, TYPEFACE_KEY, READ_PACES, READ_PACE_DEFAULT, captionHold } from "./constants.js";
+  DSL_VERSION, TYPEFACES, TYPEFACE_KEY, READ_PACES, READ_PACE_DEFAULT, captionHold, ACT_GAP, ACT_R } from "./constants.js";
 import { parseDrill, serializeDrill, extractDrill, deriveInventory, ensureShotNet } from "./drill-format.js";
 import { prepareImage, drillFromImage, ANTHROPIC_KEY_STORE } from "./drill-vision.js";
 import { drillSvg } from "./drill-svg.js";
@@ -452,11 +452,20 @@ const PRESS_KEY = "drillboard:pencil-pressure";  // Apple Pencil pressure → li
 const HAND_KEY = "drillboard:hand";  // which side the chrome's controls sit on
 const LINE_KEY = "drillboard:line-scale";    // route/arrow/mark thickness multiplier
 const MARK_KEY = "drillboard:mark-opacity";  // how solid the drawn markings are
+const RINKDIM_KEY = "drillboard:rink-dim";   // how strongly the rink markings are drawn
+// The icon discs at a pass / shoot / pickup. Whiteboard mode has always dropped
+// them; this is the same look without going full whiteboard. Key name and flag
+// match the unmerged commit on the sibling worktree branch that first added it,
+// so the two converge instead of colliding.
+const ACTC_KEY = "drillboard:action-circles";
 // ...and the range each is allowed, declared ONCE because it is read twice: the
 // control clamps to it and the stored value is validated against it. Two copies
 // and raising a stepper's max would leave the new top of the range unloadable —
 // stored fine, silently reset to the default on the next launch.
-const LINE_RANGE = [0.5, 3], MARK_RANGE = [0.1, 1];
+// ...the rink floor is 0.2 rather than 0.1: the markings are what tell you WHICH
+// rink you are looking at, and past about a fifth they stop being faint and
+// start being gone.
+const LINE_RANGE = [0.5, 3], MARK_RANGE = [0.1, 1], RINKDIM_RANGE = [0.2, 1];
 // A stored NUMBER pref. The boolean prefs can treat any junk as false, but junk
 // here is worse than wrong: NaN in the line scale multiplies every route width
 // to nothing and blanks the board. So anything unparseable, or outside the range
@@ -882,6 +891,12 @@ export default function DrillAnimator() {
   const [arrowStagger, setArrowStagger] = useState(true); // tidy arrowheads: stagger converging heads + recess off crossing lines (off = marks land exactly where drawn)
   const [realisticShots, setRealisticShots] = useState(true); // random goal/post/wide/over + air; off = always bury flat
   const [detailAnim, setDetailAnim] = useState(true);  // skater stride sway, stick swing, dribble cradle
+  // the icon discs at each pass/shoot/pickup. Persisted, because it is a standing
+  // view preference like whiteboard rather than something you set per drill.
+  const [actionCircles, setActionCircles] = useState(() => {
+    try { return localStorage.getItem(ACTC_KEY) !== "0"; } catch { return true; }
+  });
+  useEffect(() => { try { localStorage.setItem(ACTC_KEY, actionCircles ? "1" : "0"); } catch { /* private mode */ } }, [actionCircles]);
   // whiteboard mode: players draw as classic X/O/letter symbols, action badges
   // collapse to arrow-into-gap, and detail animations shut off. A standing view
   // preference, so unlike the other prefs toggles it persists across refreshes.
@@ -978,6 +993,9 @@ export default function DrillAnimator() {
   // whiteboard draws the PLANNER's routes only: authored lines, no animation-time
   // detour bends/ghosts (the skater still avoids obstacles either way)
   const effAvoidVis = avoidanceVisuals && !whiteboard;
+  // whiteboard has never drawn the action discs, so it wins over the pref rather
+  // than fighting it — same shape as the three flags above
+  const effActCircles = actionCircles && !whiteboard;
   // Both persist. They are the two display prefs you set for a ROOM — thicker
   // lines to project, lighter ink to annotate over — and a coach who set one at
   // the rink was made to set it again at the next practice.
@@ -985,12 +1003,18 @@ export default function DrillAnimator() {
   useEffect(() => { try { localStorage.setItem(LINE_KEY, String(lineScale)); } catch { /* private mode */ } }, [lineScale]);
   const [markOpacity, setMarkOpacity] = useState(() => numPref(MARK_KEY, 1, MARK_RANGE));   // opacity of the drawn drill markings only (routes/forks/stops/ink/aim); players, implements + rink stay opaque
   useEffect(() => { try { localStorage.setItem(MARK_KEY, String(markOpacity)); } catch { /* private mode */ } }, [markOpacity]);
+  // ...and the mirror of it for the SHEET: how strongly the rink's own lines are
+  // drawn. Deliberately a separate knob from Mark opacity — that one quiets what
+  // you drew so the rink reads through it, this one quiets the rink so what you
+  // drew reads over it. Turning both down just fades everything.
+  const [rinkDim, setRinkDim] = useState(() => numPref(RINKDIM_KEY, 1, RINKDIM_RANGE));
+  useEffect(() => { try { localStorage.setItem(RINKDIM_KEY, String(rinkDim)); } catch { /* private mode */ } }, [rinkDim]);
   // What the settings sheet's preview tiles draw with. Everything a scene can
   // need, in one object, so a new scene never has to thread another prop through
   // PrefPick. prefersDark is in here because the Theme row's "Auto" tile has to
   // resolve the same way the app does.
-  const pvCtx = useMemo(() => ({ T, ink, prefersDark, lineScale, markOpacity }),
-    [T, ink, prefersDark, lineScale, markOpacity]);
+  const pvCtx = useMemo(() => ({ T, ink, prefersDark, lineScale, markOpacity, rinkDim }),
+    [T, ink, prefersDark, lineScale, markOpacity, rinkDim]);
   const [defaultSpeed, setDefaultSpeed] = useState(1.5); // speed given to newly-added players
   // tunable shot odds (0..1): goalie save chance; empty-net miss split into
   // post/wide/over (the remainder is a goal); and how often a shot goes airborne
@@ -6054,11 +6078,13 @@ export default function DrillAnimator() {
   }
 
   /* ---- action badges at waypoints ---- */
-  // gap (rink ft) the line leaves around an action badge; badge radius in icon-frame units
-  const ACT_GAP = 3.4, ACT_R = 3.0;
-  // whiteboard mode drops the badge discs, so the line-gap shrinks to a small
-  // central gap the arrows point into (nothing to clear but the waypoint itself)
-  const actGap = whiteboard ? 0.8 : ACT_GAP;
+  // ACT_GAP / ACT_R (the line's gap around a badge, and the disc radius) live in
+  // constants.js: the settings sheet's preview tile draws the same badge.
+  // With no badge discs — whiteboard, or Action badges off — the line-gap shrinks
+  // to a small central gap the arrows point into: there is nothing left to clear
+  // but the waypoint itself, and a 3.4ft hole around nothing reads as a broken
+  // route. This is why the pref cannot just hide the discs with CSS.
+  const actGap = effActCircles ? ACT_GAP : 0.8;
   // route ends converging on one waypoint queue their arrowheads back along their
   // own lines (same idea as the shot stagger in puckPathNodes) instead of clumping
   const ARROW_CLUSTER_R = 2;      // ft: only ends that directly overlap share a stagger group
@@ -6185,7 +6211,7 @@ export default function DrillAnimator() {
             if (Math.hypot(dx, dy) < 1e-4) { dx = s.x - prev.x; dy = s.y - prev.y; }
             els.push(routeMark(`${keyPrefix}am${i}`, { x: fin.x, y: fin.y },
               (Math.atan2(dy, dx) * 180) / Math.PI, s.endStop, color));
-            if (!whiteboard) els.push(iconBadge({ x: s.x, y: s.y }, actionIconName(info.type), color, `${keyPrefix}ab${i}`, 1, info.count));
+            if (effActCircles) els.push(iconBadge({ x: s.x, y: s.y }, actionIconName(info.type), color, `${keyPrefix}ab${i}`, 1, info.count));
             continue;
           }
           const near = evalSeg(prev, s, 0.95); tx = s.x - near.x; ty = s.y - near.y;   // near the end → carat aligns with the incoming run
@@ -6199,8 +6225,8 @@ export default function DrillAnimator() {
       const back = arrivalBack("main", mp0.x, mp0.y);
       const mp = back ? gmMove(s.x, s.y, -tx / tl, -ty / tl, actGap + back) : mp0;
       els.push(routeMark(`${keyPrefix}am${i}`, mp, ang, s.endStop, color));
-      // whiteboard: no icon disc — the arrow just stops, pointing into the gap
-      if (!whiteboard) els.push(iconBadge({ x: s.x, y: s.y }, actionIconName(info.type), color, `${keyPrefix}ab${i}`, 1, info.count));
+      // no disc — the arrow just stops, pointing into the gap
+      if (effActCircles) els.push(iconBadge({ x: s.x, y: s.y }, actionIconName(info.type), color, `${keyPrefix}ab${i}`, 1, info.count));
     }
     return <g>{els}</g>;
   }
@@ -6253,7 +6279,7 @@ export default function DrillAnimator() {
       const back = arrivalBack("main", mp0.x, mp0.y);
       const mp = back ? gmMove(e.x, e.y, -tx / tl, -ty / tl, actGap + back) : mp0;
       els.push(routeMark(`lcm-${p.id}-${k}`, mp, ang, false, ink(p.color), GHOST_OP));
-      if (!whiteboard) els.push(iconBadge({ x: e.x, y: e.y }, "collect", p.color, `lcb-${p.id}-${k}`, GHOST_OP));
+      if (effActCircles) els.push(iconBadge({ x: e.x, y: e.y }, "collect", p.color, `lcb-${p.id}-${k}`, GHOST_OP));
     });
     return els.length ? <g>{els}</g> : null;
   }
@@ -6267,7 +6293,7 @@ export default function DrillAnimator() {
   // → shift the brain up to sit tangent above it, so the action circle (and its count
   // bubble) stays readable instead of hiding underneath.
   function reactionBadge(pt, color, key, lift = false) {
-    if (whiteboard) return null;   // whiteboard: branches just fan out of the gap
+    if (!effActCircles) return null;   // no discs: branches just fan out of the gap
     return iconBadge(pt, "brain", color, key, 1, 0, lift ? -(ACT_R * 2 + 0.7) : 0);
   }
 
@@ -8989,7 +9015,7 @@ export default function DrillAnimator() {
       }}>
         <svg viewBox={`0 0 ${2 * R} ${2 * R}`}>
           <g transform={loupeXf}>
-          <RinkMarkings />
+          <RinkMarkings dim={rinkDim} />
           {pieces.map(p => {
             let prev = { x: p.x, y: p.y };
             return p.path.map((s, i) => {
@@ -9454,7 +9480,7 @@ export default function DrillAnimator() {
 
             <g transform={zoomXf}>
             <g ref={sceneRef} transform={sceneTransform} clipPath={rink === "half" ? "url(#halfview)" : undefined}>
-            <RinkMarkings yFix={yFix} />
+            <RinkMarkings yFix={yFix} dim={rinkDim} />
 
             {/* freehand marker annotations sit on the ice, under the drill — they
                 are drill markings, so they honour Mark opacity */}
@@ -9805,7 +9831,7 @@ export default function DrillAnimator() {
                     if (!ea) return null;
                     // legacy branch `action` → its circle, else a plain skate carat / ‖ stop
                     const legacy = f.action && f.action !== "skate" ? forkActionIcon(f.action) : null;
-                    if (legacy && !whiteboard) return { ea, legacy };
+                    if (legacy && effActCircles) return { ea, legacy };
                     // several branches can END at the same spot — queue the carats
                     return { ea, bk: arrivalBack("main", ea.endPt.x, ea.endPt.y) };
                   })();
@@ -10963,6 +10989,22 @@ export default function DrillAnimator() {
             <input type="range" min={MARK_RANGE[0]} max={MARK_RANGE[1]} step={0.05} value={markOpacity} style={{ width: "100%" }}
               onChange={e => setMarkOpacity(parseFloat(e.target.value))} />
           </PrefSample>
+          {/* The mirror of Mark opacity, and next to it on purpose: that one
+              quiets what you drew so the rink reads through it, this one quiets
+              the rink so what you drew reads over it. */}
+          <PrefSample title="Rink markings" scene="rinkdim" ctx={pvCtx} value={rinkDim}
+            desc={rinkDim < 1
+              ? `How strongly the rink's own lines, circles and creases are drawn — ${Math.round(rinkDim * 100)}% now. The ice itself doesn't change, so the sheet stays solid and only the markings step back.`
+              : "How strongly the rink's own lines, circles and creases are drawn. Turn it down to let a busy drill read over the sheet, or to calm a projector."}>
+            <input type="range" min={RINKDIM_RANGE[0]} max={RINKDIM_RANGE[1]} step={0.05} value={rinkDim} style={{ width: "100%" }}
+              onChange={e => setRinkDim(parseFloat(e.target.value))} />
+          </PrefSample>
+          <PrefPick title="Action badges" scene="badges" ctx={pvCtx} value={actionCircles} set={setActionCircles}
+            opts={[[true, "Show"], [false, "Hide"]]}
+            dim={whiteboard}
+            desc={whiteboard
+              ? "The icon discs marking where a player passes, shoots or picks the puck up. Whiteboard mode never draws them, so this has no effect until you switch back to Graphic in the Rink menu."
+              : "The icon discs marking where a player passes, shoots or picks the puck up. Hidden, the route just runs an arrow into the waypoint — the same look whiteboard mode has always had. What happens where is still listed in the piece's Chain of events."} />
 
           {/* Whiteboard mode itself is a board choice, not a preference — it
               lives in the Rink menu next to full/half/quarter. What stays here

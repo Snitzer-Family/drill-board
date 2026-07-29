@@ -26,6 +26,7 @@ const app = read("src/hockey-drill-animator.jsx");
 const pv = read("src/pref-preview.jsx");
 const rink = read("src/rink.jsx");
 const styles = read("src/styles.js");
+const cons = read("src/constants.js");
 
 const { THEME_ORDER } = await import("../src/theme.js");
 const { TYPEFACES } = await import("../src/constants.js");
@@ -112,18 +113,60 @@ check("the stored number prefs are validated against the range their control off
   // raising a stepper's max leaves the new top of the range stored fine but
   // silently reset to the default on the next launch — which presents as the
   // setting "not sticking", and only at one end of its travel.
-  assert.match(app, /const LINE_RANGE = \[[\d.]+, [\d.]+\], MARK_RANGE = \[[\d.]+, [\d.]+\];/,
-    "LINE_RANGE / MARK_RANGE must stay one declaration");
-  assert.match(app, /numPref\(LINE_KEY, 1, LINE_RANGE\)/);
-  assert.match(app, /numPref\(MARK_KEY, 1, MARK_RANGE\)/);
-  assert.match(app, /min=\{LINE_RANGE\[0\]\} max=\{LINE_RANGE\[1\]\}/,
-    "the thickness stepper must take its bounds from LINE_RANGE, not literals");
-  assert.match(app, /min=\{MARK_RANGE\[0\]\} max=\{MARK_RANGE\[1\]\}/,
-    "the opacity slider must take its bounds from MARK_RANGE, not literals");
-  // ...and both must actually be written back, or they are session-only again
-  for (const k of ["LINE_KEY", "MARK_KEY"]) {
+  const RANGES = ["LINE_RANGE", "MARK_RANGE", "RINKDIM_RANGE"];
+  for (const r of RANGES) {
+    assert.match(app, new RegExp(`${r} = \\[[\\d.]+, [\\d.]+\\]`), `${r} must be one [min, max] literal`);
+  }
+  for (const [k, r, ctl] of [["LINE_KEY", "LINE_RANGE", "thickness stepper"],
+                             ["MARK_KEY", "MARK_RANGE", "mark-opacity slider"],
+                             ["RINKDIM_KEY", "RINKDIM_RANGE", "rink-dim slider"]]) {
+    assert.match(app, new RegExp(`numPref\\(${k}, 1, ${r}\\)`),
+      `${k} must be validated against ${r}`);
+    assert.match(app, new RegExp(`min=\\{${r}\\[0\\]\\} max=\\{${r}\\[1\\]\\}`),
+      `the ${ctl} must take its bounds from ${r}, not literals`);
+    // ...and each must actually be written back, or it is session-only again
     assert.ok(app.includes(`localStorage.setItem(${k},`), `${k} is read but never written`);
   }
+});
+
+check("the action-badge pref gates every badge site, and whiteboard still wins", () => {
+  // Six separate draw sites used to read !whiteboard directly. Miss one and the
+  // board shows a single stray disc, or keeps a 3.4ft hole in a route with
+  // nothing in it — both look like a rendering bug, not a setting.
+  assert.match(app, /const effActCircles = actionCircles && !whiteboard;/,
+    "whiteboard must still win over the pref, like the other eff* flags");
+  assert.equal((app.match(/!whiteboard\) els\.push\(iconBadge/g) || []).length, 0,
+    "a badge site still gates on whiteboard directly instead of effActCircles");
+  assert.ok((app.match(/effActCircles/g) || []).length >= 6,
+    "expected the flag at the gap plus all five draw sites");
+  assert.match(app, /const actGap = effActCircles \? ACT_GAP : 0\.8;/,
+    "the route gap must follow the badge, or the line breaks around nothing");
+  assert.ok(app.includes("localStorage.setItem(ACTC_KEY,"), "the pref must persist");
+});
+
+check("the badge tile and the board draw the same disc", () => {
+  // the tile is only worth having if it is the board's own geometry
+  assert.match(cons, /export const ACT_GAP = [\d.]+, ACT_R = [\d.]+;/,
+    "ACT_GAP / ACT_R must be shared, not retyped in the preview");
+  for (const f of [app, pv]) {
+    assert.match(f, /ACT_GAP|ACT_R/, "both the board and the tile must read them");
+  }
+  assert.match(pv, /r=\{ACT_R\}/, "the tile's disc must be ACT_R, not a literal");
+  assert.match(pv, /ICONS\.pass/, "and carry a real action icon");
+});
+
+check("dimming the rink fades the markings, never the ice", () => {
+  // an opacity on the whole group would fade the ice fill too and show the room
+  // through the sheet — translucent rink instead of quiet lines
+  assert.match(rink, /clipId = "boards", dim = 1/, "RinkMarkings must take a dim, defaulting to 1");
+  const body = rink.slice(rink.indexOf("<g clipPath="));
+  const iceRect = body.indexOf('fill={T.ice}');
+  const dimGroup = body.indexOf("<g opacity={dim");
+  assert.ok(iceRect > 0 && dimGroup > 0, "expected both the ice rect and the dim group");
+  assert.ok(dimGroup > iceRect,
+    "the dim group must open AFTER the ice rect, or the sheet itself goes translucent");
+  assert.match(app, /<RinkMarkings dim=\{rinkDim\} \/>/, "the loupe must dim with the board");
+  assert.match(app, /<RinkMarkings yFix=\{yFix\} dim=\{rinkDim\} \/>/, "and so must the board");
 });
 
 check("the tile label survives — a row is never picture-only", () => {

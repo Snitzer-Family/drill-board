@@ -25,7 +25,8 @@
 
 import { useId } from "react";
 import { RinkMarkings } from "./rink.jsx";
-import { PieceIcon } from "./icons.jsx";
+import { PieceIcon, ICONS } from "./icons.jsx";
+import { ACT_GAP, ACT_R, ICON_SCALE } from "./constants.js";
 import { ThemeCtx } from "./theme-react.jsx";
 import { tokens, resolveTheme } from "./theme.js";
 import { ZONES } from "./zones.js";
@@ -70,7 +71,7 @@ const Head = ({ x, y, ux, uy, color, w = 0.7 }) => {
 
 // key -> { view, fit, bg(v, c), render(v, c, id) }
 //   v  = the value this tile stands for
-//   c  = live app context { T, ink, prefersDark, lineScale, markOpacity }
+//   c  = live app context { T, ink, prefersDark, lineScale, markOpacity, rinkDim }
 //   id = a document-unique id stem, for clipPath refs
 // `fit` is "meet" everywhere: the tile's background is already the ice, so a
 // letterboxed scene simply sits on more ice rather than showing a gutter, and
@@ -214,6 +215,59 @@ export const SCENES = {
           <Head x={64} y={5} ux={1} uy={0} color={c.T["ice-ink"]} w={w} />
           <Route d="M 76 5 L 112 5" color={RED} w={w} dash={`${2.4 * c.lineScale} ${1.8 * c.lineScale}`} />
           <Route d="M 8 15 L 112 15" color={BLUE} w={w} />
+        </g>
+      );
+    },
+  },
+
+  // Live, single tile, and the ONE scene that draws the real RinkMarkings at a
+  // width worth the node cost: the thing being dimmed is the sheet itself, so a
+  // schematic of it would be describing the setting rather than showing it. A
+  // band from goal line to goal line — creases, dots, centre circle — with a
+  // route over it, because what you are really judging is whether the drill
+  // still reads against the rink.
+  rinkdim: {
+    // a 20ft strip across the waist of the sheet, which is 10:1 — the shape of a
+    // full-width tile. Both creases, both goal lines, both blue lines and the
+    // centre line fall inside it at nearly 2px per foot.
+    view: [0, 32.5, 200, 20], fit: "meet",
+    render: (v, c, id) => (
+      <g>
+        <defs><clipPath id={id}><rect x={0.5} y={0.5} width={199} height={84} rx={28} ry={28} /></clipPath></defs>
+        <RinkMarkings clipId={id} dim={v} />
+        <Route d="M 168 48 C 132 48 126 37 92 37" color={c.T["ice-ink"]} w={1.1} />
+        <Head x={92} y={37} ux={-1} uy={0} color={c.T["ice-ink"]} w={1.1} />
+      </g>
+    ),
+  },
+
+  // The icon discs at a pass / shoot / pickup. Off is not just the discs hidden:
+  // the route's gap closes to meet the arrow, which is the whole reason this is
+  // a render choice and not a CSS one — so both tiles draw their own gap.
+  badges: {
+    view: [0, 0, 52, 13], fit: "meet",
+    render: (v) => {
+      const on = v === true, gap = on ? ACT_GAP : 0.8;
+      const X = 27, Y = 7;   // where the player acts on the puck
+      return (
+        <g>
+          <PieceIcon p={piece("player", { color: RED, label: "F1" })} pos={{ x: 5, y: 10, a: 0 }} hitOff />
+          <Route d={`M 10 10 C 18 10 19 ${Y} ${X - gap} ${Y}`} color={RED} w={0.7} />
+          <Head x={X - gap} y={Y} ux={1} uy={0} color={RED} w={0.7} />
+          {on && (
+            // the app's own badge geometry: the ICON_SCALE frame, an ACT_R disc,
+            // and the icon on the same scale(0.178) translate(-12 -12) footing
+            <g transform={`translate(${X} ${Y}) scale(${ICON_SCALE})`}>
+              <circle cx={0} cy={0} r={ACT_R} fill="#fff" stroke={RED} strokeWidth={0.5} />
+              <g style={{ color: RED }} transform="scale(0.178) translate(-12 -12)"
+                fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round">
+                {ICONS.pass}
+              </g>
+            </g>
+          )}
+          {/* the pass leaving that waypoint, so the disc is marking something */}
+          <Route d={`M ${X + (on ? gap : 1.6)} ${Y} L 49 ${Y}`} color={RED} w={0.6} dash="2 1.5" />
+          <Head x={49} y={Y} ux={1} uy={0} color={RED} w={0.6} />
         </g>
       );
     },
@@ -386,10 +440,13 @@ function Tile({ scene, value, ctx, id }) {
 // whole row one button, and a button can't contain buttons. Each tile is its own
 // target instead, still comfortably over 44pt, and keeps a text label so the row
 // is never picture-only.
-export function PrefPick({ title, desc, scene, value, set, opts, ctx }) {
+// `dim` greys the row where something else has taken the decision away — the
+// tiles still work and still show the truth, they just aren't what's on screen
+// right now (Action badges under whiteboard mode). Same signal PrefRow uses.
+export function PrefPick({ title, desc, scene, value, set, opts, ctx, dim }) {
   const uid = useId().replace(/:/g, "");
   return (
-    <div className="hd-pref">
+    <div className={`hd-pref${dim ? " dim" : ""}`}>
       <div className="hd-prefhead"><span className="hd-preftitle">{title}</span></div>
       {desc && <div className="hd-prefdesc">{desc}</div>}
       <div className="hd-pvrow" role="radiogroup" aria-label={title}>
