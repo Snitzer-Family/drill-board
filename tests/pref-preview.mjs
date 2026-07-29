@@ -107,6 +107,25 @@ check("a tile that fills with the accent still sets its text colour", () => {
   assert.match(m[0], /color:var\(--db-text-on-accent\)/);
 });
 
+check("the stored number prefs are validated against the range their control offers", () => {
+  // One declaration, read by both the clamp and the control. Two copies and
+  // raising a stepper's max leaves the new top of the range stored fine but
+  // silently reset to the default on the next launch — which presents as the
+  // setting "not sticking", and only at one end of its travel.
+  assert.match(app, /const LINE_RANGE = \[[\d.]+, [\d.]+\], MARK_RANGE = \[[\d.]+, [\d.]+\];/,
+    "LINE_RANGE / MARK_RANGE must stay one declaration");
+  assert.match(app, /numPref\(LINE_KEY, 1, LINE_RANGE\)/);
+  assert.match(app, /numPref\(MARK_KEY, 1, MARK_RANGE\)/);
+  assert.match(app, /min=\{LINE_RANGE\[0\]\} max=\{LINE_RANGE\[1\]\}/,
+    "the thickness stepper must take its bounds from LINE_RANGE, not literals");
+  assert.match(app, /min=\{MARK_RANGE\[0\]\} max=\{MARK_RANGE\[1\]\}/,
+    "the opacity slider must take its bounds from MARK_RANGE, not literals");
+  // ...and both must actually be written back, or they are session-only again
+  for (const k of ["LINE_KEY", "MARK_KEY"]) {
+    assert.ok(app.includes(`localStorage.setItem(${k},`), `${k} is read but never written`);
+  }
+});
+
 check("the tile label survives — a row is never picture-only", () => {
   assert.match(pv, /className="hd-pvlbl"/, "PrefPick must still render a text label under each tile");
   assert.match(styles, /\.hd-pvlbl \{/, "and styles.js must still style it");

@@ -450,6 +450,23 @@ const HALFFLIP_KEY = "drillboard:half-flip";  // half-ice net at the far end (le
 const STRETCH_KEY = "drillboard:stretch-fill";  // full ice stretches to fill the screen
 const PRESS_KEY = "drillboard:pencil-pressure";  // Apple Pencil pressure → line weight
 const HAND_KEY = "drillboard:hand";  // which side the chrome's controls sit on
+const LINE_KEY = "drillboard:line-scale";    // route/arrow/mark thickness multiplier
+const MARK_KEY = "drillboard:mark-opacity";  // how solid the drawn markings are
+// ...and the range each is allowed, declared ONCE because it is read twice: the
+// control clamps to it and the stored value is validated against it. Two copies
+// and raising a stepper's max would leave the new top of the range unloadable —
+// stored fine, silently reset to the default on the next launch.
+const LINE_RANGE = [0.5, 3], MARK_RANGE = [0.1, 1];
+// A stored NUMBER pref. The boolean prefs can treat any junk as false, but junk
+// here is worse than wrong: NaN in the line scale multiplies every route width
+// to nothing and blanks the board. So anything unparseable, or outside the range
+// the control itself offers, falls back to the default rather than being trusted.
+const numPref = (key, dflt, [min, max]) => {
+  try {
+    const n = parseFloat(localStorage.getItem(key));
+    return Number.isFinite(n) && n >= min && n <= max ? n : dflt;
+  } catch { return dflt; }   // private mode throws on access
+};
 // The ONE width breakpoint in the app. Above it the action bar lays its groups
 // out inline and the corner menus centre on the button that opened them; below,
 // the bar collapses groups into popovers and the stylesheet stretches the menus
@@ -961,8 +978,13 @@ export default function DrillAnimator() {
   // whiteboard draws the PLANNER's routes only: authored lines, no animation-time
   // detour bends/ghosts (the skater still avoids obstacles either way)
   const effAvoidVis = avoidanceVisuals && !whiteboard;
-  const [lineScale, setLineScale] = useState(1);       // route line-thickness multiplier
-  const [markOpacity, setMarkOpacity] = useState(1);   // opacity of the drawn drill markings only (routes/forks/stops/ink/aim); players, implements + rink stay opaque
+  // Both persist. They are the two display prefs you set for a ROOM — thicker
+  // lines to project, lighter ink to annotate over — and a coach who set one at
+  // the rink was made to set it again at the next practice.
+  const [lineScale, setLineScale] = useState(() => numPref(LINE_KEY, 1, LINE_RANGE));  // route line-thickness multiplier
+  useEffect(() => { try { localStorage.setItem(LINE_KEY, String(lineScale)); } catch { /* private mode */ } }, [lineScale]);
+  const [markOpacity, setMarkOpacity] = useState(() => numPref(MARK_KEY, 1, MARK_RANGE));   // opacity of the drawn drill markings only (routes/forks/stops/ink/aim); players, implements + rink stay opaque
+  useEffect(() => { try { localStorage.setItem(MARK_KEY, String(markOpacity)); } catch { /* private mode */ } }, [markOpacity]);
   // What the settings sheet's preview tiles draw with. Everything a scene can
   // need, in one object, so a new scene never has to thread another prop through
   // PrefPick. prefersDark is in here because the Theme row's "Auto" tile has to
@@ -10934,10 +10956,11 @@ export default function DrillAnimator() {
             desc="Name the areas of the sheet over the rink — slot, half wall, neutral zone. Useful when writing captions that refer to them." />
           <PrefSample title="Line thickness" scene="thickness" ctx={pvCtx} value={lineScale}
             desc="Scales every route line, arrow and mark. Worth raising when projecting to a room."
-            control={<Stepper value={lineScale} onChange={setLineScale} step={0.25} min={0.5} max={3} suffix="×" />} />
+            control={<Stepper value={lineScale} onChange={setLineScale} step={0.25}
+              min={LINE_RANGE[0]} max={LINE_RANGE[1]} suffix="×" />} />
           <PrefSample title="Mark opacity" scene="opacity" ctx={pvCtx} value={markOpacity}
             desc={`How solid freehand marker ink and shapes are drawn — ${Math.round(markOpacity * 100)}% now. Lower lets rink markings read through your annotations.`}>
-            <input type="range" min={0.1} max={1} step={0.05} value={markOpacity} style={{ width: "100%" }}
+            <input type="range" min={MARK_RANGE[0]} max={MARK_RANGE[1]} step={0.05} value={markOpacity} style={{ width: "100%" }}
               onChange={e => setMarkOpacity(parseFloat(e.target.value))} />
           </PrefSample>
 
