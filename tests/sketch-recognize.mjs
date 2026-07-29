@@ -296,6 +296,42 @@ const kinds = ops => ops.map(o => o.op);
   T('big ○ is a circle', big[0] && big[0].shape, 'circle');
 }
 
+// ---- …but the SAME big loop drawn off a player is a swing route, not an
+//      overlay. The closed-shape test used to run before route attachment and
+//      never looked at the board, so a circle-back got stolen. Identical ink
+//      throughout — only the roster changes. ----
+{
+  const loop = strokesOf(drawn(GLYPHS.O, 100, 42, 18, 0.5, 67));   // starts at (100, 33)
+  const at = players => classifyPenGroup(loop, { players });
+  const onIt = at([{ id: 'P1', x: 100, y: 33 }]);
+  T('loop off a player → route', kinds(onIt), ['route']);
+  T('...bound to that player', onIt[0].to, { id: 'P1' });
+  T('...a fresh route, not an extension', onIt[0].extend, false);
+  // a loop drawn AROUND a player starts on its own rim, a full radius away
+  T('loop around a player is still a shape', kinds(at([{ id: 'P1', x: 100, y: 42 }])), ['shape']);
+  // and off a route's tip it continues that route
+  const tip = at([{ id: 'P1', x: 60, y: 70, end: { x: 100, y: 33 }, hasPath: true }]);
+  T('loop off a route tip → route', kinds(tip), ['route']);
+  T('...marked as an extension', tip[0].extend, true);
+}
+
+// ---- the swing rule is size-gated: below overlayMin a ring is a player token,
+//      and dropping an O beside an existing player must keep working ----
+{
+  const beside = classifyPenGroup(strokesOf(drawn(GLYPHS.O, 100, 42, 5, 0.15, 313)),
+    { players: [{ id: 'P1', x: 100, y: 39.5 }] });   // player right on the ring's start
+  T('small O beside a player is a player', kinds(beside), ['player']);
+  // a 20ft ring at phone scale measures 120px — wide enough to be an overlay,
+  // still under the 130px symbol cap, so it reaches the shape branch by the
+  // SYMBOL path. The split has to send it down the route pipeline too.
+  const CAP = { pxFt: 0.236 };
+  const mid = strokesOf(drawn(GLYPHS.O, 100, 42, 20, 0.5, 317));   // starts at (100, 32)
+  T('mid-size loop with nobody near → shape', kinds(classifyPenGroup(mid, CAP)), ['shape']);
+  const off = classifyPenGroup(mid, { ...CAP, players: [{ id: 'P1', x: 100, y: 32 }] });
+  T('mid-size loop off a player → route', kinds(off), ['route']);
+  T('...bound to that player', off[0] && off[0].to, { id: 'P1' });
+}
+
 // ---- finger-sloppy rings: a 290° open loop (35-40% gap) is still an O ----
 {
   const sloppy = [arcPts(0.5, 0.5, 0.5, -55, 235, 22)];

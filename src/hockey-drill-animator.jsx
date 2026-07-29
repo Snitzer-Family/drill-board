@@ -6016,6 +6016,10 @@ export default function DrillAnimator() {
   const ARROW_STAGGER_STEP = 2.5; // ft each queued arrowhead steps back (~one chevron depth)
   const ARROW_MIN_KEEP = 2;       // ft of last leg that must survive the trim
   const ARROW_LINE_CLEAR = 1.2;   // ft a head keeps clear of any foreign route line
+  // ...and the same vocabulary for the grey shot carets in puckPathNodes
+  const SHOT_TIP_GAP = 6;         // ft a shot's caret stands off its landing point
+  const SHOT_CLUSTER_R = 5;       // ft: only shot heads this close queue behind each other
+  const SHOT_STAGGER_STEP = 9;    // ft each queued shot head steps back along its own axis
   // priority for picking the "main" action shown in a badge with several actions
   const ACT_PRI = { shot: 5, pass: 4, rim: 3, chip: 2, receive: 1, collect: 1, pickup: 1 };
   const stepActionType = st => st.role === "pickup" ? "pickup" : st.role === "receive" ? "receive"
@@ -6235,7 +6239,7 @@ export default function DrillAnimator() {
   // Several route ends converging on one waypoint would stamp their end marks on
   // the exact same spot — group ends within ARROW_CLUSTER_R and pull each mark
   // back along its OWN line by a spaced interval so the heads queue up readably
-  // (the same de-confliction puckPathNodes does for shots on one net). Shortest
+  // (the same de-confliction puckPathNodes does for converging shot heads). Shortest
   // last leg keeps the true endpoint; the pull-back is clamped so a short leg
   // never trims past its own start. A second pass then RECESSES any head sitting
   // on a foreign route's line until it clears it. Cosmetic only — ref paths/
@@ -8510,12 +8514,9 @@ export default function DrillAnimator() {
     // a fly leg launches/lands at the player's STICK, ~a stick-length off the
     // waypoint centre where the badge sits — so match within that reach
     const nearBadge = (x, y) => { let best = null, bd = 6; for (const b of badges) { const d = Math.hypot(b.x - x, b.y - y); if (d < bd) { bd = d; best = b; } } return best; };
-    // multiple shots landing on the same net stop at staggered distances so their
-    // arrowheads queue up in front of it instead of piling into one busy clump
-    // group shots by the NET they land on (landings scatter a few feet, so bucket
-    // by nearest net, not exact point), then stagger by LENGTH: the closest
-    // (shortest) shots keep their room right at the net, and the farther (longer)
-    // shots step back — so nothing overlaps and short shots still read accurately
+    // which target a shot lands on — landings scatter a few feet across the mouth,
+    // so bucket by nearest net rather than exact point. Only the repeat-shot dedup
+    // key below uses it; the stagger reads tip positions, not nets.
     const shotTargets = pieces.filter(q => q.kind === "net" || q.kind === "passer" || q.kind === "bumper" || q.kind === "tire");
     const nearNet = (x, y) => { let best = "?", bd = 24; for (const nt of shotTargets) { const d = Math.hypot(nt.x - x, nt.y - y); if (d < bd) { bd = d; best = nt.id; } } return best; };
     // A player firing a pile of pucks from one spot at one net draws the same arrow
@@ -8524,7 +8525,7 @@ export default function DrillAnimator() {
     // by release point (~3ft) rather than exact coordinates: the blade shifts a little
     // between shots as the body settles, and they are still visually the same mark.
     const shotOne = {}, shotN = {};      // `${pk}/${k}` → is the drawn one / how many it stands for
-    const byNet = {}, shotStagger = {};  // `${pk}/${k}` → extra feet in front of the net
+    const shotStagger = {};              // `${pk}/${k}` → extra feet in front of the net
     const groups = {};
     pieces.filter(q => q.kind === "puck" && plans[q.id]).forEach(q => plans[q.id].legs.forEach((L, k, legs) => {
       if (L.type === "fly" && L.shot && (!legs[k + 1] || legs[k + 1].type !== "fly")) {
@@ -8541,14 +8542,39 @@ export default function DrillAnimator() {
       list.forEach(sIt => { shotN[sIt.id] = list.length; });
       shotOne[lead.id] = true;
     });
-    // ...and only the drawn ones queue for room in front of the net
-    pieces.filter(q => q.kind === "puck" && plans[q.id]).forEach(q => plans[q.id].legs.forEach((L, k, legs) => {
-      if (L.type === "fly" && L.shot && (!legs[k + 1] || legs[k + 1].type !== "fly") && shotOne[`${q.id}/${k}`]) {
-        const net = nearNet(L.x1, L.y1);
-        (byNet[net] = byNet[net] || []).push({ id: `${q.id}/${k}`, len: Math.hypot(L.x1 - L.x0, L.y1 - L.y0) });
+    // ...and only the drawn ones queue for room in front of the net. Group by where
+    // the CARET actually lands — the landing point pulled back SHOT_TIP_GAP along the
+    // shot's own axis — and NOT by which net it's aimed at: two shots converging on
+    // one net from clearly different angles have heads yards apart and need no
+    // stagger at all. Same tip rule arrivalBack applies to passes and route carats,
+    // so swinging a shooter round the net dissolves the queue the moment they clear.
+    // Within a cluster the shortest shot keeps the slot at the net and the longer
+    // ones step back, so a close-in shot still reads true against the cage.
+    if (arrowStagger) {
+      const tips = [];
+      pieces.filter(q => q.kind === "puck" && plans[q.id]).forEach(q => plans[q.id].legs.forEach((L, k, legs) => {
+        if (!(L.type === "fly" && L.shot && (!legs[k + 1] || legs[k + 1].type !== "fly") && shotOne[`${q.id}/${k}`])) return;
+        // the same origin and direction the renderer draws with (badge centre when
+        // released at an action circle), so the tip we cluster on is the real one
+        const sb = (k === 0 || legs[k - 1].type !== "fly") ? nearBadge(L.x0, L.y0) : null;
+        const ox = sb ? sb.x : L.x0, oy = sb ? sb.y : L.y0;
+        const len = Math.hypot(L.x1 - ox, L.y1 - oy) || 1;
+        const t = gmMove(L.x1, L.y1, -(L.x1 - ox) / len, -(L.y1 - oy) / len, SHOT_TIP_GAP);
+        // gm space, so the cluster radius reads the same in every direction under
+        // the fill-mode stretch (as the route-end clearance pass does)
+        tips.push({ id: `${q.id}/${k}`, len, x: t.x * gmSar, y: t.y / gmSar });
+      }));
+      const shotClusters = [];
+      for (const t of tips) {
+        let c = shotClusters.find(c2 => Math.hypot(c2.seed.x - t.x, c2.seed.y - t.y) <= SHOT_CLUSTER_R);
+        if (!c) { c = { seed: t, list: [] }; shotClusters.push(c); }
+        c.list.push(t);
       }
-    }));
-    Object.values(byNet).forEach(list => list.sort((a, b) => a.len - b.len).forEach((s, i) => { shotStagger[s.id] = i * 9; }));
+      for (const c of shotClusters) {
+        if (c.list.length < 2) continue;
+        c.list.sort((a, b) => a.len - b.len).forEach((s, i) => { if (i) shotStagger[s.id] = i * SHOT_STAGGER_STEP; });
+      }
+    }
     // a PASS's drawn line comes from the AUTHORED chain (planner geometry:
     // release waypoint → catch waypoint, like renderBranchGhostArrows), NOT the
     // animation plan's fly legs — those launch/land on warped blade positions
@@ -8674,14 +8700,15 @@ export default function DrillAnimator() {
         const len = Math.hypot(L.x1 - ox, L.y1 - oy) || 1, ux = (L.x1 - ox) / len, uy = (L.y1 - oy) / len;
         const sp = sb ? gmMove(sb.x, sb.y, ux, uy, START_OFF) : { x: L.x0, y: L.y0 };
         const sx = sp.x, sy = sp.y;
-        // end: a shot stops just short of the net (+ stagger for several on one net);
-        // a pass/rim/chip into a receiver's badge stops just off its edge. Clamp the
-        // offset so a SHORT leg's arrow never overshoots its own start and reverses.
+        // end: a shot stops just short of the net (+ stagger when another shot's
+        // head lands on top of this one); a pass/rim/chip into a receiver's badge
+        // stops just off its edge. Clamp the offset so a SHORT leg's arrow never
+        // overshoots its own start and reverses.
         const eb = runEnd && !L.shot ? nearBadge(L.x1, L.y1) : null;
         // whiteboard: a chip/rim that lands LOOSE (no collector badge) gets a
         // ghost puck sitting on the landing spot — the line stops just short
         const ghostLand = !flat && whiteboard && runEnd && (L.rim || L.chip) && !eb;
-        let eGap = L.shot && runEnd ? 6 + (shotStagger[`${q.id}/${k}`] || 0) : eb ? START_OFF : ghostLand ? 3.4 : 0;
+        let eGap = L.shot && runEnd ? SHOT_TIP_GAP + (shotStagger[`${q.id}/${k}`] || 0) : eb ? START_OFF : ghostLand ? 3.4 : 0;
         const eCap = Math.max(0, Math.hypot((L.x1 - sx) * gmSar, (L.y1 - sy) / gmSar) - 2);
         if (eGap > 0) eGap = Math.min(eGap, eCap);
         // pass/rim/chip arrivals register their natural TIP so same-direction heads at
@@ -8806,7 +8833,7 @@ export default function DrillAnimator() {
     const arrow = (a, b, shot, key, op = OP_GHOST) => {
       const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1, ux = dx / len, uy = dy / len;
       const sp = gmMove(a.x, a.y, ux, uy, Math.min(START_OFF, len / 2));
-      const base = Math.min(shot ? 6 : START_OFF, Math.max(0, len - 2));
+      const base = Math.min(shot ? SHOT_TIP_GAP : START_OFF, Math.max(0, len - 2));
       const ep0 = gmMove(b.x, b.y, -ux, -uy, base);
       const back = arrivalBack("main", ep0.x, ep0.y);
       const ep = back ? gmMove(b.x, b.y, -ux, -uy, Math.min(base + back, Math.max(0, len - 2))) : ep0;
