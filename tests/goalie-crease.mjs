@@ -58,8 +58,14 @@ T('mid angle plays the arc, still well off the line', at(35).x > 4 && Math.abs(a
 // keeper who kept sliding round to 140° would be behind their own goal line.
 T('sealed to the post by RVH', same(at(96), at(140)), true);
 T('…and holds it right across the band', same(at(100), at(148)), true);
-T('the post is inside the 3 ft pipe, not outside it', Math.abs(at(120).y) < 3, true);
-T('…and in front of the goal line', at(120).x > 0, true);
+// The seal is set by the SPRITE, not by the centre: the keeper is ~6.8 ft across
+// against a 6 ft mouth, so a centre parked near the 3 ft pipe puts the mask, an
+// arm, a pad and the blocker inside the post itself. Measured on the board, 1.15
+// keeps every body part off the pipe. Anything above ~1.6 puts limbs back in it.
+T('the RVH centre stays well inside the pipe', Math.abs(at(120).y) < 1.6, true);
+T('…but far enough off centre for the two sides to read apart',
+  Math.abs(at(120).y - at(-120).y) > 1.8, true);
+T('…and out in front of the goal line, not buried in the cage', at(120).x > 2, true);
 T('the far side mirrors', [r2(at(-120).x), r2(at(-120).y)], [r2(at(120).x), r2(-at(120).y)]);
 // Continuity at 180 is what stops a 6 ft teleport when the puck crosses behind.
 T('both sides meet in the middle at 180', same(at(179.9), at(-179.9), 0.05), true);

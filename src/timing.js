@@ -97,8 +97,18 @@ export const GOALIE_ARC_MAX = (58 * Math.PI) / 180;   // last angle worth playin
 export const GOALIE_RVH = (95 * Math.PI) / 180;       // fully sealed to the post
 export const GOALIE_SLIDE = (150 * Math.PI) / 180;    // starts the push across
 export const GOALIE_FACE_MAX = (105 * Math.PI) / 180; // never faces back through the cage
-const POST_X = 1.8, POST_Y = 2.1;   // ft, net-local: the RVH seal against a post
-const MID_X = 1.0;                  // ft: mid goal line, where the two sides meet
+/* The RVH seal, in feet, net-local. These are set by where the drawn SPRITE
+   ends up, not by any nominal "the keeper's centre stands on the post" offset.
+   The keeper is ~6.8 ft across against a 6 ft mouth, so parking their centre by
+   the post buries the mask, an arm, a pad AND the blocker inside the post pipe,
+   and a limb drawn across the pipe reads as going through it.
+   Measured against the post disc (0.66 ft radius, on the goal line at ±3 ft):
+   at 1.8/2.1 the nearest body part sat 0.17 ft from the post centre — well
+   inside it. Pulled off and forward until every body part clears the pipe with
+   a margin. The STICK may still cross it, which is what a goalie's stick does.
+   Sides stay ~2.9 ft apart, so the push across still reads as a push. */
+const POST_X = 2.45, POST_Y = 1.15;
+const MID_X = 1.5;                  // ft: mid goal line, where the two sides meet
 const smooth = u => u * u * (3 - 2 * u);
 const sat = u => Math.max(0, Math.min(1, u));
 
