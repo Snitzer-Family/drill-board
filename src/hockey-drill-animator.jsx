@@ -4181,6 +4181,19 @@ export default function DrillAnimator() {
   // player could own one, so they ask `kind === "player"`; a route is the same
   // thing with the skater factored out, and must read the same on the sheet.
   const skates = p => !!p && (p.kind === "player" || p.kind === "route");
+  // A queued skater's grab disc must not reach its neighbours'. The default is
+  // wider than a typical 6 ft spacing, so every member's target overlapped the
+  // next and whichever drew last swallowed the taps meant for all of them — the
+  // stack looked like one un-pickable clump. Half the spacing, with a floor so it
+  // never shrinks below the body you can see. Returns 0 (= use the default) for
+  // anyone not standing in a line.
+  const grabRadiusOf = p => {
+    if (!p || p.kind !== "player" || !p.route) return 0;
+    const R = pieces.find(q => q.id === p.route && q.kind === "route");
+    if (!R) return 0;
+    const gap = R.gap > 0 ? R.gap : QUEUE_GAP;
+    return Math.max(2.4, Math.min(6.8, gap * 0.45));
+  };
 
   // "Go to route" — where this line's finishers head when they're done. ONE
   // definition, rendered in two places that are both the right place to look for
@@ -10718,7 +10731,16 @@ export default function DrillAnimator() {
                 // locked pieces sink beneath every unlocked one, so a contested tap
                 // always lands on the unlocked piece/waypoint stacked over it
                 const rank = p => kindRank(p) - (p.lock ? 10 : 0);
-                return rank(a) - rank(b);
+                const d = rank(a) - rank(b);
+                if (d) return d;
+                // Two skaters queued on the same route stand a spacing apart, close
+                // enough that their grab discs still brush. Draw the FRONT of the
+                // line last so it wins any contested tap: the head is the one you
+                // reach for (it owns the line's puck work) and the one sitting on
+                // the route's own start point. Without this the BACK of the line
+                // drew on top and quietly answered for everybody.
+                if (a.route && a.route === b.route) return (b.q ?? 0) - (a.q ?? 0);
+                return 0;
               })
               .map(p => {
               if (p.goalieOf) return renderGoalie(p.goalieOf);
@@ -10745,6 +10767,7 @@ export default function DrillAnimator() {
                     <g transform={`translate(${lp.x} ${lp.y}) scale(${k}) translate(${-lp.x} ${-lp.y})`}>
                       <PieceIcon p={p} pos={lp} xf={lfx.t} thDeg={lfx.th} noShadow={isJump} wb={whiteboard} wbCircle={wbCircle}
                         selected={editing && p.id === selectedId} swing={isJump ? displaySwing(p) : 0} dim={animT > 0} onDown={e => pieceDown(e, p.id)}
+                        grabR={grabRadiusOf(p)}
                         hitOff={p.lock && !lockedSelectable} />
                     </g>
                   </g>
@@ -10755,12 +10778,38 @@ export default function DrillAnimator() {
                 <PieceIcon key={p.id} p={p} pos={dp} xf={fx.t} thDeg={fx.th} wb={whiteboard} wbCircle={wbCircle}
                   selected={editing && p.id === selectedId} swing={displaySwing(p)}
                   dim={animT > 0} onDown={e => pieceDown(e, p.id)}
+                  grabR={grabRadiusOf(p)}
                   hitOff={p.lock && !lockedSelectable}
                   onStickDown={editing && tool !== "draw" && p.kind === "player" && !p.path.length && !(p.lock && !lockedSelectable)
                     ? e => stickDown(e, p) : undefined} />
               );
               const spray = snowSpray(p, dp);
               return spray ? <g key={p.id}>{spray}{icon}</g> : icon;
+            })}
+            {/* A route's head is, by definition, exactly where its line STANDS, so
+                the skater's own grab disc (much larger than the route marker) sat
+                on top of it and swallowed every tap: the one piece you most need
+                to reach was the one piece you couldn't. This is an ANNULUS painted
+                above the icons — the hole lets the centre fall through to the
+                skater, and the ring, which is exactly where the route's dashed
+                marker is already drawn, grabs the route. Touch gets the same 1.4x
+                the waypoint handles use. */}
+            {editing && tool !== "draw" && !aiPlay && pieces.map(p => {
+              if (p.kind !== "route" || (p.lock && !lockedSelectable)) return null;
+              const fx = iconXf({ x: p.x, y: p.y, a: 0 });
+              const G = coarsePtr ? 1.4 : 1;
+              return (
+                <g key={`rgrab-${p.id}`} transform={fx.t}>
+                  {/* the ring re-drawn on top, so the thing you aim at is the thing
+                      you can see — the copy inside PieceIcon is behind the skater */}
+                  <circle cx={0} cy={0} r={3.05} fill="none" stroke={ink(p.color)} strokeWidth={0.42}
+                    strokeDasharray="1.5 1.05" opacity={p.id === selectedId ? 0.95 : 0.6}
+                    pointerEvents="none" />
+                  <circle cx={0} cy={0} r={3.05} fill="none" stroke="transparent" strokeWidth={2.8 * G}
+                    pointerEvents="stroke" style={{ cursor: "grab" }}
+                    onPointerDown={e => pieceDown(e, p.id)} />
+                </g>
+              );
             })}
             {/* editing handles ON TOP of all piece icons: a waypoint's grab target
                 must beat any prop (stick/cone/…) stacked over it, so these paint

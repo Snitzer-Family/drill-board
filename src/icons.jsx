@@ -179,7 +179,11 @@ export function DiagPanel({ drillVersion }) {
 // stays literal. Only two things here follow the theme: the selection ring,
 // which has to read against whatever ice it lands on, and the puck body.
 
-export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStickDown, swing = 0, noShadow = false, hitOff = false, wb = false, wbCircle = false }) {
+// `grabR` narrows the grab disc (icon units) for a piece that is packed in tight
+// with others — a skater queued in a line. The default 6.8 is wider than a 6 ft
+// queue spacing, so without it every member's target overlaps its neighbours' and
+// whichever happens to draw last swallows the taps meant for all of them.
+export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStickDown, swing = 0, noShadow = false, hitOff = false, wb = false, wbCircle = false, grabR = 0 }) {
   const T = useTheme();
   const ink = useInk();
   const SEL = T["ice-select"];
@@ -450,7 +454,7 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
     ? <rect x={-2.4} y={-3.1} width={4.8} height={6.2} fill="transparent" onPointerDown={onDown} pointerEvents={hPE} style={{ cursor: "grab" }} />
     : p.kind === "route"
     ? <circle cx={0} cy={0} r={3.2} fill="transparent" onPointerDown={onDown} pointerEvents={hPE} style={{ cursor: "grab" }} />
-    : <circle cx={0} cy={0} r={p.kind === "puck" ? 3.4 : 6.8} fill="transparent" onPointerDown={onDown} pointerEvents={hPE} style={{ cursor: "grab" }} />;
+    : <circle cx={0} cy={0} r={grabR || (p.kind === "puck" ? 3.4 : 6.8)} fill="transparent" onPointerDown={onDown} pointerEvents={hPE} style={{ cursor: "grab" }} />;
   return (
     <g opacity={dim ? 0.92 : 1} transform={frame}>
       {sz !== 1 ? <g transform={`scale(${sz})`}>{body}{grab}</g> : <>{body}{grab}</>}
