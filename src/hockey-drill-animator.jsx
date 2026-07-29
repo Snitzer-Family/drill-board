@@ -6,7 +6,7 @@ import { parseDrill, serializeDrill, extractDrill, deriveInventory, ensureShotNe
 import { prepareImage, drillFromImage, ANTHROPIC_KEY_STORE } from "./drill-vision.js";
 import { drillSvg } from "./drill-svg.js";
 import { mdEscape, mdInline, mdBlock } from "./md.js";
-import { clampX, clampY, segEnd, segD, nearestT, splitSeg, zigzagPoints, wigglePoints, wigglePoly, zigzagPoly, convertSeg, fitRoute, evalSeg, rdp, catmullToBezier, alignJoint, mirrorJoint, translateJointHandles, trimSegStart, trimSegEnd, trimPolyStart, trimPolyEnd, gapPolyAt } from "./geometry.js";
+import { clampX, clampY, fitInside, segEnd, segD, nearestT, splitSeg, zigzagPoints, wigglePoints, wigglePoly, zigzagPoly, convertSeg, fitRoute, evalSeg, rdp, catmullToBezier, alignJoint, mirrorJoint, translateJointHandles, trimSegStart, trimSegEnd, trimPolyStart, trimPolyEnd, gapPolyAt } from "./geometry.js";
 import { dirOf, dirAtWaypoint, spreadDir } from "./route-dir.js";
 import * as boards from "./boards.js";
 import { netShapes, bumperShapes, solidShapes, detourRoute, segCrossesNet } from "./net-collide.js";
@@ -5029,11 +5029,11 @@ export default function DrillAnimator() {
     const cx = m.pts.reduce((a, q) => a + q.x, 0) / m.pts.length;
     const cy = m.pts.reduce((a, q) => a + q.y, 0) / m.pts.length;
     const r = (deg * Math.PI) / 180, c = Math.cos(r), s = Math.sin(r);
-    const pts = m.pts.map(q => ({
+    const pts = fitInside(m.pts.map(q => ({
       ...q,
-      x: clampX(cx + (q.x - cx) * c - (q.y - cy) * s),
-      y: clampY(cy + (q.x - cx) * s + (q.y - cy) * c),
-    }));
+      x: cx + (q.x - cx) * c - (q.y - cy) * s,
+      y: cy + (q.x - cx) * s + (q.y - cy) * c,
+    })));
     updateById(id, { pts, x: pts[0].x, y: pts[0].y });
   }
   // scale a mark's points about its centroid — sx/sy per axis (size & proportion)
@@ -5042,7 +5042,7 @@ export default function DrillAnimator() {
     if (!m || !m.pts || m.pts.length < 2) return;
     const cx = m.pts.reduce((a, q) => a + q.x, 0) / m.pts.length;
     const cy = m.pts.reduce((a, q) => a + q.y, 0) / m.pts.length;
-    const pts = m.pts.map(q => ({ ...q, x: clampX(cx + (q.x - cx) * sx), y: clampY(cy + (q.y - cy) * sy) }));
+    const pts = fitInside(m.pts.map(q => ({ ...q, x: cx + (q.x - cx) * sx, y: cy + (q.y - cy) * sy })));
     updateById(id, { pts, x: pts[0].x, y: pts[0].y });
   }
 
@@ -5135,6 +5135,12 @@ export default function DrillAnimator() {
       for (const k of ["y", "cy", "c1y", "c2y"]) if (t[k] != null) t[k] = clampY(t[k] + off);
       return t;
     });
+    // a mark's copy has to carry its pts across, or it lands exactly on top of
+    // the original with only its (derived) x/y offset
+    if (Array.isArray(copy.pts) && copy.pts.length) {
+      copy.pts = fitInside(copy.pts.map(q => ({ ...q, x: q.x + off, y: q.y + off })));
+      copy.x = copy.pts[0].x; copy.y = copy.pts[0].y;
+    }
     // a duplicated puck starts loose (avoid two pucks glued to one carrier)
     if (copy.kind === "puck") { copy.carrier = null; copy.transfers = []; copy.terminals = undefined; copy.pickup = null; }
     setPieces(ps => [...ps, copy]);
@@ -5154,6 +5160,13 @@ export default function DrillAnimator() {
     const ci = (x, y) => boards.clampInside(x, y);
     update(p => {
       if (!has(p.id) || p.lock) return p;   // a locked member never slides with its group
+      // a mark's geometry lives in pts (x/y is just a copy of pts[0]), so it
+      // has to move as a rigid body — moving x/y alone left the ink sitting
+      // still while its position desynced from what's drawn
+      if (p.kind === "mark" && p.pts) {
+        const pts = fitInside(p.pts.map(q => ({ ...q, x: q.x + dx, y: q.y + dy })));
+        return { ...p, pts, x: pts[0].x, y: pts[0].y };
+      }
       const np = ci(p.x + dx, p.y + dy);
       const path = (p.path || []).map(s => {
         const q = ci(s.x + dx, s.y + dy), s2 = { ...s, x: q.x, y: q.y };
@@ -5197,6 +5210,16 @@ export default function DrillAnimator() {
     const rot = (x, y) => { const dx = x - C.x, dy = y - C.y; return boards.clampInside(C.x + dx * ca - dy * sa, C.y + dx * sa + dy * ca); };
     update(p => {
       if (!multiSel.has(p.id)) return p;
+      // a mark rotates through its own points, rigidly (rot() clamps per point,
+      // which would squash it) — x/y then follows pts[0] as everywhere else
+      if (p.kind === "mark" && p.pts) {
+        const pts = fitInside(p.pts.map(q => ({
+          ...q,
+          x: C.x + (q.x - C.x) * ca - (q.y - C.y) * sa,
+          y: C.y + (q.x - C.x) * sa + (q.y - C.y) * ca,
+        })));
+        return { ...p, pts, x: pts[0].x, y: pts[0].y };
+      }
       const np = { ...p }, q = rot(p.x, p.y); np.x = q.x; np.y = q.y;
       if (rotatesFacing(p)) np.facing = (p.facing || 0) + deg;
       np.path = (p.path || []).map(s => {
@@ -5228,6 +5251,11 @@ export default function DrillAnimator() {
         for (const k of ["y", "cy", "c1y", "c2y"]) if (t[k] != null) t[k] = clampY(t[k] + off);
         return t;
       });
+      // as in duplicatePiece: a mark's geometry is pts, so offset that too
+      if (Array.isArray(c.pts) && c.pts.length) {
+        c.pts = fitInside(c.pts.map(q => ({ ...q, x: q.x + off, y: q.y + off })));
+        c.x = c.pts[0].x; c.y = c.pts[0].y;
+      }
       if (c.kind === "puck") {
         if (c.carrier) c.carrier = idMap[c.carrier] || null;                       // carrier outside the group → drop (loose)
         if (c.pickup && c.pickup.to) c.pickup = idMap[c.pickup.to] ? { ...c.pickup, to: idMap[c.pickup.to] } : null;
@@ -5340,7 +5368,11 @@ export default function DrillAnimator() {
     // reshows — but only if it was ALREADY being edited; a bare reposition of a
     // piece whose popup was closed should stay closed.
     const popOpen = pinned || (!!popup && popup.id === id);
-    drag.current = { kind: "piece", id, popOpen, start: pt, last: pt, moved: false, touch: e.pointerType !== "mouse", locked };
+    // a mark moves as a rigid body, so it needs its geometry as it was at grab
+    // time: every move re-derives from pts0, never from the last committed
+    // (possibly boundary-shifted) state — see the mark branch in onSvgMove
+    const pts0 = pc && pc.kind === "mark" && pc.pts ? pc.pts.map(q => ({ ...q })) : null;
+    drag.current = { kind: "piece", id, popOpen, pts0, start: pt, last: pt, moved: false, touch: e.pointerType !== "mouse", locked };
     svgRef.current.setPointerCapture?.(e.pointerId);
   }
 
@@ -5522,11 +5554,11 @@ export default function DrillAnimator() {
       d.moved = true;
       const ang = Math.atan2(pt.y - d.cy, pt.x - d.cx) - d.a0;
       const c = Math.cos(ang), s = Math.sin(ang);
-      const pts = d.pts0.map(q => ({
+      const pts = fitInside(d.pts0.map(q => ({
         ...q,
-        x: clampX(d.cx + (q.x - d.cx) * c - (q.y - d.cy) * s),
-        y: clampY(d.cy + (q.x - d.cx) * s + (q.y - d.cy) * c),
-      }));
+        x: d.cx + (q.x - d.cx) * c - (q.y - d.cy) * s,
+        y: d.cy + (q.x - d.cx) * s + (q.y - d.cy) * c,
+      })));
       updateById(d.id, { pts, x: pts[0].x, y: pts[0].y });
       return;
     }
@@ -5536,7 +5568,9 @@ export default function DrillAnimator() {
       d.moved = true;
       const sx = Math.max(0.12, Math.min(8, (pt.x - d.ax) / ((d.x0 - d.ax) || 1e-6)));
       const sy = Math.max(0.12, Math.min(8, (pt.y - d.ay) / ((d.y0 - d.ay) || 1e-6)));
-      const pts = d.pts0.map(q => ({ ...q, x: clampX(d.ax + (q.x - d.ax) * sx), y: clampY(d.ay + (q.y - d.ay) * sy) }));
+      // fitInside, not a per-point clamp: a shape grown against a wall slides
+      // inward whole (the anchor corner gives) instead of flattening on it
+      const pts = fitInside(d.pts0.map(q => ({ ...q, x: d.ax + (q.x - d.ax) * sx, y: d.ay + (q.y - d.ay) * sy })));
       updateById(d.id, { pts, x: pts[0].x, y: pts[0].y });
       return;
     }
@@ -5558,9 +5592,18 @@ export default function DrillAnimator() {
       const ci = (x, y) => boards.clampInside(x, y);    // clamp to the rounded boards
       update(p => {
         if (p.id !== d.id) return p;
-        if (p.kind === "mark") {   // a marker annotation moves all its points together
-          // spread q first so per-point flags (sharp corners) survive the move
-          const pts = p.pts.map(q => ({ ...q, ...ci(q.x + dx, q.y + dy) }));
+        if (p.kind === "mark") {
+          // A marker annotation is a RIGID body: translate the whole thing by
+          // the total drag, then shift it back inside as a unit. Clamping each
+          // point on its own squashed the shape flat against the boards, and
+          // since the clamped result fed the next move it never came back.
+          // Deriving from pts0 + (pt - start) rather than an incremental delta
+          // is what makes it recoverable: push 10ft past the wall, pull back
+          // 5ft, and the shape sits 5ft off the wall, still under the cursor.
+          const src = d.pts0 || p.pts;
+          const tx = pt.x - d.start.x, ty = pt.y - d.start.y;
+          // spread q first so per-point flags (sharp corners, pressure) survive
+          const pts = fitInside(src.map(q => ({ ...q, x: q.x + tx, y: q.y + ty })));
           return { ...p, pts, x: pts[0].x, y: pts[0].y };
         }
         if (d.line == null) {
