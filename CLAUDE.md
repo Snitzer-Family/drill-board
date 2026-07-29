@@ -104,7 +104,7 @@ restart so the settings watcher reloads it.
 - DSL round-trip: any model change needs parser + serializer + help-text +
   `docs/drill-dsl.md` updates together (`pass=`, `shoot=`, `rebound=`, `rim=`,
   `chip=`/`~deg` aim, `pickup=`, `on=`, `net=`, `face=`, `hand=`, `hold=`,
-  `goalie`, `defense`).
+  `&f`/`&b` release hand, `goalie`, `defense`).
 - Puck chains: carrier/pickup head → transfers[] → optional shotAt. UI stage
   resolution is possession-aware (players can repeat in a chain — give-and-go).
 - The fill-mode stretch is cosmetic-only: positions stretch, rink circles are

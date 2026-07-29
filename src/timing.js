@@ -79,6 +79,19 @@ const swungLever = (fwd, lat, deg) => {
 // hand, so one set of (forward, lateral) numbers covers both. Icon units, ×ICON_SCALE
 // to get feet — the same convention as BLADE_/TIP_ in the animator.
 const TIP_FWD_U = 5.6, TIP_LAT_U = 2.45;         // the drawn blade tip, in icon units
+// ...and its heel, so the blade is a SEGMENT rather than a point. Taking a pass is
+// played off the FACE — the flat of the blade — which means two things the toe cannot
+// give you: the puck lands mid-blade, not on the end of it, and the face is turned to
+// meet the puck instead of the toe being aimed at the passer.
+const HEEL_FWD_U = 4.2, HEEL_LAT_U = 2.6;
+const BLADE_MID = { fwd: (HEEL_FWD_U + TIP_FWD_U) / 2, lat: (HEEL_LAT_U + TIP_LAT_U) / 2 };
+// which way the face points at rest: normal to heel→toe, ~84° off the nose (out to the
+// strong side). Derived, not declared, so it tracks the drawn blade if that ever moves.
+const FACE_REST = (Math.atan2(TIP_FWD_U - HEEL_FWD_U, HEEL_LAT_U - TIP_LAT_U) * 180) / Math.PI;
+// Presenting the face, then giving with the puck: the blade is turned to meet it just
+// before it arrives, gives a few degrees as it lands (soft hands — a rigid blade makes
+// a pass bounce off), then settles back to the carry pose.
+const CATCH_IN = 0.2, CATCH_OUT = 0.34, CATCH_GIVE = 9;
 // How far the stick group swings from its drawn rest pose to release. The release
 // SPOT is derived from the swing rather than specified alongside it — that is what
 // guarantees the puck is exactly on the blade at the moment it leaves.
@@ -88,7 +101,12 @@ const BACK_SWING = -75;                          // backhand: round the other wa
 // turns with the release, then unwinds. Applied to the heading, so the stick and the
 // puck riding it come along by construction — and folded into the launch point too,
 // or the puck would leave from a blade the body had already turned away from.
-const BACK_TWIST = 28;
+// A backhand PASS/chip/rim turns the shoulders too, but it is a quicker, lighter play
+// than a shot — the body doesn't wind all the way round for a touch feed.
+// Both are timed to the SWING, not to the catch window (see buildOpens): the turn and
+// the stick are one motion, and running them on separate clocks is what made a
+// backhand read as the puck coming off the blade.
+const BACK_TWIST = 28, BACK_TWIST_SOFT = 22;
 // ...and the release spots themselves, derived rather than declared alongside
 const FORE_LEVER = swungLever(TIP_FWD_U, TIP_LAT_U, RELEASE_SWING);
 const BACK_LEVER = swungLever(TIP_FWD_U, TIP_LAT_U, BACK_SWING);
@@ -175,21 +193,37 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
   // route-local elapsed `eLoc` (0 outside a window)
   // the turn AND how far into it we are — a standing player blends its idle gaze
   // against this, so the weight has to come out too, not just the product
+  const windowK = (w, eLoc) => eLoc < w.t1 ? smooth01((eLoc - w.t0) / (w.t1 - w.t0))
+    : eLoc <= w.t2 ? 1
+    : 1 - smooth01((eLoc - w.t2) / (w.t3 - w.t2));
   function openPart(p, eLoc) {
     if (planPhase) return { deg: 0, k: 0 };
     const list = currentOpens[p.id];
     if (!list) return { deg: 0, k: 0 };
     let best = { deg: 0, k: 0 };
     for (const w of list) {
-      if (eLoc <= w.t0 || eLoc >= w.t3) continue;
-      const k = eLoc < w.t1 ? smooth01((eLoc - w.t0) / (w.t1 - w.t0))
-        : eLoc <= w.t2 ? 1
-        : 1 - smooth01((eLoc - w.t2) / (w.t3 - w.t2));
+      if (w.snap || eLoc <= w.t0 || eLoc >= w.t3) continue;
+      const k = windowK(w, eLoc);
       if (Math.abs(w.deg * k) > Math.abs(best.deg * best.k)) best = { deg: w.deg, k };
     }
     return best;
   }
   const openAt = (p, eLoc) => { const o = openPart(p, eLoc); return o.deg * o.k; };
+  // The shoulders coming round into a backhand. Unlike opening up — a deliberate turn
+  // a beat BEFORE the puck arrives — this one is part of the swing and runs on the
+  // swing's clock, so it stacks ON TOP of whatever the body is otherwise doing rather
+  // than competing with it for the same slot.
+  function snapAt(p, eLoc) {
+    if (planPhase) return 0;
+    const list = currentOpens[p.id];
+    if (!list) return 0;
+    let sum = 0;
+    for (const w of list) {
+      if (!w.snap || eLoc <= w.t0 || eLoc >= w.t3) continue;
+      sum += w.deg * windowK(w, eLoc);
+    }
+    return sum;
+  }
 
   /* ---- idle gaze ----
      A player standing still watches the play. Rather than snapping between whoever
@@ -201,10 +235,15 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
   const GAZE_MIN_SPD = 2;    // ft/s — slower than this is not "activity"
   const GAZE_NEAR = 5;       // ft — ignore what is already on their own stick
   const GAZE_PUCK = 2.4;     // the puck pulls harder than a body: you watch the puck
-  let gazeE = null, gazeSnap = null, gazeBusy = false;
-  // one pass per frame, shared by every standing player
+  // a few slots, not one: the gaze is averaged over a window (see gazeAt), so several
+  // times are in play each frame and a single slot would thrash between them. The whole
+  // closure is rebuilt per render, so this never outlives a plan.
+  const gazeCache = new Map();
+  let gazeBusy = false;
+  // one pass per sampled time, shared by every standing player
   function activityAt(e) {
-    if (gazeE === e && gazeSnap) return gazeSnap;
+    const hit = gazeCache.get(e);
+    if (hit) return hit;
     gazeBusy = true;                       // nested position lookups must not re-enter
     try {
       const out = [];
@@ -215,29 +254,118 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
         out.push({ id: q.id, kind: q.kind, x: b2.x, y: b2.y,
           spd: Math.hypot(b2.x - a.x, b2.y - a.y) / 0.24 });
       }
-      gazeSnap = out; gazeE = e;
+      if (gazeCache.size > 16) gazeCache.clear();
+      gazeCache.set(e, out);
     } finally { gazeBusy = false; }
-    return gazeSnap;
+    return gazeCache.get(e);
   }
-  // Where a standing player should be looking, and how strongly. `conf` matters as
-  // much as the bearing: a hard "is it moving?" cutoff makes the head snap round the
-  // instant a skater crosses the threshold, so activity fades IN with speed and the
-  // gaze eases back to the authored pose as the rink goes quiet.
-  const GAZE_REF = 0.004;    // pull at which the player is fully watching
+  // Where a standing player should be looking, and how strongly.
+  //
+  // The first model summed a pull from everything moving and looked down the resultant.
+  // With one thing on the ice that reads beautifully; with a busy drill it falls apart,
+  // and for a structural reason rather than a tuning one: the resultant of several
+  // near-opposed vectors has a SMALL MAGNITUDE and therefore a violently unstable
+  // DIRECTION, so a few degrees of change in any one skater swings the head right round.
+  // It also got worse the more was happening, which is backwards.
+  //
+  // People do not average the play. They watch ONE thing, hold it, and switch when
+  // something else clearly takes over. So: score the candidates, commit, hold a minimum
+  // dwell, only switch for a challenger that clearly beats the incumbent, then swing the
+  // head across smoothly. The schedule is precomputed per drill (as buildOpens and the
+  // pivots are), which keeps it a pure function of t — scrubbing and playback agree.
+  const GAZE_DT = 0.2;        // how often attention is reconsidered
+  const GAZE_DWELL = 1.0;     // s — hold a focus at least this long before switching
+  const GAZE_BEAT = 1.5;      // ...and only for something this much more interesting
+  const GAZE_TURN = 0.7;      // s — the head swings to a new focus over this long
+  const GAZE_HALF = 34;       // ft — interest halves over this distance (gentle, not 1/d²)
+  const GAZE_ON = 0.55;       // interest at which they are fully watching
+  // how interesting `q` is to a player standing at (px,py) — distance falls off gently,
+  // so nobody's head is hostage to whoever is momentarily nearest
+  const gazeScore = (q, px, py) => {
+    const dx = q.x - px, dy = q.y - py, d = Math.hypot(dx, dy);
+    if (d < GAZE_NEAR) return 0;
+    const moving = smooth01((q.spd - GAZE_MIN_SPD) / GAZE_MIN_SPD);
+    if (moving <= 0) return 0;
+    return (q.kind === "puck" ? GAZE_PUCK : 1) * moving / (1 + d / GAZE_HALF);
+  };
+  let gazeTracks = null;
+  function gazeHorizon() {
+    const { plans, warp } = getPlan();
+    let hi = 0;
+    // A carried puck that is never released is ONE ride leg with t0=0 and no t1, so
+    // reading leg times alone put the horizon at ~1s: the attention track ran out a
+    // second into the drill and every watcher froze mid-play on a stale blend. Route
+    // durations are the real length of a drill.
+    for (const pid in plans) for (const l of plans[pid].legs) hi = Math.max(hi, l.t1 || 0, l.t0 || 0);
+    for (const q of pieces) {
+      if (q.kind !== "player" || !q.path.length) continue;
+      hi = Math.max(hi, routeTimeW(q, warp) + startWaitOf(q));
+    }
+    return Math.min(600, hi + GAZE_DT);
+  }
+  // one attention timeline per standing player: [{ t0, id }]
+  function gazeTrack(p) {
+    if (!gazeTracks) {
+      gazeTracks = {};
+      const hi = gazeHorizon();
+      const standing = pieces.filter(q => q.kind === "player" && !q.defense && !q.path.length);
+      for (const st of standing) gazeTracks[st.id] = [];
+      for (let e = 0; e <= hi; e += GAZE_DT) {
+        const act = activityAt(e);
+        for (const st of standing) {
+          const tr = gazeTracks[st.id];
+          let bestId = null, bestS = 0;
+          for (const q of act) {
+            if (q.id === st.id) continue;
+            const s = gazeScore(q, st.x, st.y);
+            if (s > bestS) { bestS = s; bestId = q.id; }
+          }
+          const cur = tr.length ? tr[tr.length - 1] : null;
+          // the first focus runs from t=0, not from whenever it qualified: starting it
+          // mid-play makes the head jump off the authored facing in a single frame. The
+          // caller's GAZE_IN ramp is what eases it in, and it only works from the start.
+          if (!cur) { if (bestId) tr.push({ t0: 0, id: bestId }); continue; }
+          if (!bestId || bestId === cur.id) continue;
+          // hysteresis: the incumbent keeps the head unless it has been held long enough
+          // AND the challenger is clearly better. Without both, a busy drill flickers.
+          const held = e - cur.t0;
+          const curS = gazeScore(act.find(q => q.id === cur.id) || { x: 1e6, y: 1e6, spd: 0 }, st.x, st.y);
+          if (held >= GAZE_DWELL && bestS > curS * GAZE_BEAT) tr.push({ t0: e, id: bestId });
+        }
+      }
+    }
+    return gazeTracks[p.id] || null;
+  }
   function gazeAt(p, e) {
     if (gazeBusy || planPhase || !detail || e <= 0) return null;
-    let vx = 0, vy = 0, tot = 0;
-    for (const q of activityAt(e)) {
-      if (q.id === p.id) continue;
-      const dx = q.x - p.x, dy = q.y - p.y, d2 = dx * dx + dy * dy;
-      if (d2 < GAZE_NEAR * GAZE_NEAR) continue;
-      const moving = smooth01((q.spd - GAZE_MIN_SPD) / GAZE_MIN_SPD);
-      if (moving <= 0) continue;
-      const d = Math.sqrt(d2), w = (q.kind === "puck" ? GAZE_PUCK : 1) * moving * q.spd / d2;
-      vx += (dx / d) * w; vy += (dy / d) * w; tot += w;
+    const tr = gazeTrack(p);
+    if (!tr || !tr.length || e < tr[0].t0) return null;
+    let i = 0;
+    while (i + 1 < tr.length && tr[i + 1].t0 <= e) i++;
+    const act = activityAt(e);
+    const bearing = id => {
+      const q = act.find(v => v.id === id);
+      if (!q) return null;
+      const dx = q.x - p.x, dy = q.y - p.y;
+      return Math.hypot(dx, dy) < 1 ? null : (Math.atan2(dy, dx) * 180) / Math.PI;
+    };
+    let deg = bearing(tr[i].id);
+    if (deg == null) return null;
+    // swing across to a new focus rather than cutting to it
+    if (i > 0) {
+      const w = smooth01((e - tr[i].t0) / GAZE_TURN);
+      if (w < 1) { const d0 = bearing(tr[i - 1].id); if (d0 != null) deg = d0 + wrapDeg(deg - d0) * w; }
     }
-    if (!tot) return null;
-    return { deg: (Math.atan2(vy, vx) * 180) / Math.PI, conf: smooth01(tot / GAZE_REF) };
+    // conf is 1, deliberately. Blending PARTWAY between the authored facing and the
+    // gaze is what produced the worst snapping: `base + wrap(deg-base)*conf` swings
+    // through ~360°*conf the instant the target crosses the ANTIPODE of base, so a hair
+    // of drift threw the head right round. (Interpolating vectors instead does not help
+    // — the two cancel when opposed and evenly weighted; the singularity is inherent to
+    // blending a fixed heading against a moving one.) Once the drill is running a
+    // watcher IS watching, so there is no half-way pose to sit in: the caller still
+    // ramps this in over GAZE_IN, and with nothing worth watching the track simply has
+    // no segment here and they keep the pose they had.
+    return { deg, conf: 1 };
   }
 
   // the flip (deg) to add to leg i's tangent at route-local elapsed `eLoc` — the
@@ -304,18 +432,46 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
   // strong-side foot. (Compass, nose at N: right shot's forehand NE→E, backhand N→NW.)
   const releaseAt = (pl, e, warp, turn = 0, back = false) =>
     bladeAt(pl, e, warp, false, back ? BACK_LEVER : FORE_LEVER, turn);
-  // Which hand a shot comes off. "fore"/"back" are the coach's call; with no call it
-  // is whichever side the target is already on — you do not reach across your body
-  // for a net sitting on your backhand.
-  function shotBack(sh, e, warp, aimPt, forced) {
+  // Which hand a release comes off — shot, pass, chip or rim alike. "fore"/"back" are
+  // the coach's call; with no call it is whichever side the target is already on — you
+  // do not reach across your body for a net sitting on your backhand, or for a receiver.
+  // `turn` is any square-up the release already applies (aimTurn on a standing passer):
+  // the hand is read off the heading they will actually release from, not the one they
+  // happened to be parked at, or every standing feed would spuriously read backhand.
+  function handBack(sh, e, warp, aimDeg, forced, turn = 0) {
     if (forced === "fore") return false;
     if (forced === "back") return true;
-    if (!sh || !aimPt) return false;
+    if (!sh || aimDeg == null) return false;
     const cp = routePosAt(sh, e, warp);
-    const rel = wrapDeg((Math.atan2(aimPt.y - cp.y, aimPt.x - cp.x) * 180) / Math.PI - (cp.aStep || 0));
+    const rel = wrapDeg(aimDeg - (cp.aStep || 0) - turn);
+    // dead astern has no side — wrapDeg's ±180 boundary would decide it, and a
+    // hair of heading either way would flip the hand. Play it off the forehand,
+    // the shoulder you would open up over anyway (cf. openTurn).
+    if (Math.abs(rel) > 179) return false;
     const side = sh.hand === "L" ? -1 : 1;
     return rel * side < -20;                 // clearly across the body → backhand
   }
+  // bearing (deg) from the releaser to what they are playing the puck at
+  const bearingTo = (sh, e, warp, pt) => {
+    if (!sh || !pt) return null;
+    const cp = routePosAt(sh, e, warp);
+    return (Math.atan2(pt.y - cp.y, pt.x - cp.x) * 180) / Math.PI;
+  };
+  const degOf = v => (Math.atan2(v.y, v.x) * 180) / Math.PI;
+  // Which way a rim RUNS, for an un-aimed one that only knows its collector. A rim
+  // path is a short lead from the blade out to the wall and then the boards-running
+  // stretch — and the lead is the same whichever way it rims, so it is the stretch
+  // that says which hand this is. Read off the RAW path (before densify), whose
+  // vertices are the board steps.
+  const rimDeg = raw => {
+    if (!raw || raw.length < 2) return null;
+    const a = raw[Math.min(1, raw.length - 2)], b = raw[Math.min(3, raw.length - 1)];
+    return degOf({ x: b.x - a.x, y: b.y - a.y });
+  };
+  // The shoulders come round into a backhand — toward the weak side, the way they
+  // actually go. Folded into the heading AND the launch point (see BACK_TWIST).
+  const handTwist = (sh, back, shot) =>
+    back ? -(shot ? BACK_TWIST : BACK_TWIST_SOFT) * (sh.hand === "L" ? -1 : 1) : 0;
 
   // Where the puck sits on the stick at time e, as a local (forward, lateral) lever
   // in icon units: the blade tip while carrying, sweeping round to the release spot
@@ -329,7 +485,19 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
     // slid the puck straight to the release spot while the stick drew back off it, so
     // for the length of a wind-up the two were pulling in opposite directions and the
     // puck visibly left the blade before the shot.
-    return swungLever(TIP_FWD_U, TIP_LAT_U, swingDeg(id, e));
+    // A caught puck arrives on the FACE — mid-blade — and only slides out to the toe as
+    // the receiver settles into carrying it. Both are points ON the blade, so the puck
+    // stays welded to it either way; what changes is WHERE along the blade it sits.
+    // catchPull steers the flight's landing onto this same lever, so the pass finishes
+    // on the face instead of the end of the stick.
+    const c = catchPose(id, e);
+    let base = { fwd: TIP_FWD_U, lat: TIP_LAT_U };
+    if (c) {
+      const k = c.tau <= 0 ? 0 : smooth01(c.tau / CATCH_OUT);
+      base = { fwd: BLADE_MID.fwd + (TIP_FWD_U - BLADE_MID.fwd) * k,
+        lat: BLADE_MID.lat + (TIP_LAT_U - BLADE_MID.lat) * k };
+    }
+    return swungLever(base.fwd, base.lat, swingDeg(id, e));
   }
 
   function getPlan() {
@@ -464,8 +632,12 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
             if (rem < flag.easeOut) v = speed * Math.max(0.04, Math.sqrt(rem / flag.easeOut));
           }
           const dt = Math.max(1e-3, Math.hypot(seg.x - prev.x, seg.y - prev.y) / Math.max(1e-3, v));
+          // only the FIRST leg leaves a stick, so that is the one that carries the
+          // releaser and their hand — the rest is the puck running the boards
           legs.push({ type: "fly", x0: prev.x, y0: prev.y, x1: seg.x, y1: seg.y, t0: t, t1: t + dt,
-            ...(k === 1 && flag.by ? { by: flag.by } : {}), rim: !!flag.rim, chip: !!flag.chip });
+            ...(k === 1 && flag.by ? { by: flag.by } : {}),
+            ...(k === 1 && flag.back ? { back: true } : {}),
+            ...(k === 1 && flag.relTwist ? { relTwist: flag.relTwist } : {}), rim: !!flag.rim, chip: !!flag.chip });
           t += dt; prev = seg;
         }
         return { t, end: prev };
@@ -571,9 +743,8 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
         // now the target is known, so the hand is too: the coach's call if they made
         // one, else whichever side the net is already on — nobody reaches across their
         // body for a net sitting on their backhand
-        const back = shotBack(cur, launchT, warp, aimPt || net, shand);
-        // twist toward the backhand side — the way their shoulders actually go
-        const twist = back ? -BACK_TWIST * (cur.hand === "L" ? -1 : 1) : 0;
+        const back = handBack(cur, launchT, warp, bearingTo(cur, launchT, warp, aimPt || net), shand);
+        const twist = handTwist(cur, back, true);
         if (back) launch = releaseAt(cur, launchT, warp, twist, true);
         const vShot = pace * SPEED.shot * (pk.speed || 1);
         const inx = net.x - launch.x, iny = net.y - launch.y;
@@ -625,7 +796,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           const tArr = launchT + Math.hypot(contact.x - launch.x, contact.y - launch.y) / vShot;
           // a shot that reaches the net plane (post) climbs into it (rise); a puck
           // that sails wide/over arcs like a sauce and comes back down to land
-          legs.push({ type: "fly", shot: true, [flagKey]: true, ...(air ? (rise ? { rise: true } : { sauce: true }) : {}), by: cur.id, ...(back ? { back: true, relTurn: twist } : {}),
+          legs.push({ type: "fly", shot: true, [flagKey]: true, ...(air ? (rise ? { rise: true } : { sauce: true }) : {}), by: cur.id, ...(back ? { back: true, relTwist: twist } : {}),
             x0: launch.x, y0: launch.y, x1: contact.x, y1: contact.y, t0: launchT, t1: tArr });
           const dm = Math.hypot(rollDir.x, rollDir.y) || 1;
           // integrate the roll step by step, caroming off BOTH the rink boards and
@@ -692,7 +863,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           const tArr = launchT + Math.hypot(endPt.x - launch.x, endPt.y - launch.y) / vShot;
           // goal=true rides through the rest too: the puck sits BEHIND the net
           // plane, so render (via puckInGoal) sinks it under the cage
-          legs.push({ type: "fly", shot: true, goal: true, rise: airborne, by: cur.id, ...(back ? { back: true, relTurn: twist } : {}), x0: launch.x, y0: launch.y, x1: endPt.x, y1: endPt.y, t0: launchT, t1: tArr });
+          legs.push({ type: "fly", shot: true, goal: true, rise: airborne, by: cur.id, ...(back ? { back: true, relTwist: twist } : {}), x0: launch.x, y0: launch.y, x1: endPt.x, y1: endPt.y, t0: launchT, t1: tArr });
           legs.push({ type: "rest", goal: true, x: endPt.x, y: endPt.y, t0: tArr });
           tBase = tArr;
           // if a collector was expecting this shot's rebound (aimPt) but it went in
@@ -729,7 +900,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
         const saved = (goalie && !isGoal) || (onNet && !!aimPt);
         // a blocked designated rebound stays flat (its carom is cut off at the net);
         // an airborne save/shot climbs into the net (rise), not a sauce arc
-        const flyLeg = { type: "fly", shot: true, save: saved, goal: false, rise: airborne && !aimPt, by: cur.id, ...(back ? { back: true, relTurn: twist } : {}), x0: launch.x, y0: launch.y, x1: hit.x, y1: hit.y, t0: launchT, t1: tArr };
+        const flyLeg = { type: "fly", shot: true, save: saved, goal: false, rise: airborne && !aimPt, by: cur.id, ...(back ? { back: true, relTwist: twist } : {}), x0: launch.x, y0: launch.y, x1: hit.x, y1: hit.y, t0: launchT, t1: tArr };
         legs.push(flyLeg);
         // a designated rebound whose collection spot sits behind/through the net
         // can never get there — stop the puck dead at the net and break the chain
@@ -789,8 +960,6 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           const launchT = (cur.path.length && tr.at >= 0)
             ? Math.max(tBase, routeTimeW(cur, warp, Math.min(tr.at, cur.path.length - 1))) : tBase;
           newEvents.push({ by: cur.id, at: tr.at, t: launchT, kind: tr.kind });
-          const lb = releaseAt(cur, launchT, warp);
-          const launch = boards.clampInside(lb.x, lb.y);       // a blade past the boards → no path
           let anchor, gj = -1;
           if (rec.path.length) {
             gj = tr.recvAt == null ? rec.path.length - 1 : Math.max(0, Math.min(tr.recvAt, rec.path.length - 1));
@@ -800,19 +969,32 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           // carrier's facing/aim, banks off the boards, and travels exactly as
           // far as it takes to reach the collector's spot — a harder chip for a
           // farther pickup, softer for a nearer one
-          let poly, speed, ease = 0;
-          if (tr.kind === "rim") {
-            poly = densify(tr.aim != null ? boards.rimTo(launch, tr.aim, anchor) : boards.rimPath(launch, anchor));
-            speed = vRim(); ease = 14;                                                    // settle at the collector
-          } else {
+          const build = (turn, back) => {
+            const lb = releaseAt(cur, launchT, warp, turn, back);
+            const launch = boards.clampInside(lb.x, lb.y);     // a blade past the boards → no path
+            if (tr.kind === "rim") {
+              const raw = tr.aim != null ? boards.rimTo(launch, tr.aim, anchor) : boards.rimPath(launch, anchor);
+              return { raw, poly: densify(raw), speed: vRim(), ease: 14 };                 // settle at the collector
+            }
             const h = chipHeading(cur, launchT, tr.aim);
-            poly = densify(boards.slideTo(launch.x, launch.y, h.x, h.y, anchor));
+            const poly = densify(boards.slideTo(launch.x, launch.y, h.x, h.y, anchor));
             let len = 0;
             for (let k = 1; k < poly.length; k++) len += Math.hypot(poly[k].x - poly[k - 1].x, poly[k].y - poly[k - 1].y);
-            speed = vChip() + (vRim() - vChip()) * Math.min(1, Math.max(0, (len - 18) / 40));  // hard vs soft
-            ease = Math.min(len * 0.5, 15);                                                     // glide to a settle
-          }
-          const r = pushTravel(poly, launchT, speed, { by: cur.id, rim: tr.kind === "rim", chip: tr.kind === "chip", easeOut: ease });
+            return { raw: null, poly,
+              speed: vChip() + (vRim() - vChip()) * Math.min(1, Math.max(0, (len - 18) / 40)),  // hard vs soft
+              ease: Math.min(len * 0.5, 15) };                                                  // glide to a settle
+          };
+          // the direction the puck sets off in is what says which hand this is. A chip
+          // and an aimed rim know theirs up front; an un-aimed rim only finds out once
+          // the path is laid out, so the forehand path is built provisionally to read
+          // it off — exactly as a shot takes a provisional launch to find its net.
+          let aimDeg = tr.kind === "chip" ? degOf(chipHeading(cur, launchT, tr.aim)) : tr.aim;
+          let prov = null;
+          if (aimDeg == null) { prov = build(0, false); aimDeg = rimDeg(prov.raw); }
+          const back = handBack(cur, launchT, warp, aimDeg, tr.shand);
+          const twist = handTwist(cur, back, false);
+          const { poly, speed, ease } = back ? build(twist, true) : (prov || build(0, false));
+          const r = pushTravel(poly, launchT, speed, { by: cur.id, rim: tr.kind === "rim", chip: tr.kind === "chip", easeOut: ease, back, relTwist: twist });
           // the puck lands loose and waits at the spot until the collector's route
           // reaches its collect waypoint (pick it up like a rebound)
           const gatherT = gj >= 0 ? Math.max(r.t, routeTimeW(rec, warp, gj)) : r.t;
@@ -829,7 +1011,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           } else {
             aim = { x: rec.x, y: rec.y };
           }
-          doShot(tr.at, aim, tr.net != null ? tr.net : null);  // this rebound shot's own net (independent of the terminal)
+          doShot(tr.at, aim, tr.net != null ? tr.net : null, tr.shand || null);  // this rebound shot's own net and hand (independent of the terminal)
           if (chainBlocked) return;                      // rebound died at the net — no collect
           const tGather = gi >= 0 ? Math.max(tBase, routeTimeW(rec, warp, gi)) : tBase;
           legs.push({ type: "ride", id: rec.id, t0: tGather, catch: true, ...(tr.open ? { open: true } : {}) });
@@ -852,7 +1034,17 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
             ? segEnd(rec, tr.recvAt != null ? Math.max(0, Math.min(tr.recvAt, rec.path.length - 1)) : rec.path.length - 1)
             : { x: rec.x, y: rec.y };
         const rTurn = aimTurn(cur, launch0T, aimPt, warp);
-        const launch0 = releaseAt(cur, launch0T, warp, rTurn);
+        // ...and then the hand, read off the heading they will actually release from
+        // (the square-up included) — the receiver already on the backhand side gets
+        // fed off the backhand rather than reached across for
+        const back = handBack(cur, launch0T, warp, bearingTo(cur, launch0T, warp, aimPt), tr.shand, rTurn);
+        // Two motions on two clocks (buildOpens runs them apart): rTurn squares a
+        // standing passer up to their receiver, early and deliberate; twist is the
+        // backhand's shoulder turn, which happens WITH the swing. The launch point
+        // comes off the sum, because at the release frame both are peaked.
+        const twist = handTwist(cur, back, false);
+        const relTurn = rTurn + twist;
+        const launch0 = releaseAt(cur, launch0T, warp, relTurn, back);
         // a give-and-go bounced off a stationary passer: the puck flies to the
         // passer first, then returns to the receiver from the passer's face; a
         // plain pass launches straight from the carrier's blade
@@ -863,7 +1055,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           const pPt = { x: passer.x, y: passer.y };
           const tHit = launch0T + Math.hypot(pPt.x - launch0.x, pPt.y - launch0.y) / vPass();
           legs.push({ type: "fly", by: cur.id, x0: launch0.x, y0: launch0.y, x1: pPt.x, y1: pPt.y, t0: launch0T, t1: tHit,
-            ...(rTurn ? { relTurn: rTurn } : {}) });
+            ...(rTurn ? { relTurn: rTurn } : {}), ...(twist ? { relTwist: twist } : {}), ...(back ? { back: true } : {}) });
           launchMin = tHit; launchT = tHit; launch = pPt; byId = tr.via; viaFrom = true;
         }
         let target, tArr;
@@ -882,7 +1074,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           for (let k = 0; k < 3; k++) {
             const flight = Math.hypot(anchor.x - launch.x, anchor.y - launch.y) / vPass();
             launchT = Math.max(launchMin, tRecvNat - flight);
-            if (!viaFrom) launch = releaseAt(cur, launchT, warp, rTurn);  // a via return launches from the fixed passer
+            if (!viaFrom) launch = releaseAt(cur, launchT, warp, relTurn, back);  // a via return launches from the fixed passer
           }
           tArr = launchT + Math.hypot(anchor.x - launch.x, anchor.y - launch.y) / vPass();
           // warp only to SLOW an early receiver; never speed them up (f ≤ 1)
@@ -905,7 +1097,8 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
         // a flat pass that would cut through a bumper lifts over it automatically
         const sauce = !!tr.sauce || (bumpSh.length > 0 && segCrossesNet(launch, target, bumpSh));
         legs.push({ type: "fly", by: byId, x0: launch.x, y0: launch.y, x1: target.x, y1: target.y, t0: launchT, t1: tArr, sauce,
-          ...(byId === cur.id && rTurn ? { relTurn: rTurn } : {}) });
+          ...(byId === cur.id && rTurn ? { relTurn: rTurn } : {}), ...(byId === cur.id && twist ? { relTwist: twist } : {}),
+          ...(byId === cur.id && back ? { back: true } : {}) });
         legs.push({ type: "ride", id: rec.id, t0: tArr, catch: true, ...(tr.open ? { open: true } : {}) });
         // the carrier's own release (a `via` bounces off a passer first, so the
         // carrier lets go earlier, at launch0T)
@@ -920,20 +1113,35 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
         const at = pk.rimAt;
         const launchT = (cur.path.length && at >= 0) ? Math.max(tBase, routeTimeW(cur, warp, Math.min(at, cur.path.length - 1))) : tBase;
         newEvents.push({ by: cur.id, at, t: launchT, kind: "rim" });
-        const lb = releaseAt(cur, launchT, warp);
-        const launch = boards.clampInside(lb.x, lb.y);           // a blade past the boards → no path
         const dist = pk.rimDist != null ? pk.rimDist : 65;       // handle-set travel distance
-        const r = pushTravel(densify(reflectPath(boards.rimAround(launch, dist, pk.rimAim), netSh)), launchT, vRim(), { by: cur.id, rim: true, easeOut: Math.min(55, dist * 0.6) });
+        // provisional forehand path first, only to read which way the rim sets off —
+        // the same two-pass a shot takes to find its net before it can pick a hand
+        const build = (turn, bk) => {
+          const lb = releaseAt(cur, launchT, warp, turn, bk);
+          const launch = boards.clampInside(lb.x, lb.y);         // a blade past the boards → no path
+          const raw = boards.rimAround(launch, dist, pk.rimAim);
+          return { raw, poly: densify(reflectPath(raw, netSh)) };
+        };
+        let aimDeg = pk.rimAim, prov = null;
+        if (aimDeg == null) { prov = build(0, false); aimDeg = rimDeg(prov.raw); }
+        const back = handBack(cur, launchT, warp, aimDeg, pk.shand);
+        const twist = handTwist(cur, back, false);
+        const { poly } = back ? build(twist, true) : (prov || build(0, false));
+        const r = pushTravel(poly, launchT, vRim(), { by: cur.id, rim: true, easeOut: Math.min(55, dist * 0.6), back, relTwist: twist });
         legs.push({ type: "rest", x: r.end.x, y: r.end.y, t0: r.t }); tBase = r.t;
       } else if (pk.chipAt != null && cur) {           // terminal chip into space (bounces)
         const at = pk.chipAt;
         const launchT = (cur.path.length && at >= 0) ? Math.max(tBase, routeTimeW(cur, warp, Math.min(at, cur.path.length - 1))) : tBase;
         newEvents.push({ by: cur.id, at, t: launchT, kind: "chip" });
-        const lb = releaseAt(cur, launchT, warp);
-        const launch = boards.clampInside(lb.x, lb.y);           // a blade past the boards → no path
         const h = chipHeading(cur, launchT, pk.chipAim);
+        // a chip goes where it is aimed whatever the body does, so the direction is
+        // known up front and the hand falls straight out of it — no provisional pass
+        const back = handBack(cur, launchT, warp, degOf(h), pk.shand);
+        const twist = handTwist(cur, back, false);
+        const lb = releaseAt(cur, launchT, warp, twist, back);
+        const launch = boards.clampInside(lb.x, lb.y);           // a blade past the boards → no path
         const dist = pk.chipDist != null ? pk.chipDist : 26;     // handle-set travel distance
-        const r = pushTravel(densify(reflectPath(boards.slide(launch.x, launch.y, h.x, h.y, dist), netSh)), launchT, vChip(), { by: cur.id, chip: true, easeOut: Math.min(28, dist * 0.6) });
+        const r = pushTravel(densify(reflectPath(boards.slide(launch.x, launch.y, h.x, h.y, dist), netSh)), launchT, vChip(), { by: cur.id, chip: true, easeOut: Math.min(28, dist * 0.6), back, relTwist: twist });
         legs.push({ type: "rest", x: r.end.x, y: r.end.y, t0: r.t }); tBase = r.t;
       }
       let relT = Infinity;
@@ -1087,14 +1295,28 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
         const pl = plans[pk.id];
         if (!pl) continue;
         pl.legs.forEach((leg, k) => {
-          // a standing passer squaring up to their receiver: the plan already aimed
-          // the release off this exact turn (relTurn), so the body and the puck agree
-          if (leg.type === "fly" && leg.relTurn) {
+          // the plan aimed the release off exactly these turns, so the body and the
+          // puck agree at the moment it goes. They are two DIFFERENT motions, though,
+          // and giving them one clock is what made a backhand read as broken:
+          if (leg.type === "fly" && (leg.relTurn || leg.relTwist)) {
             const sh = pieces.find(q => q.id === leg.by && q.kind === "player");
             if (sh) {
               const t = leg.t0 - startWaitOf(sh);
-              (out[sh.id] = out[sh.id] || []).push({ t0: t - OPEN_IN - OPEN_SET, t1: t - OPEN_SET,
+              const push = w => (out[sh.id] = out[sh.id] || []).push(w);
+              // Squaring up to your receiver is deliberate and early — a standing
+              // passer is facing them long before the puck goes.
+              if (leg.relTurn) push({ t0: t - OPEN_IN - OPEN_SET, t1: t - OPEN_SET,
                 t2: t + OPEN_HELD, t3: t + OPEN_HELD + OPEN_OUT, deg: leg.relTurn });
+              // The backhand shoulder turn is not that. On the catch window it turned
+              // 0.85s early and then sat still while the stick whipped through in
+              // 0.15s — two unrelated motions, and the puck, welded to the blade,
+              // read as detached from the body. It rides the SWING's clock instead:
+              // in with the wind-up, peaking at the release, unwinding through the
+              // follow-through, matching stickSwing's WU/FT exactly.
+              if (leg.relTwist) {
+                const WU = leg.shot ? 0.22 : 0.15, FT = leg.shot ? 0.32 : 0.2;
+                push({ snap: true, t0: t - WU, t1: t, t2: t + 0.4 * FT, t3: t + 1.6 * FT, deg: leg.relTwist });
+              }
             }
             return;
           }
@@ -1282,6 +1504,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
         if (g) show = base + wrapDeg(g.deg - base) * g.conf * smooth01(e / GAZE_IN);
         // ...and a catch or release takes precedence over idle watching as it peaks
         if (o.k > 0) show += wrapDeg(base + o.deg - show) * o.k;
+        show += snapAt(p, e - startWaitOf(p));   // the backhand turn, on top of all of it
       } else show = base + o.deg * o.k;
       return { x: p.x, y: p.y, a: show, aStep: base, flip: wrapDeg(show - base), v: 0, dist: 0 };
     }
@@ -1290,7 +1513,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
     // the old instant flip, and everything that plans puck geometry (blade spots,
     // chip headings) stays on it so no pivot can move a launch point or a leg time.
     const eLoc = e;
-    const flip = i => flipAt(p, i, eLoc) + openAt(p, eLoc);
+    const flip = i => flipAt(p, i, eLoc) + openAt(p, eLoc) + snapAt(p, eLoc);
     // Sharp interior corners get a speed dip (carve the turn) so the skater
     // decelerates in and accelerates out instead of pivoting at full speed.
     const dirN = (dx, dy) => { const m = Math.hypot(dx, dy) || 1; return [dx / m, dy / m]; };
@@ -1440,6 +1663,43 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
     return w > 0 ? { id: nx.id, w } : null;
   }
 
+  // The mirror of catchApproach, at the LAUNCH end: who just fired this puck, and how
+  // far through leaving their stick it is. The renderer draws a carried puck on the
+  // real blade — lean, hockey-stop plant and shield included — while the plan's launch
+  // point is taken off the ROUTE pose, which knows none of that. Cutting straight from
+  // one to the other hands the whole gap over in a single frame: measured at 3.8ft at a
+  // route end, where the plant swings the blade furthest, against a 0.5ft flight step.
+  // So the puck leaves from the blade actually on screen and eases onto the planned
+  // line. Display only — the plan's endpoints and every time derived from them stand.
+  function releaseDepart(pkId, e) {
+    const { plans, warp } = getPlan();
+    const pl = plans[pkId];
+    if (!pl) return null;
+    let li = -1;
+    for (let k = 0; k < pl.legs.length; k++) { if (e >= pl.legs[k].t0) li = k; else break; }
+    const leg = pl.legs[li];
+    if (!leg || leg.type !== "fly" || e >= leg.t1) return null;
+    // a chip/rim is densified into many short fly legs; only the first left a stick,
+    // so walk back over the rest to find the one that did
+    let j = li;
+    while (j > 0 && pl.legs[j].type === "fly" && !pl.legs[j].by) j--;
+    const rl = pl.legs[j], pv = pl.legs[j - 1];
+    if (!rl || rl.type !== "fly" || !rl.by || !pv || pv.type !== "ride" || pv.id !== rl.by) return null;
+    const sh = pieces.find(q => q.id === rl.by && q.kind === "player");
+    if (!sh) return null;
+    // LINEAR across the release leg, for the same reason displayPosAt's nudges are:
+    // any other profile bends the flight instead of just moving where it starts.
+    const w = 1 - Math.max(0, Math.min(1, (e - rl.t0) / Math.max(0.001, rl.t1 - rl.t0)));
+    // `r` is the launch displayPosAt already corrects to (the ROUTE pose). The caller
+    // knows the DRAWN pose — lean, plant, shield — so it supplies the rest, relative to
+    // this, and the two corrections compose into one straight line. The lever is frozen
+    // at the one it left on: a departing puck must not be dragged along by the stick's
+    // follow-through, which is still sweeping on past the release.
+    const r = bladeAt(sh, rl.t0, warp, true, rl.back ? BACK_LEVER : FORE_LEVER);
+    return w > 0 ? { id: rl.by, w, t0: rl.t0, rx: r.x, ry: r.y,
+      lever: rl.back ? BACK_LEVER : FORE_LEVER } : null;
+  }
+
   // Is this puck in the air (or skidding) right now? The renderer attaches a puck to
   // the nearest blade by proximity, which is right for a carry but wrong the instant
   // one is fired: for a frame or two the puck is still within reach of the stick that
@@ -1495,10 +1755,16 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
         if (leg.type === "fly" && e < leg.t1) {
           const k = Math.max(0, Math.min(1, (e - leg.t0) / Math.max(0.001, leg.t1 - leg.t0)));
           let x = leg.x0 + (leg.x1 - leg.x0) * k, y = leg.y0 + (leg.y1 - leg.y0) * k;
-          const wOut = 1 - smooth01(k / 0.35);
+          // Both end-nudges decay LINEARLY across the leg, and that is load-bearing:
+          //   pos(k) = line(k) + (R-x0)(1-k) + (C-x1)k  =  R(1-k) + C·k
+          // — a straight line from the real release to the real catch. Easing them in
+          // over 35% windows instead (as this did) makes the puck veer off the moment
+          // it leaves the stick and then run parallel: a shot that visibly bends
+          // mid-flight rather than going where it was aimed.
+          const wOut = 1 - k;
           if (wOut > 0) { const r = releasePush();
             if (r) { x += (r.x - leg.x0) * wOut; y += (r.y - leg.y0) * wOut; } }
-          return pull(x, y, leg.x1, leg.y1, smooth01((k - 0.65) / 0.35));
+          return pull(x, y, leg.x1, leg.y1, k);
         }
         if (leg.type === "skid" && e < leg.t1) {
           const u = Math.max(0, Math.min(1, (e - leg.t0) / Math.max(0.001, leg.t1 - leg.t0)));
@@ -1549,6 +1815,51 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
   const stickSwing = (id, e) => (detail ? swingDeg(id, e) : 0);
   // the stick's rotation (deg) at time e — one curve, drawn on the stick AND carried
   // by the puck, so the two can never come apart
+  // A catch on `id` around time e: how far through it we are, and the swing that turns
+  // the blade FACE to the incoming puck. Without this the receiver squares up (openTurn)
+  // and the stick — which points forward from the body — ends up aimed toe-first down
+  // the passing lane, so the puck glues onto the end of it.
+  function catchPose(id, e) {
+    const { plans, warp } = getPlan();
+    const rec = pieces.find(q => q.id === id && q.kind === "player");
+    if (!rec) return null;
+    let best = null;
+    for (const pid in plans) {
+      const legs = plans[pid].legs;
+      for (let k = 0; k < legs.length; k++) {
+        const leg = legs[k];
+        if (leg.type !== "ride" || !leg.catch || leg.id !== id) continue;
+        const tau = e - leg.t0;
+        if (tau < -CATCH_IN || tau > CATCH_OUT) continue;
+        if (best && Math.abs(tau) >= Math.abs(best.tau)) continue;
+        // only a puck still TRAVELLING has a direction to meet: one that settled and
+        // was picked up off the ice (a `rest` leg in between) is played off the toe
+        const fly = legs[k - 1];
+        let face = 0;
+        if (fly && fly.type === "fly") {
+          // against the body heading NOW, not one frozen at the catch: opening up is
+          // still sweeping the receiver round as the puck arrives (measured 158°→123°
+          // over the last frames of a square-up), so a frozen heading leaves the face
+          // wrong by however far the body has turned since — it came out at -19° where
+          // it needed -84°, i.e. barely off the rest pose.
+          const cp = routePosAt(rec, e, warp);
+          const from = (Math.atan2(fly.y0 - fly.y1, fly.x0 - fly.x1) * 180) / Math.PI;
+          const side = rec.hand === "L" ? -1 : 1;
+          const rel = wrapDeg(from - (cp.a || 0)) * side;      // where it comes FROM, in their frame
+          // Clamped, and the lower bound is load-bearing. The lever rotates WITH the
+          // stick, so squaring the face perfectly (-84° for a head-on pass) carries the
+          // puck from (4.9,+2.5) round to (3.8,-3.7) — negative lat is the WEAK side, so
+          // every pass arrived on the receiver's backhand. Past about -33° the rotated
+          // lever's lat goes negative; stopping short of that angles the blade toward the
+          // puck, off toe-on, while the puck still arrives on the forehand.
+          face = Math.max(-20, Math.min(35, wrapDeg(rel - FACE_REST)));
+        }
+        best = { tau, face };
+      }
+    }
+    return best;
+  }
+
   function swingDeg(id, e) {
     const { plans } = getPlan();
     let ang = 0, best = Infinity; // pick the most-centered event when several overlap
@@ -1579,17 +1890,17 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           // 0 → back → (release, blade on the puck out beside the foot) → through → 0
           ang = keyframe([[-WU, 0], [-0.55 * WU, BACK], [0, REL], [0.4 * FT, THRU], [FT, 0]], tau);
         }
-        if (leg.catch && leg.id === id) {
-          const IN = 0.12, OUT = 0.24, MAX = 15;
-          const tau = e - leg.t0;
-          // slight bias so a shot/pass release outranks a catch at the same moment
-          if (tau < -IN || tau > OUT || Math.abs(tau) + 0.05 >= best) continue;
-          best = Math.abs(tau) + 0.05;
-          ang = tau < 0
-            ? MAX * (1 + tau / IN)                              // reach out to meet the puck
-            : MAX * (1 - tau / OUT);                            // cushion back to neutral
-        }
       }
+    }
+    // Taking a pass: turn the face to meet it, give with it, then settle to the carry
+    // pose. Sits outside the leg loop because the angle depends on the flight that
+    // delivered the puck, not on the ride leg alone.
+    const cp = catchPose(id, e);
+    if (cp && Math.abs(cp.tau) + 0.05 < best) {    // a release at the same moment outranks a catch
+      best = Math.abs(cp.tau) + 0.05;
+      const give = CATCH_GIVE * (cp.face < 0 ? -1 : 1);   // carries on the way it was already turning
+      ang = keyframe([[-CATCH_IN, 0], [-0.3 * CATCH_IN, cp.face], [0, cp.face],
+        [0.12, cp.face + give], [CATCH_OUT, 0]], cp.tau);
     }
     // stickhandling cradle — same phase as the carried puck's lateral sweep, so
     // stick and puck move in unison (only when no shot/catch swing is active)
@@ -1600,5 +1911,5 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
   // warped arrival time at a player's waypoint index (for movement captions)
   function waypointTime(p, i) { const { warp } = getPlan(); return routeTimeW(p, warp, i); }
 
-  return { getPlan, pieceTime, displayPosAt, stickSwing, stickSpot, catchApproach, puckInFlight, waypointTime, puckInGoal };
+  return { getPlan, pieceTime, displayPosAt, stickSwing, stickSpot, catchApproach, releaseDepart, puckInFlight, waypointTime, puckInGoal };
 }
