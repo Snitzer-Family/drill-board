@@ -425,6 +425,9 @@ function DelayTrigger({ value, onChange, sub, players, actorIds, nameOf }) {
    it (at their @<pt>, else route end / where they stand) and
    carries on — so pass=/rebound=/shoot= all resume normally from
    the collector. pass= and rebound= apply in the order written.
+   A trailing &f/&b on any release (pass=/rebound=/shoot=/rim=/
+   chip=) forces the forehand or the backhand; absent = whichever
+   side the target is already on.
    pickup=<player>@<pt> starts a loose puck: it sits (or runs
    its own route) until that player reaches the waypoint, then
    hops onto their blade. A player with no route picks up when the
@@ -1836,7 +1839,7 @@ export default function DrillAnimator() {
   // → effective piece so position sampling follows the reaction, not the base end
   const effById = new Map(effPieces.map(p => [p.id, p]));
   const effOf = p => p && p.kind === "player" && (p.forks || []).length ? (effById.get(p.id) || p) : p;
-  const { getPlan, pieceTime, displayPosAt, stickSwing, stickSpot, catchApproach, puckInFlight, waypointTime, puckInGoal } = createTiming({ pieces: effPieces, pace, segRefs, planCache, seed: playSeed, realisticShots: effRealistic, detail: effDetail, odds: shotOdds });
+  const { getPlan, pieceTime, displayPosAt, stickSwing, stickSpot, catchApproach, releaseDepart, puckInFlight, waypointTime, puckInGoal } = createTiming({ pieces: effPieces, pace, segRefs, planCache, seed: playSeed, realisticShots: effRealistic, detail: effDetail, odds: shotOdds });
   // intent plan for the route preview (identical to the main plan but with misses
   // off, so shots always route on net). Only built when realistic shots are on and
   // the puck-path overlay is actually shown; otherwise the main plan already IS the
@@ -3185,7 +3188,7 @@ export default function DrillAnimator() {
             // catch could never bootstrap), and so a chip/rim can fall back to a plain
             // release into space.
             tchanged = true;
-            dropRel.push({ by: releaser, at: at2, kind: t.kind, aim: t.aim ?? null });
+            dropRel.push({ by: releaser, at: at2, kind: t.kind, aim: t.aim ?? null, shand: t.shand ?? null });
             return;
           }
           if (at2 !== t.at || rc2 !== t.recvAt || t.atRef || t.recvRef) tchanged = true;
@@ -3216,7 +3219,8 @@ export default function DrillAnimator() {
         }
         const tp = { shotAt: null, rimAt: null, chipAt: null, rimAim: null, chipAim: null, rimDist: null, chipDist: null, shand: null };
         if (win) {
-          if (win.kind === "shot") { tp.shotAt = winAt; tp.net = win.net ?? null; tp.shand = win.shand ?? null; }   // the terminal's OWN net (absent = nearest) + forehand/backhand call
+          tp.shand = win.shand ?? null;   // forehand/backhand call — every terminal kind carries one
+          if (win.kind === "shot") { tp.shotAt = winAt; tp.net = win.net ?? null; }   // the terminal's OWN net (absent = nearest)
           else if (win.kind === "rim") { tp.rimAt = winAt; tp.rimAim = win.aim ?? null; tp.rimDist = win.dist ?? null; }
           else { tp.chipAt = winAt; tp.chipAim = win.aim ?? null; tp.chipDist = win.dist ?? null; }
           tp._winTerm = win;   // the AUTHORING terminal that fired this run (ghost pass skips its duplicate)
@@ -3226,6 +3230,7 @@ export default function DrillAnimator() {
           // space, so lower it as a plain terminal release
           const fr = dropRel.find(r => r.kind === "chip" || r.kind === "rim");
           if (fr) {
+            tp.shand = fr.shand ?? null;
             if (fr.kind === "chip") { tp.chipAt = fr.at; tp.chipAim = fr.aim; }
             else { tp.rimAt = fr.at; tp.rimAim = fr.aim; }
           }
@@ -3754,9 +3759,31 @@ export default function DrillAnimator() {
       // makes the catch continuous instead of a hop onto the stick.
       let approachW = 1;
       if (!cq) {
-        const ap = catchApproach(p.id, animT <= 0 ? 0 : animT * totalTime);
+        const eNow = animT <= 0 ? 0 : animT * totalTime;
+        const ap = catchApproach(p.id, eNow);
         const rec = ap && pieces.find(x => x.id === ap.id && x.kind === "player" && !x.defense);
         if (rec) { cq = rec; cSide = rec.hand === "L" ? -1 : 1; approachW = ap.w; }
+        else {
+          // ...and the same at the LAUNCH end. A carried puck is drawn on the real blade
+          // (lean, plant, shield); the plan's launch point comes off the route pose and
+          // knows none of it, so cutting straight there pops the puck several feet in one
+          // frame — worst at a route end, where the hockey-stop plant swings the blade
+          // furthest. Apply the difference as a FROZEN offset that decays linearly:
+          // frozen so it doesn't chase the still-planting body, linear so it only moves
+          // where the flight starts instead of bending it. displayPosAt has already
+          // nudged `res` onto dp.rx/ry, so this is the remainder on top of that.
+          const dp = releaseDepart(p.id, eNow);
+          const sh = dp && pieces.find(x => x.id === dp.id && x.kind === "player" && !x.defense);
+          if (sh) {
+            const q0 = displayPosRaw(sh, dp.t0);
+            const side0 = sh.hand === "L" ? -1 : 1;
+            const tip0 = whiteboard
+              ? bladeAtWorld(q0.x, q0.y, q0.a || 0, 2.4, 0, side0)
+              : bladeAtWorld(q0.x, q0.y, q0.a || 0, dp.lever.fwd * ICON_SCALE * PLAYER_SCALE,
+                  dp.lever.lat * ICON_SCALE * PLAYER_SCALE, side0);
+            return { ...res, x: res.x + (tip0.x - dp.rx) * dp.w, y: res.y + (tip0.y - dp.ry) * dp.w };
+          }
+        }
       }
       {
         const q = cq, side = cSide;
@@ -3780,10 +3807,14 @@ export default function DrillAnimator() {
     }
     return res;
   }
-  function displayPosRaw(p) {
+  // `eAt` samples the drawn pose at a GIVEN time instead of the current frame — the
+  // release nudge needs the shooter's pose at the instant the puck left, frozen, or it
+  // chases a still-planting body and bends the flight.
+  function displayPosRaw(p, eAt) {
     p = effOf(p);
     if (p.kind === "player" && p.defense) return animT > 0 ? dmanPos(p) : { x: p.x, y: p.y, a: p.facing || 0 };
-    const dp = displayPosAt(p, animT <= 0 ? 0 : animT * totalTime);
+    const eFix = eAt != null ? eAt : (animT <= 0 ? 0 : animT * totalTime);
+    const dp = displayPosAt(p, eFix);
     if (!effDetail || p.kind !== "player" || animT <= 0) return dp; // detail off / editing board: still frame
     const r = dp.smul || 0;                               // effective speed multiple
     let lat = 0, fore = 0, lean = 0;                      // lateral / fore-aft ft, deg — vs facing
@@ -3792,7 +3823,7 @@ export default function DrillAnimator() {
       // standing (or near enough): shift weight instead of freezing solid.
       // Two incommensurate slow sines per axis so the motion never loops
       // visibly; phase hashed from the id so players fidget out of sync.
-      const e = animT * totalTime;
+      const e = eFix;
       let ph = 0;
       for (let i = 0; i < String(p.id).length; i++) ph += String(p.id).charCodeAt(i) * 0.618;
       ph = (ph % 1) * 2 * Math.PI;
@@ -3834,6 +3865,10 @@ export default function DrillAnimator() {
     const isTire = net.kind === "tire";
     const R_TIRE = 2.6 * ICON_SCALE * (net.size || 1) + 1.3;
     const f = ((net.facing || 0) * Math.PI) / 180;    // net mouth opens this way
+    // NOT `eFix`: that is a const inside displayPosRaw, a sibling function, so
+    // reading it here is a ReferenceError that takes the whole board down the
+    // moment any drill has a goalie. It shipped, and the live site was crashing
+    // on every goalie drill. This is the same value, in scope.
     const e = animT <= 0 ? 0 : animT * totalTime;
     // A tire keeper is a different animal: no posts to seal against, so it just
     // rides the rubber all the way round. A net keeper gets the real solve —
@@ -7314,25 +7349,32 @@ export default function DrillAnimator() {
       );
     };
 
-    // Which hand a shot comes off. Default reads the shooter's angle to the net and
-    // takes whichever side it is already on; the coach can force either instead —
-    // a drill built around finishing on the backhand shouldn't depend on geometry.
-    const shotSubRows = (p, i, st) => {
-      const pk = st.pk, term = st.term;
-      if (!pk || !term) return null;
-      const cur = term.shand || "auto";
-      const setHand = h => update(q => q.id !== pk.id ? q
-        : { ...q, terminals: (q.terminals || []).map(x => sameTerm(x, term)
-            ? { ...x, shand: h === "auto" ? undefined : h } : x) });
+    // Which hand a release comes off — shots, passes, chips and hard rims alike.
+    // Default reads the angle from the releaser to what they're playing the puck at
+    // and takes whichever side it is already on; the coach can force either instead,
+    // because a drill built around finishing on the backhand shouldn't depend on
+    // geometry. The flag lives on the terminal for a terminal release and on the
+    // transfer for a delivery, so it round-trips as a trailing `&f`/`&b` either way.
+    const HAND_TARGET = { shoot: "the net", pass: "the receiver", chip: "the chip", rim: "the rim" };
+    const handSubRows = (p, i, st, t) => {
+      const pk = st.pk;
+      const term = st.role === "terminal" ? st.term : null;
+      if (!pk || (!term && st.stage == null)) return null;
+      const cur = (term ? term.shand : ((pk.transfers || [])[st.stage] || {}).shand) || "auto";
+      const setHand = h => { const v = h === "auto" ? undefined : h;
+        update(q => q.id !== pk.id ? q
+          : term ? { ...q, terminals: (q.terminals || []).map(x => sameTerm(x, term) ? { ...x, shand: v } : x) }
+          : { ...q, transfers: (q.transfers || []).map((x, s) => s === st.stage ? { ...x, shand: v } : x) }); };
+      const lbl = t === "shoot" ? "Shot" : t === "pass" ? "Pass" : t === "chip" ? "Chip" : "Rim";
       return (
         <>
-          <div className="hd-sectitle" style={{ marginTop: 5 }}>Shot hand</div>
+          <div className="hd-sectitle" style={{ marginTop: 5 }}>{lbl} hand</div>
           <div className="hd-poprow">
-            {[["auto", "Default", "whichever side the net is already on"],
+            {[["auto", "Default", `whichever side ${HAND_TARGET[t]} is already on`],
               ["fore", "Forehand", "always off the strong side"],
-              ["back", "Backhand", "always off the back of the blade"]].map(([k, lbl, tip]) => (
-              <button key={k} className={`hd-mini${cur === k ? " on" : ""}`} title={`${lbl} — ${tip}`}
-                onClick={() => setHand(k)}>{lbl}</button>
+              ["back", "Backhand", "always off the back of the blade"]].map(([k, tx, tip]) => (
+              <button key={k} className={`hd-mini${cur === k ? " on" : ""}`} title={`${tx} — ${tip}`}
+                onClick={() => setHand(k)}>{tx}</button>
             ))}
           </div>
         </>
@@ -7593,7 +7635,7 @@ export default function DrillAnimator() {
                 {st.warn && <div className="hd-poprow"><span className="hd-stepwarn">⚠ {st.warn}</span></div>}
                 {t === "pass" && passSubRows(p, i, st)}
                 {isGain(t) && gainSubRows(p, i, st)}
-                {t === "shoot" && shotSubRows(p, i, st)}
+                {!isGain(t) && handSubRows(p, i, st, t)}
                 {(t === "chip" || t === "rim") && <div className="hd-poprow"><span className="hd-stephint">drag the on-ice handle to aim &amp; set distance</span></div>}
               </div>
             );
@@ -11524,6 +11566,12 @@ export default function DrillAnimator() {
             (serialized as a trailing <code>*</code>); choose a specific puck id in the dropdown to lock it.
             (The handoff forms <code>chip=4:F1</code> /
             <code>rim=4:F2</code> that carry straight to a collector still load and play.)
+            Every release picks a <b>hand</b>. By default it comes off whichever side the target is
+            already on — the net for a shot, the receiver for a pass, the direction it travels for a
+            chip or rim — because nobody reaches across their body for a puck already on their
+            backhand. Force it with <b>Shot / Pass / Chip / Rim hand</b> on the releasing step
+            (a trailing <code>&amp;f</code> / <code>&amp;b</code>, e.g. <code>pass=2:F2@3&amp;b</code>). A backhand
+            leaves off the other face of the blade and the shoulders turn with it; the timing is unchanged.
             <code> pickup=F2@3</code> — a loose puck hops onto F2's blade at their point 3
             (<code>pickup=F2@3*</code> = nearest-puck, re-resolved live).
             <code> face=45</code> sets a stationary player's heading (degrees).
