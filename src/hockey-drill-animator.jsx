@@ -8,7 +8,7 @@ import { drillSvg } from "./drill-svg.js";
 import { mdEscape, mdInline, mdBlock } from "./md.js";
 import { clampX, clampY, fitInside, segEnd, segD, nearestT, splitSeg, zigzagPoints, wigglePoints, wigglePoly, zigzagPoly, convertSeg, fitRoute, evalSeg, rdp, catmullToBezier, alignJoint, mirrorJoint, translateJointHandles, trimSegStart, trimSegEnd, trimPolyStart, trimPolyEnd, gapPolyAt } from "./geometry.js";
 import { dirOf, dirAtWaypoint, spreadDir } from "./route-dir.js";
-import { lowerRoutes, queueOf, stackSpot, isMobile, unbindLine, transitPoly, transitObstacles, chainOf,
+import { lowerRoutes, queueOf, stackSpot, isMobile, unbindLine, transitPoly, transitObstacles, chainOf, crossRate,
   headHeadingDeg as routeHeadDeg, QUEUE_GAP, QUEUE_LEAD } from "./route-lines.js";
 import { PLAYER_R, TRANSIT_RATE, CROSSING_DASH } from "./constants.js";
 import * as boards from "./boards.js";
@@ -4406,7 +4406,9 @@ export default function DrillAnimator() {
     const C = {
       ...base,                                  // no queue rule, no spacing: it has no line
       color: A.color, connector: true, next: B.id, label: "",
-      path: pts.map(q => ({ type: "L", x: q.x, y: q.y, mode: "carry", dir: "fwd", stop: 0, rate: TRANSIT_RATE })),
+      // it starts at whatever pace they were skating as they left the route — the
+      // skater carries their speed across rather than dropping to a fixed glide
+      path: pts.map(q => ({ type: "L", x: q.x, y: q.y, mode: "carry", dir: "fwd", stop: 0, rate: crossRate(A, end) })),
     };
     flash("Crossing is now a route — drag its points to shape it");
     return [...ps.map(q => (q.id === A.id ? { ...q, next: C.id } : q)), C];
@@ -8521,7 +8523,9 @@ export default function DrillAnimator() {
                   // disagree, so a hand-tuned leg isn't silently flattened.
                   const rates = p.path.map(s => s.rate || 1);
                   const same = rates.every(r => Math.abs(r - rates[0]) < 1e-6);
-                  const cur = same && rates.length ? rates[0] : TRANSIT_RATE;
+                  const from = pieces.find(q => q.kind === "route" && q.next === p.id);
+                  const inherit = from && from.path.length ? crossRate(from, from.path[from.path.length - 1]) : 1;
+                  const cur = same && rates.length ? rates[0] : inherit;
                   const setAll = v => updateById(p.id, { path: p.path.map(s => ({ ...s, rate: v })) });
                   return (
                     <div className="hd-field">
@@ -8535,13 +8539,16 @@ export default function DrillAnimator() {
                         <span>Pace</span>
                         <Stepper value={+cur.toFixed(2)} min={0.2} max={2} step={0.05} suffix="×"
                           onChange={setAll} />
+                        <button className="hd-mini" onClick={() => setAll(inherit)}>
+                          Match {from ? nameOf(from.id) : "the route"}
+                        </button>
                         <button className="hd-mini" onClick={() => setAll(TRANSIT_RATE)}>Glide</button>
-                        <button className="hd-mini" onClick={() => setAll(1)}>Full</button>
                       </div>
                       <div className="hd-sechint">
-                        {same
-                          ? (cur < 0.95 ? "A regroup glide — slower than the drill itself." : "Skated at full pace.")
-                          : "Legs differ — set a pace here to make the whole crossing match."}
+                        {!same ? "Legs differ — set a pace here to make the whole crossing match."
+                          : Math.abs(cur - inherit) < 1e-6 ? `Carrying the speed they came off ${from ? nameOf(from.id) : "the route"} at.`
+                          : cur < 0.95 ? "A regroup glide — slower than the route itself."
+                          : "Skated at full pace."}
                       </div>
                     </div>
                   );
@@ -8824,46 +8831,28 @@ export default function DrillAnimator() {
               </div>
             )}
           </div>
+          {/* WHAT HAPPENS HERE comes first. A waypoint is a place where the drill
+              does something — a pass, a shot, a collect, a pause — and that was
+              buried under the cosmetics and the leg-shape controls. */}
+          {p.kind === "player" && ActionSteps(p, i, fork)}
+          {/* A route's waypoints carry the same Actions the skater's would — see
+              lineProxy. Authored on the head of the line and handed to the rest. */}
+          {p.kind === "route" && (lineProxy(p)
+            ? (
+              <>
+                {ActionSteps(lineProxy(p), i, fork)}
+                <div className="hd-sechint">
+                  Authored on {nameOf(lineHead(p).id)} at the head of the line. Everyone
+                  behind them does the same, as long as there&rsquo;s a loose puck for them.
+                </div>
+              </>
+            )
+            : <div className="hd-poprow hd-stephint">Add a skater to this line to give it puck actions.</div>)}
           {/* the branch waypoint carries the reaction controls: the base route's end
               (light reactions), or a SKATE reaction's end (chain another reaction) */}
           {p.kind === "player" && i === route.length - 1 && (!fork
             ? renderLightReactions(p, null)
             : branchEndsOpen(p, fork) ? renderLightReactions(p, fork) : null)}
-          <div className="hd-field">
-            <div className="hd-sectitle">Note</div>
-            <div className="hd-poprow">
-              <input className="hd-input" style={{ flex: 1, minWidth: 90 }}
-                value={s.desc != null ? s.desc : (s.name || "")}
-                placeholder={zoneAt(s.x, s.y) || "describe this spot"}
-                onChange={e => uSeg(i, { desc: e.target.value || undefined, name: undefined })} />
-            </div>
-          </div>
-          {(s.desc != null ? s.desc : s.name) && (
-            <div className="hd-field">
-              <div className="hd-sectitle">Show as</div>
-              <div className="hd-sechint">Auto decides for you · Present reads it as a caption during playback · Label pins it on the ice.</div>
-              <div className="hd-poprow">
-                {[["auto", "Auto"], ["preso", "Present"], ["label", "Label"]].map(([m, lab]) => (
-                  <button key={m} className={`hd-mini${(s.dmode || "auto") === m ? " on" : ""}`}
-                    onClick={() => uSeg(i, {
-                      desc: s.desc != null ? s.desc : s.name, name: undefined,   // migrate legacy NAME
-                      ...(m === "label"
-                        ? { dmode: "label", dsize: s.dsize || 1, dox: s.dox || 0, doy: s.doy != null ? s.doy : -5 }
-                        : { dmode: m }),
-                    })}>{lab}</button>
-                ))}
-              </div>
-            </div>
-          )}
-          {s.dmode === "label" && (s.desc != null ? s.desc : s.name) && (
-            <div className="hd-field">
-              <div className="hd-sectitle">Label size</div>
-              <div className="hd-poprow">
-                <Stepper value={+(s.dsize || 1).toFixed(2)} onChange={v => uSeg(i, { dsize: Math.max(0.4, v) })} step={0.2} min={0.4} suffix="×" />
-                <span className="hd-sechint">drag it to move</span>
-              </div>
-            </div>
-          )}
           {next ? (
             <>
               {/* unified delay trigger: pause here on a timer, another player's
@@ -8906,14 +8895,14 @@ export default function DrillAnimator() {
                 </div>
               )}
               <div className="hd-field">
-                <div className="hd-sectitle">{p.kind === "player" ? "Skating speed after" : "Speed after"} ×{(next.rate || 1).toFixed(2)}</div>
+                <div className="hd-sectitle">Pace to the next point ×{(next.rate || 1).toFixed(2)}</div>
                 <div className="hd-poprow">
                   <input type="range" min={0.5} max={2} step={0.05} value={next.rate || 1} style={{ flex: 1, minWidth: 70 }}
                     onChange={e => uSeg(i + 1, { rate: parseFloat(e.target.value) })} />
                 </div>
               </div>
               <div className="hd-field">
-                <div className="hd-sectitle">Next leg</div>
+                <div className="hd-sectitle">Shape of the next leg</div>
                 <div className="hd-poprow">
                   {curveButtons(t => changeSegType(p.id, i + 1, t, fork), () => drawRouteMode(p.id, fork), next.type)}
                 </div>
@@ -9007,23 +8996,47 @@ export default function DrillAnimator() {
               </div>
             );
           })()}
-          {p.kind === "player" && ActionSteps(p, i, fork)}
-          {/* A route's waypoints carry the same Actions the skater's would — see
-              lineProxy. Authored on the head of the line and handed to the rest. */}
-          {p.kind === "route" && (lineProxy(p)
-            ? (
-              <>
-                {ActionSteps(lineProxy(p), i, fork)}
-                <div className="hd-sechint">
-                  Authored on {nameOf(lineHead(p).id)} at the head of the line. Everyone
-                  behind them does the same, as long as there&rsquo;s a loose puck for them.
-                </div>
-              </>
-            )
-            : <div className="hd-poprow hd-stephint">Add a skater to this line to give it puck actions.</div>)}
           {/* ...and the route's own action: where they go when they finish it.
               Offered at the END, because that is when it happens. */}
           {p.kind === "route" && !fork && i === route.length - 1 && routeFinishField(p)}
+          {/* Cosmetics last. This is a note pinned to a spot, not something the
+              drill DOES, and it was sitting between the actions and the leg
+              controls — splitting "what happens here" from "how they leave". */}
+          <div className="hd-field">
+            <div className="hd-sectitle">Label on the ice</div>
+            <div className="hd-poprow">
+              <input className="hd-input" style={{ flex: 1, minWidth: 90 }}
+                value={s.desc != null ? s.desc : (s.name || "")}
+                placeholder={zoneAt(s.x, s.y) || "describe this spot"}
+                onChange={e => uSeg(i, { desc: e.target.value || undefined, name: undefined })} />
+            </div>
+          </div>
+          {(s.desc != null ? s.desc : s.name) && (
+            <div className="hd-field">
+              <div className="hd-sectitle">Show as</div>
+              <div className="hd-sechint">Auto decides for you · Present reads it as a caption during playback · Label pins it on the ice.</div>
+              <div className="hd-poprow">
+                {[["auto", "Auto"], ["preso", "Present"], ["label", "Label"]].map(([m, lab]) => (
+                  <button key={m} className={`hd-mini${(s.dmode || "auto") === m ? " on" : ""}`}
+                    onClick={() => uSeg(i, {
+                      desc: s.desc != null ? s.desc : s.name, name: undefined,   // migrate legacy NAME
+                      ...(m === "label"
+                        ? { dmode: "label", dsize: s.dsize || 1, dox: s.dox || 0, doy: s.doy != null ? s.doy : -5 }
+                        : { dmode: m }),
+                    })}>{lab}</button>
+                ))}
+              </div>
+            </div>
+          )}
+          {s.dmode === "label" && (s.desc != null ? s.desc : s.name) && (
+            <div className="hd-field">
+              <div className="hd-sectitle">Label size</div>
+              <div className="hd-poprow">
+                <Stepper value={+(s.dsize || 1).toFixed(2)} onChange={v => uSeg(i, { dsize: Math.max(0.4, v) })} step={0.2} min={0.4} suffix="×" />
+                <span className="hd-sechint">drag it to move</span>
+              </div>
+            </div>
+          )}
           <div className="hd-poprow" style={{ marginTop: 2 }}>
             <button className="hd-mini" title="Pin this waypoint in place so it can't be moved or edited by accident."
               onClick={() => uSeg(i, { lock: true })}>🔒 Lock point</button>

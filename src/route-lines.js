@@ -160,6 +160,16 @@ export function transitObstacles(pieces) {
 // Sample → arc around the obstacles → simplify back to a handful of points.
 // Without the simplify a 100-point detour becomes 100 legs, each needing its own
 // SVG ref and timing entry.
+// The pace a crossing is skated at. A skater carries their speed across rather
+// than dropping to an arbitrary glide, so the default is simply whatever they
+// were doing on the last leg before it — set the pace at the end of the route
+// and the crossing follows. An explicit `regroup=` on the route they are leaving
+// still wins.
+export function crossRate(fromRoute, lastLeg) {
+  if (fromRoute && fromRoute.regroup > 0) return fromRoute.regroup;
+  return (lastLeg && lastLeg.rate > 0) ? lastLeg.rate : 1;
+}
+
 export function transitLegs(from, to, obstacles, rate = TRANSIT_RATE) {
   const span = Math.hypot(to.x - from.x, to.y - from.y);
   if (span < 1) return [];
@@ -417,8 +427,7 @@ export function lowerRoutes(pieces) {
         // the skater is already standing on it
         if (legs.length) {
           const end = legs[legs.length - 1];
-          const rate = prev && prev.regroup > 0 ? prev.regroup : TRANSIT_RATE;
-          legs.push(...transitLegs({ x: end.x, y: end.y }, { x: cur.x, y: cur.y }, obstacles, rate));
+          legs.push(...transitLegs({ x: end.x, y: end.y }, { x: cur.x, y: cur.y }, obstacles, crossRate(prev, end)));
         }
         laps.push({ base: legs.length, x: cur.x, y: cur.y, route: cur.id });
         legs.push(...(cur.path || []).map(s => ({ ...s })));

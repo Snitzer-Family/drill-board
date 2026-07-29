@@ -163,7 +163,8 @@ const routeB = (over = {}) => ({
   const legs = out.find(p => p.id === 'P1').path;
   T('a recycled skater gets more legs than one route', legs.length > A.path.length, true);
   T('the transit legs are marked', legs.some(s => s.transit), true);
-  T('transit is a regroup glide, not another rep', legs.filter(s => s.transit).every(s => s.rate === TRANSIT_RATE), true);
+  // a skater carries their speed across rather than dropping to a fixed glide
+  T('the crossing is skated at the pace they came off at', legs.filter(s => s.transit).every(s => s.rate === 1), true);
   T('the last leg is the destination route\'s last waypoint',
     [legs[legs.length - 1].x, legs[legs.length - 1].y], [120, 70]);
   T('the destination legs are not marked transit',
@@ -366,6 +367,19 @@ const chainSig = (out, id) => { const p = out.find(q => q.id === id); return [p.
   const out = lowerRoutes([A, mk('P1', 1), mk('P2', 2), tpl]);
   T('without feed, a short pile just means skating empty', out.some(p => p.fed), false);
   T('...and only the authored rep has a chain', out.filter(p => p.kind === 'puck' && p.pickup).length, 1);
+}
+
+// ---- a crossing inherits the pace off the route before it ----
+{
+  const fast = route({ id: 'R1', x: 30, y: 22, next: 'R2',
+    path: [{ type: 'L', x: 90, y: 22, rate: 1 }, { type: 'L', x: 140, y: 36, rate: 1.6 }] });
+  const B = routeB({ id: 'R2', x: 150, y: 66, path: [{ type: 'L', x: 90, y: 66 }] });
+  const P = { id: 'P1', kind: 'player', x: 30, y: 22, route: 'R1', q: 1, path: [], forks: [] };
+  const t = lowerRoutes([fast, B, P]).find(p => p.id === 'P1').path.filter(s => s.transit);
+  T('the crossing takes the last leg\'s pace', t.length && t.every(s => s.rate === 1.6), true);
+  // ...unless the route says otherwise
+  const slow = lowerRoutes([{ ...fast, regroup: 0.4 }, B, P]).find(p => p.id === 'P1').path.filter(s => s.transit);
+  T('an explicit regroup still wins', slow.every(s => s.rate === 0.4), true);
 }
 
 // ---- reps: a pass through the WHOLE chain, not a link ----
