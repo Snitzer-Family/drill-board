@@ -1853,6 +1853,15 @@ export default function DrillAnimator() {
   // need the effective piece for the same reason. Without `p.route` here every
   // queue member samples an empty route and stands still on their mark.
   const effOf = p => p && p.kind === "player" && ((p.forks || []).length || p.route) ? (effById.get(p.id) || p) : p;
+  // Pucks a route fed itself exist ONLY in the lowered model — they are not on the
+  // authored board, which is the point (they never touch the drill text). But the
+  // renderers all enumerate the raw `pieces`, so without this they were planned,
+  // timed and carried while being completely invisible: a skater collecting
+  // nothing. `drawPieces` is the board as it should be SEEN.
+  // ...and they take no taps: there is no authored piece behind one, so selecting
+  // it would open an editor for something that doesn't exist.
+  const fedPucks = effPieces.filter(p => p.fed);
+  const drawPieces = fedPucks.length ? [...pieces, ...fedPucks] : pieces;
   const { getPlan, pieceTime, displayPosAt, stickSwing, stickSpot, catchApproach, puckInFlight, waypointTime, puckInGoal } = createTiming({ pieces: effPieces, pace, segRefs, planCache, seed: playSeed, realisticShots: effRealistic, detail: effDetail, odds: shotOdds });
   // intent plan for the route preview (identical to the main plan but with misses
   // off, so shots always route on net). Only built when realistic shots are on and
@@ -9167,7 +9176,7 @@ export default function DrillAnimator() {
     const shotOne = {}, shotN = {};      // `${pk}/${k}` → is the drawn one / how many it stands for
     const shotStagger = {};              // `${pk}/${k}` → extra feet in front of the net
     const groups = {};
-    pieces.filter(q => q.kind === "puck" && plans[q.id]).forEach(q => plans[q.id].legs.forEach((L, k, legs) => {
+    drawPieces.filter(q => q.kind === "puck" && plans[q.id]).forEach(q => plans[q.id].legs.forEach((L, k, legs) => {
       if (L.type === "fly" && L.shot && (!legs[k + 1] || legs[k + 1].type !== "fly")) {
         // keyed on the SHOOTER as well as the spot: two players standing within a
         // yard of each other are still two marks, not one attributed to whoever
@@ -9192,7 +9201,7 @@ export default function DrillAnimator() {
     // ones step back, so a close-in shot still reads true against the cage.
     if (arrowStagger) {
       const tips = [];
-      pieces.filter(q => q.kind === "puck" && plans[q.id]).forEach(q => plans[q.id].legs.forEach((L, k, legs) => {
+      drawPieces.filter(q => q.kind === "puck" && plans[q.id]).forEach(q => plans[q.id].legs.forEach((L, k, legs) => {
         if (!(L.type === "fly" && L.shot && (!legs[k + 1] || legs[k + 1].type !== "fly") && shotOne[`${q.id}/${k}`])) return;
         // the same origin and direction the renderer draws with (badge centre when
         // released at an action circle), so the tip we cluster on is the real one
@@ -9603,7 +9612,7 @@ export default function DrillAnimator() {
           {renderMarkHandles(1)}
           {selected && renderRotateHandle(selected, 1)}
           {pieces.map(p => <g key={`ca-${p.id}`}>{renderAim(p, true, 1)}</g>)}
-          {pieces.filter(p => p.kind !== "label" && p.kind !== "mark").map(p => {
+          {drawPieces.filter(p => p.kind !== "label" && p.kind !== "mark").map(p => {
             const dp = displayPos(p);
             return (
               <PieceIcon key={`lp${p.id}`} p={p} pos={dp} thDeg={(dp.a || 0) + screenRot} wb={whiteboard} wbCircle={wbCircle}
@@ -10808,7 +10817,7 @@ export default function DrillAnimator() {
                carried puck can't steal the grab; rotate ring is drawn last. A
                puck IN the net (a goal) sinks below the cage (rank −1). */}
             {!aiPlay && [
-                ...pieces.filter(p => p.kind !== "label" && p.kind !== "mark" && !previewHiddenIds.has(p.id)),
+                ...drawPieces.filter(p => p.kind !== "label" && p.kind !== "mark" && !previewHiddenIds.has(p.id)),
                 // goalies ride at rank 0.5 — above their net + drawn crease, below the action
                 ...pieces.filter(q => (q.kind === "net" || q.kind === "tire") && q.goalie).map(n => ({ goalieOf: n })),
               ]
@@ -10860,7 +10869,7 @@ export default function DrillAnimator() {
                       <PieceIcon p={p} pos={lp} xf={lfx.t} thDeg={lfx.th} noShadow={isJump} wb={whiteboard} wbCircle={wbCircle}
                         selected={editing && p.id === selectedId} swing={isJump ? displaySwing(p) : 0} dim={animT > 0} onDown={e => pieceDown(e, p.id)}
                         grabR={grabRadiusOf(p)}
-                        hitOff={p.lock && !lockedSelectable} />
+                        hitOff={(p.lock && !lockedSelectable) || !!p.fed} />
                     </g>
                   </g>
                 );
@@ -10871,7 +10880,7 @@ export default function DrillAnimator() {
                   selected={editing && p.id === selectedId} swing={displaySwing(p)}
                   dim={animT > 0} onDown={e => pieceDown(e, p.id)}
                   grabR={grabRadiusOf(p)}
-                  hitOff={p.lock && !lockedSelectable}
+                  hitOff={(p.lock && !lockedSelectable) || !!p.fed}
                   onStickDown={editing && tool !== "draw" && p.kind === "player" && !p.path.length && !(p.lock && !lockedSelectable)
                     ? e => stickDown(e, p) : undefined} />
               );
