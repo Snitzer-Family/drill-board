@@ -16,7 +16,11 @@ import { netShapes, solidShapes, bumperShapes, reflectPath, segCrossesNet, bounc
 export function resolveNearest(pieces) {
   const intents = pieces.filter(p => p.kind === "puck" && p.pickup && p.pickup.nearest);
   if (!intents.length) return pieces;
+  // "plain loose": nothing authored on it at all. `terminals` counts — a puck
+  // someone is due to shoot is not free for a nearest-collect to steal, even
+  // though its shot hasn't been lowered to a scalar yet.
   const looseOK = q => !q.carrier && !q.pickup && !(q.transfers || []).length
+    && !(q.terminals || []).length
     && q.shotAt == null && q.rimAt == null && q.chipAt == null;
   let out = pieces;                       // clone lazily, only if something migrates
   const claimed = new Set();              // pucks already assigned to a collector
@@ -35,11 +39,19 @@ export function resolveNearest(pieces) {
     if (near.id === owner.id) continue;   // already sits nearest — nothing to move
     if (out === pieces) out = pieces.slice();
     const oi = out.findIndex(q => q.id === owner.id), ni = out.findIndex(q => q.id === near.id);
+    // `terminals` is the AUTHORING form of shoot=/rim=/chip= — what the parser
+    // produces and what resolveForks later lowers into the scalars below. This
+    // pass runs BEFORE that lowering, so at this point the scalars are still
+    // undefined and terminals holds the whole story. Moving only the scalars left
+    // the shot behind on the puck we had just emptied: "collect the nearest puck
+    // and shoot it" collected, then carried it forever.
     out[ni] = { ...out[ni], carrier: null, pickup: { ...owner.pickup },
-      transfers: owner.transfers || [], shotAt: owner.shotAt, rimAt: owner.rimAt, chipAt: owner.chipAt,
+      transfers: owner.transfers || [], terminals: owner.terminals,
+      shotAt: owner.shotAt, rimAt: owner.rimAt, chipAt: owner.chipAt,
       rimAim: owner.rimAim, chipAim: owner.chipAim, chipDist: owner.chipDist, rimDist: owner.rimDist,
       net: owner.net, termBy: owner.termBy };
-    out[oi] = { ...out[oi], carrier: null, pickup: null, transfers: [], shotAt: null, rimAt: null,
+    out[oi] = { ...out[oi], carrier: null, pickup: null, transfers: [], terminals: undefined,
+      shotAt: null, rimAt: null,
       chipAt: null, rimAim: null, chipAim: null, chipDist: null, rimDist: null, net: null, termBy: null };
   }
   return out;

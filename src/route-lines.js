@@ -183,7 +183,9 @@ function retarget(pk, fromId, toId) {
   const sw = id => (id === fromId ? toId : id);
   const out = { ...pk };
   if (pk.carrier) out.carrier = sw(pk.carrier);
-  if (pk.pickup) out.pickup = { ...pk.pickup, to: sw(pk.pickup.to) };
+  // the copy is bound to a specific spare puck, so drop `nearest` — resolveNearest
+  // has already run by the time a line is lowered and would never revisit it
+  if (pk.pickup) { const { nearest, ...rest } = pk.pickup; out.pickup = { ...rest, to: sw(pk.pickup.to) }; }
   if ((pk.transfers || []).length) out.transfers = pk.transfers.map(t => ({
     ...t, to: sw(t.to), ...(t.by ? { by: sw(t.by) } : {}), ...(t.via ? { via: sw(t.via) } : {}),
   }));
