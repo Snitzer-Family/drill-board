@@ -77,10 +77,10 @@ export const QUEUE_GAP = 5;
 // at once, which is what every drill authored before this did.
 export const QUEUE_LEAD = 15;
 // Recycling: a route can send its finishers to another route's head (`next=`).
-// `hops` is how many of those links one skater follows, and it strictly decreases
-// per unfold, so a next= cycle (A -> B -> A, how a full-ice drill is actually
-// drawn) still terminates. HOPS_MAX and LINE_LEG_CAP are the backstops.
-export const HOPS_MAX = 8;
+// A REP is one pass through the whole connected chain — A -> B -> A is one rep,
+// not two links — because that is what a coach counts. Bounded by REPS_MAX and,
+// as a structural backstop whatever the chain looks like, LINE_LEG_CAP.
+export const REPS_MAX = 8;
 export const LINE_LEG_CAP = 200;
 // crossing the ice to the next line is a regroup glide, not another rep
 export const TRANSIT_RATE = 0.65;

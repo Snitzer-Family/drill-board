@@ -247,7 +247,7 @@ export function parseDrill(text) {
         // lines: `route`/`q` bind a PLAYER to the route they queue on; `gap` is the
         // ROUTE's own spacing between stacked skaters
         let routeId = null, qIx = null, gapFt = null, queue = null;
-        let nextRoute = null, hops = null, regroup = null;   // route: where finishers go next
+        let nextRoute = null, reps = null, regroup = null;   // route: where finishers go next
         let feedPucks = false;                               // route: keep the line supplied with pucks
         let connector = false;                               // route: this IS a crossing, not a line of its own
         const transfers = [];
@@ -390,9 +390,12 @@ export function parseDrill(text) {
                 else if (n > 0) queue = { mode: "lead", lead: n };
               }
             } else if (key === "next") nextRoute = v;       // route: finishers cross to this route's head
-            else if (key === "hops") {
-              const n = parseInt(v, 10);                     // how many next= links one skater follows
-              if (!isNaN(n) && n >= 0) hops = n;
+            else if (key === "reps" || key === "hops") {
+              // reps = passes through the whole connected chain. `hops` is the
+              // earlier spelling (it counted links) and is read so drills written
+              // against it still load; it is never written back.
+              const n = parseInt(v, 10);
+              if (!isNaN(n) && n >= 0) reps = n;
             } else if (key === "regroup") {
               const n = parseFloat(v);                       // pace multiplier for the skate between routes
               if (!isNaN(n) && n > 0) regroup = n;
@@ -408,7 +411,7 @@ export function parseDrill(text) {
         const mode = lmode || (rand === false ? "sequence" : "reactive");   // legacy rand=off → sequence
         // a bare net= token targets every shot terminal that didn't carry its own >net
         if (net) terminals.forEach(t => { if (t.kind === "shot" && !t.net) t.net = net; });
-        const p = { id, kind, x, y, color, label, text, size, speed, hand, sym, carrier, facing, transfers, pickup, ...(terminals.length ? { terminals } : {}), net, holdLine, goalie, defense, wait, group, crease, lock, cues, mode, alwaysColor, lightId, ...(routeId ? { route: routeId } : {}), ...(qIx != null ? { q: qIx } : {}), ...(gapFt != null ? { gap: gapFt } : {}), ...(queue ? { queue } : {}), ...(nextRoute ? { next: nextRoute } : {}), ...(hops != null ? { hops } : {}), ...(regroup != null ? { regroup } : {}), ...(feedPucks ? { feed: true } : {}), ...(connector ? { connector: true } : {}), ...(bg ? { bg } : {}), ...(bgOp != null ? { bgOp } : {}), ...(border ? { border } : {}), ...(borderOp != null ? { borderOp } : {}), ...(textOp != null ? { textOp } : {}), forks: [], path: [] };
+        const p = { id, kind, x, y, color, label, text, size, speed, hand, sym, carrier, facing, transfers, pickup, ...(terminals.length ? { terminals } : {}), net, holdLine, goalie, defense, wait, group, crease, lock, cues, mode, alwaysColor, lightId, ...(routeId ? { route: routeId } : {}), ...(qIx != null ? { q: qIx } : {}), ...(gapFt != null ? { gap: gapFt } : {}), ...(queue ? { queue } : {}), ...(nextRoute ? { next: nextRoute } : {}), ...(reps != null ? { reps } : {}), ...(regroup != null ? { regroup } : {}), ...(feedPucks ? { feed: true } : {}), ...(connector ? { connector: true } : {}), ...(bg ? { bg } : {}), ...(bgOp != null ? { bgOp } : {}), ...(border ? { border } : {}), ...(borderOp != null ? { borderOp } : {}), ...(textOp != null ? { textOp } : {}), forks: [], path: [] };
         pieces.push(p); byId[id] = p;
       } else if (cmd === "PATH") {
         const id = tok[1];
@@ -708,7 +711,7 @@ export function serializeDrill(rink, pieces, title = "", desc = "", steps = [], 
     // the pace they cross at. `hops` is written whenever it isn't the default 1,
     // including 0 (which means "draw the link but don't run it").
     const lnx = p.kind === "route" && p.next
-      ? ` next=${p.next}${p.hops != null && p.hops !== 1 ? " hops=" + p.hops : ""}${p.regroup > 0 && p.regroup !== TRANSIT_RATE ? " regroup=" + f2(p.regroup) : ""}`
+      ? ` next=${p.next}${p.reps != null && p.reps !== 1 ? " reps=" + p.reps : ""}${p.regroup > 0 && p.regroup !== TRANSIT_RATE ? " regroup=" + f2(p.regroup) : ""}`
       : "";
     const lfeed = p.kind === "route" && p.feed ? " feed" : "";
     const lconn = p.kind === "route" && p.connector ? " connector" : "";

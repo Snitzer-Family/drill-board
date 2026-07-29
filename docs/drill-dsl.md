@@ -156,7 +156,7 @@ Places a piece. `id` is any unique token (e.g. `F1`, `PK1`, `N2`).
 | `queue=point:<pt>` | route | Each skater holds until the one **ahead of them** reaches point `<pt>` of the route (1-based). |
 | `queue=lead:<ft>` | route | Each skater holds until the one ahead is `<ft>` **clear of them** — the separation, not the distance travelled (they already start `gap` apart). Omit `queue=` entirely and they all go at once. |
 | `next=<routeId>` | route | When they finish, they skate to that route's head and run it — going around nets, props and anyone standing still. |
-| `hops=<n>` | route | How many `next=` links one skater follows (default `1`, omitted then). `0` draws the link without running it. Two routes pointed at each other recirculate, and this is what ends it. |
+| `reps=<n>` | route | How many times the whole **connected chain** is run (default `1`, omitted then). A -> B and back is ONE rep, not two links — a rep is what a coach counts. Every route in a chain carries the same number; the app writes it to all of them. With nothing connected, a rep above 1 sends them back to this route's own start. *(`hops=` is the earlier spelling, still read, never written.)* |
 | `regroup=<n>` | route | Pace multiplier for the skate between routes (default `0.65` — a glide, not another rep). |
 | `connector` | route | This route **is** a crossing between two lines, shaped by hand instead of drawn automatically. It has no line of its own, and following it does **not** spend one of the source route's `hops`. (Bare word.) |
 | `feed` | route | The line supplies its own pucks: a fresh one for every rep that needs one, so a recirculating drill never runs dry. Only ever acts where puck work is already authored. Fed pucks exist only while the drill runs — they are never written back to the text. (Bare word.) |
@@ -334,9 +334,9 @@ which lets the route supply them itself.
 is how a full-ice drill actually runs:
 
 ```drill
-PIECE R1 route 30 22 #3f7f8c Lane_A queue=lead:18 next=R2 hops=2
+PIECE R1 route 30 22 #3f7f8c Lane_A queue=lead:18 next=R2 reps=2
 PATH  R1 L 90,22 Q 130,22 165,45
-PIECE R2 route 170 66 #b06a2e Lane_B queue=lead:18 next=R1 hops=2
+PIECE R2 route 170 66 #b06a2e Lane_B queue=lead:18 next=R1 reps=2
 PATH  R2 L 110,66 Q 70,66 35,45
 ```
 
@@ -366,9 +366,10 @@ the automatic crossings either side collapse to nothing. In the app, *Shape the
 crossing ›* on the source route's popup builds one for you, seeded with the path
 it was already drawing.
 
-Two routes pointing at each other is a cycle, and deliberately so. `hops` is what
-bounds it: it counts down once per crossing (a `connector` is free), so the
-unfold always terminates.
+Two routes pointing at each other is a cycle, and deliberately so — closing the
+loop is exactly what ends a rep. `reps` is what bounds the whole thing: each rep
+walks the chain until it comes back to where it started, runs out, or would
+repeat a route, and the rep count is clamped.
 Branches and recycling don't combine yet — a route that carries a `BRANCH` runs
 its own legs and stops.
 

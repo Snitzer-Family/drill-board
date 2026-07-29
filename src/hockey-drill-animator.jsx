@@ -8,7 +8,7 @@ import { drillSvg } from "./drill-svg.js";
 import { mdEscape, mdInline, mdBlock } from "./md.js";
 import { clampX, clampY, fitInside, segEnd, segD, nearestT, splitSeg, zigzagPoints, wigglePoints, wigglePoly, zigzagPoly, convertSeg, fitRoute, evalSeg, rdp, catmullToBezier, alignJoint, mirrorJoint, translateJointHandles, trimSegStart, trimSegEnd, trimPolyStart, trimPolyEnd, gapPolyAt } from "./geometry.js";
 import { dirOf, dirAtWaypoint, spreadDir } from "./route-dir.js";
-import { lowerRoutes, queueOf, stackSpot, isMobile, unbindLine, transitPoly, transitObstacles,
+import { lowerRoutes, queueOf, stackSpot, isMobile, unbindLine, transitPoly, transitObstacles, chainOf,
   headHeadingDeg as routeHeadDeg, QUEUE_GAP, QUEUE_LEAD } from "./route-lines.js";
 import { PLAYER_R, TRANSIT_RATE, CROSSING_DASH } from "./constants.js";
 import * as boards from "./boards.js";
@@ -4233,6 +4233,7 @@ export default function DrillAnimator() {
   const routeFinishField = p => {
     const others = pieces.filter(q => q.kind === "route" && q.id !== p.id);
     const branchy = (p.forks || []).length > 0;
+    const chained = chainOf(pieces, p.id);
     return (
       <div className="hd-field">
         <div className="hd-sectitle">When they finish</div>
@@ -4248,15 +4249,9 @@ export default function DrillAnimator() {
             </div>
             {p.next && (
               <>
-                <div className="hd-poprow">
-                  <span>following</span>
-                  <Stepper value={p.hops == null ? 1 : p.hops} min={0} max={8} step={1}
-                    fmt={v => `${v} link${v === 1 ? "" : "s"}`} onChange={v => updateById(p.id, { hops: v })} />
-                </div>
                 <div className="hd-sechint">
                   They cross the ice to that line&rsquo;s start, going around nets, props
-                  and anyone standing still. Two lines pointed at each other
-                  recirculate; the link count is what ends it.
+                  and anyone standing still.
                 </div>
                 {branchy && <div className="hd-sechint">This route branches, so only the first leg runs — branches and recycling don&rsquo;t combine yet.</div>}
                 {!(pieces.find(q => q.id === p.next) || {}).connector && (
@@ -4268,6 +4263,21 @@ export default function DrillAnimator() {
             )}
           </>
         ) : <div className="hd-sechint">Add another route to send them on to.</div>}
+        {/* A rep is one pass through the WHOLE connected chain, so the count
+            belongs to the chain, not to any one route in it — setting it here
+            writes it to every route joined to this one. Offered even with nothing
+            connected: for a lone route, going again means back to its own head. */}
+        <div className="hd-poprow">
+          <span>Run it</span>
+          <Stepper value={p.reps == null ? 1 : p.reps} min={1} max={8} step={1}
+            fmt={v => `${v}\u00d7`} onChange={v => setChainReps(p.id, v)} />
+          <span className="hd-sechint">{chained.size > 1 ? `with ${chained.size - 1} more route${chained.size > 2 ? "s" : ""}` : "times"}</span>
+        </div>
+        <div className="hd-sechint">
+          {chained.size > 1
+            ? "One rep is a full lap of the whole chain, so every route in it counts the same number."
+            : "Nothing connected, so they loop back to this route's own start each time."}
+        </div>
       </div>
     );
   };
@@ -4364,6 +4374,13 @@ export default function DrillAnimator() {
     flash(`Feeding — ${nameOf(head.id)} collects a puck at the start`);
     return [...out, { ...makePiece("puck", { x: clampX(at.x + 1.6), y: clampY(at.y + 3.4) }, out),
       pickup: { to: head.id, at: -1 } }];
+  });
+  // A rep counts a pass through the whole connected chain, so the number is the
+  // CHAIN's, not one route's. Write it to every route joined to this one, or two
+  // ends of the same loop could disagree about how many times it runs.
+  const setChainReps = (routeId, v) => setPieces(ps => {
+    const ids = chainOf(ps, routeId);
+    return ps.map(q => (ids.has(q.id) && q.kind === "route" ? { ...q, reps: v } : q));
   });
   // Turn the automatic crossing into a route you can shape. It becomes a real
   // route piece seeded with the path the app was already drawing, so every route

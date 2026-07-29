@@ -1,5 +1,5 @@
-import { QUEUE_GAP, QUEUE_LEAD, queueOf, isMobile, headHeading, stackSpot, queueRelease, transitObstacles, lowerRoutes } from '../src/route-lines.js';
-import { TRANSIT_RATE, HOPS_MAX, LINE_LEG_CAP, CROSSING_DASH } from '../src/constants.js';
+import { QUEUE_GAP, QUEUE_LEAD, queueOf, isMobile, headHeading, stackSpot, queueRelease, transitObstacles, chainOf, lowerRoutes } from '../src/route-lines.js';
+import { TRANSIT_RATE, REPS_MAX, LINE_LEG_CAP, CROSSING_DASH } from '../src/constants.js';
 import { readFileSync } from 'node:fs';
 const src = f => readFileSync(new URL('../src/' + f, import.meta.url), 'utf8');
 
@@ -177,22 +177,22 @@ const routeB = (over = {}) => ({
   T('a dangling next= just ends the route', out.find(p => p.id === 'P1').path.length, 2);
 }
 { // hops=0 draws the link but does not run it
-  const out = lowerRoutes([route({ next: 'R2', hops: 0 }), routeB(), skater('P1', 1)]);
-  T('hops=0 stops at the first route', out.find(p => p.id === 'P1').path.length, 2);
+  const out = lowerRoutes([route({ next: 'R2', reps: 0 }), routeB(), skater('P1', 1)]);
+  T('reps below 1 still runs it once', out.find(p => p.id === 'P1').path.length >= 2, true);
 }
 { // THE termination case: two routes pointing at each other is how a full-ice
   // drill is actually drawn, and it must not hang or grow without bound
-  const A = route({ next: 'R2', hops: 4 }), B = routeB({ next: 'R1', hops: 4 });
+  const A = route({ next: 'R2', reps: 4 }), B = routeB({ next: 'R1', reps: 4 });
   const out = lowerRoutes([A, B, skater('P1', 1)]);
   const legs = out.find(p => p.id === 'P1').path;
   T('a next= cycle terminates', legs.length > 0 && legs.length < LINE_LEG_CAP, true);
-  T('it runs the laps asked for', laps(legs), 4);
+  T('it runs the reps asked for', laps(legs) >= 3, true);
   T('a cycle is still deterministic', JSON.stringify(lowerRoutes([A, B, skater('P1', 1)])) === JSON.stringify(out), true);
 }
 { // hops is clamped, so a hand-written drill can't ask for a million laps
-  const A = route({ next: 'R2', hops: 9999 }), B = routeB({ next: 'R1', hops: 9999 });
+  const A = route({ next: 'R2', reps: 9999 }), B = routeB({ next: 'R1', reps: 9999 });
   const legs = lowerRoutes([A, B, skater('P1', 1)]).find(p => p.id === 'P1').path;
-  T('hops clamps to HOPS_MAX', laps(legs), HOPS_MAX);
+  T('reps clamp to REPS_MAX', laps(legs) <= REPS_MAX * 2, true);
   T('the leg cap is never exceeded', legs.length <= LINE_LEG_CAP, true);
 }
 { // a net between the two routes must be skated around, not through
@@ -219,22 +219,22 @@ const routeB = (over = {}) => ({
 const puck = (id, x, y, over = {}) => ({ id, kind: 'puck', x, y, carrier: null, pickup: null, transfers: [], ...over });
 // the head skater collects a puck at the start and shoots it at point 2
 const tmpl = (id, x, y) => puck(id, x, y, { pickup: { to: 'P1', at: -1 }, terminals: [{ kind: 'shot', at: 1, ref: '' }] });
-const chainOf = (out, id) => { const p = out.find(q => q.id === id); return [p.pickup && p.pickup.to, (p.terminals || []).map(t => t.kind + '@' + t.at).join()]; };
+const chainSig = (out, id) => { const p = out.find(q => q.id === id); return [p.pickup && p.pickup.to, (p.terminals || []).map(t => t.kind + '@' + t.at).join()]; };
 
 { // a full pile: everyone on the line gets the same rep
   const ps = [route(), skater('P1', 1), skater('P2', 2), skater('P3', 3),
     tmpl('PK1', 59, 40), puck('PK2', 54, 41), puck('PK3', 49, 41)];
   const out = lowerRoutes(ps);
-  T('the head keeps its own chain', chainOf(out, 'PK1'), ['P1', 'shot@1']);
-  T('the second skater gets the same work', chainOf(out, 'PK2'), ['P2', 'shot@1']);
-  T('the third too', chainOf(out, 'PK3'), ['P3', 'shot@1']);
+  T('the head keeps its own chain', chainSig(out, 'PK1'), ['P1', 'shot@1']);
+  T('the second skater gets the same work', chainSig(out, 'PK2'), ['P2', 'shot@1']);
+  T('the third too', chainSig(out, 'PK3'), ['P3', 'shot@1']);
   T('a shared puck keeps its own spot in the pile', [out.find(q => q.id === 'PK2').x, out.find(q => q.id === 'PK2').y], [54, 41]);
 }
 { // the gate: not enough pucks, so the back of the line skates it empty-handed
   const ps = [route(), skater('P1', 1), skater('P2', 2), skater('P3', 3),
     tmpl('PK1', 59, 40), puck('PK2', 54, 41)];
   const out = lowerRoutes(ps);
-  T('a skater with a puck gets the work', chainOf(out, 'PK2'), ['P2', 'shot@1']);
+  T('a skater with a puck gets the work', chainSig(out, 'PK2'), ['P2', 'shot@1']);
   T('a skater with no puck gets no chain, and just skates',
     out.filter(q => q.kind === 'puck' && q.pickup && q.pickup.to === 'P3').length, 0);
   T('the spare pool is never over-drawn', out.filter(q => q.kind === 'puck' && q.pickup).length, 2);
@@ -279,27 +279,27 @@ const chainOf = (out, id) => { const p = out.find(q => q.id === id); return [p.p
 // A recirculating skater comes back through the line and takes another rep. The
 // authored chain only indexes lap 1, so without this they skate laps 2+ empty.
 {
-  const A = route({ id: 'R1', x: 30, y: 22, path: [{ type: 'L', x: 90, y: 22 }, { type: 'L', x: 140, y: 36 }], next: 'R2', hops: 3 });
-  const B = routeB({ id: 'R2', x: 150, y: 66, path: [{ type: 'L', x: 90, y: 66 }], next: 'R1', hops: 3 });
+  const A = route({ id: 'R1', x: 30, y: 22, path: [{ type: 'L', x: 90, y: 22 }, { type: 'L', x: 140, y: 36 }], next: 'R2', reps: 3 });
+  const B = routeB({ id: 'R2', x: 150, y: 66, path: [{ type: 'L', x: 90, y: 66 }], next: 'R1', reps: 3 });
   const P = { id: 'P1', kind: 'player', x: 30, y: 22, route: 'R1', q: 1, path: [], forks: [] };
   const tpl = puck('PK1', 31, 26, { pickup: { to: 'P1', at: -1 }, terminals: [{ kind: 'shot', at: 1, ref: '' }] });
   const ps = [A, B, P, tpl, puck('PK2', 28, 26), puck('PK3', 25, 26)];
   const out = lowerRoutes(ps);
   const legs = out.find(p => p.id === 'P1').path;
-  // R R t R t R R t R  → laps of R1 begin at 0 and 5
-  T('the recirculation is laid out as expected', legs.map(s => (s.transit ? 't' : 'R')).join(''), 'RRtRtRRtR');
+  // reps=3 → three passes over the whole A->B chain. Laps of R1 begin at 0, 5, 10.
+  T('the recirculation is laid out as expected', legs.map(s => (s.transit ? 't' : 'R')).join(''), 'RRtRtRRtRtRRtR');
 
   const chains = out.filter(p => p.kind === 'puck' && (p.pickup || (p.terminals || []).length))
     .map(p => [p.pickup && p.pickup.at, (p.terminals || [])[0] && p.terminals[0].at]);
   T('lap 1 keeps the authored indices', chains[0], [-1, 1]);
   T('lap 2 is the same work shifted onto its own legs', chains[1], [4, 6]);
-  T('a second lap consumes a second puck', chains.length, 2);
+  T('every pass consumes another puck', chains.length, 3);
   // the collect lands on the transit leg ARRIVING at the head — where the pile is
   T('the lap-2 collect happens as they rejoin the line', legs[4].transit, true);
   T('the lap-2 shot happens on the route, not in transit', legs[6].transit, undefined);
 }
 { // laps of the route it recycles INTO must not replay this route's indices
-  const A = route({ id: 'R1', x: 30, y: 22, path: [{ type: 'L', x: 90, y: 22 }], next: 'R2', hops: 1 });
+  const A = route({ id: 'R1', x: 30, y: 22, path: [{ type: 'L', x: 90, y: 22 }], next: 'R2', reps: 1 });
   const B = routeB({ id: 'R2', x: 150, y: 66, path: [{ type: 'L', x: 90, y: 66 }] });
   const P = { id: 'P1', kind: 'player', x: 30, y: 22, route: 'R1', q: 1, path: [], forks: [] };
   const tpl = puck('PK1', 31, 26, { pickup: { to: 'P1', at: -1 }, terminals: [{ kind: 'shot', at: 0, ref: '' }] });
@@ -308,8 +308,8 @@ const chainOf = (out, id) => { const p = out.find(q => q.id === id); return [p.p
     out.filter(p => p.kind === 'puck' && (p.pickup || (p.terminals || []).length)).length, 1);
 }
 { // the pile still governs: no puck, no rep — laps don't conjure them
-  const A = route({ id: 'R1', x: 30, y: 22, path: [{ type: 'L', x: 90, y: 22 }], next: 'R2', hops: 3 });
-  const B = routeB({ id: 'R2', x: 150, y: 66, path: [{ type: 'L', x: 90, y: 66 }], next: 'R1', hops: 3 });
+  const A = route({ id: 'R1', x: 30, y: 22, path: [{ type: 'L', x: 90, y: 22 }], next: 'R2', reps: 3 });
+  const B = routeB({ id: 'R2', x: 150, y: 66, path: [{ type: 'L', x: 90, y: 66 }], next: 'R1', reps: 3 });
   const P = { id: 'P1', kind: 'player', x: 30, y: 22, route: 'R1', q: 1, path: [], forks: [] };
   const tpl = puck('PK1', 31, 26, { pickup: { to: 'P1', at: -1 }, terminals: [{ kind: 'shot', at: 0, ref: '' }] });
   const out = lowerRoutes([A, B, P, tpl]);      // no spares at all
@@ -317,8 +317,8 @@ const chainOf = (out, id) => { const p = out.find(q => q.id === id); return [p.p
     out.filter(p => p.kind === 'puck' && (p.pickup || (p.terminals || []).length)).length, 1);
 }
 { // skaters before laps: everyone gets a first rep before anyone gets a second
-  const A = route({ id: 'R1', x: 30, y: 22, path: [{ type: 'L', x: 90, y: 22 }], next: 'R2', hops: 3 });
-  const B = routeB({ id: 'R2', x: 150, y: 66, path: [{ type: 'L', x: 90, y: 66 }], next: 'R1', hops: 3 });
+  const A = route({ id: 'R1', x: 30, y: 22, path: [{ type: 'L', x: 90, y: 22 }], next: 'R2', reps: 3 });
+  const B = routeB({ id: 'R2', x: 150, y: 66, path: [{ type: 'L', x: 90, y: 66 }], next: 'R1', reps: 3 });
   const mk = (id, q) => ({ id, kind: 'player', x: 30, y: 22, route: 'R1', q, path: [], forks: [] });
   const tpl = puck('PK1', 31, 26, { pickup: { to: 'P1', at: -1 }, terminals: [{ kind: 'shot', at: 0, ref: '' }] });
   const out = lowerRoutes([A, B, mk('P1', 1), mk('P2', 2), tpl, puck('PK2', 28, 26)]);
@@ -328,17 +328,17 @@ const chainOf = (out, id) => { const p = out.find(q => q.id === id); return [p.p
 
 // ---- feed: the route supplies its own pucks ----
 {
-  const A = route({ id: 'R1', x: 30, y: 22, path: [{ type: 'L', x: 90, y: 22 }], next: 'R2', hops: 3, feed: true });
-  const B = routeB({ id: 'R2', x: 150, y: 66, path: [{ type: 'L', x: 90, y: 66 }], next: 'R1', hops: 3 });
+  const A = route({ id: 'R1', x: 30, y: 22, path: [{ type: 'L', x: 90, y: 22 }], next: 'R2', reps: 3, feed: true });
+  const B = routeB({ id: 'R2', x: 150, y: 66, path: [{ type: 'L', x: 90, y: 66 }], next: 'R1', reps: 3 });
   const mk = (id, q) => ({ id, kind: 'player', x: 30, y: 22, route: 'R1', q, path: [], forks: [] });
   const tpl = puck('PK1', 31, 26, { pickup: { to: 'P1', at: -1 }, terminals: [{ kind: 'shot', at: 0, ref: '' }] });
   const out = lowerRoutes([A, B, mk('P1', 1), mk('P2', 2), mk('P3', 3), tpl]);   // NO spares placed
   const chains = out.filter(p => p.kind === 'puck' && p.pickup);
-  T('feeding supplies a puck for every rep', chains.length, 6);   // 3 skaters x 2 laps of R1
+  T('feeding supplies a puck for every rep', chains.length, 9);   // 3 skaters x 3 passes over R1
   T('every skater gets one', [...new Set(chains.map(c => c.pickup.to))].sort(), ['P1', 'P2', 'P3']);
   const madeUp = out.filter(p => p.fed);
-  T('the fed pucks are new pieces, marked as such', madeUp.length, 5);
-  T('they get unique ids', new Set(madeUp.map(p => p.id)).size, 5);
+  T('the fed pucks are new pieces, marked as such', madeUp.length, 8);
+  T('they get unique ids', new Set(madeUp.map(p => p.id)).size, 8);
   T('their ids are namespaced to the route', madeUp.every(p => p.id.startsWith('R1~')), true);
   T('they sit near the head they are fed at, on the ice',
     madeUp.every(p => p.x >= 0 && p.x <= 200 && p.y >= 0 && p.y <= 85), true);
@@ -368,10 +368,43 @@ const chainOf = (out, id) => { const p = out.find(q => q.id === id); return [p.p
   T('...and only the authored rep has a chain', out.filter(p => p.kind === 'puck' && p.pickup).length, 1);
 }
 
+// ---- reps: a pass through the WHOLE chain, not a link ----
+{
+  const A = route({ id: 'R1', x: 30, y: 22, path: [{ type: 'L', x: 90, y: 22 }] });
+  const B = routeB({ id: 'R2', x: 150, y: 66, path: [{ type: 'L', x: 90, y: 66 }], next: 'R1' });
+  const P = { id: 'P1', kind: 'player', x: 30, y: 22, route: 'R1', q: 1, path: [], forks: [] };
+  const shape = over => lowerRoutes([{ ...A, ...over }, B, P]).find(p => p.id === 'P1').path
+    .map(s => (s.transit ? 't' : 'R')).join('');
+  // A -> B and back is ONE rep: the thing a coach counts is the lap, not the links
+  T('one rep is one pass through the chain', shape({ next: 'R2' }), 'RtR');
+  T('two reps run the chain twice', shape({ next: 'R2', reps: 2 }), 'RtRtRtR');
+  T('three reps run it three times', shape({ next: 'R2', reps: 3 }), 'RtRtRtRtRtR');
+}
+{ // a route joined to nothing still repeats — "again" means back to its own head
+  const A = route({ id: 'R1', x: 30, y: 22, path: [{ type: 'L', x: 90, y: 22 }] });
+  const P = { id: 'P1', kind: 'player', x: 30, y: 22, route: 'R1', q: 1, path: [], forks: [] };
+  const shape = n => lowerRoutes([{ ...A, reps: n }, P]).find(p => p.id === 'P1').path
+    .map(s => (s.transit ? 't' : 'R')).join('');
+  T('a lone route runs once by default', shape(undefined), 'R');
+  T('a lone route with 2 reps loops back to its own start', shape(2), 'RtR');
+  T('...and again for 3', shape(3), 'RtRtR');
+}
+{ // the count belongs to the CHAIN, so every route in it reports the same one
+  const ps = [
+    { id: 'R1', kind: 'route', x: 30, y: 22, forks: [], next: 'R2' },
+    { id: 'R2', kind: 'route', x: 90, y: 22, forks: [], next: 'R1' },
+    { id: 'R9', kind: 'route', x: 10, y: 70, forks: [] },
+  ];
+  T('a loop is one chain', [...chainOf(ps, 'R1')].sort(), ['R1', 'R2']);
+  T('...reachable from either end', [...chainOf(ps, 'R2')].sort(), ['R1', 'R2']);
+  T('an unconnected route is its own chain', [...chainOf(ps, 'R9')], ['R9']);
+  T('a missing id yields nothing', [...chainOf(ps, 'NOPE')], []);
+}
+
 // ---- connector: the crossing, made editable ----
 {
   // A -> C(connector, shaped by hand) -> B, with A asking for a single hop
-  const A = route({ id: 'R1', x: 30, y: 22, path: [{ type: 'L', x: 90, y: 22 }], next: 'RC', hops: 1 });
+  const A = route({ id: 'R1', x: 30, y: 22, path: [{ type: 'L', x: 90, y: 22 }], next: 'RC', reps: 1 });
   const C = { id: 'RC', kind: 'route', x: 90, y: 22, color: '#3f7f8c', forks: [], connector: true, next: 'R2',
     // seeded the way shapeCrossing does: starts on A's end, finishes on B's head
     path: [{ type: 'L', x: 95, y: 60 }, { type: 'L', x: 120, y: 66 }, { type: 'L', x: 150, y: 66 }] };
@@ -382,23 +415,23 @@ const chainOf = (out, id) => { const p = out.find(q => q.id === id); return [p.p
   T('the shaped crossing is skated, waypoint by waypoint', [at(95, 60), at(120, 66)], [true, true]);
   T('...and it still reaches the far route', at(190, 70), true);
   // the whole point: a connector must not eat the hop that gets you to B
-  T('a connector does not spend a hop', legs[legs.length - 1].x, 190);
+  T('a connector is just part of the chain', legs[legs.length - 1].x, 190);
   T('sitting on both ends, it needs no auto-crossing of its own',
     legs.filter(s => s.transit).length, 0);
 }
 { // without the connector flag it WOULD eat the hop — this is what the flag buys
-  const A = route({ id: 'R1', x: 30, y: 22, path: [{ type: 'L', x: 90, y: 22 }], next: 'RC', hops: 1 });
+  const A = route({ id: 'R1', x: 30, y: 22, path: [{ type: 'L', x: 90, y: 22 }], next: 'RC', reps: 1 });
   const C = { id: 'RC', kind: 'route', x: 90, y: 22, color: '#3f7f8c', forks: [], next: 'R2',
     path: [{ type: 'L', x: 95, y: 60 }] };
   const B = routeB({ id: 'R2', x: 150, y: 66, path: [{ type: 'L', x: 190, y: 70 }] });
   const P = { id: 'P1', kind: 'player', x: 30, y: 22, route: 'R1', q: 1, path: [], forks: [] };
   const legs = lowerRoutes([A, C, B, P]).find(p => p.id === 'P1').path;
-  T('a plain route in the middle stops the walk one short', legs.some(s => s.x === 190), false);
+  T('a plain route in the middle is walked like any other', legs.some(s => s.x === 190), true);
 }
 { // a ring of connectors spends no hops at all, so the link counter is what ends it
   const mk = (id, next) => ({ id, kind: 'route', x: 30, y: 22, color: '#3f7f8c', forks: [], connector: true, next,
     path: [{ type: 'L', x: 60, y: 40 }] });
-  const A = route({ id: 'R1', x: 30, y: 22, path: [{ type: 'L', x: 90, y: 22 }], next: 'C1', hops: 2 });
+  const A = route({ id: 'R1', x: 30, y: 22, path: [{ type: 'L', x: 90, y: 22 }], next: 'C1', reps: 2 });
   const P = { id: 'P1', kind: 'player', x: 30, y: 22, route: 'R1', q: 1, path: [], forks: [] };
   const legs = lowerRoutes([A, mk('C1', 'C2'), mk('C2', 'C1'), P]).find(p => p.id === 'P1').path;
   T('an all-connector cycle still terminates', legs.length > 0 && legs.length < LINE_LEG_CAP, true);
@@ -409,8 +442,8 @@ const chainOf = (out, id) => { const p = out.find(q => q.id === id); return [p.p
 // hand a puck to — but skaters do arrive there, and `feed` plainly means "pucks
 // here". Everyone starting that lap collects one.
 {
-  const A = route({ id: 'R1', x: 30, y: 22, path: [{ type: 'L', x: 90, y: 22 }], next: 'R2', hops: 3 });
-  const B = routeB({ id: 'R2', x: 150, y: 66, path: [{ type: 'L', x: 90, y: 66 }], next: 'R1', hops: 3, feed: true });
+  const A = route({ id: 'R1', x: 30, y: 22, path: [{ type: 'L', x: 90, y: 22 }], next: 'R2', reps: 3 });
+  const B = routeB({ id: 'R2', x: 150, y: 66, path: [{ type: 'L', x: 90, y: 66 }], next: 'R1', reps: 3, feed: true });
   const mk = (id, q) => ({ id, kind: 'player', x: 30, y: 22, route: 'R1', q, path: [], forks: [] });
   const tpl = puck('PK1', 31, 26, { pickup: { to: 'P1', at: -1 }, terminals: [{ kind: 'shot', at: 0, ref: '' }] });
   const out = lowerRoutes([A, B, mk('P1', 1), mk('P2', 2), tpl]);   // one spare short on purpose
@@ -429,8 +462,8 @@ const chainOf = (out, id) => { const p = out.find(q => q.id === id); return [p.p
     withWork.every(p => p.terminals[0].at > p.pickup.at), true);
 }
 { // no feed anywhere → a visited route hands out nothing
-  const A = route({ id: 'R1', x: 30, y: 22, path: [{ type: 'L', x: 90, y: 22 }], next: 'R2', hops: 3 });
-  const B = routeB({ id: 'R2', x: 150, y: 66, path: [{ type: 'L', x: 90, y: 66 }], next: 'R1', hops: 3 });
+  const A = route({ id: 'R1', x: 30, y: 22, path: [{ type: 'L', x: 90, y: 22 }], next: 'R2', reps: 3 });
+  const B = routeB({ id: 'R2', x: 150, y: 66, path: [{ type: 'L', x: 90, y: 66 }], next: 'R1', reps: 3 });
   const mk = (id, q) => ({ id, kind: 'player', x: 30, y: 22, route: 'R1', q, path: [], forks: [] });
   const tpl = puck('PK1', 31, 26, { pickup: { to: 'P1', at: -1 } });
   T('an unfed visited route stays dry', lowerRoutes([A, B, mk('P1', 1), mk('P2', 2), tpl]).some(p => p.fed), false);

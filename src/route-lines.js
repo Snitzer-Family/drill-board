@@ -24,7 +24,7 @@
 
 import { segTangentAngle, clampX, clampY, rdp } from "./geometry.js";
 import { netShapes, bumperShapes, detourRoute } from "./net-collide.js";
-import { QUEUE_GAP, QUEUE_LEAD, ICON_SCALE, PLAYER_R, TRANSIT_RATE, HOPS_MAX, LINE_LEG_CAP } from "./constants.js";
+import { QUEUE_GAP, QUEUE_LEAD, ICON_SCALE, PLAYER_R, TRANSIT_RATE, REPS_MAX, LINE_LEG_CAP } from "./constants.js";
 
 // feet between stacked skaters, measured back along the route's entry heading,
 // and how far clear of you the skater ahead gets before you go
@@ -106,6 +106,28 @@ export function queueRelease(route, prevId) {
     return { on: prevId, dist: Math.max(0, lead - spacing), mode: "span" };
   }
   return null;
+}
+
+// Every route joined to this one by `next=`, in either direction. A rep counts a
+// pass through the whole chain, so the count belongs to the chain rather than to
+// any one route in it — Lane A and Lane B feeding each other share one number,
+// and the editor writes it to all of them at once.
+export function chainOf(pieces, routeId) {
+  const routes = (pieces || []).filter(p => p.kind === "route");
+  const adj = new Map(routes.map(r => [r.id, new Set()]));
+  for (const r of routes) {
+    if (!adj.has(r.id) || !adj.has(r.next)) continue;
+    adj.get(r.id).add(r.next);
+    adj.get(r.next).add(r.id);
+  }
+  const out = new Set(), stack = [routeId];
+  while (stack.length) {
+    const id = stack.pop();
+    if (out.has(id) || !adj.has(id)) continue;
+    out.add(id);
+    for (const n of adj.get(id)) stack.push(n);
+  }
+  return out;
 }
 
 // The static things a skater crossing the ice has to go around. Deliberately a
@@ -366,42 +388,48 @@ export function lowerRoutes(pieces) {
   // "a lowered skater is an ordinary player" rule: a lap is just more legs, and
   // the timing engine needs to know nothing about recycling.
   //
-  // Bounded three independent ways, none of them a fixpoint: `hops` is a counter
-  // that strictly decreases each unfold, it is clamped to HOPS_MAX on entry, and
-  // the leg count is capped. So this is primitive recursion with a decreasing
-  // measure — it terminates even when next= points in a cycle (A -> B -> A),
-  // which is exactly how a real full-ice drill is drawn.
+  // Bounded three independent ways, none of them a fixpoint: the rep count is
+  // clamped to REPS_MAX, each rep's walk stops the moment the chain closes or
+  // revisits a route, and the leg count is capped. A next= cycle (A -> B -> A,
+  // which is exactly how a real full-ice drill is drawn) is the NORMAL case here,
+  // not a hazard — closing the loop is what ends a rep.
+  // A REP is one pass through the whole connected chain of routes, not one link.
+  // Lane A feeding Lane B and back again is ONE rep, because that is the thing a
+  // coach counts: "we'll go three times", meaning three times round, however many
+  // routes the loop happens to be made of.
+  //
+  // The chain is walked until it closes (back to where this rep started), runs
+  // out, or repeats itself. Then, if there are reps left, the skater crosses back
+  // to the start and goes again — which is also what gives a LONE route its reps:
+  // with nothing to connect to, "again" means back to its own head.
   const unfold = R => {
-    const legs = (R.path || []).map(s => ({ ...s }));
-    // where each pass over a route begins, and the head it begins from — what the
-    // puck work is replayed against, so a second lap is a second rep and not just
-    // the same legs skated again empty-handed
-    const laps = [{ base: 0, x: R.x, y: R.y, route: R.id }];
-    let cur = R;
-    let hops = Math.max(0, Math.min(HOPS_MAX, R.hops == null ? 1 : R.hops));
-    // A CONNECTOR is the crossing itself, made editable — a path the coach shaped
-    // to walk a skater round the ice into the next line, not another route in the
-    // drill. Following one must not spend a hop, or inserting one would silently
-    // halve how far a recirculating skater gets. That means hops alone no longer
-    // bounds the walk, so links are counted too: a ring of nothing but connectors
-    // would otherwise loop forever.
-    let links = 0;
-    while (hops > 0 && links < HOPS_MAX * 2 + 4) {
-      const nxt = routes.get(cur.next);
-      if (!nxt || !legs.length || legs.length >= LINE_LEG_CAP) break;
-      // Branching and recycling don't compose yet: a fork's `at` is an index into
-      // the route it belongs to, and past the first lap those indices no longer
-      // mean what they say. Stop at the last fork-free route rather than splice a
-      // branch onto the wrong waypoint.
-      if ((cur.forks || []).length || (nxt.forks || []).length) break;
-      links++;
-      if (!nxt.connector) hops--;
-      const end = legs[legs.length - 1];
-      const rate = cur.regroup > 0 ? cur.regroup : TRANSIT_RATE;
-      legs.push(...transitLegs({ x: end.x, y: end.y }, { x: nxt.x, y: nxt.y }, obstacles, rate));
-      laps.push({ base: legs.length, x: nxt.x, y: nxt.y, route: nxt.id });
-      legs.push(...(nxt.path || []).map(s => ({ ...s })));
-      cur = nxt;
+    const legs = [], laps = [];
+    const reps = Math.max(1, Math.min(REPS_MAX, R.reps == null ? 1 : R.reps));
+    for (let r = 0; r < reps && legs.length < LINE_LEG_CAP; r++) {
+      let cur = R, prev = null;
+      const seen = new Set();
+      while (cur && legs.length < LINE_LEG_CAP) {
+        // Branching and recycling don't compose yet: a fork's `at` indexes the
+        // route it belongs to, and past the first pass those indices stop meaning
+        // what they say. Stop rather than splice onto the wrong waypoint.
+        if ((cur.forks || []).length) break;
+        // cross to this route's head — except on the very first leg of all, where
+        // the skater is already standing on it
+        if (legs.length) {
+          const end = legs[legs.length - 1];
+          const rate = prev && prev.regroup > 0 ? prev.regroup : TRANSIT_RATE;
+          legs.push(...transitLegs({ x: end.x, y: end.y }, { x: cur.x, y: cur.y }, obstacles, rate));
+        }
+        laps.push({ base: legs.length, x: cur.x, y: cur.y, route: cur.id });
+        legs.push(...(cur.path || []).map(s => ({ ...s })));
+        seen.add(cur.id);
+        const nxt = routes.get(cur.next);
+        // the rep ends when the chain closes back on itself, runs out, or would
+        // repeat a route it has already covered this time round
+        if (!nxt || nxt.id === R.id || seen.has(nxt.id)) break;
+        prev = cur; cur = nxt;
+      }
+      if (!legs.length) break;                    // nothing to repeat
     }
     const capped = legs.slice(0, LINE_LEG_CAP);
     return { legs: capped, laps: laps.filter(l => l.base < capped.length) };
