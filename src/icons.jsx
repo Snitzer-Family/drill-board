@@ -179,7 +179,7 @@ export function DiagPanel({ drillVersion }) {
 // stays literal. Only two things here follow the theme: the selection ring,
 // which has to read against whatever ice it lands on, and the puck body.
 
-export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStickDown, swing = 0, noShadow = false, hitOff = false, wb = false, wbCircle = false }) {
+export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStickDown, swing = 0, noShadow = false, hitOff = false, wb = false, wbCircle = false, part }) {
   const T = useTheme();
   const ink = useInk();
   const SEL = T["ice-select"];
@@ -202,29 +202,43 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
     const red = ink(p.color || "#c81e33");
     // mouth (goal line) faces +x at x=0; the cage bows back to a rounded back at -x
     const CAGE = "M 0 -3.75 L -1.7 -3.75 Q -4.15 -3.75 -4.15 -1.5 L -4.15 1.5 Q -4.15 3.75 -1.7 3.75 L 0 3.75";
-    body = (
-      <g pointerEvents="none">
-        {selected && <rect x={-4.8} y={-4.5} width={5.4} height={9} rx={1} fill="none" stroke={SEL} strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
-        {/* a drawn goalie crease: an unfilled arch in front of the mouth (for a
-            net placed away from the standard crease). ~6 ft radius (7.5 local).
-            Suppressed on a net standing in a painted crease — the arc would
-            just trace the paint. The stored flag is left alone, so dragging the
-            net back out into open ice brings the drawn crease back. */}
-        {p.crease && !atGoalSpot(p) && <path d="M 0 -7.5 A 7.5 7.5 0 0 1 0 7.5" fill="none" stroke="#d7263d" strokeWidth={0.42} opacity={0.85} strokeLinecap="round" />}
-        {/* mesh backing + crosshatch netting + centre seam */}
-        <path d={CAGE + " Z"} fill="rgba(230,238,246,0.3)" stroke="none" />
-        <g stroke="#9fb0c0" strokeWidth={0.13} opacity={0.85} fill="none">
-          <path d="M -0.4 -2.9 L -3.7 -1.7 M -0.4 -1.45 L -3.95 -0.85 M -0.4 1.45 L -3.95 0.85 M -0.4 2.9 L -3.7 1.7" />
-          <path d="M -1.2 -3.3 L -1.2 3.3 M -2.4 -3.1 L -2.4 3.1 M -3.4 -2 L -3.4 2" />
-          <path d="M -0.2 0 L -4.0 0" stroke="#8ea0b2" strokeWidth={0.16} />
-        </g>
-        {/* red pipe frame + the goal-line pipe (with a slight overhang) + posts */}
-        <path d={CAGE} fill="none" stroke={red} strokeWidth={0.55} strokeLinejoin="round" strokeLinecap="round" />
-        <line x1={0} y1={-4.05} x2={0} y2={4.05} stroke={red} strokeWidth={0.8} strokeLinecap="round" />
-        <circle cx={0} cy={-3.75} r={0.82} fill={red} />
-        <circle cx={0} cy={3.75} r={0.82} fill={red} />
+    const ring = selected && <rect x={-4.8} y={-4.5} width={5.4} height={9} rx={1} fill="none" stroke={SEL} strokeWidth={0.4} strokeDasharray="1.2 0.9" />;
+    {/* a drawn goalie crease: an unfilled arch in front of the mouth (for a
+        net placed away from the standard crease). ~6 ft radius (7.5 local).
+        Suppressed on a net standing in a painted crease — the arc would just
+        trace the paint. The stored flag is left alone, so dragging the net back
+        out into open ice brings the drawn crease back. */}
+    const crease = p.crease && !atGoalSpot(p) &&
+      <path d="M 0 -7.5 A 7.5 7.5 0 0 1 0 7.5" fill="none" stroke="#d7263d" strokeWidth={0.42} opacity={0.85} strokeLinecap="round" />;
+    const posts = <>
+      <circle cx={0} cy={-3.75} r={0.82} fill={red} />
+      <circle cx={0} cy={3.75} r={0.82} fill={red} />
+    </>;
+    // mesh backing + crosshatch netting + centre seam, then the red pipe frame
+    // and the goal-line pipe (with a slight overhang)
+    const shell = <>
+      <path d={CAGE + " Z"} fill="rgba(230,238,246,0.3)" stroke="none" />
+      <g stroke="#9fb0c0" strokeWidth={0.13} opacity={0.85} fill="none">
+        <path d="M -0.4 -2.9 L -3.7 -1.7 M -0.4 -1.45 L -3.95 -0.85 M -0.4 1.45 L -3.95 0.85 M -0.4 2.9 L -3.7 1.7" />
+        <path d="M -1.2 -3.3 L -1.2 3.3 M -2.4 -3.1 L -2.4 3.1 M -3.4 -2 L -3.4 2" />
+        <path d="M -0.2 0 L -4.0 0" stroke="#8ea0b2" strokeWidth={0.16} />
       </g>
-    );
+      <path d={CAGE} fill="none" stroke={red} strokeWidth={0.55} strokeLinejoin="round" strokeLinecap="round" />
+      <line x1={0} y1={-4.05} x2={0} y2={4.05} stroke={red} strokeWidth={0.8} strokeLinecap="round" />
+    </>;
+    /* A MANNED net draws in two passes with the keeper sandwiched between, so
+       the goal reads as standing over them rather than behind them:
+         base — the posts, which a keeper tucked against one must cover: in RVH
+                they are sealed against the INSIDE of the post, not hiding behind
+                it, and a post painted over the pads looks like the latter.
+         top  — crossbar and top netting, which pass over a keeper deep in the
+                crease the way the goal frame really does.
+       `part` is undefined everywhere else (palette tiles, ghosts, empty nets),
+       which draws the lot in the original order — posts last — so an unmanned
+       net is untouched. */
+    body = part === "base" ? <g pointerEvents="none">{ring}{crease}{posts}</g>
+      : part === "top" ? <g pointerEvents="none">{shell}</g>
+      : <g pointerEvents="none">{ring}{crease}{shell}{posts}</g>;
   } else if (p.kind === "tire") {
     // agility tire, top-down: a black rubber ring with tread ticks (~r 2.6 ≈ 4 ft)
     // through ink(): black rubber on a dark rink was ~1.1:1, an invisible ring.

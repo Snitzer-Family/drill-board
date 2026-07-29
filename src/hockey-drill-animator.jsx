@@ -14,7 +14,7 @@ import { netShapes, bumperShapes, solidShapes, detourRoute, segCrossesNet } from
 import { RinkMarkings } from "./rink.jsx";
 import { ZONES, zoneAt } from "./zones.js";
 import { PieceIcon, GoalieIcon, Stepper, DiagPanel, Icon, ICONS } from "./icons.jsx";
-import { createTiming, resolveNearest, goalieDepth, GOALIE_MAXREL } from "./timing.js";
+import { createTiming, resolveNearest, goalieDepth, goalieSpot } from "./timing.js";
 import { buildLedger, mayHoldOn, mayHoldEntering, orderTransfers } from "./possession.js";
 import { classifyPenGroup, SYMBOL_MAX, SYMBOL_MAX_PX } from "./sketch-recognize.js";
 import { newGame, stepGame } from "./ai-game.js";
@@ -3768,13 +3768,14 @@ export default function DrillAnimator() {
     const R_TIRE = 2.6 * ICON_SCALE * (net.size || 1) + 1.3;
     const f = ((net.facing || 0) * Math.PI) / 180;    // net mouth opens this way
     const e = animT <= 0 ? 0 : animT * totalTime;
-    const MAXREL = isTire ? Math.PI : GOALIE_MAXREL; // net: post-to-post; tire: all the way round
-    const onArc = (ang, R) => {                         // clamp an aim angle to the front hemisphere
-      let rel = ang - f; rel = Math.atan2(Math.sin(rel), Math.cos(rel));
-      rel = Math.max(-MAXREL, Math.min(MAXREL, rel));
-      const a = f + rel;
-      const rr = isTire ? R_TIRE : R;                   // a tire keeper always rides just off the rubber
-      return { x: net.x + Math.cos(a) * rr, y: net.y + Math.sin(a) * rr, a: (a * 180) / Math.PI };
+    // A tire keeper is a different animal: no posts to seal against, so it just
+    // rides the rubber all the way round. A net keeper gets the real solve —
+    // arc, then RVH on a post, then the push across (goalieSpot in timing.js,
+    // which is also what places a saved puck).
+    const at = (ang, dist) => {
+      if (isTire) return { x: net.x + Math.cos(ang) * R_TIRE, y: net.y + Math.sin(ang) * R_TIRE, a: (ang * 180) / Math.PI };
+      const s = goalieSpot(net.facing, ang, dist);
+      return { x: net.x + s.x, y: net.y + s.y, a: s.a };
     };
     // freeze on a shot: once a shot at this net is released, the goalie sets and
     // holds — on a save the puck stops right at it, a corner goal beats it clean
@@ -3789,18 +3790,14 @@ export default function DrillAnimator() {
         && (!shot || leg.t0 > shot.t0)) shot = leg;
     }
     if (shot) {
-      // slide across the crease toward the shot's origin, but stay in front of
-      // the net (post-to-post) — a wrap-around shooter must not drag the goalie
-      // around behind or through the cage
-      // Depth comes off how far the SHOT was taken from, by the same ramp the
-      // tracking case uses — a point shot is met at the top of the crease, a
-      // walkout from the goal line. goalieDepth() is timing.js's, which is also
-      // what places the puck's stop point, so a save lands on the sprite.
-      // A beaten keeper is drawn a touch deeper: being beaten from distance
-      // reads as not having come out far enough.
+      // Set to where the SHOT came from, by the same solve as the tracking case:
+      // a point shot is met at the top of the crease, a walkout from the goal
+      // line, a shot from below the goal line off the post in RVH.
+      // A beaten keeper is drawn a touch deeper — being beaten from distance
+      // reads as not having come out far enough — by feeding the ramp a shorter
+      // shot rather than by scaling the result, so the RVH bands still apply.
       const sd = Math.hypot(shot.x0 - net.x, shot.y0 - net.y);
-      const R = goalieDepth(sd) * (shot.save ? 1 : 0.8);
-      return onArc(Math.atan2(shot.y0 - net.y, shot.x0 - net.x), R);
+      return at(Math.atan2(shot.y0 - net.y, shot.x0 - net.x), shot.save ? sd : sd * 0.7);
     }
     const pucks = pieces.filter(q => q.kind === "puck");
     let aim = { x: net.x + Math.cos(f) * 20, y: net.y + Math.sin(f) * 20 }, best = Infinity;
@@ -3810,11 +3807,7 @@ export default function DrillAnimator() {
       if (d < best) { best = d; aim = dp; }
     });
     const dist = best === Infinity ? 30 : best;
-    // depth: deep on the line when close, out to the top of the crease when far
-    // (the ramp lives in timing.js — the puck's save point reads the same one)
-    const R = goalieDepth(dist);
-    // track the puck aggressively, clamped to the front hemisphere (never behind)
-    return onArc(Math.atan2(aim.y - net.y, aim.x - net.x), R);
+    return at(Math.atan2(aim.y - net.y, aim.x - net.x), dist);
   }
 
   // airborne height (0..1) of a lofted puck this frame — for the fake-3D lift +
@@ -6061,12 +6054,15 @@ export default function DrillAnimator() {
     }
     if (!best) return 0;
     const n = best.q;
-    // the keeper's depth off the SAME ramp the sprite is drawn with, from the
-    // same shot length, so the two move together by construction
-    const need = goalieDepth(Math.hypot(n.x - L.x0, n.y - L.y0)) + GOALIE_CARET_CLEAR;
-    // a save already lands short of the cage — credit what it's standing off by
-    const already = (L.x1 - n.x) * -ux + (L.y1 - n.y) * -uy;
-    return Math.max(0, need - already);
+    // the keeper's ACTUAL spot, off the same solve the sprite is drawn with —
+    // not a depth along the shot line, because a severe-angle shot finds them
+    // sealed to a post well off that line
+    const s = goalieSpot(n.facing, Math.atan2(L.y0 - n.y, L.x0 - n.x), Math.hypot(n.x - L.x0, n.y - L.y0));
+    // how far along the shot's own axis the keeper sits relative to the landing
+    // point; the caret has to end up CLEAR behind that. A save already lands
+    // short of the cage, which this credits automatically.
+    const pK = (n.x + s.x - L.x1) * ux + (n.y + s.y - L.y1) * uy;
+    return Math.max(0, GOALIE_CARET_CLEAR - pK);
   };
   // priority for picking the "main" action shown in a badge with several actions
   const ACT_PRI = { shot: 5, pass: 4, rim: 3, chip: 2, receive: 1, collect: 1, pickup: 1 };
@@ -10147,12 +10143,20 @@ export default function DrillAnimator() {
                puck IN the net (a goal) sinks below the cage (rank −1). */}
             {!aiPlay && [
                 ...pieces.filter(p => p.kind !== "label" && p.kind !== "mark" && !previewHiddenIds.has(p.id)),
-                // goalies ride at rank 0.5 — above their net + drawn crease, below the action
+                // goalies ride at rank 0.5 — above their net's posts, below the action
                 ...pieces.filter(q => (q.kind === "net" || q.kind === "tire") && q.goalie).map(n => ({ goalieOf: n })),
+                // …and a manned net's crossbar + top netting comes back over them
+                // at 0.6, so the goal stands over the keeper instead of behind
+                // them. Whiteboard is excluded: the keeper is a letter there and
+                // the cage would simply bury it.
+                ...(whiteboard ? [] : pieces
+                  .filter(q => q.kind === "net" && q.goalie && !previewHiddenIds.has(q.id))
+                  .map(n => ({ netTopOf: n }))),
               ]
               .sort((a, b) => {
                 const goalE = animT <= 0 ? 0 : animT * totalTime;
-                const kindRank = p => (p.goalieOf ? 0.5
+                const kindRank = p => (p.netTopOf ? 0.6
+                  : p.goalieOf ? 0.5
                   : p.kind === "puck" && puckInGoal(p, goalE) ? -1
                   // whiteboard: the puck rides ABOVE the symbols, so a carried puck
                   // sits on top of an opaque circled-symbol disc instead of under it
@@ -10165,6 +10169,11 @@ export default function DrillAnimator() {
               })
               .map(p => {
               if (p.goalieOf) return renderGoalie(p.goalieOf);
+              if (p.netTopOf) {
+                const n = p.netTopOf, np = displayPos(n), nfx = iconXf(np);
+                return <PieceIcon key={`nettop-${n.id}`} p={n} pos={np} xf={nfx.t} thDeg={nfx.th}
+                  part="top" hitOff onDown={() => {}} />;
+              }
               const dp = displayPos(p);
               // a light's screen colour tracks its cue timeline as the drill plays
               if (p.kind === "light") p = { ...p, color: lightColor(p) };
@@ -10198,6 +10207,8 @@ export default function DrillAnimator() {
                 <PieceIcon key={p.id} p={p} pos={dp} xf={fx.t} thDeg={fx.th} wb={whiteboard} wbCircle={wbCircle}
                   selected={editing && p.id === selectedId} swing={displaySwing(p)}
                   dim={animT > 0} onDown={e => pieceDown(e, p.id)}
+                  // a manned net leaves its crossbar and netting to the 0.6 pass
+                  part={!whiteboard && p.kind === "net" && p.goalie ? "base" : undefined}
                   hitOff={p.lock && !lockedSelectable}
                   onStickDown={editing && tool !== "draw" && p.kind === "player" && !p.path.length && !(p.lock && !lockedSelectable)
                     ? e => stickDown(e, p) : undefined} />

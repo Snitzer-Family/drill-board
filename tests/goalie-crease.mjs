@@ -12,7 +12,8 @@
 // standing in the rink's painted crease must not have any of them draw a second
 // arc on top of the paint. Run: node tests/goalie-crease.mjs
 import { readFileSync } from 'node:fs';
-import { goalieDepth, goalieAngle, GOALIE_NEAR, GOALIE_FAR, GOALIE_DEEP, GOALIE_HIGH, GOALIE_MAXREL, GOALIE_FACE } from '../src/timing.js';
+import { goalieDepth, goalieSpot, GOALIE_NEAR, GOALIE_FAR, GOALIE_DEEP, GOALIE_HIGH, GOALIE_FACE,
+  GOALIE_ARC_MAX, GOALIE_RVH, GOALIE_SLIDE, GOALIE_FACE_MAX } from '../src/timing.js';
 import { atGoalSpot, GOAL_SPOTS } from '../src/constants.js';
 
 let pass = 0, fail = 0;
@@ -44,35 +45,72 @@ T('top of the circle (~25 ft) is met above 4 ft out', goalieDepth(25) > 4, true)
 T('a walkout (~12 ft) is still played deep', goalieDepth(12) < 2.5, true);
 T('the pad face pushes the puck further back still', GOALIE_FACE > 0, true);
 
-/* ---- the post-to-post clamp ---- */
-const deg = r => Math.round((r * 180) / Math.PI);
-T('square shot is not turned', deg(goalieAngle(0, 0)), 0);
-T('a shot from the side is clamped to the post', deg(goalieAngle(0, Math.PI / 2)), deg(GOALIE_MAXREL));
-T('…and from behind, to the same post', deg(goalieAngle(0, Math.PI * 0.9)), deg(GOALIE_MAXREL));
-T('…the other way too', deg(goalieAngle(0, -Math.PI * 0.9)), -deg(GOALIE_MAXREL));
-T('clamp follows the net facing', deg(goalieAngle(180, Math.PI)), 180);
+/* ---- arc, then RVH on the post, then the push across ---- */
+const rad = d => (d * Math.PI) / 180;
+const at = (d, dist = 40, facing = 0) => goalieSpot(facing, rad(d), dist);
+const r2 = n => Math.round(n * 100) / 100;
+const same = (a, b, tol = 0.01) => Math.abs(a.x - b.x) < tol && Math.abs(a.y - b.y) < tol;
+
+T('square: straight out at the depth the ramp gives', [r2(at(0).x), r2(at(0).y)], [r2(goalieDepth(40)), 0]);
+T('…and square means square', at(0).a, 0);
+T('mid angle plays the arc, still well off the line', at(35).x > 4 && Math.abs(at(35).y) > 2, true);
+// The whole point: past the arc they stop tracking and sit on the post. A
+// keeper who kept sliding round to 140° would be behind their own goal line.
+T('sealed to the post by RVH', same(at(96), at(140)), true);
+T('…and holds it right across the band', same(at(100), at(148)), true);
+T('the post is inside the 3 ft pipe, not outside it', Math.abs(at(120).y) < 3, true);
+T('…and in front of the goal line', at(120).x > 0, true);
+T('the far side mirrors', [r2(at(-120).x), r2(at(-120).y)], [r2(at(120).x), r2(-at(120).y)]);
+// Continuity at 180 is what stops a 6 ft teleport when the puck crosses behind.
+T('both sides meet in the middle at 180', same(at(179.9), at(-179.9), 0.05), true);
+T('…on the goal line, centred', Math.abs(at(180).y) < 0.01, true);
+T('a puck straight behind is not tracked round the cage', Math.abs(at(180).x) < 2, true);
+{
+  let jump = 0, prev = at(-180);
+  for (let d = -180; d <= 180; d += 0.5) { const c = at(d); jump = Math.max(jump, Math.hypot(c.x - prev.x, c.y - prev.y)); prev = c; }
+  T('no teleport anywhere round the sweep', jump < 0.5, true);
+}
+T('never faces back through its own cage', Math.abs(at(180).a) <= (GOALIE_FACE_MAX * 180) / Math.PI + 0.01, true);
+T('facing tracks the puck inside the arc', at(40).a, 40);
+// the whole solve is net-relative, so it has to survive a net turned around
+{
+  const s = goalieSpot(180, rad(180), 40);   // puck straight out in front of a flipped net
+  T('a flipped net solves in its own frame', [r2(s.x), r2(s.y)], [r2(-goalieDepth(40)), 0]);
+}
+T('the bands are ordered', GOALIE_ARC_MAX < GOALIE_RVH && GOALIE_RVH < GOALIE_SLIDE && GOALIE_SLIDE < Math.PI, true);
 
 /* ---- neither call site may go back to a literal ---- */
 {
   const anim = src('hockey-drill-animator.jsx');
   const goaliePos = anim.slice(anim.indexOf('function goaliePos'), anim.indexOf('function goaliePos') + 2600);
   T('goaliePos exists to slice', goaliePos.startsWith('function goaliePos'), true);
-  T('the sprite reads the shared ramp', /goalieDepth\(/.test(goaliePos), true);
-  T('…for the tracking case AND the frozen shot', (goaliePos.match(/goalieDepth\(/g) || []).length >= 2, true);
+  T('the sprite reads the shared solve', /goalieSpot\(/.test(goaliePos), true);
   T('no hand-rolled smoothstep left behind', /R_MIN|R_MAX|D_NEAR|D_FAR/.test(goaliePos), false);
+  T('…and no hand-rolled angle clamp either', /MAXREL/.test(goaliePos), false);
 
   // …and the drawn shot caret has to back off the KEEPER, not the cage. A flat
   // SHOT_TIP_GAP puts it exactly where a keeper meeting a long shot stands.
-  T('the caret standoff reads the keeper ramp', /const goalieCaretGap = [\s\S]{0,900}goalieDepth\(/.test(anim), true);
+  T('the caret standoff reads the keeper solve', /const goalieCaretGap = [\s\S]{0,900}goalieSpot\(/.test(anim), true);
   T('the drawn shot uses it', /Math\.max\(SHOT_TIP_GAP, goalieCaretGap\(L, ux, uy\)\)/.test(anim), true);
   T('…the stagger clusters on the same point', (anim.match(/Math\.max\(SHOT_TIP_GAP, goalieCaretGap\(L, ux, uy\)\)/g) || []).length >= 2, true);
   T('…and branch ghosts stand off too', /goalieCaretGap\(\{ x0: a\.x/.test(anim), true);
 
   const tim = src('timing.js');
-  const save = tim.slice(tim.indexOf('} else if (goalie) {'), tim.indexOf('} else if (goalie) {') + 420);
-  T('the save point reads the same ramp', /goalieDepth\(/.test(save), true);
+  const save = tim.slice(tim.indexOf('} else if (goalie) {'), tim.indexOf('} else if (goalie) {') + 560);
+  T('the save point reads the same solve', /goalieSpot\(/.test(save), true);
   T('…offset to the pad face', /GOALIE_FACE/.test(save), true);
-  T('…and takes the same post-to-post clamp', /goalieAngle\(/.test(save), true);
+}
+
+/* ---- a manned net draws in two layers, keeper sandwiched ---- */
+{
+  const anim = src('hockey-drill-animator.jsx'), ico = src('icons.jsx');
+  T('the icon can draw a net in parts', /part === "base"[\s\S]{0,200}part === "top"/.test(ico), true);
+  T('…posts in the base, under the keeper', /part === "base" \? <g pointerEvents="none">\{ring\}\{crease\}\{posts\}/.test(ico), true);
+  T('…crossbar and netting on top of them', /part === "top" \? <g pointerEvents="none">\{shell\}/.test(ico), true);
+  T('an UNMANNED net still draws in one go', /\{ring\}\{crease\}\{shell\}\{posts\}/.test(ico), true);
+  T('a manned net hands its top to the later pass', /part=\{!whiteboard && p\.kind === "net" && p\.goalie \? "base" : undefined\}/.test(anim), true);
+  T('…which is ranked above the keeper', /p\.netTopOf \? 0\.6[\s\S]{0,60}p\.goalieOf \? 0\.5/.test(anim), true);
+  T('…and skipped in whiteboard, which has no sprite to cover', /whiteboard \? \[\] : pieces[\s\S]{0,160}netTopOf/.test(anim), true);
 }
 
 /* ---- a net in the painted crease ---- */

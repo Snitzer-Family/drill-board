@@ -69,22 +69,59 @@ export function goalieDepth(dist) {
   const u = Math.max(0, Math.min(1, (dist - GOALIE_NEAR) / (GOALIE_FAR - GOALIE_NEAR)));
   return GOALIE_DEEP + (GOALIE_HIGH - GOALIE_DEEP) * (u * u * (3 - 2 * u)); // smoothstep
 }
-// …and post-to-post: a keeper never gets dragged around behind their own cage,
-// so the aim angle is clamped into the net's front hemisphere. The puck's stop
-// point has to take the SAME clamp, or a wrap-around shot stops on the far side
-// of the net from the goalie who supposedly saved it.
-export const GOALIE_MAXREL = (82 * Math.PI) / 180;
 // A shot dies on the PADS, not at the keeper's belly button. The sprite reaches
 // ~2.3 ft in front of its own centre, so a puck stopped at goalieDepth() alone
 // is drawn buried inside the body — and the higher the keeper plays, the more
 // obviously the shot line overshoots them. This pushes the stop point back out
 // to the pad face, which is where the shot visibly ends.
 export const GOALIE_FACE = 2.6;
-export function goalieAngle(facingDeg, ang) {
+
+/* ---- and WHERE on the arc, which is not simply "wherever the puck is" ----
+   A keeper does not skate a full half-circle round the crease staying square to
+   the puck. Past a certain angle there is no angle left to cut, and they stop
+   playing the arc and drop into RVH — reverse-VH — sealed against the near post.
+   They then HOLD that post for anything in that shallow band instead of tracking
+   it. Take the puck behind the net and they stay on it until the puck crosses,
+   then push hard across to the other post. Bring it back out to the top of the
+   zone and they come off the post and rejoin the arc.
+
+   Three bands, blended so the keeper slides between them rather than snapping:
+     0…ARC_MAX     play the angle out on the arc, depth by distance
+     ARC_MAX…RVH   drop down onto the near post
+     SLIDE…180     push across the goal line toward the far post
+
+   That last band is what keeps this continuous. At exactly 180° both sides
+   resolve to the middle of the goal line, so there is no frame where the keeper
+   teleports six feet from one post to the other. */
+export const GOALIE_ARC_MAX = (58 * Math.PI) / 180;   // last angle worth playing square
+export const GOALIE_RVH = (95 * Math.PI) / 180;       // fully sealed to the post
+export const GOALIE_SLIDE = (150 * Math.PI) / 180;    // starts the push across
+export const GOALIE_FACE_MAX = (105 * Math.PI) / 180; // never faces back through the cage
+const POST_X = 1.8, POST_Y = 2.1;   // ft, net-local: the RVH seal against a post
+const MID_X = 1.0;                  // ft: mid goal line, where the two sides meet
+const smooth = u => u * u * (3 - 2 * u);
+const sat = u => Math.max(0, Math.min(1, u));
+
+// Where the keeper stands for a puck at `ang` (absolute radians, net→puck),
+// `dist` feet out: an offset in FEET from the net origin plus the facing to draw
+// them at. Net-relative, so it works at either end and at any net rotation.
+export function goalieSpot(facingDeg, ang, dist) {
   const f = ((facingDeg || 0) * Math.PI) / 180;
   let rel = ang - f;
-  rel = Math.atan2(Math.sin(rel), Math.cos(rel));
-  return f + Math.max(-GOALIE_MAXREL, Math.min(GOALIE_MAXREL, rel));
+  rel = Math.atan2(Math.sin(rel), Math.cos(rel));         // −π…π
+  const a = Math.abs(rel), side = rel < 0 ? -1 : 1;
+  // playing the angle: out on the arc at the distance-driven depth
+  const arcA = Math.min(a, GOALIE_ARC_MAX), R = goalieDepth(dist);
+  const arc = { x: Math.cos(arcA) * R, y: side * Math.sin(arcA) * R };
+  // sealed to the post — and, once the puck is nearly straight behind, coming
+  // off it toward the middle so the two sides meet instead of jumping
+  const cross = smooth(sat((a - GOALIE_SLIDE) / (Math.PI - GOALIE_SLIDE)));
+  const post = { x: POST_X + (MID_X - POST_X) * cross, y: side * POST_Y * (1 - cross) };
+  const u = smooth(sat((a - GOALIE_ARC_MAX) / (GOALIE_RVH - GOALIE_ARC_MAX)));
+  const lx = arc.x + (post.x - arc.x) * u, ly = arc.y + (post.y - arc.y) * u;
+  const face = f + Math.max(-GOALIE_FACE_MAX, Math.min(GOALIE_FACE_MAX, rel));
+  const c = Math.cos(f), s = Math.sin(f);                 // net-local → rink
+  return { x: lx * c - ly * s, y: lx * s + ly * c, a: (face * 180) / Math.PI };
 }
 // stickhandling cradle: ONE oscillation, applied to the stick's rotation — the puck
 // rides the blade tip through it, so they move together by construction rather than
@@ -758,11 +795,12 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           const R = 2.6 * ICON_SCALE * (netPiece.size || 1);
           hit = { x: net.x - ux * (R + 1.3), y: net.y - uy * (R + 1.3) };
         } else if (goalie) {
-          // stop the puck exactly where the sprite is standing: same depth ramp
-          // off the shot's length, same post-to-post clamp
-          const gd = goalieDepth(mag) + GOALIE_FACE;
-          const ga = goalieAngle(netPiece.facing, Math.atan2(launch.y - net.y, launch.x - net.x));
-          hit = { x: net.x + Math.cos(ga) * gd, y: net.y + Math.sin(ga) * gd };
+          // stop the puck exactly where the sprite is standing — same solve, so a
+          // shot from a severe angle dies on the pad of a keeper sealed to the
+          // post rather than in open ice on the shot line
+          const gs = goalieSpot(netPiece.facing, Math.atan2(launch.y - net.y, launch.x - net.x), mag);
+          const gf = (gs.a * Math.PI) / 180;   // out through the pads they're facing with
+          hit = { x: net.x + gs.x + Math.cos(gf) * GOALIE_FACE, y: net.y + gs.y + Math.sin(gf) * GOALIE_FACE };
         } else {
           hit = { x: clampX(net.x + px * place * GOAL_HALF), y: clampY(net.y + py * place * GOAL_HALF) };
         }
