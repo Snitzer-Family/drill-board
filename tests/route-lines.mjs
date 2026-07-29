@@ -404,6 +404,38 @@ const chainOf = (out, id) => { const p = out.find(q => q.id === id); return [p.p
   T('an all-connector cycle still terminates', legs.length > 0 && legs.length < LINE_LEG_CAP, true);
 }
 
+// ---- feed on a route the line only VISITS ----
+// A leg of a recirculating drill has no line standing on it, so there is nobody to
+// hand a puck to — but skaters do arrive there, and `feed` plainly means "pucks
+// here". Everyone starting that lap collects one.
+{
+  const A = route({ id: 'R1', x: 30, y: 22, path: [{ type: 'L', x: 90, y: 22 }], next: 'R2', hops: 3 });
+  const B = routeB({ id: 'R2', x: 150, y: 66, path: [{ type: 'L', x: 90, y: 66 }], next: 'R1', hops: 3, feed: true });
+  const mk = (id, q) => ({ id, kind: 'player', x: 30, y: 22, route: 'R1', q, path: [], forks: [] });
+  const tpl = puck('PK1', 31, 26, { pickup: { to: 'P1', at: -1 }, terminals: [{ kind: 'shot', at: 0, ref: '' }] });
+  const out = lowerRoutes([A, B, mk('P1', 1), mk('P2', 2), tpl]);   // one spare short on purpose
+  const fedAt = out.filter(p => p.fed && p.pickup).map(p => p.pickup.to).sort();
+  T('a visited route feeds every skater who runs it', fedAt.length >= 2, true);
+  T('...including ones the source line could not supply', new Set(fedAt).size, 2);
+  // the exact regression: R1's pile ran dry first, and bailing out of the whole
+  // pass there meant R2's feed never got a chance
+  T('a dry pile upstream does not cancel a feed downstream', out.some(p => p.fed), true);
+  // an action lives on a WAYPOINT: running through it holding a puck performs it,
+  // so a puck collected at the regroup must still carry the shot when it comes
+  // back round to the shooting point
+  const withWork = out.filter(p => p.fed && (p.terminals || []).length);
+  T('a fed puck carries the action it will run through', withWork.length >= 1, true);
+  T('...aimed at the NEXT pass over the authored route, not this one',
+    withWork.every(p => p.terminals[0].at > p.pickup.at), true);
+}
+{ // no feed anywhere → a visited route hands out nothing
+  const A = route({ id: 'R1', x: 30, y: 22, path: [{ type: 'L', x: 90, y: 22 }], next: 'R2', hops: 3 });
+  const B = routeB({ id: 'R2', x: 150, y: 66, path: [{ type: 'L', x: 90, y: 66 }], next: 'R1', hops: 3 });
+  const mk = (id, q) => ({ id, kind: 'player', x: 30, y: 22, route: 'R1', q, path: [], forks: [] });
+  const tpl = puck('PK1', 31, 26, { pickup: { to: 'P1', at: -1 } });
+  T('an unfed visited route stays dry', lowerRoutes([A, B, mk('P1', 1), mk('P2', 2), tpl]).some(p => p.fed), false);
+}
+
 // ---- the crossing's own line style ----
 // Dotted, so it reads as travel between reps rather than as a route (solid) or a
 // pass (dashed). The board and the exported sheet draw it from ONE constant —

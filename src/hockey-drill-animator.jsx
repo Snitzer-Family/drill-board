@@ -1844,7 +1844,14 @@ export default function DrillAnimator() {
   // route's legs. Route pieces are authoring objects and are dropped here, so
   // neither resolveForks nor the timing engine ever sees one. Returns `rpieces` by
   // identity when the board has no route, keeping the plan cache warm.
-  const lpieces = lowerRoutes(rpieces);
+  // Memoized on `rpieces` identity, and it MUST be. Unmemoized this rebuilt the
+  // whole lowered array — including freshly minted fed pucks — on every frame, so
+  // effPieces changed identity every frame, timing's identity-keyed planCache
+  // missed every frame, and the plan was re-rolled continuously: with realistic
+  // shots on, a different save/miss draw each time. That showed up as pucks
+  // flickering between a stick and the pile. Same reason resolveForks keeps
+  // lowerCacheRef.
+  const lpieces = useMemo(() => lowerRoutes(rpieces), [rpieces]);
   const effPieces = resolveForks(lpieces);
   // branching players are animated along their spliced (base+fork) path — map id
   // → effective piece so position sampling follows the reaction, not the base end
@@ -3759,7 +3766,22 @@ export default function DrillAnimator() {
       // it. Without this the proximity match holds a just-released puck on the blade
       // for a frame or two and then hands over the whole gap at once.
       const inAir = puckInFlight(p.id, animT <= 0 ? 0 : animT * totalTime);
-      for (const q of inAir ? [] : pieces) {
+      // ...and neither is a puck whose collect is still ahead of it. It lies in
+      // the pile until its own moment, and the pile sits a few feet off the front
+      // of a line — well inside this 2.2 ft reach — so proximity alone handed it
+      // to whichever skater happened to be standing there, then took it back as
+      // the queue shuffled. That is the flicker on a recirculating drill: pucks
+      // waiting for a later lap being pawed at by everyone who walks past.
+      const awaiting = (() => {
+        const ep = effOf(p);
+        const pu = ep && ep.pickup;
+        if (!pu || !pu.to || pu.at == null || pu.at < 0) return false;
+        const col = effPieces.find(q => q.id === pu.to && q.kind === "player");
+        if (!col) return false;
+        const e = animT <= 0 ? 0 : animT * totalTime;
+        return e < waypointTime(col, Math.min(pu.at, col.path.length - 1));
+      })();
+      for (const q of (inAir || awaiting) ? [] : pieces) {
         if (q.kind !== "player" || q.defense) continue;   // (defense never carries; avoids recursion)
         // Match against the ROUTE pose, not displayPosRaw: the puck's own position
         // comes off that same pose (carriedPuckAt), while displayPosRaw adds the
@@ -8475,16 +8497,38 @@ export default function DrillAnimator() {
                 {/* A crossing is the skate BETWEEN two lines, shaped by hand. It
                     has no line of its own, so everything below about queueing and
                     puck work would be answering a question nobody asked. */}
-                {p.connector && (
-                  <div className="hd-field">
-                    <div className="hd-sectitle">Crossing</div>
-                    <div className="hd-sechint">
-                      The skate from one line into the next. Drag its points, add more, or
-                      curve them to send skaters round the traffic. It doesn&rsquo;t count as a
-                      lap.
+                {p.connector && (() => {
+                  // One pace for the whole crossing. Per-leg RATE still works from
+                  // each waypoint, but a crossing is one movement — you want to say
+                  // "amble back" once, not four times. Shows mixed when the legs
+                  // disagree, so a hand-tuned leg isn't silently flattened.
+                  const rates = p.path.map(s => s.rate || 1);
+                  const same = rates.every(r => Math.abs(r - rates[0]) < 1e-6);
+                  const cur = same && rates.length ? rates[0] : TRANSIT_RATE;
+                  const setAll = v => updateById(p.id, { path: p.path.map(s => ({ ...s, rate: v })) });
+                  return (
+                    <div className="hd-field">
+                      <div className="hd-sectitle">Crossing</div>
+                      <div className="hd-sechint">
+                        The skate from one line into the next. Drag its points, add more, or
+                        curve them to send skaters round the traffic. It doesn&rsquo;t count as a
+                        lap.
+                      </div>
+                      <div className="hd-poprow">
+                        <span>Pace</span>
+                        <Stepper value={+cur.toFixed(2)} min={0.2} max={2} step={0.05} suffix="×"
+                          onChange={setAll} />
+                        <button className="hd-mini" onClick={() => setAll(TRANSIT_RATE)}>Glide</button>
+                        <button className="hd-mini" onClick={() => setAll(1)}>Full</button>
+                      </div>
+                      <div className="hd-sechint">
+                        {same
+                          ? (cur < 0.95 ? "A regroup glide — slower than the drill itself." : "Skated at full pace.")
+                          : "Legs differ — set a pace here to make the whole crossing match."}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
                 {/* Point 0's actions, in the same slot the pager's other points
                     put them — "collect a puck before you go" is how most shooting
                     lines start, and it had nowhere visible to live. */}
