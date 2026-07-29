@@ -1,5 +1,7 @@
 import { QUEUE_GAP, QUEUE_LEAD, queueOf, isMobile, headHeading, stackSpot, queueRelease, transitObstacles, lowerRoutes } from '../src/route-lines.js';
-import { TRANSIT_RATE, HOPS_MAX, LINE_LEG_CAP } from '../src/constants.js';
+import { TRANSIT_RATE, HOPS_MAX, LINE_LEG_CAP, CROSSING_DASH } from '../src/constants.js';
+import { readFileSync } from 'node:fs';
+const src = f => readFileSync(new URL('../src/' + f, import.meta.url), 'utf8');
 
 let pass = 0, fail = 0;
 const T = (name, got, want) => {
@@ -400,6 +402,19 @@ const chainOf = (out, id) => { const p = out.find(q => q.id === id); return [p.p
   const P = { id: 'P1', kind: 'player', x: 30, y: 22, route: 'R1', q: 1, path: [], forks: [] };
   const legs = lowerRoutes([A, mk('C1', 'C2'), mk('C2', 'C1'), P]).find(p => p.id === 'P1').path;
   T('an all-connector cycle still terminates', legs.length > 0 && legs.length < LINE_LEG_CAP, true);
+}
+
+// ---- the crossing's own line style ----
+// Dotted, so it reads as travel between reps rather than as a route (solid) or a
+// pass (dashed). The board and the exported sheet draw it from ONE constant —
+// this is the drift guard, in the spirit of tests/rink-views.mjs.
+{
+  T('the dash pattern is a dot: a near-zero mark on a long gap', /^0?\.\d+ \d/.test(CROSSING_DASH), true);
+  T('it is not the pass dash', CROSSING_DASH !== '2.4 1.8', true);
+  T('the board reads it from the constant', /CROSSING_DASH/.test(src('hockey-drill-animator.jsx')), true);
+  T('the exported sheet reads the same constant', /CROSSING_DASH/.test(src('drill-svg.js')), true);
+  T('neither hardcodes a crossing dash of its own',
+    !/strokeDasharray="[\d.]+ [\d.]+"/.test(src('hockey-drill-animator.jsx').split('transitPoly')[1] || ''), true);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

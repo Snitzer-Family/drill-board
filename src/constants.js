@@ -84,6 +84,12 @@ export const HOPS_MAX = 8;
 export const LINE_LEG_CAP = 200;
 // crossing the ice to the next line is a regroup glide, not another rep
 export const TRANSIT_RATE = 0.65;
+// ...and it is DRAWN as one: a dotted trail, distinct from both a skating route
+// (solid) and a pass (dashed), so a coach reads it as travel between reps at a
+// glance rather than as another thing to do. A near-zero dash with a round cap
+// is how this app already draws dots — see the loose-puck skid in segStroke.
+// Shared with drill-svg.js so the board and the exported sheet can't drift.
+export const CROSSING_DASH = "0.1 2.2";
 // keep-out radius (feet) around a skater — routes arc around parked players
 export const PLAYER_R = 2.9;
 // The action badge at a pass / shoot / pickup: the gap (rink ft) the route line

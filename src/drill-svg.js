@@ -9,6 +9,7 @@
 // theme.js rather than retyped: this SVG is also loaded into an <img> for PNG
 // export, where there is no host cascade at all and only the fallbacks render.
 import { parseDrill } from "./drill-format.js";
+import { CROSSING_DASH } from "./constants.js";
 import { evalSeg, wigglePoints } from "./geometry.js";
 import { solidShapes, segCrossesNet } from "./net-collide.js";
 import * as boards from "./boards.js";
@@ -336,7 +337,11 @@ function routePath(p, pieces) {
   const carry = pieces ? carrySegsOf(p, pieces) : new Set();
   const startTrim = trimSegStart({ x: p.x, y: p.y }, p.path[0], 3.6);
   const startPt = startTrim ? startTrim.start : { x: p.x, y: p.y };
-  const stroke = `fill="none" stroke="${p.color}" stroke-width="0.7" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"`;
+  // a crossing between two lines is travel, not a rep — dotted and a shade
+  // lighter, matching the board (CROSSING_DASH is shared so they can't drift)
+  const stroke = p.connector
+    ? `fill="none" stroke="${p.color}" stroke-width="0.62" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="${CROSSING_DASH}" opacity="0.62"`
+    : `fill="none" stroke="${p.color}" stroke-width="0.7" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"`;
   let lines = "";
   p.path.forEach((s0, i) => {
     const segPrev = i === 0 ? startPt : { x: p.path[i - 1].x, y: p.path[i - 1].y };

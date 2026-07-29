@@ -10,7 +10,7 @@ import { clampX, clampY, fitInside, segEnd, segD, nearestT, splitSeg, zigzagPoin
 import { dirOf, dirAtWaypoint, spreadDir } from "./route-dir.js";
 import { lowerRoutes, queueOf, stackSpot, isMobile, unbindLine, transitPoly, transitObstacles,
   headHeadingDeg as routeHeadDeg, QUEUE_GAP, QUEUE_LEAD } from "./route-lines.js";
-import { PLAYER_R, TRANSIT_RATE } from "./constants.js";
+import { PLAYER_R, TRANSIT_RATE, CROSSING_DASH } from "./constants.js";
 import * as boards from "./boards.js";
 import { netShapes, bumperShapes, solidShapes, detourRoute, segCrossesNet } from "./net-collide.js";
 import { RinkMarkings } from "./rink.jsx";
@@ -4311,6 +4311,29 @@ export default function DrillAnimator() {
     }
     return out;
   });
+  // Feeding tops up REPS — it gives a puck to every repeat of the work the line
+  // already does. Switched on for a line with no puck work at all it therefore
+  // did nothing visible, and could never start doing anything: with no real puck
+  // on the board the Actions panel has nothing to hang a pass or a shot off, so
+  // the chain that would make feeding fire was unauthorable. So turning it on
+  // seeds one — a puck at the head with a collect — and the line carries from the
+  // first frame. A REAL piece, deliberately: fed pucks are lowering-only and
+  // invisible to the editor, and this one has to be something you can build on.
+  const toggleFeed = routeId => setPieces(ps => {
+    const R = ps.find(q => q.id === routeId && q.kind === "route");
+    if (!R) return ps;
+    const on = !R.feed;
+    const out = ps.map(q => (q.id === routeId ? { ...q, feed: on } : q));
+    if (!on) return out;
+    const head = queueOf(out, routeId)[0];
+    if (!head) { flash("Add a skater to the line first"); return out; }
+    const holds = q => q.kind === "puck" && (q.carrier === head.id || (q.pickup && q.pickup.to === head.id));
+    if (out.some(holds)) return out;                 // already has work to repeat
+    const at = stackSpot(R, 0, R.gap > 0 ? R.gap : QUEUE_GAP);
+    flash(`Feeding — ${nameOf(head.id)} collects a puck at the start`);
+    return [...out, { ...makePiece("puck", { x: clampX(at.x + 1.6), y: clampY(at.y + 3.4) }, out),
+      pickup: { to: head.id, at: -1 } }];
+  });
   // Turn the automatic crossing into a route you can shape. It becomes a real
   // route piece seeded with the path the app was already drawing, so every route
   // tool works on it — drag its points, add more, curve them, send it the long way
@@ -6382,11 +6405,21 @@ export default function DrillAnimator() {
   // the rink markings if it is EXACTLY the ice fill. Two literals would drift.
   const caseOf = st => ({ ...st, stroke: T.ice, opacity: 1,
     strokeWidth: (st.strokeWidth || 1) * 2.1 });
+  // Is this leg a skate BETWEEN lines rather than part of a route? Either the
+  // whole piece is a hand-shaped crossing, or the lowering pass baked this leg as
+  // one. Both must look the same — the coach shaping a crossing shouldn't change
+  // what it means.
+  const isCrossing = (p, s) => !!((p && p.kind === "route" && p.connector) || (s && s.transit));
+
   function segStroke(p, s, isLast, flat) {
     const W = w => (flat ? w : sw(w)) * lineScale;   // global route line-thickness scale
     const D = d => (flat ? d : sdash(d));
     const base = { stroke: ink(p.color), fill: "none", strokeLinecap: "round", opacity: 0.78,
       ...(flat ? {} : { vectorEffect: "non-scaling-stroke" }) };
+    // a crossing reads as travel, not a rep: dotted, a shade lighter, and the same
+    // whether the coach shaped it (a `connector` route) or the app drew it (legs
+    // the lowering pass marked `transit`)
+    if (isCrossing(p, s)) return { ...base, opacity: 0.58, strokeWidth: W(0.62), strokeDasharray: D(CROSSING_DASH) };
     if (p.kind !== "puck") return { ...base, strokeWidth: W(0.7) };
     if (s.mode === "pass") return { ...base, strokeWidth: W(0.7), strokeDasharray: D("2.4 1.8") };
     if (s.mode === "shot") return { ...base, strokeWidth: W(1.25) };
@@ -8493,13 +8526,13 @@ export default function DrillAnimator() {
                   )}
                   <div className="hd-poprow">
                     <button className={`hd-mini${p.feed ? " on" : ""}`}
-                      onClick={() => updateById(p.id, { feed: !p.feed })}>
+                      onClick={() => toggleFeed(p.id)}>
                       {p.feed ? "✓ Feed pucks" : "Feed pucks"}
                     </button>
                   </div>
                   <div className="hd-sechint">
                     {p.feed
-                      ? "The line never runs dry — it supplies a puck for every rep it needs, so a recirculating drill keeps shooting."
+                      ? "Every skater collects one at the start, on every lap back through — the line never runs dry."
                       : "Off: the line uses only the loose pucks on the ice, and skates empty-handed once they run out."}
                   </div>
                 </div>)}
@@ -10145,8 +10178,9 @@ export default function DrillAnimator() {
               if (!poly) return null;
               return (
                 <polyline key={`tr-${p.id}`} points={poly.map(q => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" ")}
-                  fill="none" stroke={ink(p.color)} strokeWidth={0.5} strokeDasharray="2.6 2.6"
-                  strokeLinecap="round" opacity={0.42} pointerEvents="none" />
+                  fill="none" stroke={ink(p.color)} strokeWidth={sw(0.62) * lineScale}
+                  strokeDasharray={sdash(CROSSING_DASH)} strokeLinecap="round" opacity={0.58}
+                  vectorEffect="non-scaling-stroke" pointerEvents="none" />
               );
             })}
             {!aiPlay && pieces.map(p => {
