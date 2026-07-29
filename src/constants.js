@@ -70,6 +70,12 @@ export const ROUTE_START_GAP = 3;
 // feet between skaters stacked in a line behind a route's start. Out here because
 // the DSL serializer omits the token at this value and route-lines.js applies it.
 export const QUEUE_GAP = 5;
+// ...and how far clear of you the skater ahead gets before you go. Measured as
+// the SEPARATION between the two, so it reads the way a coach says it — they
+// already stand QUEUE_GAP apart, and the gap grows to this before the next one
+// leaves. A new line defaults to it; a line with no rule at all sends everyone
+// at once, which is what every drill authored before this did.
+export const QUEUE_LEAD = 15;
 // The action badge at a pass / shoot / pickup: the gap (rink ft) the route line
 // leaves around one, and the disc's radius in icon-frame units. Out here rather
 // than in the animator because the settings sheet's preview tile draws the same

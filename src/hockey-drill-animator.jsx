@@ -8,7 +8,7 @@ import { drillSvg } from "./drill-svg.js";
 import { mdEscape, mdInline, mdBlock } from "./md.js";
 import { clampX, clampY, fitInside, segEnd, segD, nearestT, splitSeg, zigzagPoints, wigglePoints, wigglePoly, zigzagPoly, convertSeg, fitRoute, evalSeg, rdp, catmullToBezier, alignJoint, mirrorJoint, translateJointHandles, trimSegStart, trimSegEnd, trimPolyStart, trimPolyEnd, gapPolyAt } from "./geometry.js";
 import { dirOf, dirAtWaypoint, spreadDir } from "./route-dir.js";
-import { lowerRoutes, queueOf, stackSpot, isMobile, unbindLine, headHeadingDeg as routeHeadDeg, QUEUE_GAP } from "./route-lines.js";
+import { lowerRoutes, queueOf, stackSpot, isMobile, unbindLine, headHeadingDeg as routeHeadDeg, QUEUE_GAP, QUEUE_LEAD } from "./route-lines.js";
 import * as boards from "./boards.js";
 import { netShapes, bumperShapes, solidShapes, detourRoute, segCrossesNet } from "./net-collide.js";
 import { RinkMarkings } from "./rink.jsx";
@@ -4141,7 +4141,10 @@ export default function DrillAnimator() {
       color: defaultColor(kind, COLORS[colorIdx]),
       label: kind === "player" ? id : "", text: kind === "label" ? "Label" : "", size: 1, path: [],
       // a route owns geometry and a line; it never skates itself
-      ...(kind === "route" ? { gap: QUEUE_GAP, forks: [] } : {}),
+      // A new line takes turns by default — a line where everyone leaves at once
+      // is a wave, not a line. Drills authored before this carry no queue= token
+      // and keep the old all-at-once behaviour.
+      ...(kind === "route" ? { gap: QUEUE_GAP, queue: { mode: "lead", lead: QUEUE_LEAD }, forks: [] } : {}),
     };
   }
 
@@ -8310,6 +8313,46 @@ export default function DrillAnimator() {
                     <span className="hd-sechint">between skaters</span>
                   </div>
                 </div>
+                {/* How the line takes its turns. The trigger is positional — "the
+                    one ahead of me" — so unlike DelayTrigger there is no player to
+                    pick; the rule is authored once and resolved per member. */}
+                {(() => {
+                  const q = p.queue, mode = q ? q.mode : "none";
+                  const set = v => updateById(p.id, { queue: v });
+                  return (
+                    <div className="hd-field">
+                      <div className="hd-sectitle">Send them</div>
+                      <div className="hd-sechint">What holds each skater until it&rsquo;s their turn.</div>
+                      <div className="hd-poprow">
+                        {[["none", "All at once"], ["lead", "When clear"], ["point", "At a point"]].map(([m, lab]) => (
+                          <button key={m} className={`hd-mini${mode === m ? " on" : ""}`}
+                            onClick={() => set(m === "none" ? null
+                              : m === "lead" ? { mode: "lead", lead: (q && q.lead) || QUEUE_LEAD }
+                              : { mode: "point", at: (q && q.at) || 0 })}>{lab}</button>
+                        ))}
+                      </div>
+                      {mode === "lead" && (
+                        <div className="hd-poprow">
+                          <span>go once the one ahead is</span>
+                          <Stepper value={q.lead || QUEUE_LEAD} min={p.gap > 0 ? p.gap : QUEUE_GAP} max={120} step={5} suffix=" ft"
+                            onChange={v => set({ mode: "lead", lead: v })} />
+                          <span className="hd-sechint">clear</span>
+                        </div>
+                      )}
+                      {mode === "point" && (p.path.length ? (
+                        <div className="hd-poprow">
+                          <span>go once the one ahead reaches</span>
+                          <select className="hd-select on" value={q.at || 0}
+                            onChange={e => set({ mode: "point", at: parseInt(e.target.value, 10) })}>
+                            {p.path.map((s, wi) => <option key={wi} value={wi}>{wi + 1}</option>)}
+                          </select>
+                        </div>
+                      ) : (
+                        <div className="hd-poprow"><span className="hd-sechint">Draw the route first — there are no points to wait on yet.</span></div>
+                      ))}
+                    </div>
+                  );
+                })()}
               </>
             );
           })()}

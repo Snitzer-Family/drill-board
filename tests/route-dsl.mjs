@@ -23,7 +23,7 @@ const trip = text => {
 
 const LINE = [
   'RINK full',
-  'PIECE R1 route 60 40 #3f7f8c Left_lane gap=6',
+  'PIECE R1 route 60 40 #3f7f8c Left_lane gap=6 queue=lead:18',
   'PATH R1 L 100,40 Q 130,25 150,40',
   'PIECE P1 player 60 40 #d7263d F1 route=R1 q=1',
   'PIECE P2 player 54 40 #2ea043 F2 route=R1 q=2',
@@ -63,6 +63,19 @@ const LINE = [
   T('a negative gap is rejected, not stored', d.pieces.find(p => p.id === 'R1').gap, undefined);
   T('a zero q is rejected, not stored', d.pieces.find(p => p.id === 'P1').q, undefined);
   T('a dangling route= still loads', d.pieces.find(p => p.id === 'P1').route, 'R9');
+}
+{ // the line's turn-taking rule
+  const R = trip(LINE).b.pieces.find(p => p.id === 'R1');
+  T('a lead rule survives the trip', R.queue, { mode: 'lead', lead: 18 });
+  const pt = parseDrill(LINE.replace('queue=lead:18', 'queue=point:3'));
+  T('a point rule is 1-based on the wire, 0-based in memory', pt.pieces[0].queue, { mode: 'point', at: 2 });
+  T('a point rule round-trips as written', /queue=point:3/.test(ser(pt)), true);
+  // an absent rule means "all at once", so it must never be defaulted in
+  const none = parseDrill(LINE.replace(' queue=lead:18', ''));
+  T('no rule parses as no rule', none.pieces[0].queue, undefined);
+  T('no rule emits no token', /queue=/.test(ser(none)), false);
+  const bad = parseDrill(LINE.replace('queue=lead:18', 'queue=point:0'));
+  T('a zero-point rule is rejected, not stored', bad.pieces[0].queue, undefined);
 }
 { // the parser and the lowering pass agree on the model
   const out = lowerRoutes(parseDrill(LINE).pieces);

@@ -362,6 +362,23 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
       return isFinite(best) ? best : null;
     };
     const rawTo = (p, at) => { let t = 0; for (let i = 0; i < p.path.length; i++) { if (i > at) break; t += (p.path[i].stop || 0) + effMove(p, p.path[i], i, warp); } return t; };
+    // ...and the same clock run to a DISTANCE rather than a waypoint: how long
+    // until `p` has covered `dist` feet of their own route. A line releases the
+    // next skater once the one ahead is a set distance clear, and a waypoint is
+    // far too coarse a ruler for that — on a four-point route the choices are
+    // tens of feet apart. Interpolates within the leg the distance falls in.
+    // Arc length ÷ pace like every other leg time; no screen geometry enters,
+    // because segLen returns rink feet (the viewBox is in rink feet).
+    const rawSpan = (p, dist) => {
+      let t = 0, acc = 0;
+      for (let i = 0; i < p.path.length; i++) {
+        t += (p.path[i].stop || 0);
+        const L = segLen(p.id, i), mt = effMove(p, p.path[i], i, warp);
+        if (acc + L >= dist) return t + (L > 0 ? (mt * (dist - acc)) / L : 0);
+        acc += L; t += mt;
+      }
+      return t;                     // never gets that far clear — go when they finish
+    };
     let newEvents = [];
     for (let outer = 0, OUTER = hasActionTrigger ? 6 : 1; outer < OUTER; outer++) {
     // fresh warp/plans each pass so hold resolution always starts from the same
@@ -384,6 +401,14 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           if (p.wait.on === p.id) return;                  // no self-trigger
           const t = actionTimeOf(p.wait.on, p.wait.at);   // absolute release time
           w = t == null ? 0 : t;                           // we sit at the start, so the hold IS t
+        } else if (p.wait.mode === "span") {
+          // "go when the one ahead is clear" — a queue release. Same shape as the
+          // waypoint case (their start-wait plus their own travel), measured to a
+          // distance instead of a waypoint, so it converges on the same argument:
+          // a line's triggers chain strictly backwards to the head, who never waits.
+          const trig = pieces.find(q => q.id === p.wait.on && q.kind === "player");
+          if (!trig || trig.id === p.id) return;
+          w = (swNew[trig.id] || 0) + rawSpan(trig, Math.max(0, p.wait.dist || 0));
         } else {
           const trig = pieces.find(q => q.id === p.wait.on && q.kind === "player");
           if (!trig || trig.id === p.id) return;

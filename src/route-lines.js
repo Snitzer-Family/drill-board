@@ -23,10 +23,11 @@
 // See tests/route-lines.mjs. Precedent: route-dir.js, possession.js.
 
 import { segTangentAngle, clampX, clampY } from "./geometry.js";
-import { QUEUE_GAP } from "./constants.js";
+import { QUEUE_GAP, QUEUE_LEAD } from "./constants.js";
 
-// feet between stacked skaters, measured back along the route's entry heading
-export { QUEUE_GAP };
+// feet between stacked skaters, measured back along the route's entry heading,
+// and how far clear of you the skater ahead gets before you go
+export { QUEUE_GAP, QUEUE_LEAD };
 
 // A player sorts by queue index; one without a `q` falls to the back of the line,
 // and ties break on id so the stack order is stable frame to frame.
@@ -82,6 +83,30 @@ export function stackSpot(route, k, gap = QUEUE_GAP) {
   return { x: clampX(route.x - h.x * d), y: clampY(route.y - h.y * d) };
 }
 
+// How a line releases: what holds skater k on their mark until it is their turn.
+// The rule is authored ONCE on the route and resolved per member here, because
+// the trigger is positional — "the one ahead of me" — and only the line knows who
+// that is. `prevId` is member k-1; the head of the line is never held.
+//
+//   { mode: "point", at }  → hold until they reach waypoint `at` of the route.
+//                            Lowers to the waypoint trigger timing.js already has.
+//   { mode: "lead", lead } → hold until they are `lead` FEET clear of me. The two
+//                            already start `spacing` apart, so what the skater
+//                            ahead has to TRAVEL is lead − spacing; converting it
+//                            here keeps timing.js measuring distance and knowing
+//                            nothing about why.
+export function queueRelease(route, prevId) {
+  const q = route && route.queue;
+  if (!q || !prevId) return null;
+  if (q.mode === "point") return { on: prevId, at: Math.max(0, q.at || 0), mode: "waypoint" };
+  if (q.mode === "lead") {
+    const spacing = route.gap > 0 ? route.gap : QUEUE_GAP;
+    const lead = q.lead > 0 ? q.lead : QUEUE_LEAD;
+    return { on: prevId, dist: Math.max(0, lead - spacing), mode: "span" };
+  }
+  return null;
+}
+
 // Materialize every line into plain players and drop the route pieces, which are
 // authoring objects the engine must never see (they would otherwise land in
 // drillTime as zero-length routes and in the timing plan as bogus skaters).
@@ -99,12 +124,17 @@ export function lowerRoutes(pieces) {
   const lowered = new Map();
   for (const [id, R] of routes) {
     const gap = R.gap > 0 ? R.gap : QUEUE_GAP;
-    queueOf(list, id).forEach((P, k) => {
+    const line = queueOf(list, id);
+    line.forEach((P, k) => {
       const spot = stackSpot(R, k, gap);
+      // the head of the line goes on the whistle; everyone behind waits their turn.
+      // A member's OWN wait= is overwritten, not merged: the line owns the release.
+      const wait = k > 0 ? queueRelease(R, line[k - 1].id) : null;
       lowered.set(P.id, {
         ...P,
         x: spot.x,
         y: spot.y,
+        wait,
         // the route's legs verbatim — see the header on why nothing is prepended
         path: (R.path || []).map(s => ({ ...s })),
         // shared by reference: forks are immutable here, and resolveForks picks a

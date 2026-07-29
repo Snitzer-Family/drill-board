@@ -127,7 +127,8 @@ Places a piece. `id` is any unique token (e.g. `F1`, `PK1`, `N2`).
 **Kinds:** `player` · `puck` · `cone` · `net` · `bumper` (solid barrier — players route around it, pucks carom off it) ·
 `deker` (stickhandling gate) · `passer` (rebounder box) · `tire` (agility prop) ·
 `stick` (a stick laid on the ice) · `light` (cognitive-training light — an iPad on a tripod whose screen shows a cue colour) ·
-`label` (a movable, resizable on-ice text note).
+`label` (a movable, resizable on-ice text note) ·
+`route` (a **line**: a route that owns its own geometry, with players queued on it — see *Lines* below).
 
 **Modifiers** (any order):
 
@@ -148,7 +149,12 @@ Places a piece. `id` is any unique token (e.g. `F1`, `PK1`, `N2`).
 | `speed=<n>` | player, puck | Pace multiplier (1 = default; players default 1.5) |
 | `hand=L` / `hand=R` | player, stick | Shooting hand — mirrors the player's stick, or flips the on-ice stick prop's blade for a left/right-handed stick |
 | `sym=<text>` | player | Whiteboard-mode symbol (≤3 chars, e.g. `X`, `O`, `F`, `LW`, `RD`; underscores read as spaces). `△`, `○`, `□` render as drawn shapes rather than text. Shown instead of the skater when **Whiteboard mode** is on (Rink menu → Board style). Unset falls back to the player's name (the popup offers the same shorthand list under *Name*), or `X` if the name is still the auto id (`P1`, `P2`…). |
-| `face=<deg>` | route-less player, net, bumper, deker, passer | Facing angle (0 = +x / toward the right) |
+| `face=<deg>` | route-less player, net, bumper, deker, passer, path-less route | Facing angle (0 = +x / toward the right). On a `route` with no `PATH` yet it is the direction the line stacks along. |
+| `route=<routeId>` | player | Stand this player on that **line**. The route owns the geometry; the player's own `PATH` is ignored. |
+| `q=<n>` | player | Place in the queue, **1-based** (`q=1` is the head of the line). Missing = the back. |
+| `gap=<ft>` | route | Feet between stacked skaters (default `5`, omitted then). |
+| `queue=point:<pt>` | route | Each skater holds until the one **ahead of them** reaches point `<pt>` of the route (1-based). |
+| `queue=lead:<ft>` | route | Each skater holds until the one ahead is `<ft>` **clear of them** — the separation, not the distance travelled (they already start `gap` apart). Omit `queue=` entirely and they all go at once. |
 | `defense` | player | Auto-reacting defenceman (holds the slot, stays goal-side) |
 | `lock` | any | Pin the piece in place — it can't be dragged, rotated, or edited until unlocked. Toggle *🔒 Lock* on the piece popup, or lock/unlock everything via **☰ → Lock board**. (Bare word, parsed before the jersey-label catch-all.) |
 | `hold=line` | player | Wait at the blue line until the puck enters the zone |
@@ -259,6 +265,38 @@ Standalone text notes use the `label` **piece** instead:
 `PIECE L1 label 100 40 size=1.2 "Regroup here"`, styled with
 `bg=`/`border=`/`textop=`, e.g.
 `PIECE L2 label 100 60 #1f4fa3 bg=none textop=0.6 "Neutral zone"`.
+
+### Lines (a `route` piece + the players queued on it)
+
+A **line** is the shape most of a practice plan is made of: a route drawn once,
+with three or four skaters stacked at its head running it in turn. The route is a
+piece of its own — it owns the geometry and nothing else — and players bind to it:
+
+```drill
+PIECE R1 route 30 20 #3f7f8c Left_lane gap=6 queue=lead:18
+PATH  R1 L 95,20 Q 140,20 165,42
+PIECE P1 player 30 20 #d7263d F1 route=R1 q=1
+PIECE P2 player 24 20 #d7263d F2 route=R1 q=2
+PIECE P3 player 18 20 #d7263d F3 route=R1 q=3
+```
+
+- The route's `x y` **is the head of the line** — where the first skater stands.
+  The rest stack back along the route's opening heading, `gap` feet apart.
+- A bound player's own `PATH` is ignored; the route supplies it. Positions are
+  still written for readability but are recomputed from the route on load, so a
+  hand-written line does not have to get them right.
+- `queue=` is the turn-taking rule and is authored **once on the route**, because
+  the trigger is positional ("the one ahead of me"). The head of the line is never
+  held. No `queue=` at all means they all leave together.
+- Waypoint numbering is **unchanged** for a line member: leg *i* of the skater is
+  waypoint *i* of the route, so `shoot=3` or `pass=2:F2` on a queued player means
+  the point you can see on the route line.
+- A route may carry `BRANCH`es like a player. Every member reads them
+  independently, so three skaters on one reactive route each get their own answer.
+
+In the app: the **Route** tool on the Edit bar places one, or *Make this a line*
+on a player you have already drawn a route for lifts it out. The route's popup
+holds the line's members, its spacing and its `Send them` rule.
 
 ### `BRANCH <player> <ref> [at=<pt>] [<cond>] [<action>[:target]] <segments…>`
 A **conditional route branch** for a player ("multiple routes off one waypoint"): a

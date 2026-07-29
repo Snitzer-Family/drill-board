@@ -1,5 +1,5 @@
 // Drill text format: parser and serializer. See the DSL spec in App header.
-import { VIEWS, RINK_ALIAS, DSL_VERSION, QUEUE_GAP } from "./constants.js";
+import { VIEWS, RINK_ALIAS, DSL_VERSION, QUEUE_GAP, QUEUE_LEAD } from "./constants.js";
 import { orderTransfers } from "./possession.js";
 
 // A puck-action index may be qualified by the branch route it lives on. On the wire
@@ -246,7 +246,7 @@ export function parseDrill(text) {
         let lightId = null;                               // player: designated reaction light to read (else nearest)
         // lines: `route`/`q` bind a PLAYER to the route they queue on; `gap` is the
         // ROUTE's own spacing between stacked skaters
-        let routeId = null, qIx = null, gapFt = null;
+        let routeId = null, qIx = null, gapFt = null, queue = null;
         const transfers = [];
         rest.forEach(r => {
           if (quoted(r)) { text = unq(r); }              // a "quoted string" → label text
@@ -375,6 +375,17 @@ export function parseDrill(text) {
             } else if (key === "gap") {
               const n = parseFloat(v);                     // route: feet between stacked skaters
               if (!isNaN(n) && n > 0) gapFt = n;
+            } else if (key === "queue") {
+              // route: how the line takes its turns. queue=point:<pt> holds each
+              // skater until the one ahead REACHES that waypoint (1-based, as
+              // everywhere); queue=lead:<ft> holds them until the one ahead is that
+              // many feet clear. Absent = they all go at once.
+              const mq = /^(point|lead):(\d+(?:\.\d+)?)$/i.exec(v);
+              if (mq) {
+                const n = parseFloat(mq[2]);
+                if (mq[1].toLowerCase() === "point") { if (n >= 1) queue = { mode: "point", at: n - 1 }; }
+                else if (n > 0) queue = { mode: "lead", lead: n };
+              }
             } else if (key === "group") group = v.replace(/_/g, " ").trim() || null;   // named group membership
           } else if (r === "goalie") goalie = true;
           else if (r === "crease") crease = true;
@@ -385,7 +396,7 @@ export function parseDrill(text) {
         const mode = lmode || (rand === false ? "sequence" : "reactive");   // legacy rand=off → sequence
         // a bare net= token targets every shot terminal that didn't carry its own >net
         if (net) terminals.forEach(t => { if (t.kind === "shot" && !t.net) t.net = net; });
-        const p = { id, kind, x, y, color, label, text, size, speed, hand, sym, carrier, facing, transfers, pickup, ...(terminals.length ? { terminals } : {}), net, holdLine, goalie, defense, wait, group, crease, lock, cues, mode, alwaysColor, lightId, ...(routeId ? { route: routeId } : {}), ...(qIx != null ? { q: qIx } : {}), ...(gapFt != null ? { gap: gapFt } : {}), ...(bg ? { bg } : {}), ...(bgOp != null ? { bgOp } : {}), ...(border ? { border } : {}), ...(borderOp != null ? { borderOp } : {}), ...(textOp != null ? { textOp } : {}), forks: [], path: [] };
+        const p = { id, kind, x, y, color, label, text, size, speed, hand, sym, carrier, facing, transfers, pickup, ...(terminals.length ? { terminals } : {}), net, holdLine, goalie, defense, wait, group, crease, lock, cues, mode, alwaysColor, lightId, ...(routeId ? { route: routeId } : {}), ...(qIx != null ? { q: qIx } : {}), ...(gapFt != null ? { gap: gapFt } : {}), ...(queue ? { queue } : {}), ...(bg ? { bg } : {}), ...(bgOp != null ? { bgOp } : {}), ...(border ? { border } : {}), ...(borderOp != null ? { borderOp } : {}), ...(textOp != null ? { textOp } : {}), forks: [], path: [] };
         pieces.push(p); byId[id] = p;
       } else if (cmd === "PATH") {
         const id = tok[1];
@@ -675,6 +686,12 @@ export function serializeDrill(rink, pieces, title = "", desc = "", steps = [], 
     // route's own stacking distance. `q` is 1-based on the wire like every index here.
     const lin = p.kind === "player" && p.route ? ` route=${p.route}${p.q != null ? " q=" + (p.q + 1) : ""}` : "";
     const lgap = p.kind === "route" && p.gap > 0 && p.gap !== QUEUE_GAP ? ` gap=${f1(p.gap)}` : "";
+    // the line's turn-taking rule. Always written when set — an absent token means
+    // "all at once", so defaulting it away would silently change how a drill runs.
+    const lq = p.kind === "route" && p.queue
+      ? (p.queue.mode === "point" ? ` queue=point:${(p.queue.at ?? 0) + 1}`
+        : p.queue.mode === "lead" ? ` queue=lead:${f1(p.queue.lead ?? QUEUE_LEAD)}` : "")
+      : "";
     const cue = p.kind === "light" && (p.cues || []).length
       ? ` cues=${p.cues.map(c => `${String(c.color || "").replace("#", "")}:${f1(c.dur || 0)}`).join(";")}` : "";
     // lights are reactive (shuffle + loop) by default; note any other route mode.
@@ -685,7 +702,7 @@ export function serializeDrill(rink, pieces, title = "", desc = "", steps = [], 
           ? ` mode=always${p.alwaysColor || (p.cues && p.cues[0] && p.cues[0].color) ? ":" + String(p.alwaysColor || p.cues[0].color).replace("#", "") : ""}`
           : ` mode=${lm}`)
       : "";
-    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${sm}${car}${gp}${pas}${terms}${hld}${wt}${fac}${gl}${crs}${df}${lck}${siz}${grp}${lgt}${lin}${lgap}${cue}${rnd}${spd}`);
+    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${sm}${car}${gp}${pas}${terms}${hld}${wt}${fac}${gl}${crs}${df}${lck}${siz}${grp}${lgt}${lin}${lgap}${lq}${cue}${rnd}${spd}`);
     if (p.path.length) out.push(`PATH ${p.id} ${p.path.map(segToStr).join(" ")}`);
     // route branches (players): one conditional continuation per cue colour, with
     // the action the player performs at its end (skate default → omitted). Branches

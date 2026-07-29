@@ -1,4 +1,4 @@
-import { QUEUE_GAP, queueOf, isMobile, headHeading, stackSpot, lowerRoutes } from '../src/route-lines.js';
+import { QUEUE_GAP, QUEUE_LEAD, queueOf, isMobile, headHeading, stackSpot, queueRelease, lowerRoutes } from '../src/route-lines.js';
 
 let pass = 0, fail = 0;
 const T = (name, got, want) => {
@@ -103,6 +103,46 @@ T('isMobile: null is not', isMobile(null), false);
 { // determinism — no Math.random, no Date
   const ps = [route(), skater('P1', 1), skater('P2', 2)];
   T('lowering is deterministic', JSON.stringify(lowerRoutes(ps)) === JSON.stringify(lowerRoutes(ps)), true);
+}
+
+// ---- queueRelease: how the line takes its turns ----
+{
+  T('no rule → nobody is held', queueRelease(route(), 'P1'), null);
+  T('the head is never held', queueRelease(route({ queue: { mode: 'lead', lead: 15 } }), null), null);
+  T('a point rule lowers to the waypoint trigger timing.js already has',
+    queueRelease(route({ queue: { mode: 'point', at: 1 } }), 'P1'), { on: 'P1', at: 1, mode: 'waypoint' });
+  // the two already stand `gap` apart, so what the one ahead must TRAVEL to open a
+  // 15 ft separation is 15 − 6. Getting this backwards is a silent 2× on the gap.
+  T('a lead rule converts separation to travel',
+    queueRelease(route({ gap: 6, queue: { mode: 'lead', lead: 15 } }), 'P1'), { on: 'P1', dist: 9, mode: 'span' });
+  T('a lead already covered by the spacing releases at once',
+    queueRelease(route({ gap: 6, queue: { mode: 'lead', lead: 4 } }), 'P1').dist, 0);
+  T('a lead rule defaults its distance',
+    queueRelease(route({ gap: 5, queue: { mode: 'lead' } }), 'P1').dist, QUEUE_LEAD - 5);
+  T('an unknown rule holds nobody', queueRelease(route({ queue: { mode: 'wat' } }), 'P1'), null);
+}
+{ // lowering wires each member to the one directly ahead — a strict chain to the head
+  const R = route({ queue: { mode: 'lead', lead: 15 } });
+  const out = lowerRoutes([R, skater('P1', 1), skater('P2', 2), skater('P3', 3)]);
+  const w = id => out.find(p => p.id === id).wait;
+  T('the head of the line waits for nobody', w('P1'), null);
+  T('each skater waits on the one ahead', [w('P2').on, w('P3').on], ['P1', 'P2']);
+  T('the chain is acyclic (it terminates at the head)', (() => {
+    const by = Object.fromEntries(out.filter(p => p.kind === 'player').map(p => [p.id, p.wait && p.wait.on]));
+    let id = 'P3', hops = 0;
+    while (by[id] && hops < 10) { id = by[id]; hops++; }
+    return !by[id] && hops === 2;
+  })(), true);
+  T('every member gets the same travel distance', [w('P2').dist, w('P3').dist], [10, 10]);
+}
+{ // a member's own hand-authored wait= loses to the line's rule
+  const R = route({ queue: { mode: 'point', at: 0 } });
+  const out = lowerRoutes([R, skater('P1', 1), skater('P2', 2, { wait: { on: 'PX', at: 3, mode: 'waypoint' } })]);
+  T('the line owns the release, not the member', out.find(p => p.id === 'P2').wait, { on: 'P1', at: 0, mode: 'waypoint' });
+}
+{ // a line with no rule still lowers cleanly — everyone goes at once, as before
+  const out = lowerRoutes([route(), skater('P1', 1), skater('P2', 2)]);
+  T('no rule leaves every member unheld', out.filter(p => p.kind === 'player').every(p => p.wait === null), true);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
