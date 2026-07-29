@@ -273,5 +273,98 @@ const chainOf = (out, id) => { const p = out.find(q => q.id === id); return [p.p
   T('sharing is deterministic', JSON.stringify(lowerRoutes(ps)) === JSON.stringify(out), true);
 }
 
+// ---- the work replays on every LAP, not just the first ----
+// A recirculating skater comes back through the line and takes another rep. The
+// authored chain only indexes lap 1, so without this they skate laps 2+ empty.
+{
+  const A = route({ id: 'R1', x: 30, y: 22, path: [{ type: 'L', x: 90, y: 22 }, { type: 'L', x: 140, y: 36 }], next: 'R2', hops: 3 });
+  const B = routeB({ id: 'R2', x: 150, y: 66, path: [{ type: 'L', x: 90, y: 66 }], next: 'R1', hops: 3 });
+  const P = { id: 'P1', kind: 'player', x: 30, y: 22, route: 'R1', q: 1, path: [], forks: [] };
+  const tpl = puck('PK1', 31, 26, { pickup: { to: 'P1', at: -1 }, terminals: [{ kind: 'shot', at: 1, ref: '' }] });
+  const ps = [A, B, P, tpl, puck('PK2', 28, 26), puck('PK3', 25, 26)];
+  const out = lowerRoutes(ps);
+  const legs = out.find(p => p.id === 'P1').path;
+  // R R t R t R R t R  → laps of R1 begin at 0 and 5
+  T('the recirculation is laid out as expected', legs.map(s => (s.transit ? 't' : 'R')).join(''), 'RRtRtRRtR');
+
+  const chains = out.filter(p => p.kind === 'puck' && (p.pickup || (p.terminals || []).length))
+    .map(p => [p.pickup && p.pickup.at, (p.terminals || [])[0] && p.terminals[0].at]);
+  T('lap 1 keeps the authored indices', chains[0], [-1, 1]);
+  T('lap 2 is the same work shifted onto its own legs', chains[1], [4, 6]);
+  T('a second lap consumes a second puck', chains.length, 2);
+  // the collect lands on the transit leg ARRIVING at the head — where the pile is
+  T('the lap-2 collect happens as they rejoin the line', legs[4].transit, true);
+  T('the lap-2 shot happens on the route, not in transit', legs[6].transit, undefined);
+}
+{ // laps of the route it recycles INTO must not replay this route's indices
+  const A = route({ id: 'R1', x: 30, y: 22, path: [{ type: 'L', x: 90, y: 22 }], next: 'R2', hops: 1 });
+  const B = routeB({ id: 'R2', x: 150, y: 66, path: [{ type: 'L', x: 90, y: 66 }] });
+  const P = { id: 'P1', kind: 'player', x: 30, y: 22, route: 'R1', q: 1, path: [], forks: [] };
+  const tpl = puck('PK1', 31, 26, { pickup: { to: 'P1', at: -1 }, terminals: [{ kind: 'shot', at: 0, ref: '' }] });
+  const out = lowerRoutes([A, B, P, tpl, puck('PK2', 28, 26)]);
+  T('a lap of the NEXT route does not replay this one\'s work',
+    out.filter(p => p.kind === 'puck' && (p.pickup || (p.terminals || []).length)).length, 1);
+}
+{ // the pile still governs: no puck, no rep — laps don't conjure them
+  const A = route({ id: 'R1', x: 30, y: 22, path: [{ type: 'L', x: 90, y: 22 }], next: 'R2', hops: 3 });
+  const B = routeB({ id: 'R2', x: 150, y: 66, path: [{ type: 'L', x: 90, y: 66 }], next: 'R1', hops: 3 });
+  const P = { id: 'P1', kind: 'player', x: 30, y: 22, route: 'R1', q: 1, path: [], forks: [] };
+  const tpl = puck('PK1', 31, 26, { pickup: { to: 'P1', at: -1 }, terminals: [{ kind: 'shot', at: 0, ref: '' }] });
+  const out = lowerRoutes([A, B, P, tpl]);      // no spares at all
+  T('with an empty pile only the authored rep happens',
+    out.filter(p => p.kind === 'puck' && (p.pickup || (p.terminals || []).length)).length, 1);
+}
+{ // skaters before laps: everyone gets a first rep before anyone gets a second
+  const A = route({ id: 'R1', x: 30, y: 22, path: [{ type: 'L', x: 90, y: 22 }], next: 'R2', hops: 3 });
+  const B = routeB({ id: 'R2', x: 150, y: 66, path: [{ type: 'L', x: 90, y: 66 }], next: 'R1', hops: 3 });
+  const mk = (id, q) => ({ id, kind: 'player', x: 30, y: 22, route: 'R1', q, path: [], forks: [] });
+  const tpl = puck('PK1', 31, 26, { pickup: { to: 'P1', at: -1 }, terminals: [{ kind: 'shot', at: 0, ref: '' }] });
+  const out = lowerRoutes([A, B, mk('P1', 1), mk('P2', 2), tpl, puck('PK2', 28, 26)]);
+  const owners = out.filter(p => p.kind === 'puck' && p.pickup).map(p => p.pickup.to).sort();
+  T('the one spare goes to the second SKATER, not the first skater\'s second lap', owners, ['P1', 'P2']);
+}
+
+// ---- feed: the route supplies its own pucks ----
+{
+  const A = route({ id: 'R1', x: 30, y: 22, path: [{ type: 'L', x: 90, y: 22 }], next: 'R2', hops: 3, feed: true });
+  const B = routeB({ id: 'R2', x: 150, y: 66, path: [{ type: 'L', x: 90, y: 66 }], next: 'R1', hops: 3 });
+  const mk = (id, q) => ({ id, kind: 'player', x: 30, y: 22, route: 'R1', q, path: [], forks: [] });
+  const tpl = puck('PK1', 31, 26, { pickup: { to: 'P1', at: -1 }, terminals: [{ kind: 'shot', at: 0, ref: '' }] });
+  const out = lowerRoutes([A, B, mk('P1', 1), mk('P2', 2), mk('P3', 3), tpl]);   // NO spares placed
+  const chains = out.filter(p => p.kind === 'puck' && p.pickup);
+  T('feeding supplies a puck for every rep', chains.length, 6);   // 3 skaters x 2 laps of R1
+  T('every skater gets one', [...new Set(chains.map(c => c.pickup.to))].sort(), ['P1', 'P2', 'P3']);
+  const madeUp = out.filter(p => p.fed);
+  T('the fed pucks are new pieces, marked as such', madeUp.length, 5);
+  T('they get unique ids', new Set(madeUp.map(p => p.id)).size, 5);
+  T('their ids are namespaced to the route', madeUp.every(p => p.id.startsWith('R1~')), true);
+  T('they sit near the head they are fed at, on the ice',
+    madeUp.every(p => p.x >= 0 && p.x <= 200 && p.y >= 0 && p.y <= 85), true);
+  T('feeding is deterministic', JSON.stringify(lowerRoutes([A, B, mk('P1', 1), mk('P2', 2), mk('P3', 3), tpl])) === JSON.stringify(out), true);
+}
+{ // feed only ever fires where there is authored puck work to repeat
+  const A = route({ id: 'R1', x: 30, y: 22, path: [{ type: 'L', x: 90, y: 22 }], feed: true });
+  const mk = (id, q) => ({ id, kind: 'player', x: 30, y: 22, route: 'R1', q, path: [], forks: [] });
+  const out = lowerRoutes([A, mk('P1', 1), mk('P2', 2), mk('P3', 3)]);
+  T('a line with no puck work is never fed', out.some(p => p.fed), false);
+  T('...and no stray pucks appear', out.filter(p => p.kind === 'puck').length, 0);
+}
+{ // placed pucks are used before any are conjured
+  const A = route({ id: 'R1', x: 30, y: 22, path: [{ type: 'L', x: 90, y: 22 }], feed: true });
+  const mk = (id, q) => ({ id, kind: 'player', x: 30, y: 22, route: 'R1', q, path: [], forks: [] });
+  const tpl = puck('PK1', 31, 26, { pickup: { to: 'P1', at: -1 } });
+  const out = lowerRoutes([A, mk('P1', 1), mk('P2', 2), mk('P3', 3), tpl, puck('PK2', 28, 26)]);
+  T('the placed spare is used first', out.find(p => p.id === 'PK2').pickup.to, 'P2');
+  T('only the shortfall is fed', out.filter(p => p.fed).length, 1);
+}
+{ // feed off is the old behaviour, unchanged
+  const A = route({ id: 'R1', x: 30, y: 22, path: [{ type: 'L', x: 90, y: 22 }] });
+  const mk = (id, q) => ({ id, kind: 'player', x: 30, y: 22, route: 'R1', q, path: [], forks: [] });
+  const tpl = puck('PK1', 31, 26, { pickup: { to: 'P1', at: -1 } });
+  const out = lowerRoutes([A, mk('P1', 1), mk('P2', 2), tpl]);
+  T('without feed, a short pile just means skating empty', out.some(p => p.fed), false);
+  T('...and only the authored rep has a chain', out.filter(p => p.kind === 'puck' && p.pickup).length, 1);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -8439,11 +8439,22 @@ export default function DrillAnimator() {
                   </div>
                   {line.length > 1 && (
                     <div className="hd-sechint">
-                      Whatever {nameOf(line[0].id)} does with a puck, the rest do — as long as
-                      there&rsquo;s a loose one for them to pick up. Anyone who can&rsquo;t get one
-                      just skates the route.
+                      Whatever {nameOf(line[0].id)} does with a puck, the rest do, and again on
+                      every lap back through — as long as there&rsquo;s one for them. Anyone who
+                      can&rsquo;t get one just skates the route.
                     </div>
                   )}
+                  <div className="hd-poprow">
+                    <button className={`hd-mini${p.feed ? " on" : ""}`}
+                      onClick={() => updateById(p.id, { feed: !p.feed })}>
+                      {p.feed ? "✓ Feed pucks" : "Feed pucks"}
+                    </button>
+                  </div>
+                  <div className="hd-sechint">
+                    {p.feed
+                      ? "The line never runs dry — it supplies a puck for every rep it needs, so a recirculating drill keeps shooting."
+                      : "Off: the line uses only the loose pucks on the ice, and skates empty-handed once they run out."}
+                  </div>
                 </div>
                 <div className="hd-field">
                   <div className="hd-sectitle">Spacing</div>

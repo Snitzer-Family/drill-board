@@ -195,6 +195,28 @@ function retarget(pk, fromId, toId) {
   return out;
 }
 
+// Move a chain's own indices into a later lap. A recirculating skater runs the
+// same route several times over one long path, so the work authored at local
+// waypoint i happens again at base+i on every later lap. Local -1 (the standing
+// spot, where "collect a puck before you go" lives) becomes the last leg of the
+// transit that arrives back at the route's head — which is exactly where the
+// pile is, so they pick up as they rejoin the line.
+function shiftChain(pk, base, selfId) {
+  if (!base) return pk;
+  const sh = at => (at == null ? at : at < 0 ? base - 1 : base + at);
+  const out = { ...pk };
+  if (pk.pickup) out.pickup = { ...pk.pickup, at: sh(pk.pickup.at) };
+  if ((pk.transfers || []).length) out.transfers = pk.transfers.map(t => ({
+    ...t, at: sh(t.at),
+    // recvAt indexes the RECEIVER's path, so it only moves with this lap when the
+    // catch is on the same skater (a give-and-go). A pass to someone off the line
+    // lands at their own waypoint, wherever they are in their own route.
+    ...(t.recvAt != null && t.to === selfId ? { recvAt: sh(t.recvAt) } : {}),
+  }));
+  if ((pk.terminals || []).length) out.terminals = pk.terminals.map(t => ({ ...t, at: sh(t.at) }));
+  return out;
+}
+
 // Give every skater on the line the same puck work as the one at its head — but
 // only if there is actually a puck for them.
 //
@@ -205,34 +227,83 @@ function retarget(pk, fromId, toId) {
 // possession ledger keeps its one-carrier-per-puck assumption and `pickup=…*`
 // keeps working untouched.
 //
-// Returns a Map of puckId -> replacement piece (empty when there is nothing to do).
-export function shareLinePucks(pieces, line, spots) {
-  const out = new Map();
-  if (line.length < 2) return out;
-  const head = line[0].id;
+// ...and again on every LAP. A recirculating skater comes back through the line
+// and takes another rep, so the work replays once per pass over the route, not
+// once per skater. `laps` is [{base, x, y}] — the flat leg index each pass starts
+// at, and the head it starts from (which is where that pass's pile sits).
+//
+// A puck the ROUTE supplies rather than the coach placing it. Only ever minted
+// when the line already has puck work authored and the pile has run dry, and it
+// exists only in the lowered model — never serialized, so the drill text stays
+// exactly what was written. Laid out in a short row beside the head, the way a
+// coach dumps a bucket next to the line.
+function feedPuck(route, lap, n) {
+  const h = headHeading(route);
+  const px = -h.y, py = h.x;                 // across the entry heading
+  const back = 1.5 * (n % 5), side = 3.4 + 1.5 * Math.floor(n / 5);
+  return {
+    id: `${route.id}~feed${n}`, kind: "puck", color: "#14171a",
+    x: clampX(lap.x + px * side - h.x * back),
+    y: clampY(lap.y + py * side - h.y * back),
+    label: "", text: "", size: 1, speed: 1, hand: "R", sym: "", facing: 0,
+    carrier: null, pickup: null, transfers: [], net: null, holdLine: false,
+    goalie: false, defense: false, wait: null, group: null, crease: false,
+    lock: false, cues: [], mode: "reactive", alwaysColor: null, lightId: null,
+    forks: [], path: [], fed: true,
+  };
+}
+
+// Returns { replace, add }: chains to graft onto existing pucks, and any pucks
+// the route fed. Both empty when there is nothing to do.
+export function shareLinePucks(pieces, route, line, spots, laps) {
+  const out = new Map(), add = [];
+  const nothing = { replace: out, add };
+  const head = line[0] && line[0].id;
+  if (!head) return nothing;
   const templates = pieces.filter(pk => pk.kind === "puck" && chainHead(pk) === head);
-  if (!templates.length) return out;
+  if (!templates.length) return nothing;     // no authored puck work → never feed
+  const runs = (laps && laps.length ? laps : [{ base: 0, x: spots[0].x, y: spots[0].y }]);
+  if (line.length < 2 && runs.length < 2) return nothing;   // one skater, one lap: nothing to replicate
 
-  // the pile, nearest the head of the line first, so a skater takes the puck a
-  // coach would hand them rather than one from across the ice
-  const spare = pieces.filter(isSpare)
-    .map(pk => ({ pk, d: Math.hypot(pk.x - spots[0].x, pk.y - spots[0].y) }))
-    .sort((a, b) => a.d - b.d)
-    .map(e => e.pk);
+  const feed = !!route.feed;
+  let minted = 0;
+  const spare = pieces.filter(isSpare);
+  const used = new Set();
+  // the puck a coach would actually hand them: nearest THIS lap's head, since a
+  // recirculating drill picks up from whichever line it has just rejoined
+  const take = (x, y) => {
+    let best = null, bd = Infinity;
+    for (const pk of spare) {
+      if (used.has(pk.id)) continue;
+      const d = Math.hypot(pk.x - x, pk.y - y);
+      if (d < bd) { bd = d; best = pk; }
+    }
+    if (best) used.add(best.id);
+    return best;
+  };
 
-  let n = 0;
-  for (let k = 1; k < line.length; k++) {
-    // one spare per template, or this skater gets nothing — all or nothing per
-    // skater, so a two-puck rep never lands half-done
-    if (n + templates.length > spare.length) break;
-    templates.forEach(t => {
-      const pk = spare[n++];
-      const re = retarget(t, head, line[k].id);
-      // it keeps its OWN spot in the pile, and its own id; only the chain moves
-      out.set(pk.id, { ...re, id: pk.id, x: pk.x, y: pk.y });
-    });
+  // Lap-major: everyone takes their first rep before anyone takes a second, which
+  // is how a pile at the top of a line actually gets used up. When it runs dry the
+  // remaining reps are skated empty-handed — the availability rule, unchanged.
+  for (let L = 0; L < runs.length; L++) {
+    for (let k = 0; k < line.length; k++) {
+      if (L === 0 && k === 0) continue;              // the authored chain already IS this rep
+      // Without feeding, a rep is all-or-nothing: better that a skater plainly
+      // has no puck than that a two-puck rep lands half-done.
+      if (!feed && spare.length - used.size < templates.length) return { replace: out, add };
+      templates.forEach(t => {
+        const spared = take(runs[L].x, runs[L].y);
+        const pk = spared || feedPuck(route, runs[L], minted++);
+        const re = shiftChain(retarget(t, head, line[k].id), runs[L].base, line[k].id);
+        // it keeps its OWN spot in the pile, and its own id; only the chain moves
+        const chained = { ...re, id: pk.id, x: pk.x, y: pk.y, ...(pk.fed ? { fed: true } : {}) };
+        // a puck the coach placed is REPLACED in situ; a fed one is new, so it has
+        // to be appended to the board rather than looked up in it
+        if (spared) out.set(pk.id, chained); else add.push(chained);
+      });
+    }
   }
-  return out;
+  return { replace: out, add };
 }
 
 // Materialize every line into plain players and drop the route pieces, which are
@@ -264,6 +335,10 @@ export function lowerRoutes(pieces) {
   // which is exactly how a real full-ice drill is drawn.
   const unfold = R => {
     const legs = (R.path || []).map(s => ({ ...s }));
+    // where each pass over a route begins, and the head it begins from — what the
+    // puck work is replayed against, so a second lap is a second rep and not just
+    // the same legs skated again empty-handed
+    const laps = [{ base: 0, x: R.x, y: R.y, route: R.id }];
     let cur = R;
     let hops = Math.max(0, Math.min(HOPS_MAX, R.hops == null ? 1 : R.hops));
     while (hops > 0) {
@@ -278,21 +353,31 @@ export function lowerRoutes(pieces) {
       const end = legs[legs.length - 1];
       const rate = cur.regroup > 0 ? cur.regroup : TRANSIT_RATE;
       legs.push(...transitLegs({ x: end.x, y: end.y }, { x: nxt.x, y: nxt.y }, obstacles, rate));
+      laps.push({ base: legs.length, x: nxt.x, y: nxt.y, route: nxt.id });
       legs.push(...(nxt.path || []).map(s => ({ ...s })));
       cur = nxt;
     }
-    return legs.slice(0, LINE_LEG_CAP);
+    const capped = legs.slice(0, LINE_LEG_CAP);
+    return { legs: capped, laps: laps.filter(l => l.base < capped.length) };
   };
 
   const lowered = new Map();
   const pucks = new Map();
+  const fed = [];                            // pucks the routes supplied themselves
   for (const [id, R] of routes) {
     const gap = R.gap > 0 ? R.gap : QUEUE_GAP;
     const line = queueOf(list, id);
     const spots = line.map((_, k) => stackSpot(R, k, gap));
-    // whatever the head of the line does with a puck, the rest do — if the pile
-    // has one for them. Everyone else just skates it.
-    for (const [pid, pk] of shareLinePucks(list, line, spots)) pucks.set(pid, pk);
+    // one unfold for the whole line — every member runs the same recirculation
+    const { legs, laps } = unfold(R);
+    // Whatever the head of the line does with a puck, the rest do, and they all do
+    // it again on every pass back through — if the pile has one for them. Only laps
+    // of THIS route replay its work: a lap of the route it recycles into has its
+    // own geometry, and its own line's chain, so this route's waypoint indices
+    // would land on the wrong legs there.
+    const share = shareLinePucks(list, R, line, spots, laps.filter(l => l.route === id));
+    for (const [pid, pk] of share.replace) pucks.set(pid, pk);
+    fed.push(...share.add);
     line.forEach((P, k) => {
       const spot = spots[k];
       // the head of the line goes on the whistle; everyone behind waits their turn.
@@ -305,7 +390,9 @@ export function lowerRoutes(pieces) {
         wait,
         // this route's legs verbatim — see the header on why nothing is prepended
         // — then, if it recycles, the transit and the next route's legs after them
-        path: unfold(R),
+        // a copy per member: the unfold is shared work, but no two skaters should
+        // ever hand each other the same leg objects
+        path: legs.map(s => ({ ...s })),
         // shared by reference: forks are immutable here, and resolveForks picks a
         // branch per PLAYER, so three skaters on one reactive route read the light
         // independently — which is exactly what a read-and-react drill wants
@@ -314,5 +401,5 @@ export function lowerRoutes(pieces) {
       });
     });
   }
-  return list.filter(p => p.kind !== "route").map(p => lowered.get(p.id) || pucks.get(p.id) || p);
+  return [...list.filter(p => p.kind !== "route").map(p => lowered.get(p.id) || pucks.get(p.id) || p), ...fed];
 }

@@ -158,6 +158,7 @@ Places a piece. `id` is any unique token (e.g. `F1`, `PK1`, `N2`).
 | `next=<routeId>` | route | When they finish, they skate to that route's head and run it — going around nets, props and anyone standing still. |
 | `hops=<n>` | route | How many `next=` links one skater follows (default `1`, omitted then). `0` draws the link without running it. Two routes pointed at each other recirculate, and this is what ends it. |
 | `regroup=<n>` | route | Pace multiplier for the skate between routes (default `0.65` — a glide, not another rep). |
+| `feed` | route | The line supplies its own pucks: a fresh one for every rep that needs one, so a recirculating drill never runs dry. Only ever acts where puck work is already authored. Fed pucks exist only while the drill runs — they are never written back to the text. (Bare word.) |
 | `defense` | player | Auto-reacting defenceman (holds the slot, stays goal-side) |
 | `lock` | any | Pin the piece in place — it can't be dragged, rotated, or edited until unlocked. Toggle *🔒 Lock* on the piece popup, or lock/unlock everything via **☰ → Lock board**. (Bare word, parsed before the jersey-label catch-all.) |
 | `hold=line` | player | Wait at the blue line until the puck enters the zone |
@@ -321,6 +322,12 @@ A skater with no puck to collect **runs the route empty-handed and does no puck
 work at all** — which is what having no chain already means everywhere else in the
 format. So a three-deep line with two pucks is legal and does the obvious thing.
 In the app, *+ Pucks* on the route's popup drops the pile for you.
+
+The work replays on **every lap**, not just the first: a skater who recirculates
+back through the line takes another rep, with the indices shifted onto that lap's
+legs (the collect landing as they rejoin the line, which is where the pile is).
+That eats a puck per rep, so a looping drill wants either a deep pile or `feed`,
+which lets the route supply them itself.
 
 **Recirculating.** `next=` sends a line's finishers to another line's head, which
 is how a full-ice drill actually runs:

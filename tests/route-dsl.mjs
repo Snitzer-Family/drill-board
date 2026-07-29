@@ -77,6 +77,22 @@ const LINE = [
   const bad = parseDrill(LINE.replace('queue=lead:18', 'queue=point:0'));
   T('a zero-point rule is rejected, not stored', bad.pieces[0].queue, undefined);
 }
+{ // feed: the route supplies its own pucks
+  const f = LINE.replace('queue=lead:18', 'queue=lead:18 feed');
+  const d = parseDrill(f);
+  T('feed parses as a flag', d.pieces.find(p => p.id === 'R1').feed, true);
+  T('feed round-trips', / feed\b/.test(ser(d)), true);
+  T('feed is a fixed point', ser(parseDrill(ser(d))) === ser(d), true);
+  T('no feed emits no token', / feed\b/.test(ser(parseDrill(LINE))), false);
+  T('an unfed route has no feed field', parseDrill(LINE).pieces.find(p => p.id === 'R1').feed, undefined);
+  // fed pucks are lowering-only and must never reach the drill text. Needs
+  // authored puck work to repeat — feeding never invents a rep that wasn't asked for.
+  const withWork = parseDrill(`${f}\nPIECE PK1 puck 61 44 #14171a pickup=P1@0 shoot=1`);
+  const lowered = lowerRoutes(withWork.pieces);
+  T('fed pucks exist in the lowered model', lowered.some(p => p.fed), true);
+  T('...but the authored pieces are untouched', withWork.pieces.some(p => p.fed), false);
+  T('...and never reach the drill text', / feed[0-9]|~feed/.test(ser(withWork)), false);
+}
 { // the parser and the lowering pass agree on the model
   const out = lowerRoutes(parseDrill(LINE).pieces);
   T('a parsed line lowers to three skaters', out.filter(p => p.kind === 'player').length, 3);
