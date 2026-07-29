@@ -11,7 +11,7 @@
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { THEMES, PAIRS, EXEMPT, NON_COLOR_TOKENS, AUTO_MAP, themeCss } from "../src/theme.js";
+import { THEMES, PAIRS, EXEMPT, NON_COLOR_TOKENS, AUTO_MAP, themeCss, teamInk } from "../src/theme.js";
 
 let passed = 0, failed = 0, known = 0;
 // Empty is the goal state. Add a check name here only to land a migration in
@@ -153,37 +153,158 @@ check("menu width agrees between styles.js and the anchoring JS", () => {
   assert.ok(cssW, "--hd-menu-w not found in styles.js");
   assert.ok(jsW, "MENU_W not found in hockey-drill-animator.jsx");
   assert.equal(jsW[1], cssW[1], `MENU_W=${jsW[1]} but --hd-menu-w=${cssW[1]}px`);
-  // and the stretch breakpoint must match the one the media query uses
+  // and the stretch breakpoint must match the one the media query uses.
+  // MENU_ANCHOR_MIN is DENSE_MIN, so resolve through it.
   const cssBp = /@media \(max-width: (\d+)px\) \{\s*\.hd-menu/.exec(css);
-  const jsBp = /MENU_ANCHOR_MIN = (\d+)/.exec(js);
+  const jsBp = /const DENSE_MIN = (\d+)/.exec(js);
   assert.ok(cssBp && jsBp, "menu breakpoint not found on both sides");
   assert.equal(+jsBp[1], +cssBp[1] + 1,
     `JS anchors at >=${jsBp[1]}px but CSS stretches up to ${cssBp[1]}px — ` +
     `there is a gap or overlap where both or neither apply`);
 });
 
-// The player bar and the pen palette are alternate contents of the same slot,
-// so they must share one height and both be border-box — otherwise switching
-// tools in landscape jogs the ice, and the reserved band (which is computed
-// from --hd-barh) silently stops matching what actually renders. Reading these
-// heights off the CSS by hand has been wrong twice, so pin the structure.
-check("the two bottom panels share one border-box height", () => {
+// The pen palette and the player bar are alternate CONTENTS of one element now,
+// so there is one height and one reserved band. Both must derive from --hd-barh:
+// if the bar's rendered height and the strip of ice reserved for it ever stop
+// agreeing, the bar overlaps the ice (band too short) or the ice floats above a
+// gap (too tall). Reading these heights off the CSS by hand has been wrong
+// twice, so pin the structure instead.
+check("the action bar is one border-box height, one reserved band", () => {
   const css = read("../src/styles.js");
-  const rule = name => {
-    const m = new RegExp(`\\.hd-${name} \\{[^}]*\\}`, "s").exec(css);
-    assert.ok(m, `.hd-${name} rule not found`);
-    return m[0];
-  };
-  for (const [name, prop] of [["scrub", "height"], ["pen", "min-height"]]) {
-    const r = rule(name);
-    assert.match(r, /box-sizing:\s*border-box/,
-      `.hd-${name} must be border-box or its stated height isn't its rendered height`);
-    assert.match(r, new RegExp(`${prop}:\\s*var\\(--hd-barh\\)`),
-      `.hd-${name} must take its ${prop} from --hd-barh, not a literal`);
+  const m = /^\s*\.hd-act \{[^}]*\}/ms.exec(css);
+  assert.ok(m, ".hd-act base rule not found");
+  assert.match(m[0], /box-sizing:\s*border-box/,
+    ".hd-act must be border-box or its stated height isn't its rendered height");
+  assert.match(m[0], /height:\s*var\(--hd-barh\)/,
+    ".hd-act must take its height from --hd-barh, not a literal");
+  assert.doesNotMatch(m[0], /min-height/,
+    ".hd-act must be a fixed height — min-height lets it grow past its reserved band");
+  // the band is unconditional and computed from the SAME variable
+  assert.match(css, /--hd-act: calc\(4px \+ var\(--hd-barh\) \+ var\(--hd-icegap\)\);/);
+  assert.match(css, /\.hd-root\.act-off \{ --hd-act: 0px; \}/);
+  // The two-row palette and its second height variable are gone for good.
+  // Match declarations and var() uses, not bare names — the comments above
+  // --hd-act deliberately explain what --hd-barh2 was and why it died.
+  for (const dead of ["--hd-barh2", "--hd-scrub"]) {
+    assert.doesNotMatch(css, new RegExp(`${dead}\\s*:`), `${dead} is still declared — one bar, one height`);
+    assert.ok(!css.includes(`var(${dead})`), `${dead} is still used — one bar, one height`);
   }
-  // and the reserved bands must be derived from the same variables
-  assert.match(css, /\.hd-root\.scrub-on \{ --hd-scrub: calc\(4px \+ var\(--hd-barh\)/);
-  assert.match(css, /\.hd-root\.pen-on \{ --hd-scrub: calc\(4px \+ var\(--hd-barh2\)/);
+  for (const dead of [".hd-root.pen-on {", ".hd-root.scrub-on {"])
+    assert.ok(!css.includes(dead), `${dead}…} should no longer exist — the band is unconditional`);
+});
+
+// A piece's default colour is written out TWICE — once in the board editor's
+// defaultColor(), once in the DSL parser — so a kind can end up one colour when
+// you place it and another when you load the same board from text. That is
+// exactly what happened to the stick (#14171a placed, #20242a parsed), and it
+// stayed invisible because both are near-black. Pin the two tables together.
+check("the two default-colour tables agree on every kind", () => {
+  const js = read("../src/hockey-drill-animator.jsx");
+  const fmt = read("../src/drill-format.js");
+  const grab = (src, after) => {
+    const i = src.indexOf(after);
+    assert.ok(i >= 0, `couldn't find "${after}"`);
+    const body = src.slice(i, i + 700);
+    const out = {};
+    for (const m of body.matchAll(/kind === "(\w+)" \? "(#[0-9a-fA-F]{6})"/g)) out[m[1]] = m[2].toLowerCase();
+    return out;
+  };
+  const editor = grab(js, "const defaultColor =");
+  const parser = grab(fmt, "let color = kind ===");
+  const kinds = [...new Set([...Object.keys(editor), ...Object.keys(parser)])]
+    .filter(k => k in editor && k in parser);
+  assert.ok(kinds.length >= 7, `only matched ${kinds.length} kinds — did a table's shape change?`);
+  for (const k of kinds)
+    assert.equal(editor[k], parser[k],
+      `${k}: the editor places it ${editor[k]} but the parser loads it ${parser[k]}`);
+});
+
+// Pen ink has to be visible on the sheet it lands on. Black ink was 1.01:1 on
+// the dark rink — literally the same colour as the ice — and yellow was 1.35:1
+// on the light one. TEAM_LIFT flips those (and a couple of others measurement
+// turned up) at PAINT time only; the stored colour never changes, so a drill
+// saved with black ink is still black ink and the DSL round-trip is untouched.
+check("every pen ink is visible on every sheet", () => {
+  const INKS = ["#ffd447", "#d7263d", "#1f4fa3", "#1f8a4c", "#e0731d", "#7a3fa8", "#111318"];
+  for (const theme of Object.keys(THEMES)) {
+    const ice = THEMES[theme].ice;
+    for (const stored of INKS) {
+      const painted = teamInk(theme, stored);
+      const r = contrast(parseHex(painted), parseHex(ice));
+      assert.ok(r >= 3, `${theme}: ink ${stored}` +
+        (painted === stored ? "" : ` (painted ${painted})`) +
+        ` is ${r.toFixed(2)}:1 on the ice — a stroke you can't see`);
+    }
+  }
+});
+
+// Same problem, different piece: props moulded in black rubber were ~1.1:1 on
+// the dark rink — the ice with a faint outline round it. These are the DEFAULT
+// body colours, the ones a piece gets when nobody has chosen one, so they have
+// to be visible on whatever sheet they land on.
+check("default prop bodies are visible on every sheet", () => {
+  const BODIES = {
+    tire: "#1c1c1e", bumper: "#1b1e22", cone: "#e0731d", deker: "#c79a4e",
+    passer: "#57636f", light: "#2ea043", net: "#c81e33", stick: "#20242a",
+  };
+  for (const theme of Object.keys(THEMES)) {
+    const ice = THEMES[theme].ice;
+    for (const [kind, stored] of Object.entries(BODIES)) {
+      // the stick reads its body from a token rather than a stored colour
+      const painted = kind === "stick" ? THEMES[theme]["ice-stick"] : teamInk(theme, stored);
+      const r = contrast(parseHex(painted), parseHex(ice));
+      assert.ok(r >= 3, `${theme}: ${kind} body ${stored}` +
+        (painted === stored ? "" : ` (painted ${painted})`) +
+        ` is ${r.toFixed(2)}:1 on the ice — it disappears into the rink`);
+    }
+  }
+});
+
+// STYLES is one big template literal, so a stray backtick — even inside a CSS
+// comment, quoting a property name — closes the string and the whole file stops
+// parsing. Worse, the build error points at the next odd character rather than
+// the backtick, and on a clean tree the copy-preview plugin's ENOENT (dist/ was
+// never written) masks it completely. Cost twenty minutes twice; catch it in a
+// one-second node test instead.
+check("styles.js has no stray backticks inside the STYLES literal", () => {
+  const css = read("../src/styles.js");
+  const body = css.slice(css.indexOf("export const STYLES = `") + 23);
+  const end = body.indexOf("`");
+  assert.ok(end >= 0, "STYLES literal is never closed");
+  assert.equal(body.slice(0, end).includes("`"), false);
+  // the only backtick after the opener must be the one that closes it
+  assert.equal((body.match(/`/g) || []).length, 1,
+    "a backtick inside STYLES ends the template literal early — use plain prose");
+});
+
+// The single-line guarantee. The palette used to wrap to a second row on a
+// narrow phone, which is the only reason a second height variable ever existed.
+// nowrap on both bars is what makes one height true at every width; without it
+// the reserved band silently goes short and the bar sits on the ice.
+check("neither bottom bar can wrap to a second row", () => {
+  const css = read("../src/styles.js");
+  for (const name of ["act", "bar"]) {
+    // anchored to the start of a line so this finds the BASE rule, not one of
+    // the `.hd-root:not(.dense) .hd-act {…}` overrides that precede it
+    const m = new RegExp(`^\\s*\\.hd-${name} \\{[^}]*\\}`, "ms").exec(css);
+    assert.ok(m, `.hd-${name} base rule not found`);
+    assert.match(m[0], /flex-wrap:\s*nowrap/,
+      `.hd-${name} must be flex-wrap:nowrap — a second row breaks the reserved band`);
+  }
+});
+
+// The bar's layout tier and the corner menus' stretch breakpoint are the same
+// number, so a device changes personality exactly once as it rotates. DENSE_MIN
+// is the JS source of truth; the stylesheet keys off the .dense class it writes,
+// which is why there is no bar media query to drift against.
+check("DENSE_MIN drives both the bar tier and the menu anchoring", () => {
+  const js = read("../src/hockey-drill-animator.jsx");
+  const d = /const DENSE_MIN = (\d+)/.exec(js);
+  assert.ok(d, "DENSE_MIN not found in hockey-drill-animator.jsx");
+  assert.match(js, /MENU_ANCHOR_MIN = DENSE_MIN/,
+    "MENU_ANCHOR_MIN must be derived from DENSE_MIN, not a second copy of the number");
+  assert.match(js, new RegExp(`min-width: \\$\\{DENSE_MIN\\}px`),
+    "the dense matchMedia query must interpolate DENSE_MIN rather than repeat it");
 });
 
 // A rule that FILLS with the accent must also set the on-accent text colour,
@@ -192,7 +313,9 @@ check("the two bottom panels share one border-box height", () => {
 // dark-on-teal the moment a light theme existed. Pair contrast can't catch
 // this: both tokens are individually fine, the rule just never opts in.
 const ACCENT_FILL_NO_TEXT = new Set([
-  ".hd-penswknob",   // the sliding knob; its label lives on .hd-penswopt
+  // the sliding knob shared by the mode switch and the pen segment; the labels
+  // it slides under live on .hd-modeopt / .hd-segopt, which do set on-accent
+  ".hd-modeknob, .hd-segknob",
   ".hd-sw.on",       // switch track, no text at all
 ]);
 check("every accent-filled rule sets the on-accent text colour", () => {
@@ -210,6 +333,26 @@ check("every accent-filled rule sets the on-accent text colour", () => {
   }
   assert.deepEqual(offenders, [],
     `accent-filled but inheriting their text colour: ${offenders.join(", ")}`);
+});
+
+// A bad merge once spliced a whole line of source INTO a tooltip string, and it
+// shipped: the Marks group's tip read "Freehand marker, shapes andconst
+// [openMenu, setOpenMenu] = useState(null); // settings | rinkmenu | ..." for
+// eleven commits. Nothing caught it — it is a valid string literal, so the
+// build is happy, and no test reads tooltips. These are the strings a user
+// actually reads, so check they look like prose.
+check("no source code has leaked into a user-facing label or tip", () => {
+  const src = read("../src/hockey-drill-animator.jsx");
+  // both spellings: object properties (ADD_GROUPS' label/tip, PEN_READ's rows)
+  // and JSX attributes (title="…"), since the corruption could land in either
+  const strings = [
+    ...[...src.matchAll(/\b(?:label|tip|title|desc):\s*"([^"\\]{4,})"/g)].map(m => m[1]),
+    ...[...src.matchAll(/\b(?:title|aria-label|placeholder)="([^"\\]{4,})"/g)].map(m => m[1]),
+  ];
+  assert.ok(strings.length > 20, `expected plenty of labels, found ${strings.length}`);
+  const codey = strings.filter(s =>
+    /\buseState\s*\(|=>|\bconst\s+\[|\bfunction\s*\(|\);\s*\/\//.test(s));
+  assert.deepEqual(codey, [], `source spliced into user-facing strings: ${codey.join(" | ")}`);
 });
 
 // drill-svg.js's var() fallbacks are what an <img>-loaded SVG actually renders

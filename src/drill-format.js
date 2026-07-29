@@ -1,5 +1,5 @@
 // Drill text format: parser and serializer. See the DSL spec in App header.
-import { VIEWS, DSL_VERSION } from "./constants.js";
+import { VIEWS, RINK_ALIAS, DSL_VERSION } from "./constants.js";
 import { orderTransfers } from "./possession.js";
 
 // A puck-action index may be qualified by the branch route it lives on. On the wire
@@ -227,7 +227,9 @@ export function parseDrill(text) {
         if (isNaN(n) || n < 1) throw new Error(`DSL needs a version number, got "${tok[1] || ""}"`);
         dslVersion = n;
       } else if (cmd === "RINK") {
-        const m = (tok[1] || "").toLowerCase();
+        // legacy spellings normalize here, so nothing downstream ever sees one
+        const raw = (tok[1] || "").toLowerCase();
+        const m = RINK_ALIAS[raw] || raw;
         if (!VIEWS[m]) throw new Error(`unknown rink "${tok[1]}"`);
         rink = m;
       } else if (cmd === "PIECE") {
@@ -442,10 +444,13 @@ export function parseDrill(text) {
         // a bare `lock` flag may sit among the trailing tokens; coords are pure
         // numbers (the tokenizer splits on commas), so it never collides with them
         const mlock = rest.some(t => t.toLowerCase() === "lock");
-        // `note` = annotation ink the smart pen's converter leaves alone, so a
-        // scribbled reminder survives Convert. Unlike `lock` it stays fully
-        // selectable and erasable — it opts out of recognition, nothing else.
-        const mnote = rest.some(t => t.toLowerCase() === "note");
+        // `sketch` = ink the smart pen's converter leaves alone, so freehand
+        // drawing survives Convert exactly as drawn. Unlike `lock` it stays
+        // fully selectable and erasable — it opts out of recognition, nothing
+        // else. Written as `sketch`; `note` is the original spelling and is
+        // still read, because it is in every drill, autosave and share link
+        // saved before v6.92 and those must not silently start converting.
+        const msketch = rest.some(t => { const v = t.toLowerCase(); return v === "sketch" || v === "note"; });
         // optional independent area fill: fill=<hex>[:<opacity 0..1>] — non-
         // numeric, so older readers drop it harmlessly via the isNaN filter
         const mfTok = rest.find(t => /^fill=/i.test(t));
@@ -462,7 +467,7 @@ export function parseDrill(text) {
         // optional sharp-corner point indices: corners=i;j;k — the curve
         // BREAKS at these points instead of smoothing through them (older
         // readers drop the token harmlessly via the isNaN filter)
-        // per-point stylus pressure for note ink: press=<v>;<v>;… one per point
+        // per-point stylus pressure for sketch ink: press=<v>;<v>;… one per point
         // (2dp, 0..1). Older readers drop the token via the isNaN filter.
         const mpTok = rest.find(t => /^press=/i.test(t));
         const mpress = mpTok
@@ -472,7 +477,7 @@ export function parseDrill(text) {
         if (mcTok) mcTok.slice(8).split(";").forEach(s => { const i = parseInt(s, 10); if (pts[i]) pts[i].c = true; });
         if (mid && pts.length >= 2) {
           const m = { id: mid, kind: "mark", color: mcol, width: mw, style: ["dashed", "dotted", "wavy"].includes(mst) ? mst : "solid",
-            ...(mlock ? { lock: true } : {}), ...(mnote ? { note: true } : {}),
+            ...(mlock ? { lock: true } : {}), ...(msketch ? { sketch: true } : {}),
             ...(mpress && mpress.length === pts.length ? { press: mpress } : {}),
             ...(mfill ? { fill: mfill, fillOp: mfillOp } : {}), x: pts[0].x, y: pts[0].y, pts, path: [] };
           pieces.push(m); byId[mid] = m;
@@ -585,7 +590,8 @@ export function serializeDrill(rink, pieces, title = "", desc = "", steps = [], 
     }
     if (p.kind === "mark") {
       const lk = p.lock ? " lock" : "";
-      const nt = p.note ? " note" : "";
+      // written as `sketch` now; the parser still accepts the old `note`
+      const nt = p.sketch ? " sketch" : "";
       const fl = p.fill ? ` fill=${String(p.fill).replace("#", "")}:${f2(p.fillOp != null ? p.fillOp : 0.25)}` : "";
       const cIdx = (p.pts || []).map((q, i) => (q.c ? i : -1)).filter(i => i >= 0);
       const cr = cIdx.length ? ` corners=${cIdx.join(";")}` : "";

@@ -70,6 +70,27 @@ const LIGHT = {
     "ui-select": "#a06400",
     "brand-red": "#d7263d",
 
+    // The DRAW flow's colour on the mode switch's sliding knob. Edit wears
+    // `accent` and Play wears `brand-red` (the red the transport's own Play
+    // button already carries), so only the third flow needs a token — and it
+    // borrows nothing, because every amber already here flips LIGHT in dark
+    // mode. `warn`, `ui-select` and `act-loose` all do, and a knob whose whole
+    // job is to carry a white glyph can't. Same value on both themes, like
+    // accent and brand-red themselves: it has to hold white at 4.5:1 AND clear
+    // 3:1 against the sunken track it slides in, and one value does both on
+    // every sheet (4.87 / 3.80-4.65).
+    "mode-draw": "#ad5c0b",
+
+    /* what a puck ACTION does, as a stripe down the side of its step card.
+       Named for the move, not the hue: the puck arrives (gain), goes to a
+       teammate (pass), goes at the net (shot), or goes to space off the boards
+       or glass (loose). Decorative — every step also states its type in text —
+       so these carry no contrast pair. */
+    "act-gain": "#1657c4",
+    "act-pass": "#177a41",
+    "act-shot": "#c0182b",
+    "act-loose": "#b4610d",
+
     /* ice / diagram — the only tier the SVG reads */
     ice: "#f5fafd",
     "ice-surround": "#eef5f9",
@@ -79,6 +100,9 @@ const LIGHT = {
     "ice-boards": "#31404e",
     "ice-dash": "#ffffff",
     "ice-ink": "#14171a",
+    // a stick lying on the ice — lifted off the sheet rather than the near-black
+    // literal it used to carry, which vanished on a dark rink
+    "ice-stick": "#3d4753",
     "ice-select": "#a06400",
 
     /* effects — alpha, composited over a declared base in the contrast test */
@@ -130,6 +154,15 @@ const DARK = {
     "ui-select": "#ffd447",
     "brand-red": "#d7263d",
 
+    // see the light theme — deliberately the same value there and here
+    "mode-draw": "#ad5c0b",
+
+    /* see the light theme for what these mean */
+    "act-gain": "#6ea8ff",
+    "act-pass": "#3ecf7a",
+    "act-shot": "#ff5a6a",
+    "act-loose": "#e0731d",
+
     ice: "#0d151c",
     "ice-surround": "#0d151c",
     "ice-line-red": "#ff5a6a",
@@ -138,6 +171,9 @@ const DARK = {
     "ice-boards": "#5b7186",
     "ice-dash": "#0d151c",
     "ice-ink": "#cdd8e2",
+    // a stick lying on the ice — lifted off the sheet rather than the near-black
+    // literal it used to carry, which vanished on a dark rink
+    "ice-stick": "#a6b3c2",
     "ice-select": "#ffd447",
 
     "fx-glass": "rgba(23,29,37,.84)",
@@ -214,6 +250,9 @@ const BARN = {
   "ice-boards": "#545f69",
   "ice-dash": "#ffffff",
   "ice-ink": "#14171a",
+  // a stick lying on the ice — lifted off the sheet rather than the near-black
+  // literal it used to carry, which vanished on a dark rink
+  "ice-stick": "#3d4753",
   "ice-select": "#b87e00",
 };
 
@@ -236,6 +275,9 @@ const SLATE = {
   "ice-boards": "#6a819a",
   "ice-dash": "#1a2836",
   "ice-ink": "#d6e2ee",
+  // a stick lying on the ice — lifted off the sheet rather than the near-black
+  // literal it used to carry, which vanished on a dark rink
+  "ice-stick": "#aebccb",
 };
 
 // Per-theme RENDERED team colours. The stored DSL value is never touched — this
@@ -243,6 +285,43 @@ const SLATE = {
 // lightness moves, so a red player still reads red. Keyed by the stored hex.
 // A theme absent here renders team colours exactly as authored.
 export const TEAM_LIFT = {
+  // Two inks are all but invisible on the sheet they land on, so they flip with
+  // it. The STORED value never changes — a drill saved with black ink is still
+  // black ink — this is only what gets painted, so the DSL round-trip and a
+  // share link are unaffected and the board looks right on either theme.
+  //   #111318  the pen's black. On the dark rink (#0d151c) that is 1.1:1 — you
+  //            genuinely cannot see the stroke you just drew. It becomes the
+  //            sheet's own ink colour, which is what "black pen" MEANS there.
+  //   #ffd447  the pen's yellow. On the light rink (#f5fafd) it is ~1.3:1, a
+  //            highlighter smear rather than a line, so it deepens to amber.
+  //   #22262b  the whiteboard black used for PLAYERS, same problem as the pen's.
+  // #c79a4e is the deker's wood. On white ice it is 2.45:1 — visible, but under
+  // the bar, and it was only caught because the guard walks EVERY default body
+  // rather than the two that were reported. Deepened just enough to clear it;
+  // still unmistakably wood.
+  // #e0731d is the cone. 3.01:1 on white ice is ON the bar, not over it —
+  // slate already deepens the same orange for the same reason.
+  light: { "#ffd447": "#a06400", "#c79a4e": "#ad7f30", "#e0731d": "#c46519" },
+  sheet: { "#ffd447": "#a06400", "#c79a4e": "#ad7f30", "#e0731d": "#c46519" },
+  barn:  { "#ffd447": "#a06400", "#c79a4e": "#ad7f30", "#e0731d": "#c46519" },
+  dark: {
+    "#111318": "#cdd8e2",   // pen black    1.01 -> 12.7 on the dark sheet
+    "#22262b": "#8b99a8",   // player black 1.21 ->  5.6
+    // measured, not assumed: these two were under 3:1 on this sheet as well.
+    // slate already lifted them, dark never did — same values work here, and
+    // the darker ice makes them clear the bar by more.
+    "#1f4fa3": "#457bdc",   // blue         2.37 ->  4.5
+    "#7a3fa8": "#9c67c6",   // purple       2.72 ->  4.6
+    // Props moulded in black rubber. On this sheet they were the ice with a
+    // faint outline; flipped, they read as equipment lying on it. Their tread
+    // ticks, edges and dividers are all DARKER than the body, so they keep
+    // working against a light one — only the body moves.
+    "#1c1c1e": "#9aa2ab",   // tire         1.12 ->  6.6
+    "#1b1e22": "#98a0aa",   // bumper       1.14 ->  6.5
+    "#57636f": "#6b7784",   // passer       3.00 ->  4.03 — it sat exactly ON
+                            // the bar, which is not "visible", it's a rounding
+                            // coin-flip. Nudged until it clearly clears.
+  },
   slate: {
     "#d7263d": "#de475b",   // red     3.71 -> 4.53 on the slate sheet
     "#1f4fa3": "#457bdc",   // blue    2.37 -> 4.50
@@ -250,6 +329,11 @@ export const TEAM_LIFT = {
     "#e0731d": "#c46519",   // orange  5.82 -> 4.58
     "#22262b": "#727f90",   // black   1.21 -> 4.52
     "#7a3fa8": "#9c67c6",   // purple  2.72 -> 4.53
+    "#111318": "#d6e2ee",   // pen black — as dark, against slate's own ink tone
+    "#1c1c1e": "#8d97a3",   // tire   — as dark, tuned to slate's lighter sheet
+    "#1b1e22": "#8b95a1",   // bumper
+    "#57636f": "#6b7784",   // passer 2.44 -> 3.28
+    "#c81e33": "#de475b",   // net    2.63 -> 3.68, the same lift its posts get
   },
 };
 // stored colour -> what this theme should actually paint
@@ -291,6 +375,11 @@ export const PAIRS = [
   { fg: "text-faint", bg: "surface-bar", min: 4.5, why: ".hd-ver version watermark" },
   { fg: "text-on-accent", bg: "accent", min: 4.5, why: "every .on state" },
   { fg: "text-on-accent", bg: "brand-red", min: 4.5, why: ".hd-scrubbtn.play" },
+  // The mode switch's knob wears a different fill per flow, and with the
+  // captions gone the glyph riding it IS the control — so 4.5, not the 3:1 a
+  // decorative icon would take. Edit's fill is `accent` and Play's is
+  // `brand-red`, both covered by the two pairs above.
+  { fg: "text-on-accent", bg: "mode-draw", min: 4.5, why: "the DRAW glyph on its knob" },
   { fg: "danger", bg: "surface-raised", min: 4.5, why: ".hd-item.danger, .hd-mini.danger" },
   { fg: "danger", bg: "surface-panel", min: 4.5, why: ".hd-err" },
   { fg: "warn", bg: "surface-panel", min: 4.5, why: "step warnings, unapplied-edit notes" },
@@ -314,6 +403,14 @@ export const PAIRS = [
   { fg: "warn", bg: "fx-glass", over: "ice", min: 3, why: ".hd-tick.step marker" },
   { fg: "ui-select", bg: "surface-panel", min: 3, why: ".hd-swatch.on selected ring" },
   { fg: "accent", bg: "surface-panel", min: 3, why: ".hd-mini.on fill vs the panel" },
+  // the mode knob against the sunken track it slides in — position is half of
+  // what that control says, so the knob has to be findable, not just legible
+  { fg: "mode-draw", bg: "surface-sunken", min: 3, why: ".hd-modeknob on Draw vs its track" },
+  { fg: "accent", bg: "surface-sunken", min: 3, why: ".hd-modeknob on Edit vs its track" },
+  { fg: "brand-red", bg: "surface-sunken", min: 3, why: ".hd-modeknob on Play vs its track" },
+  // the two UNLIT mode cells. Never asserted before because they had a caption
+  // to fall back on; now the grey glyph is the whole cell.
+  { fg: "text-muted", bg: "surface-sunken", min: 4.5, why: ".hd-modeopt, flow not live" },
 
   /* ice / diagram — 3:1 against the sheet they're drawn on */
   { fg: "ice-line-red", bg: "ice", min: 3, why: "goal + centre lines, faceoff circles" },

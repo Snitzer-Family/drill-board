@@ -454,8 +454,12 @@ function chain(pk, byId, pieces) {
 
 /* ------------------------------------------------------------------ */
 // rink view boxes (rink feet): the DSL RINK mode crops the diagram to half /
-// quarter ice, matching the editor's views
-const VIEWS = { full: [0, 0, 200, 85], half: [100, 0, 100, 85], quarter: [100, 0, 100, 42.5] };
+// quarter ice, matching the editor's views. Must track constants.js VIEWS —
+// tests/rink-views.mjs pins the two together. The bare `quarter` key is the
+// legacy spelling, kept for a standalone caller that skips parseDrill (which
+// would otherwise normalize it). Keep this on ONE line with no inner braces:
+// scripts/build-drill-preview.mjs strips it with a line regex.
+const VIEWS = { full: [0, 0, 200, 85], half: [100, 0, 100, 85], "quarter-tl": [0, 0, 100, 42.5], "quarter-tr": [100, 0, 100, 42.5], "quarter-bl": [0, 42.5, 100, 42.5], "quarter-br": [100, 42.5, 100, 42.5], quarter: [100, 0, 100, 42.5] };
 
 export function drillSvg(dsl, opts = {}) {
   const { pieces, rink: rinkMode } = parseDrill(dsl);

@@ -35,7 +35,9 @@ restart so the settings watcher reloads it.
    to `main` (GitHub Actions builds and publishes to Pages, ~90s), so it goes
    live. Always confirm and get the user's go-ahead before merging to `main` or
    pushing. Commit on the worktree/session branch freely; the user verifies
-   deploys via the version watermark in the app's bottom bar (bottom-right).
+   deploys via the version watermark, which lives at the foot of the ☰ menu
+   (it also opens About) — it left the bottom bar so that bar could be
+   controls only.
 4. `vite.config.js` must keep `base: "/drill-board/"` (matches repo name).
 5. No new dependencies without asking — the app is deliberately React-only.
 
@@ -91,6 +93,9 @@ restart so the settings watcher reloads it.
 - `possession.js` — the possession ledger: pure, condition-aware possession
   stints + loose-puck intervals per puck (branch-choice atom conjunctions prove
   cross-player mutual exclusion); node-testable, no seed/DOM
+- `route-dir.js` — the sticky write rule for skate direction: `dir` is stored on
+  every leg, but setting one waypoint backwards means "and everything after it,
+  down the branches too" until a later one flips. Pure, node-tested
 - `timing.js` — createTiming() factory: leg timing, pass/shot/pickup planner,
   receiver time-warps, warp-aware positions
 - `hockey-drill-animator.jsx` — App shell: state, pointer interaction, popouts,
@@ -110,6 +115,52 @@ restart so the settings watcher reloads it.
 - The fill-mode stretch is cosmetic-only: positions stretch, rink circles are
   counter-corrected (yFix), icons render in stretch-cancelling matrix frames
   (iconXf). Keep that separation.
+
+## Editor chrome: three flows, one action bar
+
+- `mode` is `"draw" | "edit" | "play"`, set only by `setMode()` and shown by the
+  `.hd-mode` segment in the bottom bar. `penMode` is derived (`mode === "draw"`),
+  not stored. Mode is **not** persisted and **not** in the DSL.
+- That segment is the app's primary control, and the chrome says so: it holds
+  the **centre** of `.hd-bar`, it's the one thing there taller than a bar button
+  (48 vs 44), it is **icon-only** — the only bar control without a `.hd-blbl`
+  caption, so `aria-label` carries each cell's name — and its knob wears a
+  colour per flow (Draw `--db-mode-draw`, Edit `--db-accent`, Play
+  `--db-brand-red`). It is centred by *construction*, not measurement: undo+redo
+  and rink+menu weigh exactly the same (92px, 106 dense), so it lands on the
+  centre line and the lefty `row-reverse` mirror leaves it there. Change a width
+  on either side and it silently stops being centred.
+- `.hd-mode` and the draw bar's `.hd-penseg` share the knob maths in
+  `styles.js`, but **not** their size — each overrides `--mw`/`height` on its own
+  selector. Never resize one by editing the shared block.
+- `.hd-act` is ONE element whose contents swap per mode. It is `height:
+  var(--hd-barh)` and `flex-wrap:nowrap`, and the ice's reserved band
+  (`--hd-act`) is computed from the same `--hd-barh` — never a literal, never a
+  second variable. Each mode's contents must have exactly one flexible child.
+- `DENSE_MIN` (700) is the app's main width breakpoint. It drives the bar's
+  layout tier AND the corner-menu anchoring, and JS owns it: the `.dense` class
+  on `.hd-root` is what the stylesheet keys off, so there is no media query to
+  drift against. Below it, groups collapse into popovers — that's a different
+  render tree, which is why it can't be pure CSS.
+- `ROOMY_MIN` (1000) is the second and only other one, for the Edit palette
+  alone: above it the Shapes group inlines too. It exists because the five
+  shape tools cost ~204px more than the popover button they replace, and the
+  bar's flexible child is the standing hint — so "the bar fits" stays true long
+  after the hint has become a stub. 1000 keeps it at 136px, no worse than the
+  130px it already has at 768. Landscape iPad and up; portrait iPad stays
+  grouped. Width-only, deliberately NOT `isWide`'s `pointer:fine` — an iPad
+  reports a coarse pointer even with a Pencil attached.
+- `setMode()` must never disturb the pen: it commits buffered ink (`flushPen`,
+  not `clearInk`) and leaves ink colour/width/style and the pen's read mode
+  alone, so draw → edit → draw stays a free round trip.
+- Never give `.hd-act` `overflow:hidden` — the line-settings popovers are its
+  children and spring upward out of its box.
+- `ADD_GROUPS` is the single table of everything placeable. The Edit bar, its
+  group popovers and the double-tap quick-add all read it; that grid used to be
+  written out twice and the two copies drifted.
+- `src/styles.js` is one template literal. A backtick in a comment ends it, the
+  build then blames the next odd character, and on a clean tree the
+  copy-preview plugin's ENOENT hides the error entirely. Guarded by a test.
 
 ## Platform lessons (learned painfully — do not relearn)
 
@@ -135,6 +186,13 @@ recogniser, theme contrast, crash-recovery stash — plus drift guards that pin
 invariants a reader can't verify by eye (no raw hex in `styles.js`, `MENU_W` vs
 `--hd-menu-w`, `drill-svg.js` fallbacks tracking `THEMES.light`).
 
+**`npm run build` exits 0 on a JSX warning**, so "the build passed" never meant
+the JSX was sound. `tests/jsx-warnings.mjs` runs the compiler's own check and
+fails on any warning — it caught a merge that added a class as a *second*
+attribute (`className="hd-poprow" className="hd-stephint"`), where JSX keeps the
+last one and the layout class vanished silently. Read the build's output too;
+don't trust its exit code alone.
+
 Nothing covers the rendered UI. That still means an iPhone 15 (standalone) and
 the user's eyes, and it is where the real bugs have been — a stated `height:40px`
 that renders 50, a menu centred on a width it doesn't have. **Measure the DOM in
@@ -150,12 +208,30 @@ run it on every change. The browser suites live outside the repo in
 input against the dev server. Run them with the parallel runner, not one at a
 time:
 
-- `node /tmp/db-verify/run.mjs ui` — palette, modes, cursor, convert, extend.
-  Use for UI/markup/CSS changes (~45s).
-- `node /tmp/db-verify/run.mjs recog` — the recognition suites. Use when
+- `node /tmp/db-verify/run.mjs ui <url>` — bar fit, palette, modes, cursor,
+  convert, extend. Use for UI/markup/CSS changes.
+- `node /tmp/db-verify/run.mjs recog <url>` — the recognition suites. Use when
   `sketch-recognize.js` or the capture path changes.
-- `node /tmp/db-verify/run.mjs` — everything. Before a deploy, or after a
-  change that touches both.
+- `node /tmp/db-verify/run.mjs '' <url>` — everything. Before a deploy, or after
+  a change that touches both.
+
+**Always pass this session's LAN URL.** The suites build their own `#d=` links,
+so the runner hands the base down as `DB_URL`; a suite run without it silently
+falls back to a hardcoded port and can report a green sweep for a *different
+worktree's* dev server. That has happened — a full `ui` pass once validated
+markup this branch had already deleted.
+
+`bar-fit.mjs` is the single-line guarantee: at eight widths × three modes it
+asserts `scrollWidth <= clientWidth`, that the bar's height still equals
+`--hd-barh`, and that the ice ends above the bar. Layout arithmetic in this app
+has been wrong three times; measure with this, don't reason from the CSS.
+
+**Don't edit `src/` while a sweep is running.** Vite hot-reloads the app under
+the running Chromes, so the suites measure a moving target: a full sweep once
+came back `70 pass, 123 fail` with 16 suites "crashed", and every one of them
+passed on a quiet tree minutes later. A sweep takes ~18 minutes — start it when
+the tree is settled, and re-run rather than interpret one that overlapped edits.
+Pipe it to a file, too: `| tail` hides the failure lines you actually need.
 
 Scope the group to what changed; a full sweep on a CSS tweak is waste. But do
 run `ui` on markup changes: the suites select by class/title, and layout

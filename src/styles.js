@@ -7,54 +7,91 @@
 // or add one to theme.js if nothing fits.
 //
 // Geometry vars stay --hd-*; only colour is --db-*.
+//
+// STYLES is a template literal, so a backtick anywhere in here — including in a
+// comment, quoting a property name — ends the string and the file stops parsing.
+// The build error then points at the NEXT stray character rather than the
+// backtick, and if dist/ doesn't exist yet the copy-preview plugin's ENOENT
+// masks it entirely. tests/theme-contrast.mjs pins this; keep prose plain.
 
 export const STYLES = `
         /* Scoped box-sizing reset. The app has no global reset, so by default a
            padded element's stated width/height is its CONTENT box and it renders
-           bigger than it says. That produced three separate bugs: .hd-scrub said
-           40px and rendered 50 (its reserved band overlapped the ice), the pen
-           palette computed 96px and rendered 102 (same), and .hd-menu said 230px
+           bigger than it says. That produced three separate bugs: the player bar
+           said 40px and rendered 50 (its reserved band overlapped the ice), the
+           pen palette computed 96px and rendered 102 (same), and .hd-menu said 230px
            and rendered 256 (the JS centring it on 230 put every panel 13px off
            its button). Each was found by measuring, never by reading the CSS.
            Scoped to .hd-root rather than * so nothing outside the app shifts. */
         .hd-root, .hd-root *, .hd-root *::before, .hd-root *::after { box-sizing:border-box; }
         .hd-root { position:fixed; inset:0; background:var(--db-surface-app); color:var(--db-text); overflow:hidden;
           --hd-b: var(--hd-safe-b, min(env(safe-area-inset-bottom, 0px), 34px));
-          --hd-scrub: 0px;   /* reserved height for the player bar band (0 when hidden) */
-          /* breathing room between the bottom boards and the player/pen bar.
+          /* breathing room between the bottom boards and the action bar.
              The band used to be exactly the bar's height, which left the rink
              edge sitting ~4px off the scrubber — they read as one stuck object. */
           --hd-icegap: 10px;
-          /* The floating bottom panel height. The player bar and the pen palette
-             are alternate contents of the SAME slot, so they share it and can't
-             drift apart — they used to be 50 and 54, which read as a jump when
-             you switched tools in landscape. Both are border-box, so this is the
-             rendered height, not a content box to add padding to. */
+          /* The action bar's height — ONE number for every mode. The pen palette
+             and the player bar are alternate CONTENTS of the same element now,
+             so they cannot drift apart; they used to be 50 and 54, which read as
+             a jump when you switched tools in landscape. It is border-box, so
+             this is the rendered height, not a content box to add padding to. */
           --hd-barh: 54px;
-          /* …and wrapped to two rows on a narrow phone: one more 42px control
-             plus the 6px row gap. Measured 102px, not the 96px the padding
-             arithmetic suggests. */
-          --hd-barh2: calc(var(--hd-barh) + 48px);
+          /* The height the bottom MENU bar claims from the layout. A variable
+             so presentation can hand it back to the ice — the bar keeps its own
+             height (it slides away rather than shrinking), this is only what
+             everything else has to keep clear of. */
+          --hd-menubar: 54px;
+          /* The reserved band the ice gives up to the bar. Derived from the SAME
+             --hd-barh that the bar's own height property uses, so they can never
+             disagree. There used to be a second variable for a two-row palette
+             (--hd-barh2, "measured 102px") and reading either height off the CSS
+             by hand was wrong twice; .hd-act's flex-wrap:nowrap now makes a
+             second row impossible, so one variable is enough. */
+          --hd-act: calc(4px + var(--hd-barh) + var(--hd-icegap));
           /* corner-menu width. The anchoring JS needs this number too, so it is
              asserted against MENU_W in hockey-drill-animator.jsx by the tests —
              if they disagree the menus centre on the wrong spot. */
           --hd-menu-w: 230px;
           --hd-pintop: 10px; /* no floating top dock any more — popups can ride the top edge */
           --hd-dock-w: min(320px, 34vw);   /* width of the docked editing sidebar (desktop) */
-          font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
-        /* Each band = the bar's 4px offset above the menu bar + the bar's REAL
-           rendered height + the clearance. The old 48px assumed .hd-scrub was
-           its stated height:40px, but it isn't border-box — padding and border
-           make it 50px — so the band was 6px SHORT and the bar overlapped the
-           ice. Measured on device widths 430/900/1100: scrub is 50px at all of
-           them; the pen palette is 54px on one row, 102px when it wraps to two.
-           Both heights are variables rather than numbers copied out of the
-           rules, because reading them off the CSS has been wrong twice. */
-        .hd-root.scrub-on { --hd-scrub: calc(4px + var(--hd-barh) + var(--hd-icegap)); }
-        /* the pen palette replaces the player bar: two rows on a narrow phone,
-           one once there's width for both groups (landscape, tablet, desktop) */
-        .hd-root.pen-on { --hd-scrub: calc(4px + var(--hd-barh2) + var(--hd-icegap)); }
-        @media (min-width: 700px) { .hd-root.pen-on { --hd-scrub: calc(4px + var(--hd-barh) + var(--hd-icegap)); } }
+          /* the interface typeface, set as a var by the app so one assignment
+             reaches every panel and popup. The fallback after the first comma
+             is what renders if the var is ever missing. */
+          font-family: var(--hd-font, system-ui, -apple-system, "Segoe UI", sans-serif); }
+        /* The band = the bar's 4px offset above the menu bar + the bar's REAL
+           rendered height + the clearance. An old version hardcoded 48px on the
+           assumption that .hd-scrub was its stated height:40px, but it isn't
+           border-box — padding and border made it 50 — so the band was 6px SHORT
+           and the bar overlapped the ice. That is why the formula above reads
+           --hd-barh rather than any literal.
+           The band is present in every mode; only these two states drop it. */
+        .hd-root.act-off { --hd-act: 0px; }
+        /* Presentation: the EDITOR chrome goes and the transport stays. While
+           you're showing a drill to a room you still need play, pause and the
+           scrubber; what you don't need is Menu, Rink, the mode switch and
+           Undo/Redo. So the menu bar slides away and hands its 54px to the ice.
+           Revealing it again OVERLAYS — the bar comes up and the transport
+           rides above it, but the ice does not move. Re-reserving the space
+           would resize the rink every time the chrome came and went, and a
+           drill that resizes mid-presentation is the jump this whole layout
+           exists to prevent. */
+        .hd-root.preso-full { --hd-menubar: 0px; }
+        .hd-root.preso-full .hd-bar {
+          transform:translateY(100%); transition:transform .22s ease; }
+        .hd-root.preso-full.bar-up .hd-bar { transform:none; }
+        /* the transport steps up out of the revealed bar's way rather than
+           being covered by it — chrome moving is fine, the ice moving is not */
+        .hd-root.preso-full .hd-act { transition:transform .22s ease; }
+        .hd-root.preso-full.bar-up .hd-act { transform:translateY(calc(-54px - var(--hd-b))); }
+        @media (prefers-reduced-motion: reduce) {
+          .hd-root.preso-full .hd-bar, .hd-root.preso-full .hd-act { transition:none; }
+        }
+        /* A still pointer fades out during a presentation, the way a video
+           player's does — otherwise a forgotten cursor sits over the ice for a
+           whole run-through. !important because the per-piece grab cursors and
+           the draw-mode cursor both set their own, and this has to beat them:
+           the pointer is idle, so nothing it might be hovering matters. */
+        .hd-root.cursor-idle, .hd-root.cursor-idle * { cursor:none !important; }
         /* editing sidebar docked: shrink the ice to the left of it (the stage's
            ResizeObserver re-fits the rink automatically) */
         .hd-root.dock-open .hd-stage { right:calc(env(safe-area-inset-right, 0px) + var(--hd-dock-w)); }
@@ -63,7 +100,7 @@ export const STYLES = `
            opaque system bar there that web content cannot render under */
         .hd-stage { position:absolute; top:env(safe-area-inset-top, 0px);
           left:env(safe-area-inset-left, 0px); right:env(safe-area-inset-right, 0px);
-          bottom:calc(54px + var(--hd-b) + var(--hd-scrub));
+          bottom:calc(var(--hd-menubar) + var(--hd-b) + var(--hd-act));
           display:flex; align-items:center; justify-content:center; }
         /* Desktop: the ice shows what the pointer will DO. The !important beats
            the per-piece grab cursors, which is right — in draw mode nothing on
@@ -78,90 +115,167 @@ export const STYLES = `
         .hd-canvas svg.hd-ice { width:100%; height:100%; display:block; }
         .hd-stage, .hd-canvas, .hd-canvas svg, .hd-canvas svg * { touch-action:none;
           -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
-        /* player bar — transport controls + seek scrubber in one strip above the
-           menu bar; sits in its own reserved band (--hd-scrub) so it never overlaps
-           the ice sheet */
-        .hd-scrub { position:absolute; z-index:44; left:8px; right:8px;
-          bottom:calc(54px + var(--hd-b) + 4px);
+        /* ---- the action bar ----------------------------------------------
+           ONE strip above the menu bar whose CONTENTS change with what you're
+           doing: the pen palette while sketching (.draw), transport + seek
+           scrubber while playing (.play). It used to be two separate elements
+           at two different heights fighting for the same slot, so the ice jogged
+           when you switched between them. It sits in its own reserved band
+           (--hd-act) and never overlaps the ice sheet. */
+        .hd-act { position:absolute; z-index:44; left:8px; right:8px;
+          bottom:calc(var(--hd-menubar) + var(--hd-b) + 4px);
           box-sizing:border-box; height:var(--hd-barh);
           display:flex; align-items:center; gap:6px; padding:4px 8px;
+          /* The single-line guarantee: content can never spill onto a second row
+             the way the old palette did (which is what --hd-barh2 existed to
+             reserve space for), so the bar's height is always --hd-barh and the
+             band that reserves it can never be short.
+             Deliberately NOT overflow:hidden — the size/style popovers are
+             children of this bar and spring UPWARD out of its box, so clipping
+             here would make them invisible. Too-wide contents therefore spill
+             past the rounded edge, which looks obviously broken; the real guard
+             is the measured scrollWidth <= clientWidth check in bar-fit.mjs. */
+          flex-wrap:nowrap;
           background:var(--db-fx-glass); border:1px solid var(--db-border); border-radius:12px;
           box-shadow:var(--db-fx-shadow); backdrop-filter:blur(4px); }
+        /* the pen palette centres its two groups; the player bar is left-fed */
+        .hd-act.draw { justify-content:center; gap:4px; padding:5px 7px; }
+        .hd-act.edit { gap:4px; padding:5px 7px; }
+        /* the bar's one flexible child: it soaks up the slack and ellipses, so a
+           long hint can never push a control off the end of the line */
+        .hd-acthint { flex:1 1 0; min-width:0; font-size:12px; color:var(--db-text-muted);
+          text-align:right; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
         /* transport buttons */
         .hd-scrubbtn { flex:none; width:32px; height:32px; border-radius:9px; background:var(--db-surface-raised);
           border:1px solid var(--db-border-strong); color:var(--db-text-soft); display:flex; align-items:center;
           justify-content:center; cursor:pointer; }
         .hd-scrubbtn.on { background:var(--db-accent); border-color:var(--db-accent); color:var(--db-text-on-accent); }
+        /* "lines while playing" — the glyph IS the answer rather than a symbol
+           standing for it: a solid route line over a dashed puck path, each lit
+           or dimmed to match what will actually be drawn. Four states read at a
+           glance without a label, which is what the bar has room for. */
+        .hd-scrubbtn.rv { flex-direction:column; gap:4px; }
+        .hd-rvline { width:15px; height:0; border-top:2px solid currentColor;
+          opacity:.2; transition:opacity .12s; }
+        .hd-rvpuck { display:flex; align-items:center; gap:2px; opacity:.2; transition:opacity .12s; }
+        .hd-rvpuck::before { content:""; width:9px; height:0; border-top:2px dashed currentColor; }
+        .hd-rvpuck::after { content:""; width:4px; height:4px; border-radius:50%; background:currentColor; }
+        .hd-rvline.on, .hd-rvpuck.on { opacity:1; }
+        /* speed reads out its own multiple, so it needs no icon and no label
+           next to it. Tabular figures keep the glyph from shifting as it
+           cycles, and it lights only when it is NOT 1x — a drill running at
+           normal pace should look like nothing special is set. */
+        .hd-scrubbtn.spd { font-size:12.5px; font-weight:650; letter-spacing:-.02em;
+          font-variant-numeric:tabular-nums; }
+        /* the transport's three clusters: what the clock is doing, how the ice
+           looks while it runs, and the two that are not playback at all. On a
+           phone the grouping is spacing only — a hairline pair costs ~26px and
+           the scrub track has no width to give at 375. */
+        .hd-scrubgrp { flex:none; display:flex; align-items:center; gap:6px; }
+        .hd-scrubsep { flex:none; width:1px; height:26px; background:var(--db-border-strong); margin:0 3px; }
+        .hd-root:not(.dense) .hd-scrubsep { display:none; }
+        .hd-root:not(.dense) .hd-scrubgrp + .hd-scrubgrp { margin-left:4px; }
         .hd-scrubbtn:disabled { opacity:.4; cursor:default; }
         /* the play button is the one piece of chrome wearing a DOMAIN colour —
            hockey red — so it keeps its own token rather than the accent */
         .hd-scrubbtn.play { width:34px; height:34px; border-radius:50%;
           background:var(--db-brand-red); border-color:var(--db-brand-red);
           color:var(--db-text-on-accent); margin-right:2px; }
-        /* ---- pen palette (sits in the player-bar band while sketching) ---- */
-        /* min-height, not height: one row lands exactly on --hd-barh (so it
-           matches the player bar it replaces), and wrapping to two rows is still
-           free to grow */
-        .hd-pen { position:absolute; z-index:44; left:8px; right:8px;
-          bottom:calc(54px + var(--hd-b) + 4px); display:flex; flex-wrap:wrap;
-          box-sizing:border-box; min-height:var(--hd-barh);
-          align-items:center; justify-content:center; gap:6px 4px;
-          padding:5px 7px; background:var(--db-fx-glass); border:1px solid var(--db-border);
-          border-radius:12px; box-shadow:var(--db-fx-shadow); backdrop-filter:blur(4px); }
+        /* ---- pen palette (the .hd-act.draw contents) ---- */
         /* two groups — the pen's own settings, then what happens to the board.
-           They sit on one line wherever there's room (landscape, tablet, desktop)
-           and wrap to two on a narrow portrait phone. */
+           Both stay on the single line at every width: the narrow layout swaps
+           ink/size/style for one popover button rather than wrapping. */
         .hd-pengroup { display:flex; align-items:center; gap:4px; flex-wrap:nowrap; }
         .hd-pensep { flex:none; width:1px; height:26px; background:var(--db-border-strong); margin:0 3px; }
-        .hd-penspacer { flex:1 1 auto; min-width:0; }
-        /* Draw|Edit as ONE switch: a knob slides to the live half and a tap
-           anywhere flips it. --sw keeps the knob's travel tied to the half
-           width, so the narrow-screen sizing below needs no second rule. */
-        /* border-box throughout: the app has no global reset, so with the
-           default content-box each half measured --sw PLUS its padding while
-           the knob only travelled --sw — it stopped short of the second half
-           and dragged the icons off centre. */
-        .hd-penswitch, .hd-penswknob, .hd-penswopt { box-sizing:border-box; }
-        .hd-penswitch { --sw:48px; position:relative; flex:none; display:flex; height:42px;
-          padding:3px; border-radius:10px; background:var(--db-surface-sunken); border:1px solid var(--db-border-strong);
-          cursor:pointer; }
-        .hd-penswknob { position:absolute; top:3px; bottom:3px; left:3px; width:var(--sw);
-          border-radius:8px; background:var(--db-accent); transition:transform .16s ease; }
-        .hd-penswitch.edit .hd-penswknob { transform:translateX(var(--sw)); }
-        .hd-penswopt { position:relative; z-index:1; width:var(--sw); display:flex;
-          flex-direction:column; align-items:center; justify-content:center; gap:3px;
-          padding:4px 2px; color:var(--db-text-muted); font-size:8.5px; font-weight:700; letter-spacing:.03em;
-          text-transform:uppercase; line-height:1; }
-        /* Match on the option's OWN class, never its position: the knob is also
-           a span, so :nth-of-type counted it and lit the wrong half. */
-        .hd-penswitch.draw .hd-penswopt.draw,
-        .hd-penswitch.edit .hd-penswopt.edit { color:var(--db-text-on-accent); }
+        .hd-penspacer { flex:1 1 auto; min-width:0; display:flex; align-items:center;
+          overflow:hidden; padding:0 4px; }
         /* labelled tool: icon over a caption, like the bottom bar */
         .hd-pentool { flex:none; min-width:44px; height:42px; padding:3px 5px 2px;
           display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px;
           border-radius:9px; background:var(--db-surface-raised); border:1px solid var(--db-border-strong); color:var(--db-text-soft);
           cursor:pointer; font-size:8.5px; font-weight:700; letter-spacing:.03em;
           text-transform:uppercase; line-height:1; }
-        .hd-pentool > span:last-child { opacity:.75; }
+        /* a two-word caption stays on ONE line — wrapping would blow the
+           chip's fixed 42px height and with it the bar's single-line promise */
+        .hd-pentool > span:last-child { opacity:.75; white-space:nowrap; }
+        /* a piece sprite used as a bar chip's icon. .hd-toolimg is sized for the
+           big grid tiles (46px tall, full width); inside a 42px-tall bar button
+           it has to come down to icon scale. */
+        .hd-pentool .hd-toolimg { width:24px; height:20px; flex:none; }
+        .hd-actglyph { font-size:17px; line-height:1; }
+        /* what the bar is currently acting ON — a piece id, or the size of a
+           box-selection. Reads as a label, not a button, so it must not look
+           tappable; it shrinks before any control does. */
+        .hd-selchip { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis;
+          white-space:nowrap; padding:0 7px; font-size:11.5px; font-weight:700;
+          letter-spacing:.02em; color:var(--db-text); }
+        /* naming a box-selection, inline on the bar (it used to be a hand-rolled
+           input in the floating toolbar, with its own hardcoded colours) */
+        .hd-groupname { flex:0 1 96px; min-width:64px; padding:6px 8px; font-size:12px;
+          border-radius:7px; border:1px solid var(--db-border-strong);
+          background:var(--db-surface-sunken); color:var(--db-text); }
         .hd-pentool.on { background:var(--db-accent); border-color:var(--db-accent); color:var(--db-text-on-accent); }
         .hd-pentool.on > span:last-child { opacity:1; }
         .hd-pentool.danger { color:var(--db-danger); }
-        /* a narrow phone can't fit the drawing group at full size — tighten it
-           rather than let the row overflow and clip the first button */
-        @media (max-width: 480px) {
-          .hd-pen { gap:6px 3px; padding:5px 5px; }
-          .hd-pentool { min-width:40px; padding:3px 3px 2px; }
-          .hd-penswitch { --sw:40px; }
-          .hd-penswatch { width:20px; height:20px; }
-          .hd-peninks { gap:3px; }
-          .hd-pensep { margin:0 1px; }
-        }
+        /* Compact layout — a narrow phone can't fit every control at full size.
+           Keyed on the .dense class the app writes from one matchMedia query,
+           NOT on a media query of its own: the same breakpoint also decides
+           which controls REACT renders (compact swaps the ink / size / style
+           trio for one popover), and a stylesheet can't do that. One source of
+           truth, so the two halves can't disagree about which layout is live. */
+        .hd-root:not(.dense) .hd-act { gap:3px; }
+        /* the bottom bar is the tightest strip in the app at 375px — Undo/Redo,
+           the three-way mode switch, Rink and Menu all have to fit on one line.
+           The switch is the one thing here that grew: it is what the whole app
+           is driven from, so it gets 46px cells against the 44px buttons either
+           side, and everything else keeps its width. Measured at 375: 12
+           padding + 20 gaps + 92 undo/redo + 146 switch + 88 rink/menu = 358,
+           leaving 17px for the two spacers. Measured, not derived: see
+           bar-fit.mjs, where 320px is over by design and reported, not fatal. */
+        .hd-root:not(.dense) .hd-bar { gap:4px; padding:0 6px var(--hd-b); }
+        .hd-root:not(.dense) .hd-barbtn { width:44px; }
+        .hd-root:not(.dense) .hd-mode { --mw:46px; }
+        .hd-root:not(.dense) .hd-act.draw { padding:5px 5px; }
+        .hd-root:not(.dense) .hd-pentool { min-width:40px; padding:3px 3px 2px; }
+        .hd-root:not(.dense) .hd-penswatch { width:24px; height:24px; }
+        .hd-root:not(.dense) .hd-peninks { gap:3px; }
+        .hd-root:not(.dense) .hd-pensep { margin:0 1px; }
         /* size / style popovers spring upward from their own button */
         .hd-penwrap { position:relative; display:flex; }
         .hd-penpop { position:absolute; bottom:calc(100% + 6px); left:50%; transform:translateX(-50%);
           display:flex; flex-direction:column; align-items:center; gap:4px; padding:8px 6px;
           background:var(--db-surface-panel); border:1px solid var(--db-border-strong); border-radius:10px;
           box-shadow:var(--db-fx-shadow-lg); z-index:46; }
+        /* the compact "Ink" popover stacks all three line settings — colour,
+           thickness, style — under one button. Its swatches are the only thing
+           in a popover that wraps, so they get their own grid. */
+        .hd-penpop .hd-inkgrid { display:grid; grid-template-columns:repeat(4, auto); gap:6px; }
+        /* The add-group popovers reuse .hd-toolgrid, which sizes its columns in
+           1fr — fine inside a menu panel that has a width, but this popover is a
+           shrink-to-fit column flexbox, so 1fr resolved to ZERO and every tile
+           stacked in a 10px stripe. Fixed columns instead, so the popover takes
+           its width from the grid rather than the other way round.
+           The selector carries .compact because the base .hd-toolgrid.compact
+           rule is equally specific and declared later — a looser one loses. */
+        .hd-penpop .hd-toolgrid.compact { grid-template-columns:repeat(4, 66px); }
+        .hd-penpop .hd-toolgrid.compact .hd-tool .hd-toolimg { height:30px; }
+        /* …and on a narrow screen that grid is wider than the button it hangs
+           off, so centring on the button pushes it past the screen edge. Anchor
+           it to the BAR instead — the same answer the corner menus reach below
+           this breakpoint, and it cannot clip wherever the button sits.
+           position:static on the wrap is what re-points the popover's containing
+           block at .hd-act, so its bottom:100% then measures the bar. */
+        .hd-root:not(.dense) .hd-act .hd-penwrap { position:static; }
+        .hd-root:not(.dense) .hd-act .hd-penpop.grid { left:8px; right:8px; transform:none; }
+        /* …but a NARROW popover must still point at the button that opened it.
+           position:static above re-points the containing block at the bar, so
+           the base left:50% centres these on the BAR — which put the play bar's
+           folded loop/presentation/caption menu 162px away from the button at
+           the far right, floating over the middle of the transport. It is only
+           116px wide, so it cannot clip: anchor it to the bar's right edge,
+           where its button lives. */
+        .hd-root:not(.dense) .hd-act .hd-penpop.more { left:auto; right:8px; transform:none; }
+        .hd-penpop .hd-penrule { width:100%; height:1px; background:var(--db-border-strong); margin:2px 0; }
         .hd-penpoptip { font-size:10px; font-weight:700; color:var(--db-text-muted); }
         /* Vertical range: the modern property first, then the WebKit one older
            iOS needs. Selector is deliberately specific — the global
@@ -176,9 +290,11 @@ export const STYLES = `
           font-size:11px; font-weight:600; cursor:pointer; text-align:left; }
         .hd-penopt.on { background:var(--db-accent); border-color:var(--db-accent); color:var(--db-text-on-accent); }
         .hd-penopt .hd-penstyle { flex:none; }
-        /* inks as round chips, matching the swatches used elsewhere */
+        /* Inks as squares. The round chips read as PIECES — a puck, a player
+           dot — which is what round means everywhere else on this board; a
+           square says "a colour", the way a paint well does. */
         .hd-peninks { display:flex; align-items:center; gap:4px; }
-        .hd-penswatch { flex:none; width:22px; height:22px; border-radius:50%;
+        .hd-penswatch { flex:none; width:27px; height:27px; border-radius:5px;
           border:1px solid var(--db-border-strong); cursor:pointer; padding:0; }
         /* same "this one is selected" token as .hd-swatch.on — one meaning, one colour */
         .hd-penswatch.on { outline:2px solid var(--db-ui-select); outline-offset:2px; }
@@ -216,6 +332,10 @@ export const STYLES = `
           right:env(safe-area-inset-right, 0px); bottom:0;
           height:calc(54px + var(--hd-b)); padding:0 8px var(--hd-b);
           box-sizing:border-box; display:flex; align-items:center; gap:6px;
+          /* explicit, same reason as .hd-act: this bar's height is baked into
+             .hd-stage's bottom offset, so a wrapped second row would sit on
+             the ice with nothing reserved for it */
+          flex-wrap:nowrap;
           background:var(--db-surface-bar); border-top:1px solid var(--db-border); }
         .hd-barbtn { width:50px; height:44px; border-radius:10px; background:var(--db-surface-raised);
           border:1px solid var(--db-border-strong); color:var(--db-text-soft); font-size:17px; display:flex;
@@ -223,18 +343,161 @@ export const STYLES = `
           cursor:pointer; flex:none; }
         .hd-barbtn.on { background:var(--db-accent); border-color:var(--db-accent); color:var(--db-text-on-accent); }
         .hd-barbtn small { font-size:10px; font-weight:800; letter-spacing:.05em; }
-        /* caption under each bar icon — tooltips don't exist on touch */
+        /* DRAW · EDIT · PLAY as ONE control: a knob slides to the live flow, so
+           the mode reads as a position rather than three independent lights.
+           --mw ties the knob's travel to the cell width — the compact override
+           below only has to change that one number.
+           border-box on all three parts, deliberately: the app has no global
+           reset, and when a two-position ancestor of this control was
+           content-box each cell measured --mw PLUS its padding while the knob
+           only travelled --mw, so it stopped short and dragged the labels off
+           centre. */
+        /* Shared by the bottom bar's DRAW/EDIT/PLAY switch and the draw bar's
+           pen segment. The mode switch keeps its own class names because the
+           browser suites select .hd-modeopt.draw by name; the two share these
+           rules rather than a second copy of the knob maths.
+           They no longer share a SIZE. The bar's switch is the app's primary
+           control; the pen segment is a setting inside a palette. Each
+           overrides --mw and height further down on its own selector — .hd-mode
+           and .hd-penseg. Never resize one of them by editing the numbers in
+           this block: you will silently resize the other. */
+        .hd-mode, .hd-modeknob, .hd-modeopt,
+        .hd-seg, .hd-segknob, .hd-segopt { box-sizing:border-box; }
+        .hd-mode, .hd-seg { --mw:44px; position:relative; flex:none; display:flex; height:44px;
+          padding:3px; border-radius:10px; background:var(--db-surface-sunken);
+          border:1px solid var(--db-border-strong); }
+        .hd-modeknob, .hd-segknob { position:absolute; top:3px; bottom:3px; left:3px; width:var(--mw);
+          border-radius:8px; background:var(--db-accent);
+          transition:transform .16s ease, background-color .16s ease;
+          pointer-events:none; }
+        .hd-mode.edit .hd-modeknob { transform:translateX(var(--mw)); }
+        .hd-mode.play .hd-modeknob { transform:translateX(calc(var(--mw) * 2)); }
+        .hd-modeopt, .hd-segopt { position:relative; z-index:1; flex:none; width:var(--mw);
+          display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px;
+          padding:2px; background:none; border:none; color:var(--db-text-muted); cursor:pointer; }
+        /* Match on the cell's OWN class, never its position: the knob is a
+           sibling too, so :nth-child counts it and lights the wrong cell. */
+        .hd-mode.draw .hd-modeopt.draw,
+        .hd-mode.edit .hd-modeopt.edit,
+        .hd-mode.play .hd-modeopt.play { color:var(--db-text-on-accent); }
+        /* the knob is what shows "you are here", so a dimmed PLAY cell must not
+           also dim the knob sitting under it */
+        .hd-modeopt:disabled, .hd-segopt:disabled { opacity:.4; cursor:default; }
+        /* The mode switch is the app's primary control, so it is the ONE thing
+           in this bar bigger than a bar button: 48px tall against their 44, and
+           no caption at all. Icon-only is what pays for the extra width — the
+           caption is what made a 40px cell feel cramped, and with it gone the
+           glyph gets the whole box. The name moved to aria-label on each cell;
+           a title is a no-op on touch and this is a touch-first app.
+           Scoped to .hd-mode alone: .hd-penseg shares the rules above and has
+           to keep sitting level with the .hd-pentool buttons beside it.
+           Padding stays 3px — the knob's top/bottom/left offsets are that
+           number written out, so changing one means changing all four. */
+        .hd-mode { --mw:52px; height:48px; border-radius:12px; }
+        .hd-mode .hd-modeknob { border-radius:10px; box-shadow:var(--db-fx-shadow); }
+        /* Inside the segment's padding a cell is 42px tall, under Apple's 44pt
+           floor. The same invisible extension .hd-barbtn::after uses takes it
+           back past 48. VERTICAL ONLY: sideways it would overlap the next cell
+           and steal its taps. (.hd-modeopt is already position:relative above.) */
+        .hd-mode .hd-modeopt::after { content:""; position:absolute; inset:-4px 0; }
+        /* One colour per flow, carried by the knob. Where you are is the thing
+           this control exists to say, so it says it twice — by position and by
+           hue. The colour is on the FILL, never the glyph: an unlit cell stays
+           plain grey, so exactly one thing in the bar is ever coloured.
+           EDIT has no rule because it wears the app's own accent, which is the
+           point — the home flow looks like every other "on" thing in the app,
+           and the three themes that retune the accent retune this with it.
+           PLAY wears the same brand-red as the transport's play button. Only
+           DRAW needed a token of its own; see mode-draw in theme.js. */
+        .hd-mode.draw .hd-modeknob { background:var(--db-mode-draw); }
+        .hd-mode.play .hd-modeknob { background:var(--db-brand-red); }
+        /* the pen segment: what the pen does with your ink. Sized to sit level
+           with the .hd-pentool buttons beside it (42px), with cells wide enough
+           for a word rather than a four-letter caption. */
+        .hd-penseg { --mw:52px; height:42px; }
+        .hd-penseg .hd-segopt { font-size:8.5px; font-weight:700; letter-spacing:.03em; }
+        .hd-penseg.sketch .hd-segknob { transform:none; }
+        .hd-penseg.manual .hd-segknob { transform:translateX(var(--mw)); }
+        .hd-penseg.auto .hd-segknob { transform:translateX(calc(var(--mw) * 2)); }
+        .hd-penseg.sketch .hd-segopt.sketch,
+        .hd-penseg.manual .hd-segopt.manual,
+        .hd-penseg.auto .hd-segopt.auto { color:var(--db-text-on-accent); }
+        /* what the pen will do, in words, in the bar's flexible slack */
+        .hd-pensays { flex:1 1 auto; min-width:0; font-size:11.5px; color:var(--db-text-muted);
+          white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        /* caption under each bar icon — tooltips don't exist on touch. The
+           three mode cells are the deliberate exception: they are big enough
+           and coloured enough to read as themselves, and aria-label carries
+           the name for anything that isn't looking. */
         .hd-blbl { font-size:8.5px; font-weight:700; letter-spacing:.05em; line-height:1;
           text-transform:uppercase; opacity:.8; white-space:nowrap; }
-        .hd-barhint { flex:1 1 0; min-width:0; font-size:12px; color:var(--db-text-muted); text-align:right;
-          white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-        /* the version never runs off the edge: vN stays put, only the build
-           stamp truncates (ellipsis) when the bar is too narrow */
-        .hd-ver { flex:0 1 auto; min-width:0; display:flex; align-items:baseline;
-          justify-content:flex-end; overflow:hidden; font-size:10px; color:var(--db-text-faint);
-          font-variant-numeric:tabular-nums; letter-spacing:.02em; }
-        .hd-vernum { flex:0 0 auto; white-space:nowrap; }
-        .hd-verstamp { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        /* The bar's two flexible children, and the reason the switch reads as
+           centred: what sits on one side of them (Undo+Redo) and what sits on
+           the other (Rink+Menu) weigh EXACTLY the same — 92px at phone widths,
+           106px when dense — so the switch lands on the bar's true centre line
+           with nothing measuring anything. Change a width on either side and it
+           quietly stops being centred; keep the two blocks equal.
+           It is also why the left-handed mirror leaves the switch alone:
+           row-reverse swaps two blocks of identical width, so the middle does
+           not move. The handedness is which side the RESCUE (undo) and the
+           DESTINATIONS (rink, menu) fall on. */
+        .hd-barspacer { flex:1 1 auto; min-width:0; }
+        /* Undo+Redo as ONE element. gap:inherit takes the bar's own 6px (4px
+           when not dense), so wrapping them cost no width and bar-fit is
+           unmoved — the wrapper exists purely so the lefty mirror below can
+           move the pair without turning it into redo-then-undo. */
+        .hd-undogrp { display:flex; align-items:center; gap:inherit; flex:none; }
+
+        /* ---- LEFT-HANDED: the chrome mirrors, the ice never does ----
+           A coach holds the phone in the off hand and taps with the dominant
+           one, so a lefty reaches across the rink to hit Menu. This flips the
+           bottom bar and the two EDITING palettes end-for-end so the controls
+           land under the left thumb.
+           PLAY is deliberately NOT in this list. The transport is a media
+           player: time runs left-to-right, the scrubber fills that way, and
+           Play/Stop belong where every player on the device puts them. Flipping
+           it would fight a stronger habit than handedness. Draw and Edit are
+           where the reaching actually happens.
+           The DRAW·EDIT·PLAY switch is unmoved by this in practice: it sits
+           between two blocks of equal width (see .hd-barspacer), so reversing
+           them leaves it on the same centre line. Only Undo/Redo and Rink/Menu
+           trade ends. That is deliberate — the control you touch most should
+           not be somewhere different in the two hands.
+           row-reverse reverses DIRECT CHILDREN ONLY, which is exactly what's
+           wanted: .hd-mode, .hd-pengroup and .hd-undogrp are each their own
+           flex container, so DRAW·EDIT·PLAY still reads in order and the knob's
+           translateX maths still lands on the live cell. Groups MOVE; they
+           don't turn around.
+           This does make visual order diverge from DOM (and so tab) order.
+           Deliberate: the bar is touch-only, and reversing the JSX instead
+           would churn every conditional child of both palettes. Don't "fix" it.
+           Everything else is already side-agnostic and must stay that way: the
+           corner menus anchor on their button's measured rect, .hd-penpop
+           centres on its own trigger, and the popout/loupe/caption all clamp
+           symmetrically — so none of them appear here. */
+        .hd-root.lefty .hd-bar,
+        .hd-root.lefty .hd-act.draw,
+        .hd-root.lefty .hd-act.edit { flex-direction:row-reverse; }
+        /* The flexible hint hugs the controls it describes, so it swaps sides
+           with them — same idea in both directions. .hd-pensays has no rule of
+           its own above because left is the default. */
+        .hd-root.lefty .hd-acthint { text-align:left; }
+        .hd-root.lefty .hd-pensays { text-align:right; }
+        /* Clear-ink LEADS with a divider, and a divider's whole job is to sit
+           between things. Mirrored, that group moves to the outboard end and
+           the rule ends up hanging off the edge of the bar dividing nothing
+           (measured: x=15 of 393). Reverse this one group — it is a rule and a
+           button, not a sequence — so the rule falls inboard again. The tool
+           group opposite is a sequence and stays in its order. */
+        .hd-root.lefty .hd-act.draw > .hd-pengroup:last-child { flex-direction:row-reverse; }
+        /* The version row at the foot of the menu — the watermark left the
+           bottom bar so that bar could be controls only. The build stamp is
+           what you check after a deploy, so it keeps its tabular figures and
+           truncates from the stamp end, never from vN. */
+        .hd-verrow { font-variant-numeric:tabular-nums; letter-spacing:.02em; }
+        .hd-vernum { flex:0 0 auto; white-space:nowrap; font-weight:700; }
+        .hd-verstamp { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis;
+          white-space:nowrap; font-size:11px; color:var(--db-text-faint); }
         /* corner menus — same scroll-shadow cue as .hd-pop: a soft edge shadow
            appears only while more content lies that way (iOS hides the native
            bar for touch overflow, so without this a long menu reads as complete).
@@ -248,9 +511,21 @@ export const STYLES = `
         .hd-menu { position:absolute; z-index:45; box-sizing:border-box;
           border:1px solid var(--db-border-strong);
           border-radius:12px; padding:10px 12px; box-shadow:var(--db-fx-shadow-lg);
-          bottom:calc(62px + var(--hd-b));
+          /* clears the action bar as well as the menu bar. Some of these panels
+             are now opened from a button ON the action bar (Add, in Edit), and
+             anchoring only to the menu bar's height dropped the panel straight
+             over the button that opened it. */
+          bottom:calc(var(--hd-menubar) + 8px + var(--hd-b) + var(--hd-act));
           left:calc(10px + env(safe-area-inset-left, 0px));
-          display:flex; flex-direction:column; gap:8px; width:var(--hd-menu-w); max-height:70vh; overflow-y:auto;
+          display:flex; flex-direction:column; gap:8px; width:var(--hd-menu-w);
+          /* Never let the panel climb past the status bar. 70vh alone doesn't
+             know about the notch or about how much the bars below have already
+             taken, so on a short screen (a phone in landscape especially) the
+             top of the list ended up above the safe area and simply couldn't be
+             read. This is the height actually available over the bars. */
+          max-height:min(70vh, calc(100vh - var(--hd-menubar) - 8px - var(--hd-b)
+            - var(--hd-act) - env(safe-area-inset-top, 0px) - 10px));
+          overflow-y:auto;
           scrollbar-width:none; -ms-overflow-style:none;
           background-color:var(--db-surface-panel);
           background-image:
@@ -278,6 +553,65 @@ export const STYLES = `
             right:calc(8px + env(safe-area-inset-right, 0px)); width:auto; }
         }
         .hd-mh { font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:var(--db-text-muted); }
+        /* ---- a settings row ----------------------------------------------
+           Title, a line saying what the setting actually does, then its
+           control. Everything in the prefs panel takes this shape so a reader
+           can scan titles and only drop into the prose for the ones they don't
+           already know — which is most of them, since several change how the
+           simulation behaves rather than how it looks. */
+        .hd-pref { display:flex; flex-direction:column; gap:2px; width:100%;
+          padding:9px 10px; border-radius:9px; text-align:left;
+          background:var(--db-surface-raised); border:1px solid var(--db-border); }
+        /* the whole row is the target for a toggle — 44pt-ish rather than the
+           30px the switch alone would give, which matters with gloves on */
+        .hd-pref.toggle { cursor:pointer; }
+        .hd-pref.dim { opacity:.5; }
+        .hd-prefhead { display:flex; align-items:center; gap:10px; min-height:22px; }
+        .hd-preftitle { flex:1 1 auto; min-width:0; font-size:13.5px; font-weight:650;
+          color:var(--db-text); line-height:1.25; }
+        .hd-prefdesc { font-size:11.5px; line-height:1.45; color:var(--db-text-muted); }
+        .hd-prefctl { margin-top:6px; }
+        .hd-pills { display:flex; flex-wrap:wrap; gap:4px; justify-content:flex-end; }
+        /* In a prefs row the pills trail the label, so they hug the right edge.
+           In a menu they ARE the row, so they split its full width instead. */
+        .hd-menu .hd-pills { flex-wrap:nowrap; justify-content:stretch; }
+        .hd-menu .hd-pills .hd-mini { flex:1 1 0; min-width:0; justify-content:center; }
+        /* the quarter-sheet pad: laid out the way the quadrants sit on the ice */
+        .hd-quadpad { display:grid; grid-template-columns:1fr 1fr; gap:4px; }
+        .hd-quadpad .hd-mini { justify-content:center; }
+        /* a section heading inside the panel, with air above it */
+        .hd-prefsec { margin-top:6px; color:var(--db-text-faint); }
+        /* the settings sheet's scrolling body. max-width caps the MEASURE —
+           prose set the full width of a desktop is hard to track back to the
+           start of the next line, and these are paragraphs now, not labels. */
+        .hd-prefbody { flex:1; min-height:0; overflow-y:auto; overscroll-behavior:contain;
+          display:flex; flex-direction:column; gap:8px;
+          width:100%; max-width:560px; margin:0 auto; padding-right:2px; }
+        /* ---- a settings row whose options are pictures ---------------------
+           Several settings describe a picture, and a sentence is the wrong
+           medium for one. Those rows put a small live board under each option
+           and make the board the control, so you pick the one you want to look
+           at rather than reading a sentence and guessing. The label stays under
+           every tile: this is a picture AND a word, never a picture alone.
+           The svg carries the ice as its background, so a scene that letterboxes
+           inside its tile sits on more ice instead of showing a gutter. */
+        .hd-pvrow { display:flex; flex-wrap:wrap; gap:6px; margin-top:7px; }
+        .hd-pvtile { flex:1 1 30%; min-width:82px; display:flex; flex-direction:column; gap:4px;
+          padding:4px; border-radius:8px; cursor:pointer;
+          background:var(--db-surface-sunken); border:1px solid var(--db-border); color:var(--db-text-soft); }
+        .hd-pvtile.on { background:var(--db-accent); border-color:var(--db-accent);
+          color:var(--db-text-on-accent); }
+        /* a single illustrative board next to a stepper or slider: no choice to
+           make, so it spans the row and is not a target */
+        .hd-pvrow.one { padding:4px; border-radius:8px;
+          background:var(--db-surface-sunken); border:1px solid var(--db-border); }
+        .hd-pvrow.one .hd-pvsvg { height:38px; }
+        .hd-pvsvg { display:block; width:100%; height:44px; border-radius:5px;
+          background:var(--db-ice); pointer-events:none; }
+        .hd-pvlbl { font-size:10.5px; font-weight:600; line-height:1.2; text-align:center; }
+        .hd-prefwarn { font-size:11.5px; line-height:1.5; color:var(--db-warn);
+          padding:7px 9px; border-radius:8px;
+          background:var(--db-surface-sunken); border:1px solid var(--db-border); }
         .hd-item { display:flex; align-items:center; gap:8px; padding:9px 10px; font-size:14px;
           border:1px solid var(--db-border); background:var(--db-surface-raised); color:var(--db-text-soft); border-radius:8px;
           cursor:pointer; text-align:left; }
@@ -332,10 +666,23 @@ export const STYLES = `
         .hd-mdprev a { color:var(--db-info); }
         .hd-err { color:var(--db-danger); font-size:12px; white-space:pre-wrap; }
         .hd-row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
-        .hd-btn { padding:9px 16px; font-size:13.5px; font-weight:600; border:1px solid var(--db-border);
+        /* inline-flex so an icon and its label sit on one line — as a plain
+           block the Icon's display:block pushed the text onto a second row */
+        .hd-btn { display:inline-flex; align-items:center; justify-content:center; gap:6px;
+          padding:9px 16px; font-size:13.5px; font-weight:600; border:1px solid var(--db-border);
           background:var(--db-surface-raised); color:var(--db-text); border-radius:8px; cursor:pointer; min-height:40px; }
         .hd-btn.primary { background:var(--db-accent); border-color:var(--db-accent); color:var(--db-text-on-accent); }
         .hd-btn.danger { color:var(--db-danger); border-color:var(--db-danger-border); }
+        /* A button that LEAVES the surface you're on. Kept apart from whatever
+           sits beside it — margin-left:auto throws it to the far end of the row
+           — and filled, so it can't be confused with the actions next to it. A
+           mis-tap here abandons what you were doing, so proximity is the risk,
+           not visibility. */
+        .hd-btn.exit { margin-left:auto; min-width:92px; font-weight:700;
+          background:var(--db-accent); border-color:var(--db-accent); color:var(--db-text-on-accent); }
+        /* the same idea on the action bar: an exit chip sits clear of the run of
+           controls, with a rule between it and them */
+        .hd-pentool.exit { margin-left:8px; border-color:var(--db-focus); color:var(--db-focus); }
         /* presentation steps editor */
         .hd-steplist { flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:7px; }
         .hd-stepitem { display:flex; flex-direction:column; gap:6px; }
@@ -361,7 +708,7 @@ export const STYLES = `
            Default spot is bottom-centre; a saved pos (inline style) overrides it. */
         .hd-preso { position:absolute; z-index:47; box-sizing:border-box; left:50%; transform:translateX(-50%);
           --cap-hw: min(170px, 35vw);   /* max half-width, for the on-screen clamp */
-          bottom:calc(64px + var(--hd-b) + var(--hd-scrub)); width:max-content; max-width:min(340px, 70vw);
+          bottom:calc(var(--hd-menubar) + 10px + var(--hd-b) + var(--hd-act)); width:max-content; max-width:min(340px, 70vw);
           display:flex; flex-direction:column; align-items:stretch; gap:9px; padding:12px 15px;
           background:var(--db-fx-glass); border:1px solid var(--db-border-strong); border-radius:13px;
           box-shadow:var(--db-fx-shadow-lg); backdrop-filter:blur(5px); }
@@ -388,7 +735,7 @@ export const STYLES = `
         .hd-preso-tab.del { color:var(--db-danger); padding:0 9px; }
         .hd-preso-tab.done { color:var(--db-text-on-accent); background:var(--db-accent); border-color:var(--db-accent); }
         @media (pointer: fine) and (min-width: 760px) {
-          .hd-preso { --cap-hw:min(310px, 30vw); max-width:min(620px, 60vw); gap:12px; padding:16px 20px; bottom:calc(74px + var(--hd-b) + var(--hd-scrub)); }
+          .hd-preso { --cap-hw:min(310px, 30vw); max-width:min(620px, 60vw); gap:12px; padding:16px 20px; bottom:calc(var(--hd-menubar) + 20px + var(--hd-b) + var(--hd-act)); }
           .hd-preso-text { font-size:22px; }
           .hd-preso-btn { font-size:15px; padding:9px 16px; }
           .hd-preso.placing { gap:8px; }
@@ -415,7 +762,7 @@ export const STYLES = `
           .hd-x:hover:not(:disabled), .hd-anchorbtn:hover:not(:disabled),
           .hd-select:hover:not(:disabled), .hd-tool:hover:not(:disabled),
           .hd-pentool:hover:not(:disabled), .hd-penopt:hover:not(:disabled),
-          .hd-penswitch:hover, .hd-preso-btn:hover, .hd-preso-tab:hover,
+          .hd-mode:hover, .hd-preso-btn:hover, .hd-preso-tab:hover,
           .hd-resize-h:hover::before, .hd-resize-c:hover::after {
             filter:var(--db-fx-hover); }
           /* colour chips say what they are, so tinting them would misrepresent
@@ -466,14 +813,21 @@ export const STYLES = `
         .hd-x { background:none; border:none; color:var(--db-text-muted); cursor:pointer;
           font-size:16px; padding:2px 5px; display:inline-flex; align-items:center; justify-content:center; }
         .hd-x:first-of-type { margin-left:auto; }
-        .hd-x.on { color:var(--db-focus); }   /* an active toggle (pinned / docked) */
+        /* An active toggle (pinned / docked). Colour ALONE was too weak to read
+           on the light theme — its "on" teal and its resting grey are both
+           mid-dark, so a pinned panel looked unpinned. The icons now differ in
+           silhouette too (pinOff/pinOn, sidebar/sidebarOn); this adds the
+           pressed-chip fill, so the state survives a glance from any of three
+           cues rather than one. */
+        .hd-x.on { color:var(--db-focus); background:var(--db-info-bg);
+          border-radius:6px; box-shadow:inset 0 0 0 1px var(--db-info-border); }
         .hd-grip { display:inline-flex; align-items:center; }
         input[type=range] { accent-color:var(--db-accent); height:30px; }
         .hd-pop.pinned { z-index:43; }   /* just under the play dock, never behind it */
         /* docked editing sidebar: a fixed full-height column on the right edge,
            square outer corners, shadow only on its inner (left) edge */
         .hd-pop.pinned.dock { position:fixed; top:env(safe-area-inset-top, 0px); right:0;
-          bottom:calc(54px + var(--hd-b) + var(--hd-scrub));
+          bottom:calc(var(--hd-menubar) + var(--hd-b) + var(--hd-act));
           width:var(--hd-dock-w); max-height:none; height:auto;
           border-radius:0; border-top:none; border-right:none; border-bottom:none;
           box-shadow:-8px 0 24px var(--db-fx-edge); }
@@ -566,6 +920,31 @@ export const STYLES = `
           background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' stroke='%236b7a8a' stroke-width='1.4' fill='none' stroke-linecap='round'/></svg>");
           background-repeat:no-repeat; background-position:right 8px center; padding-right:22px; }
         .hd-select.on { border-color:var(--db-accent); }
+        /* ---- the puck-actions editor (a waypoint's ordered step list) ----
+           This was ~14 inline colour literals — a dark card, dark dropdowns and
+           grey label text baked in — so on a light theme it rendered as a black
+           box full of black dropdowns. Tokens now, which also brings it under
+           the no-raw-hex guard that only reads THIS file. */
+        .hd-actions { margin:6px 0; padding:7px 8px; border-radius:8px;
+          background:var(--db-surface-sunken); border:1px solid var(--db-border-hair); }
+        .hd-actions.locked { opacity:.5; pointer-events:none; }
+        /* one step. The left stripe says what the puck DOES at a glance; the
+           step also names its type in the dropdown beside it, so the stripe is
+           a scanning aid rather than the only signal. */
+        .hd-step { margin:5px 0; padding:5px 7px 5px 8px; border-radius:8px;
+          background:var(--db-surface-panel); border:1px solid var(--db-border);
+          border-left:3px solid var(--db-act-gain); }
+        .hd-step.pass  { border-left-color:var(--db-act-pass); }
+        .hd-step.shoot { border-left-color:var(--db-act-shot); }
+        .hd-step.chip, .hd-step.rim { border-left-color:var(--db-act-loose); }
+        .hd-step.warn { opacity:.7; }
+        .hd-steplbl { flex:none; min-width:46px; font-size:11.5px; font-weight:700; color:var(--db-text-muted); }
+        /* a step's own ✕ sits tight to it rather than wearing full button padding */
+        .hd-step .hd-mini.hd-stepx { padding:3px 8px; min-height:0; }
+        .hd-stepwarn { font-size:10.5px; color:var(--db-warn); }
+        .hd-stephint { font-size:10.5px; color:var(--db-text-muted); }
+        /* a divider inside a panel — e.g. above Menu's destructive Clear all */
+        .hd-rule { height:1px; margin:4px 0; background:var(--db-border); }
         .hd-stepper { display:inline-flex; align-items:center; gap:2px;
           background:var(--db-surface-sunken); border:1px solid var(--db-border); border-radius:7px; overflow:hidden; }
         .hd-stepper button { width:32px; min-height:32px; border:none; background:var(--db-surface-raised); color:var(--db-text);
@@ -577,6 +956,15 @@ export const STYLES = `
           background:var(--db-fx-glass); border:1px solid var(--db-border-strong); border-radius:13px;
           box-shadow:var(--db-fx-shadow-lg); color:var(--db-text-soft); font-size:13.5px; line-height:1.55; }
         .hd-emptyhint b { color:var(--db-text); }
+        /* the phone's hint line: over the ice just above the action bar, where
+           it has the width the bar couldn't give it. Never intercepts taps. */
+        .hd-floathint { position:absolute; z-index:43; left:50%; transform:translateX(-50%);
+          bottom:calc(var(--hd-menubar) + var(--hd-b) + var(--hd-act) + 6px);
+          max-width:calc(100vw - 24px); padding:6px 12px; pointer-events:none;
+          white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+          font-size:12px; color:var(--db-text-soft);
+          background:var(--db-fx-glass); border:1px solid var(--db-border);
+          border-radius:999px; box-shadow:var(--db-fx-shadow); backdrop-filter:blur(4px); }
         .hd-emptyhint .hd-ehsub { display:block; margin-top:4px; font-size:12px; color:var(--db-text-muted); }
         /* the loupe shows magnified ICE, so its backdrop is the ice token — it
            must match RinkMarkings' fill exactly or a wrong-shade rim shows at

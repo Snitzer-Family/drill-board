@@ -20,6 +20,7 @@ Everything is real rink feet: **x runs 0–200** (goal line axis), **y runs 0–
 center at x=100, goal lines at x=11/189, end-zone dots at (31|169, 20.5|64.5).
 Full / half / quarter views are just different SVG viewBoxes over the same
 coordinate space, so a drill authored on half ice renders correctly in any view.
+The four quarter sheets tile the rink and are named for where they sit on it.
 
 ### Drill text format (DSL)
 
@@ -35,7 +36,7 @@ PATH D1 L 152,28 STOP 1 BWD RATE 0.8 Q 140,34 134,46
 PATH PK1 STOP 0.3 SHOT L 188,41
 ```
 
-- **RINK** `full | half | quarter`
+- **RINK** `full | half | quarter-tl | quarter-tr | quarter-bl | quarter-br`
 - **PIECE** `id kind x y [#color] [label] [speed=1.2] [hand=L] [on=F1] [face=45]`
   - `speed=` per-piece speed multiplier
   - `hand=L` mirrors the player's stick (default right)

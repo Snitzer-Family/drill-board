@@ -1,12 +1,12 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo, Fragment } from "react";
-import { VIEWS, COLORS, vb, APP_VERSION, ICON_SCALE, PLAYER_SCALE, ROUTE_START_GAP, BUILD_STAMP, DEFAULT_TEXT, SPEED,
+import { VIEWS, isQuarter, COLORS, vb, APP_VERSION, ICON_SCALE, PLAYER_SCALE, ROUTE_START_GAP, BUILD_STAMP, DEFAULT_TEXT, SPEED,
   SAVE_PROB, MISS_POST, MISS_WIDE, MISS_OVER, SHOT_AIR_PROB, BOUNCE_REST, WB_SYMS, symOf,
-  READ_PACES, READ_PACE_DEFAULT, captionHold } from "./constants.js";
+  DSL_VERSION, TYPEFACES, TYPEFACE_KEY, READ_PACES, READ_PACE_DEFAULT, captionHold, ACT_GAP, ACT_R } from "./constants.js";
 import { parseDrill, serializeDrill, extractDrill, deriveInventory, ensureShotNet } from "./drill-format.js";
 import { prepareImage, drillFromImage, ANTHROPIC_KEY_STORE } from "./drill-vision.js";
 import { drillSvg } from "./drill-svg.js";
 import { mdEscape, mdInline, mdBlock } from "./md.js";
-import { clampX, clampY, segEnd, segD, nearestT, splitSeg, zigzagPoints, wigglePoints, wigglePoly, zigzagPoly, convertSeg, fitRoute, evalSeg, rdp, catmullToBezier, alignJoint, mirrorJoint, translateJointHandles, trimSegStart, trimSegEnd, trimPolyStart, trimPolyEnd, gapPolyAt } from "./geometry.js";
+import { clampX, clampY, fitInside, segEnd, segD, nearestT, splitSeg, zigzagPoints, wigglePoints, wigglePoly, zigzagPoly, convertSeg, fitRoute, evalSeg, rdp, catmullToBezier, alignJoint, mirrorJoint, translateJointHandles, trimSegStart, trimSegEnd, trimPolyStart, trimPolyEnd, gapPolyAt } from "./geometry.js";
 import { dirOf, dirAtWaypoint, spreadDir } from "./route-dir.js";
 import * as boards from "./boards.js";
 import { netShapes, bumperShapes, solidShapes, detourRoute, segCrossesNet } from "./net-collide.js";
@@ -20,12 +20,16 @@ import { newGame, stepGame } from "./ai-game.js";
 import { STYLES } from "./styles.js";
 import { THEME_KEY, THEME_ATTR, THEME_ORDER, THEME_LABEL, resolveTheme, tokens, teamInk } from "./theme.js";
 import { ThemeCtx, InkCtx } from "./theme-react.jsx";
+import { PrefPick, PrefSample } from "./pref-preview.jsx";
 import { SAVE_KEY, peekBackup, clearBackup } from "./storage.js";
 
 // Pen inks. These double as PIECE colours — a symbol you draw becomes a player
 // in the ink you drew it with — so they're the team colours plus the classic
 // yellow whiteboard marker. No white: it vanishes on the ice.
 const PEN_INKS = ["#ffd447", "#d7263d", "#1f4fa3", "#1f8a4c", "#e0731d", "#7a3fa8", "#111318"];
+// the line kinds a mark can be drawn in. One list — the pen palette and the
+// marker's settings both offer them, and they used to be written out twice.
+const PEN_STYLES = [["solid", "Solid"], ["dashed", "Dashed"], ["dotted", "Dotted"], ["wavy", "Wavy"]];
 
 // the add-tool buttons show the SAME vector sprite the piece uses on the ice.
 // Each kind renders a mini PieceIcon in a viewBox tight to its body (raw icon
@@ -42,15 +46,127 @@ const TOOL_GLYPH = {
   stick: { vb: "-6.4 -2.4 13.4 4.8", color: "#8a929c" },
   light: { vb: "-3.7 -3.7 7.4 7.4", color: "#2ea043" },
 };
+// What stays drawn on the ice once the drill is running. Two independent
+// things — the skaters' routes and the puck's passes/shots — so the four modes
+// are just their combinations. The stored names are the original three plus
+// "puck"; keeping them means a session that already chose one still resolves.
+const ROUTE_VIS = [
+  ["hide", "None", "nothing — just the skaters moving"],
+  ["puck", "Puck", "the puck's passes and shots only"],
+  ["player", "Skaters", "the skating routes only"],
+  ["all", "Both", "skating routes and the puck's path"],
+];
+const routeVis = m => ({ skaters: m === "player" || m === "all", puck: m === "puck" || m === "all" });
+
+// What the Smart pen does with a stroke. One row per state: the stored value,
+// the bar's label, its glyph, and — the point of the table — a plain sentence
+// about the NEXT stroke. That sentence is the tooltip, the hint over the ice
+// and the line on the bar, so those three can never drift apart.
+const PEN_READ = [
+  ["sketch", "Sketch", "pencil", "Ink stays exactly as you drew it."],
+  ["manual", "Manual", "wand", "Ink waits until you tap Convert."],
+  ["auto", "Auto", "brain", "Every stroke is read as you draw."],
+];
+const penReadRow = v => PEN_READ.find(([k]) => k === v) || PEN_READ[2];
+
+// How fast the whole drill runs, as a multiple of the base skating pace. This
+// is the SAME value the old "Drill pace" slider set in ft/s — it just belongs
+// on the transport, because slowing a drill down is something you do WHILE
+// showing it ("watch the give-and-go again, half speed"), not something you set
+// once in a menu. Expressed as a multiple rather than ft/s: at the bench you
+// think "slower", not "eleven feet per second".
+const BASE_PACE = 15;                      // ft/s at 1× — the long-standing default
+const PLAY_SPEEDS = [
+  [0.5, "½×", "half speed — for walking through a pattern"],
+  [1, "1×", "normal drill pace"],
+  [1.5, "1½×", "quick — shows the flow"],
+  [2, "2×", "double speed"],
+];
+
+/* ---- settings rows -------------------------------------------------------
+   Every preference reads the same way: what it's called, a line saying what it
+   actually does (and what OFF means, which is the part that was missing), then
+   the control. Most of these are things you set once and forget, several change
+   how the SIMULATION behaves rather than how it looks, and the old panel gave
+   them a bare toggle label and a fragment of a hint — you had to already know
+   what "Tidy arrowheads" or "Preview all branches" meant to use them.
+
+   A toggle is the whole row, not just the switch: a 44px-tall target beats a
+   30px one on a bench phone, and the description is part of what you're
+   pressing. Rows with a stepper, slider or pills can't be one button (a button
+   can't contain buttons), so those put the control beside the title or under
+   the description.
+
+   A third shape now sits alongside these: the rows whose effect is a PICTURE
+   render each option as a small live board and make the board the control
+   (PrefPick, in pref-preview.jsx). Those give up the whole-row target for the
+   same buttons-in-buttons reason — but each tile is its own target and larger
+   than the switch it replaced, so nothing got harder to hit. What is left here
+   is the settings a picture cannot show: timings, odds, and the ones that
+   change how the SIMULATION behaves rather than how it looks. */
+const PrefToggle = ({ title, desc, on, set, dim }) => (
+  <button className={`hd-pref toggle${dim ? " dim" : ""}`} role="switch" aria-checked={on}
+    onClick={() => set(v => !v)}>
+    <span className="hd-prefhead">
+      <span className="hd-preftitle">{title}</span>
+      <span className={`hd-sw${on ? " on" : ""}`} />
+    </span>
+    <span className="hd-prefdesc">{desc}</span>
+  </button>
+);
+const PrefRow = ({ title, desc, control, children, dim }) => (
+  <div className={`hd-pref${dim ? " dim" : ""}`}>
+    <div className="hd-prefhead">
+      <span className="hd-preftitle">{title}</span>
+      {control}
+    </div>
+    {desc && <div className="hd-prefdesc">{desc}</div>}
+    {children && <div className="hd-prefctl">{children}</div>}
+  </div>
+);
+const Pills = ({ value, opts, set }) => (
+  <div className="hd-pills">
+    {opts.map(([v, lab]) => (
+      <button key={v} className={`hd-mini${value === v ? " on" : ""}`}
+        aria-pressed={value === v} onClick={() => set(v)}>{lab}</button>
+    ))}
+  </div>
+);
+
 // the interchangeable on-ice training tools: any one can be swapped for
 // another from its popup ("Change to" row) without re-placing it
 const TOOL_KINDS = ["cone", "tire", "bumper", "deker", "passer", "stick", "light"];
+// Everything you can put on the ice, in three groups. ONE table, because the
+// same set is offered from three places — the Edit bar, its group popovers, and
+// the double-tap "Add here" popup — and it used to be written out twice, which
+// is how the quick-add popup and the Add sheet drifted apart.
+//   main  — what a drill is made of; earns a permanent slot on the bar
+//   props — training gear; a group popover unless the screen is wide
+//   marks — annotation, not equipment
+// `k` is the tool/kind name; a `glyph` renders an Icon instead of a piece sprite.
+const ADD_GROUPS = [
+  { key: "main", label: "Players", tip: "Players, pucks and nets", icon: "player", kinds: [
+    ["player", "Player"], ["playerpuck", "+ Puck"], ["puck", "Puck"], ["net", "Net"]] },
+  { key: "props", label: "Props", tip: "Cones, tires and training gear", icon: "grid", kinds: [
+    ["cone", "Cone"], ["tire", "Tire"], ["bumper", "Bumper"], ["deker", "Deker"],
+    ["passer", "Passer"], ["stick", "Stick"], ["light", "Light"]] },
+  { key: "marks", label: "Shapes", tip: "Zone shapes, freehand marker and text labels", icon: "shapes", kinds: [
+    ["marker", "Marker", "marker"], ["square", "Square", "□"], ["circle", "Circle", "○"],
+    ["triangle", "Triangle", "△"], ["label", "Label", "label"]] },
+];
+// the shapes are added straight to the board rather than arming a tool
+const SHAPE_KINDS = new Set(["square", "circle", "triangle"]);
 // the creation-time default colour for each piece kind (players cycle COLORS,
 // so their pick is passed in); also re-applied when a tool is swapped kinds
 const defaultColor = (kind, playerColor) =>
   kind === "player" ? playerColor : kind === "cone" ? "#e0731d" : kind === "net" ? "#c81e33"
     : kind === "bumper" ? "#1b1e22" : kind === "deker" ? "#c79a4e" : kind === "passer" ? "#57636f"
-    : kind === "label" ? "#14202b" : kind === "tire" ? "#1c1c1e" : kind === "light" ? "#2ea043" : "#14171a";
+    : kind === "label" ? "#14202b" : kind === "tire" ? "#1c1c1e" : kind === "light" ? "#2ea043"
+    // stick is spelled out rather than left to the fallback: drill-format.js has
+    // its own copy of this table and defaults a stick to #20242a, so the two
+    // silently disagreed depending on whether a board was placed or loaded.
+    // tests/theme-contrast.mjs now pins the two tables together.
+    : kind === "stick" ? "#20242a" : "#14171a";
 const toolImg = (kind, wb = false, wbCircle = false) => {
   const k = kind === "playerpuck" ? "player" : kind;
   const g = TOOL_GLYPH[k];
@@ -275,7 +391,7 @@ function DelayTrigger({ value, onChange, sub, players, actorIds, nameOf }) {
    y 0..85 (board to board).
 
    Text format (one command per line, # = comment):
-     RINK full|half|quarter
+     RINK full|half|quarter-tl|quarter-tr|quarter-bl|quarter-br
      PIECE <id> <player|puck|cone> <x> <y> [#color] [label] [speed=1.2] [hand=L] [on=F1]
      PATH  <id> <segments...>
    Segments (rink feet):
@@ -336,13 +452,63 @@ const HALFNS_KEY = "drillboard:half-ns";  // half-ice shown north-south (vertica
 const HALFFLIP_KEY = "drillboard:half-flip";  // half-ice net at the far end (left / top)
 const STRETCH_KEY = "drillboard:stretch-fill";  // full ice stretches to fill the screen
 const PRESS_KEY = "drillboard:pencil-pressure";  // Apple Pencil pressure → line weight
+const HAND_KEY = "drillboard:hand";  // which side the chrome's controls sit on
+const LINE_KEY = "drillboard:line-scale";    // route/arrow/mark thickness multiplier
+const MARK_KEY = "drillboard:mark-opacity";  // how solid the drawn markings are
+const RINKDIM_KEY = "drillboard:rink-dim";   // how strongly the rink markings are drawn
+// The icon discs at a pass / shoot / pickup. Whiteboard mode has always dropped
+// them; this is the same look without going full whiteboard. Key name and flag
+// match the unmerged commit on the sibling worktree branch that first added it,
+// so the two converge instead of colliding.
+const ACTC_KEY = "drillboard:action-circles";
+// ...and the range each is allowed, declared ONCE because it is read twice: the
+// control clamps to it and the stored value is validated against it. Two copies
+// and raising a stepper's max would leave the new top of the range unloadable —
+// stored fine, silently reset to the default on the next launch.
+// ...the rink floor is 0.2 rather than 0.1: the markings are what tell you WHICH
+// rink you are looking at, and past about a fifth they stop being faint and
+// start being gone.
+const LINE_RANGE = [0.5, 3], MARK_RANGE = [0.1, 1], RINKDIM_RANGE = [0.2, 1];
+// A stored NUMBER pref. The boolean prefs can treat any junk as false, but junk
+// here is worse than wrong: NaN in the line scale multiplies every route width
+// to nothing and blanks the board. So anything unparseable, or outside the range
+// the control itself offers, falls back to the default rather than being trusted.
+const numPref = (key, dflt, [min, max]) => {
+  try {
+    const n = parseFloat(localStorage.getItem(key));
+    return Number.isFinite(n) && n >= min && n <= max ? n : dflt;
+  } catch { return dflt; }   // private mode throws on access
+};
+// The ONE width breakpoint in the app. Above it the action bar lays its groups
+// out inline and the corner menus centre on the button that opened them; below,
+// the bar collapses groups into popovers and the stylesheet stretches the menus
+// to the screen edges instead. Keeping both on the same number means a device
+// changes personality exactly once as it rotates, which is the whole reason the
+// pen palette and the menus already shared 700.
+const DENSE_MIN = 700;
+// ...and one tier above it, for the Edit palette only. At DENSE_MIN the props
+// come out onto the bar; the five shape tools need ~204px more than the popover
+// button they replace, and the standing hint has to survive that. The hint
+// measures 130px at 768 today, so that is the floor worth keeping: 980 would
+// leave it 116px — narrower than what already ships — and 1000 leaves 136px.
+// It lands where it should either way: every iPad in LANDSCAPE (1024-1194)
+// opens the shapes out, while a portrait iPad (768-834) keeps them grouped,
+// because there genuinely isn't room. Measured, not guessed.
+const ROOMY_MIN = 1000;
 // Corner-menu anchoring. MENU_W must equal --hd-menu-w in styles.js (asserted by
 // tests/theme-contrast.mjs) — the panel is sized by CSS but centred by JS, so a
 // mismatch silently offsets every menu by half the difference. Below
-// MENU_ANCHOR_MIN the stylesheet stretches the panel instead and JS stands down;
-// it matches the pen palette's breakpoint so a device doesn't change personality
-// between the two.
-const MENU_W = 230, MENU_PAD = 10, MENU_ANCHOR_MIN = 700;
+// MENU_ANCHOR_MIN the stylesheet stretches the panel instead and JS stands down.
+const MENU_W = 230, MENU_PAD = 10, MENU_ANCHOR_MIN = DENSE_MIN;
+// The four quarter sheets, in reading order — which is also the order the 2x2
+// pad lays them out, so the grid mirrors the rink. [rink token, pad label, bar
+// label]. One table: the pad and the bar's label both read it.
+const QUARTERS = [
+  ["quarter-tl", "Top left", "¼ TL"],
+  ["quarter-tr", "Top right", "¼ TR"],
+  ["quarter-bl", "Bottom left", "¼ BL"],
+  ["quarter-br", "Bottom right", "¼ BR"],
+];
 // THEME_KEY ("drillboard:theme") lives in theme.js — the pre-paint boot script
 // in index.html reads the same constant, and they must not drift.
 
@@ -379,6 +545,12 @@ export default function DrillAnimator() {
   const [marquee, setMarquee] = useState(null);    // {x0,y0,x1,y1} while dragging a box
   const [groupInput, setGroupInput] = useState(null);   // pending group-name text while naming, or null
   const [popup, setPopup] = useState(null);
+  // what the Edit bar should offer after a DRAG that didn't (re)open the popup —
+  // {type:"point", id, seg, fork?} for a moved waypoint. The bar reads this only
+  // when popup is absent, so a dragged point loads its own actions (Delete hits
+  // just that point) even though no inspector panel appeared. Guarded by id, so a
+  // stale descriptor from one piece never leaks onto another's strip.
+  const [dragSel, setDragSel] = useState(null);
   const [tool, setTool] = useState("select");
   // freehand marker (annotation) settings, remembered between strokes
   const [markColor, setMarkColor] = useState("#111318");   // black ink by default
@@ -406,10 +578,10 @@ export default function DrillAnimator() {
   // Note ink is handwriting: it keeps far more of what was drawn. The sampling
   // and simplification that suit a swooping route destroy small letters — a 4px
   // tolerance is wider than the strokes of the letters themselves.
-  const inkStepFt = note => Math.max(note ? 0.1 : 0.25,
-    (note ? 1 : 2.5) * Math.min(penScale.current.x || 1.1, penScale.current.y || 1.1));
-  const inkEpsFt = note => Math.max(note ? 0.12 : 0.3,
-    (note ? 0.8 : 4) * Math.min(penScale.current.x || 1.3, penScale.current.y || 1.3));
+  const inkStepFt = sketch => Math.max(sketch ? 0.1 : 0.25,
+    (sketch ? 1 : 2.5) * Math.min(penScale.current.x || 1.1, penScale.current.y || 1.1));
+  const inkEpsFt = sketch => Math.max(sketch ? 0.12 : 0.3,
+    (sketch ? 0.8 : 4) * Math.min(penScale.current.x || 1.3, penScale.current.y || 1.3));
   const symbolMaxPx = () => (penScale.current.x > 0 ? SYMBOL_MAX_PX : SYMBOL_MAX);
   // erase everything an eraser stroke passes through: ink by its drawn points,
   // pieces by their spot. Runs through scrubRefs so deleting a player also
@@ -452,11 +624,25 @@ export default function DrillAnimator() {
     flash(`Erased ${bits.join(" + ")}`);
     return true;
   }
+  // Ink the pen would own in the given state. The two inks are separate
+  // everywhere else — convertInk won't touch sketch ink — so Clear shouldn't
+  // either: sketching and then wiping the board took your smart-pen work with
+  // it. Manual and Auto share one bucket, because their ink IS the same thing,
+  // unread convertible ink, with nothing in the model or the DSL to tell them
+  // apart. Locked ink (imported overlays) is nobody's.
+  const inkMine = (p, sketch) => p.kind === "mark" && !p.lock && !!p.sketch === sketch;
   const clearInk = () => {
-    const n = piecesRef.current.filter(p => p.kind === "mark" && !p.lock).length;
-    if (!n) { flash("No ink to clear"); return; }
-    setPieces(ps => ps.filter(p => !(p.kind === "mark" && !p.lock)));
-    flash(`Cleared ${n} ink mark${n > 1 ? "s" : ""} — Undo restores them`);
+    const sketch = penReadRef.current === "sketch";
+    // buffered strokes count as mine: setPen flushes, so everything still in
+    // the settle window was drawn under the state that's active now
+    const n = piecesRef.current.filter(p => inkMine(p, sketch)).length + penInk.length;
+    if (!n) { flash(`No ${sketch ? "sketch" : "smart-pen"} ink to clear`); return; }
+    // and drop them, or they land a second later on a board you just emptied
+    penBuf.current = [];
+    clearTimeout(penTimer.current);
+    setPenInk([]);
+    setPieces(ps => ps.filter(p => !inkMine(p, sketch)));
+    flash(`Cleared ${n} ${sketch ? "sketch" : "ink"} mark${n > 1 ? "s" : ""} — Undo restores them`);
   };
 
   // what the classifier needs to know about the board it's reading into
@@ -482,11 +668,18 @@ export default function DrillAnimator() {
     penBuf.current = [];
     clearTimeout(penTimer.current);
     if (pending.length) setPenInk([]);
+    // ...but fold them in as whatever the pen is currently laying down. This
+    // used to hardcode ordinary ink, so tapping Convert inside the 1s settle
+    // window while sketching re-laid the buffered strokes at route fidelity —
+    // losing their per-point pressure — and then fed them to the classifier,
+    // which could turn handwriting into a player. commitPen honours the pen
+    // state; this path has to as well.
+    const buffered = penReadRef.current === "sketch";
     const board = pending.length
-      ? materializePenOps(piecesRef.current, pending.map(s => ({ op: "mark", pts: s.pts, press: s.press })))
+      ? materializePenOps(piecesRef.current, pending.map(s => ({ op: "mark", pts: s.pts, press: s.press, ...(buffered ? { sketch: true } : {}) })))
       : piecesRef.current;
-    // note ink and locked ink are deliberately off-limits to the sweep
-    const marks = board.filter(p => p.kind === "mark" && !p.lock && !p.note && (p.pts || []).length >= 2);
+    // sketch ink and locked ink are deliberately off-limits to the sweep
+    const marks = board.filter(p => p.kind === "mark" && !p.lock && !p.sketch && (p.pts || []).length >= 2);
     if (!marks.length) { if (pending.length) setPieces(board); flash("No ink to convert"); return; }
     const ops = classifyPenGroup(marks.map(m => ({ pts: m.pts })), penCtx(board));
     const consumed = new Set();
@@ -566,26 +759,51 @@ export default function DrillAnimator() {
   useEffect(() => { try { localStorage.setItem(PRESS_KEY, pencilPress ? "1" : "0"); } catch { /* private mode */ } }, [pencilPress]);
   const pressRef = useRef(true);
   pressRef.current = pencilPress;
-  // the pen palette takes over the player-bar band while sketching. It stays
-  // put when you flip to the item editor, so moving a piece and going back to
-  // drawing is one tap instead of a trip through the Add sheet.
-  const [penMode, setPenMode] = useState(false);
+  // Interface typeface. A view preference like the theme — stored per device,
+  // never in the drill. Applied as a CSS var on .hd-root so every panel and
+  // popup inherits it in one place.
+  const [typeface, setTypeface] = useState(() => {
+    try { return localStorage.getItem(TYPEFACE_KEY) || "system"; } catch { return "system"; }
+  });
+  useEffect(() => { try { localStorage.setItem(TYPEFACE_KEY, typeface); } catch { /* private mode */ } }, [typeface]);
+  const fontStack = (TYPEFACES.find(f => f[0] === typeface) || TYPEFACES[0])[2];
+  // Which of the three editor flows is live. This is the app's top-level mode
+  // and the bottom bar's segmented control writes it:
+  //   draw — sketch with the smart pen; ink becomes real pieces
+  //   edit — add and modify pieces, routes and their properties
+  //   play — animate, scrub, present, write captions
+  // It replaces a pile of implicit modes (a penMode boolean, a Draw|Edit knob
+  // inside the pen palette, "is the animation running") that between them meant
+  // the chrome never said which of the three you were in.
+  //
+  // Deliberately NOT persisted and NOT derived from a loaded drill: the DSL has
+  // no concept of a mode, and giving it one would break the round-trip.
+  const [mode, setModeRaw] = useState("edit");
+  // Kept as a derived name because ~7 sites read it and they all mean the same
+  // thing — the pen is the active tool.
+  const penMode = mode === "draw";
   const [eraser, setEraser] = useState(false);
   const eraserRef = useRef(false);          // finishDraw reads it from a stale closure
   eraserRef.current = eraser;
   // auto: every settled burst is read straight away. Off: strokes stay ink
   // until Convert reads the whole drawing at once.
-  // Note mode: ink that opts out of recognition for good. Strokes skip the
-  // classifier and are stamped note=true, which Convert then steps over — so a
-  // scribbled reminder survives both auto and manual conversion. Still ordinary
-  // ink otherwise: selectable, restylable, erasable.
-  const [noteMode, setNoteMode] = useState(false);
-  const noteRef = useRef(false);
-  noteRef.current = noteMode;
+  // What the pen does with what you draw — ONE setting with three states, not
+  // two toggles. As two (note × auto) it implied four combinations, and the
+  // fourth is meaningless: sketch ink is never read, so "auto" had nothing to
+  // act on and the lit Auto button did nothing at all. Three states, and the
+  // impossible one can't be expressed.
+  //   sketch — never read. Also a different pen: finer capture, gentler
+  //            simplification, per-point pressure kept, drawn through its own
+  //            points instead of a fitted curve (see inkStepFt/inkEpsFt).
+  //   manual — ordinary ink; it waits on the board until Convert is tapped.
+  //   auto   — every stroke is read once the burst settles.
+  // Not persisted (neither half was), and deliberately NOT reset by setMode or
+  // by arming the eraser: it's a pen setting like colour, width and style.
+  const [penRead, setPenRead] = useState("auto");
+  const penReadRef = useRef("auto");
+  penReadRef.current = penRead;
+  const isSketch = penRead === "sketch";
   const [penPop, setPenPop] = useState(null);   // "size" | "style" popover, or null
-  const [autoConv, setAutoConv] = useState(true);
-  const autoRef = useRef(true);
-  autoRef.current = autoConv;
   const [stylusOn, setStylusOn] = useState(false);   // drives the hint text only
   // NB the `> 0` guard: performance.now() starts near zero, so without it a
   // never-touched-by-a-Pencil session would reject fingers for its first 5 min
@@ -613,16 +831,18 @@ export default function DrillAnimator() {
   // through this ref so the classifier context is always current
   const piecesRef = useRef(pieces);
   piecesRef.current = pieces;
-  const [openMenu, setOpenMenu] = useState(null); // settings | rinkmenu | tools | text
+  const [openMenu, setOpenMenu] = useState(null); // settings | rinkmenu | prefs | notes | inventory | steps | text
   // Every corner menu hangs off the button that opens it, rather than off a
   // screen corner. Corner-pinning reads fine on a phone, where the bar spans the
   // whole width, but in landscape or on desktop the buttons sit well left of the
   // corner and the panel opens nowhere near what was tapped — Tune's used to
   // open under Menu. (Must live below openMenu — reading it from higher up is a
   // temporal-dead-zone crash the build can't see.)
+  // Only the buttons that still exist in the bar get a ref — these are the
+  // corner menus, which the JS centres on whatever opened them. Panels reached
+  // from INSIDE another panel are full-screen sheets and don't anchor at all.
   const barBtnRefs = {
     settings: useRef(null), rinkmenu: useRef(null),
-    tools: useRef(null), prefs: useRef(null),
   };
   const [menuLeft, setMenuLeft] = useState(null);
   useLayoutEffect(() => {
@@ -659,7 +879,10 @@ export default function DrillAnimator() {
   const [playing, setPlaying] = useState(false);
   const [animT, setAnimT] = useState(0);
   const [restFade, setRestFade] = useState(1);         // extra splash fade-out that runs while paused/stopped
-  const [pace, setPace] = useState(15);
+  // Playback speed lives as the MULTIPLE, with pace derived — so the transport
+  // button and the timing engine can't disagree about what "1×" means.
+  const [speedMul, setSpeedMul] = useState(1);
+  const pace = BASE_PACE * speedMul;
   // routes shown during playback: "player" (routes only), "hide", "all" (+puck/shots)
   const [playRoutes, setPlayRoutes] = useState("player");
   // presentation mode: pause at each described step so viewers can read along
@@ -677,6 +900,12 @@ export default function DrillAnimator() {
   const [arrowStagger, setArrowStagger] = useState(true); // tidy arrowheads: stagger converging heads + recess off crossing lines (off = marks land exactly where drawn)
   const [realisticShots, setRealisticShots] = useState(true); // random goal/post/wide/over + air; off = always bury flat
   const [detailAnim, setDetailAnim] = useState(true);  // skater stride sway, stick swing, dribble cradle
+  // the icon discs at each pass/shoot/pickup. Persisted, because it is a standing
+  // view preference like whiteboard rather than something you set per drill.
+  const [actionCircles, setActionCircles] = useState(() => {
+    try { return localStorage.getItem(ACTC_KEY) !== "0"; } catch { return true; }
+  });
+  useEffect(() => { try { localStorage.setItem(ACTC_KEY, actionCircles ? "1" : "0"); } catch { /* private mode */ } }, [actionCircles]);
   // whiteboard mode: players draw as classic X/O/letter symbols, action badges
   // collapse to arrow-into-gap, and detail animations shut off. A standing view
   // preference, so unlike the other prefs toggles it persists across refreshes.
@@ -713,6 +942,17 @@ export default function DrillAnimator() {
     try { return localStorage.getItem(STRETCH_KEY) !== "0"; } catch { return true; }
   });
   useEffect(() => { try { localStorage.setItem(STRETCH_KEY, stretchFill ? "1" : "0"); } catch { /* private mode */ } }, [stretchFill]);
+  // Which hand the board is laid out for: "right" (default) | "left". A coach
+  // holds the phone in the off hand and taps with the dominant one, so "left"
+  // mirrors BOTH bars and puts Menu, Rink and the palette under the left thumb.
+  // Chrome only — the ice and everything on it never move. Stored as a word
+  // rather than the "1"/"0" convention its neighbours use because it is a side,
+  // not a switch, and "hand=left" reads right in the debugger.
+  const [hand, setHand] = useState(() => {
+    try { return localStorage.getItem(HAND_KEY) === "left" ? "left" : "right"; }
+    catch { return "right"; }
+  });
+  useEffect(() => { try { localStorage.setItem(HAND_KEY, hand); } catch { /* private mode */ } }, [hand]);
   // Theme: "auto" (follow the phone) | "light" | "dark". The inline boot script
   // in index.html has already applied a saved override before first paint —
   // this just keeps the attribute in sync once React owns the state.
@@ -762,8 +1002,28 @@ export default function DrillAnimator() {
   // whiteboard draws the PLANNER's routes only: authored lines, no animation-time
   // detour bends/ghosts (the skater still avoids obstacles either way)
   const effAvoidVis = avoidanceVisuals && !whiteboard;
-  const [lineScale, setLineScale] = useState(1);       // route line-thickness multiplier
-  const [markOpacity, setMarkOpacity] = useState(1);   // opacity of the drawn drill markings only (routes/forks/stops/ink/aim); players, implements + rink stay opaque
+  // whiteboard has never drawn the action discs, so it wins over the pref rather
+  // than fighting it — same shape as the three flags above
+  const effActCircles = actionCircles && !whiteboard;
+  // Both persist. They are the two display prefs you set for a ROOM — thicker
+  // lines to project, lighter ink to annotate over — and a coach who set one at
+  // the rink was made to set it again at the next practice.
+  const [lineScale, setLineScale] = useState(() => numPref(LINE_KEY, 1, LINE_RANGE));  // route line-thickness multiplier
+  useEffect(() => { try { localStorage.setItem(LINE_KEY, String(lineScale)); } catch { /* private mode */ } }, [lineScale]);
+  const [markOpacity, setMarkOpacity] = useState(() => numPref(MARK_KEY, 1, MARK_RANGE));   // opacity of the drawn drill markings only (routes/forks/stops/ink/aim); players, implements + rink stay opaque
+  useEffect(() => { try { localStorage.setItem(MARK_KEY, String(markOpacity)); } catch { /* private mode */ } }, [markOpacity]);
+  // ...and the mirror of it for the SHEET: how strongly the rink's own lines are
+  // drawn. Deliberately a separate knob from Mark opacity — that one quiets what
+  // you drew so the rink reads through it, this one quiets the rink so what you
+  // drew reads over it. Turning both down just fades everything.
+  const [rinkDim, setRinkDim] = useState(() => numPref(RINKDIM_KEY, 1, RINKDIM_RANGE));
+  useEffect(() => { try { localStorage.setItem(RINKDIM_KEY, String(rinkDim)); } catch { /* private mode */ } }, [rinkDim]);
+  // What the settings sheet's preview tiles draw with. Everything a scene can
+  // need, in one object, so a new scene never has to thread another prop through
+  // PrefPick. prefersDark is in here because the Theme row's "Auto" tile has to
+  // resolve the same way the app does.
+  const pvCtx = useMemo(() => ({ T, ink, prefersDark, lineScale, markOpacity, rinkDim }),
+    [T, ink, prefersDark, lineScale, markOpacity, rinkDim]);
   const [defaultSpeed, setDefaultSpeed] = useState(1.5); // speed given to newly-added players
   // tunable shot odds (0..1): goalie save chance; empty-net miss split into
   // post/wide/over (the remainder is a goal); and how often a shot goes airborne
@@ -814,6 +1074,16 @@ export default function DrillAnimator() {
   const [isWide, setIsWide] = useState(() =>
     typeof matchMedia === "function" &&
     matchMedia("(pointer: fine) and (min-width: 760px)").matches);
+  // The action bar's layout tier. It decides what REACT RENDERS, not just how
+  // it's styled — below DENSE_MIN the pen's ink/size/style trio collapses into
+  // one popover so the bar still fits on its single line — so it has to be a JS
+  // flag, not a media query. It's also written onto .hd-root as `.dense`, which
+  // is what the compact CSS keys off: one source of truth, so the stylesheet and
+  // the render tree can't disagree about which layout is live.
+  const [dense, setDense] = useState(() =>
+    typeof matchMedia === "function" && matchMedia(`(min-width: ${DENSE_MIN}px)`).matches);
+  const [roomy, setRoomy] = useState(() =>
+    typeof matchMedia === "function" && matchMedia(`(min-width: ${ROOMY_MIN}px)`).matches);
   // a coarse (touch) primary pointer needs fatter grab targets than a mouse.
   // Stable for a session, so compute once (no listener like isWide needs).
   const coarsePtr = useMemo(
@@ -971,6 +1241,22 @@ export default function DrillAnimator() {
     const on = () => setIsWide(mq.matches);
     mq.addEventListener ? mq.addEventListener("change", on) : mq.addListener(on);
     return () => { mq.removeEventListener ? mq.removeEventListener("change", on) : mq.removeListener(on); };
+  }, []);
+  // …and the action bar's layout tier, same shape. A popover only exists at one
+  // density, so a rotation across the breakpoint has to close it — otherwise the
+  // open panel outlives the button it sprang from.
+  useEffect(() => {
+    if (typeof matchMedia !== "function") return;
+    const mq = matchMedia(`(min-width: ${DENSE_MIN}px)`);
+    const rq = matchMedia(`(min-width: ${ROOMY_MIN}px)`);
+    // both tiers in one effect, and both close any open popover: a group that
+    // inlines at the wider tier must not leave its popover floating over a bar
+    // that no longer has the button it sprang from
+    const on = () => { setDense(mq.matches); setRoomy(rq.matches); setPenPop(null); };
+    const add = q => (q.addEventListener ? q.addEventListener("change", on) : q.addListener(on));
+    const del = q => (q.removeEventListener ? q.removeEventListener("change", on) : q.removeListener(on));
+    add(mq); add(rq);
+    return () => { del(mq); del(rq); };
   }, []);
 
   // stepping Prev/Next through a piece's waypoints keeps the popup put when it
@@ -1397,7 +1683,7 @@ export default function DrillAnimator() {
   let canvasH = Math.max(20, stageSize.h);
   // Full and half ice fill the stage. Quarter is constrained to its true
   // proportions up to a small over-stretch (the canvas letterboxes).
-  if (rink === "quarter") {
+  if (isQuarter(rink)) {
     const vbW = swapAxes ? vhF : vwF, vbH = swapAxes ? vwF : vhF; // effective viewBox dims
     const CAP = 1.12;                                             // max stretch past true aspect
     canvasH = Math.min(canvasH, Math.round((canvasW * vbH) / vbW * CAP));
@@ -1557,7 +1843,7 @@ export default function DrillAnimator() {
   // off, so shots always route on net). Only built when realistic shots are on and
   // the puck-path overlay is actually shown; otherwise the main plan already IS the
   // intent, so reuse it.
-  const wantPuckPaths = !aiPlay && (editing || whiteboard || playRoutes === "all");
+  const wantPuckPaths = !aiPlay && (editing || whiteboard || routeVis(playRoutes).puck);
   const getIntentPlan = (!effRealistic || !wantPuckPaths) ? getPlan
     : createTiming({ pieces: effPieces, pace, segRefs, planCache: intentPlanCache, seed: playSeed, realisticShots: false, detail: effDetail, odds: shotOdds }).getPlan;
 
@@ -1805,7 +2091,7 @@ export default function DrillAnimator() {
   // No pos → the CSS default (bottom-centre). Arg is a 0..1 app-rect fraction.
   const captionStyle = (pos, placing) => pos ? {
     left: `clamp(calc(var(--cap-hw) + 6px), ${(pos.x * 100).toFixed(2)}%, calc(100% - var(--cap-hw) - 6px))`,
-    top: `clamp(calc(env(safe-area-inset-top, 0px) + ${placing ? 96 : 58}px), ${(pos.y * 100).toFixed(2)}%, calc(100% - 54px - var(--hd-b) - var(--hd-scrub) - 58px))`,
+    top: `clamp(calc(env(safe-area-inset-top, 0px) + ${placing ? 96 : 58}px), ${(pos.y * 100).toFixed(2)}%, calc(100% - 54px - var(--hd-b) - var(--hd-act) - 58px))`,
     right: "auto", bottom: "auto", transform: "translate(-50%, -50%)",
   } : undefined;
   // seed the editable caption + focus it when a step's placement begins (kept out of
@@ -1849,11 +2135,16 @@ export default function DrillAnimator() {
     }));
     flash("Steps generated from the play");
   }
-  // scrubber tick positions (fractions 0..1): player waypoint activations + steps
+  // Scrubber tick positions (fractions 0..1): player waypoint activations and
+  // steps. Wide screens only — a phone's track is ~70px, and a drill with a few
+  // players puts a tick every couple of pixels, which reads as one thick smear
+  // rather than as marks you could aim at. Skipped, not hidden: this is a
+  // waypointTime() per waypoint plus a resolveSteps() every render, and there's
+  // no reason a phone should pay for marks it will never draw.
   const scrubDur = Math.max(0.1, totalTime);
   const wpTicks = [];
-  if (!aiPlay) effPieces.forEach(p => { if (p.kind === "player") (p.path || []).forEach((_, i) => wpTicks.push(Math.min(1, waypointTime(p, i) / scrubDur))); });
-  const stepTicks = (!aiPlay && drillSteps.length)
+  if (dense && !aiPlay) effPieces.forEach(p => { if (p.kind === "player") (p.path || []).forEach((_, i) => wpTicks.push(Math.min(1, waypointTime(p, i) / scrubDur))); });
+  const stepTicks = (dense && !aiPlay && drillSteps.length)
     ? resolveSteps().filter(s => s.resolved).map(s => Math.min(1, s.t / scrubDur)) : [];
 
   useEffect(() => {
@@ -3062,8 +3353,12 @@ export default function DrillAnimator() {
     solvedRef.current = solved;
     return out;
   }
-  // enter draw mode to author a reaction fork for player `id` under `color`
+  // enter route-drawing to author a reaction fork for player `id` under `color`.
+  // Reachable from a PINNED panel, which stays up through playback, so it has to
+  // put the app back in Edit rather than assume it is already there. setMode
+  // does the reset/stop/clear work, then the selection is re-established.
   function beginForkDraw(id, color) {
+    setMode("edit");
     resetAnim(); setPlaying(false); setPopup(null); setSelectedId(id); setEditingFork(null);
     forkTarget.current = { id, color }; setForkDrawColor(color); setTool("draw");
   }
@@ -3195,6 +3490,7 @@ export default function DrillAnimator() {
   // enter freehand draw mode for a route: a reaction fork, else the base route
   function drawRouteMode(id, fork) {
     if (fork) { beginForkDraw(id, fork); return; }
+    setMode("edit");   // route drawing is a sub-state of Edit, never its own flow
     resetAnim(); setPlaying(false); setPopup(null); setSelectedId(id); setEditingFork(null); setTool("draw");
   }
   // the reaction-authoring controls (curve buttons + action + Edit/Clear per cue
@@ -3212,8 +3508,10 @@ export default function DrillAnimator() {
     const cueLights = pieces.filter(q => q.kind === "light" && (q.cues || []).length);
     const cueCols = light ? [...new Set((light.cues || []).map(c => c.color))] : [];
     const others = pieces.filter(q => q.kind === "player" && q.id !== p.id);
-    const selStyle = { background: "#1b2530", color: "#eaf0f6", border: "1px solid rgba(255,255,255,0.16)",
-      borderRadius: 6, padding: "3px 6px", fontSize: 13, cursor: "pointer" };
+    // (the reaction dropdowns wear .hd-select like every other select. They used
+    // to carry a hardcoded dark inline style, which rendered them as black boxes
+    // on a light theme — inline styles skip the token layer, and the no-raw-hex
+    // guard only reads styles.js, so nothing caught it.)
     const COND_LABEL = { light: "On cue", random: "Random", sequence: "Sequence", always: "Always",
       possession: "If holding…", link: "If route…", event: "When player…" };
     const sibs = parentRef ? (forkAt(p, parentRef)?.forks || []) : (p.forks || []);
@@ -3224,11 +3522,13 @@ export default function DrillAnimator() {
       const ct = condOf(fk).type;
       const isEditing = editingFork && editingFork.id === p.id && forkEq(editingFork.color, ref);
       return (
-        <div key={ref} style={{ margin: "5px 0", padding: "5px 7px", borderRadius: 8,
-          background: "rgba(20,26,34,0.6)", border: "1px solid #2c3846", borderLeft: `3px solid ${fk.color}` }}>
+        // same card as a puck action step; the stripe is the CUE COLOUR here, so
+        // it stays a literal — it's drill data, not chrome, and must match the
+        // light on the ice exactly
+        <div key={ref} className="hd-step" style={{ borderLeftColor: fk.color }}>
           <div className="hd-poprow">
             <div className="hd-swatch on" style={{ background: fk.color, cursor: "default" }} />
-            <select value={ct} style={selStyle} title="condition — how this route is chosen"
+            <select value={ct} className="hd-select" title="condition — how this route is chosen"
               onChange={e => setForkCond(p.id, ref, e.target.value)}>
               {Object.entries(COND_LABEL).map(([t, lbl]) => <option key={t} value={t}>{lbl}</option>)}
             </select>
@@ -3242,7 +3542,7 @@ export default function DrillAnimator() {
               const sel = (cd.color || fk.color).toLowerCase();
               return (<>
                 {cueLights.length > 1 && (
-                  <select value={cd.lightId || ""} style={selStyle} title="cue device this route reads"
+                  <select value={cd.lightId || ""} className="hd-select" title="cue device this route reads"
                     onChange={e => updateForkCond(p.id, ref, { type: "light", color: cd.color || fk.color, lightId: e.target.value || undefined })}>
                     <option value="">Auto ({governingLightNear(pieces, branchPt)?.id || "—"})</option>
                     {cueLights.map(l => <option key={l.id} value={l.id}>{l.id}</option>)}
@@ -3259,11 +3559,11 @@ export default function DrillAnimator() {
               const routes = tgt ? enumerateRoutes(tgt).filter(r => r.ref) : [];
               const nums = tgt ? forkNumbers(tgt) : new Map();   // matches the faint R-numbers on the ice
               return (<>
-                <select value={condOf(fk).player || ""} style={selStyle} title="react to this player"
+                <select value={condOf(fk).player || ""} className="hd-select" title="react to this player"
                   onChange={e => { const t2 = pieces.find(q => q.id === e.target.value); updateForkCond(p.id, ref, { player: e.target.value, route: t2 ? (enumerateRoutes(t2).find(r => r.ref)?.ref || "") : "" }); }}>
                   {others.map(o => <option key={o.id} value={o.id}>{o.id}</option>)}
                 </select>
-                <select value={(condOf(fk).route || "").toLowerCase()} style={selStyle} title="…taking this route (numbers match the labels on the ice)"
+                <select value={(condOf(fk).route || "").toLowerCase()} className="hd-select" title="…taking this route (numbers match the labels on the ice)"
                   onChange={e => updateForkCond(p.id, ref, { route: e.target.value })}>
                   {routes.map(r => <option key={r.ref} value={r.ref.toLowerCase()}>{`R${nums.get(r.ref.toLowerCase()) ?? "?"} · ${r.ref.replace(/#/g, "")}`}</option>)}
                   {!routes.length && <option value="">(no branches)</option>}
@@ -3275,17 +3575,17 @@ export default function DrillAnimator() {
               const tgt = pieces.find(q => q.id === c.on);
               const wps = tgt ? (tgt.path || []) : [];
               return (<>
-                <select value={c.on || ""} style={selStyle} title="watch this player"
+                <select value={c.on || ""} className="hd-select" title="watch this player"
                   onChange={e => { const t2 = pieces.find(q => q.id === e.target.value); updateForkCond(p.id, ref, { on: e.target.value, ...(c.mode === "waypoint" ? { at: Math.max(0, ((t2?.path || []).length) - 1) } : {}) }); }}>
                   {others.map(o => <option key={o.id} value={o.id}>{o.id}</option>)}
                 </select>
-                <select value={c.mode || "action"} style={selStyle} title="trigger"
+                <select value={c.mode || "action"} className="hd-select" title="trigger"
                   onChange={e => { const m = e.target.value; updateForkCond(p.id, ref, { mode: m, ...(m === "waypoint" && c.at == null ? { at: Math.max(0, (wps.length) - 1) } : {}) }); }}>
                   <option value="action">releases puck</option>
                   <option value="waypoint">reaches point</option>
                 </select>
                 {c.mode === "waypoint" && (
-                  <select value={c.at != null ? c.at : Math.max(0, wps.length - 1)} style={selStyle} title="…reaches this waypoint"
+                  <select value={c.at != null ? c.at : Math.max(0, wps.length - 1)} className="hd-select" title="…reaches this waypoint"
                     onChange={e => updateForkCond(p.id, ref, { at: parseInt(e.target.value, 10) })}>
                     {wps.length ? wps.map((_, wi) => <option key={wi} value={wi}>@{wi + 1}</option>) : <option value="0">@1</option>}
                   </select>
@@ -3295,7 +3595,7 @@ export default function DrillAnimator() {
             {ct === "possession" && (
               // whose possession fires this route: mine (default) or another player's —
               // e.g. a defender collapses while the attacker still has the puck
-              <select value={condOf(fk).player || ""} style={selStyle} title="whose possession fires this route"
+              <select value={condOf(fk).player || ""} className="hd-select" title="whose possession fires this route"
                 onChange={e => updateForkCond(p.id, ref, { player: e.target.value || undefined })}>
                 <option value="">I&apos;m holding</option>
                 {others.map(o => <option key={o.id} value={o.id}>{nameOf(o.id)} holding</option>)}
@@ -3305,12 +3605,12 @@ export default function DrillAnimator() {
               onClick={() => { if (isEditing) setEditingFork(null); clearFork(p.id, ref); }}>✕</button>
           </div>
           <div className="hd-poprow">
-            <span style={{ minWidth: 46, fontSize: 11, color: "#8b99a8" }}>Route</span>
+            <span className="hd-steplbl">Route</span>
             {curveButtons(t => addForkSegment(p.id, ref, t), () => beginForkDraw(p.id, ref))}
             <button className={`hd-mini${isEditing ? " on" : ""}`}
               onClick={() => setEditingFork(isEditing ? null : { id: p.id, color: ref })}>{isEditing ? "✓ Editing" : "Edit"}</button>
             {!parentRef && p.path.length > 1 && (
-              <select value={fk.at != null ? fk.at : p.path.length - 1} style={selStyle} title="departs from this waypoint"
+              <select value={fk.at != null ? fk.at : p.path.length - 1} className="hd-select" title="departs from this waypoint"
                 onChange={e => setForkAt(p.id, ref, parseInt(e.target.value, 10))}>
                 {p.path.map((_, wi) => <option key={wi} value={wi}>@{wi + 1}</option>)}
               </select>
@@ -3326,8 +3626,8 @@ export default function DrillAnimator() {
         </div>
         {sibs.map(card)}
         <div className="hd-poprow">
-          <span style={{ minWidth: 46, fontSize: 11, color: "#8b99a8" }}>＋ Add</span>
-          <select value="none" style={selStyle} title="add a condition"
+          <span className="hd-steplbl">＋ Add</span>
+          <select value="none" className="hd-select" title="add a condition"
             onChange={e => { if (e.target.value !== "none") addForkCond(p.id, parentRef, e.target.value); }}>
             <option value="none">condition…</option>
             {addTypes.map(t => <option key={t} value={t}>{COND_LABEL[t]}</option>)}
@@ -4097,7 +4397,7 @@ export default function DrillAnimator() {
         </div>
         {evs.map((ev, n) => (
           <div key={n} style={{ display: "flex", alignItems: "center", gap: 8, padding: "2px 0" }}>
-            <span style={{ minWidth: 16, textAlign: "right", fontWeight: 700, color: "#8b99a8", fontVariantNumeric: "tabular-nums" }}>{n + 1}</span>
+            <span style={{ minWidth: 16, textAlign: "right", fontWeight: 700, color: "var(--db-text-muted)", fontVariantNumeric: "tabular-nums" }}>{n + 1}</span>
             <span style={{ flex: 1, fontSize: 12.5 }}>{forPlayer ? ev.self : ev.desc}</span>
             <button className="hd-mini danger" style={{ padding: "2px 7px", minHeight: 0 }}
               title="Delete this action (and any that follow it)" onClick={ev.del}>✕</button>
@@ -4355,13 +4655,6 @@ export default function DrillAnimator() {
     setPieces(ps => { const k = ps.findIndex(q => q.id === target.id); if (k < 0) return ps; const c = ps.slice(); const [t] = c.splice(k, 1); c.push(t); return c; });
     setSelectedId(playerId);
   }
-  function setRecvAt(pkId, trIdx, idx) {
-    update(q => {
-      if (q.id !== pkId) return q;
-      const ts = (q.transfers || []).map((t, k) => (k === trIdx ? { ...t, recvAt: idx } : t));
-      return chained({ ...q, transfers: ts });
-    });
-  }
   // manual "Receive Pass": the chosen source player passes to `receiverId` at
   // waypoint `at`. Appends the pass onto a puck the source holds; if they hold
   // none, hand them a fresh one so the feed still happens.
@@ -4560,7 +4853,7 @@ export default function DrillAnimator() {
       const id = nextId("mark");
       // the Marker is the annotation tool by definition — its ink is never
       // something the pen's converter should reinterpret
-      setPieces(ps => [...ps, { id, kind: "mark", pts, x: pts[0].x, y: pts[0].y, note: true,
+      setPieces(ps => [...ps, { id, kind: "mark", pts, x: pts[0].x, y: pts[0].y, sketch: true,
         color: markColor, width: markWidth, style: markStyle, path: [] }]);
       return;
     }
@@ -4621,14 +4914,14 @@ export default function DrillAnimator() {
     setPenInk([]);
     if (!fresh.length) return;
     const board = piecesRef.current;
-    // Note mode: never read, now or later — the ink is the point.
-    if (noteRef.current) {
-      setPieces(ps => materializePenOps(ps, fresh.map(s => ({ op: "mark", pts: s.pts, press: s.press, note: true }))));
+    // Sketch: never read, now or later — the ink is the point.
+    if (penReadRef.current === "sketch") {
+      setPieces(ps => materializePenOps(ps, fresh.map(s => ({ op: "mark", pts: s.pts, press: s.press, sketch: true }))));
       return;
     }
     // Manual mode: strokes just lay down as ink. Nothing is read until you hit
     // Convert, which looks at the whole drawing at once.
-    if (!autoRef.current) {
+    if (penReadRef.current === "manual") {
       setPieces(ps => materializePenOps(ps, fresh.map(s => ({ op: "mark", pts: s.pts, press: s.press }))));
       return;
     }
@@ -4720,20 +5013,20 @@ export default function DrillAnimator() {
     // touch lands ~60%, a hard press ~150%. Clamped so ink stays ink.
     const pressW = press => (press == null || !pressRef.current ? penW
       : Math.max(0.25, Math.min(3.5, penW * (0.6 + 1.1 * Math.min(1, press * 1.6)))));
-    const inkMark = (pts, press, note) => {
+    const inkMark = (pts, press, sketch) => {
       // thin the trail, then RDP to control points — both view-scaled so the
       // stored ink keeps the shape that was actually drawn
-      const trail = pts.filter((q, i) => i === 0 || Math.hypot(q.x - pts[i - 1].x, q.y - pts[i - 1].y) > inkStepFt(note));
-      const cps = trail.length > 3 ? rdp(trail, inkEpsFt(note)) : trail;
+      const trail = pts.filter((q, i) => i === 0 || Math.hypot(q.x - pts[i - 1].x, q.y - pts[i - 1].y) > inkStepFt(sketch));
+      const cps = trail.length > 3 ? rdp(trail, inkEpsFt(sketch)) : trail;
       if (cps.length < 2) return;
       // pen fallback ink lands at the pen's thin width, not the marker's;
       // its age makes it reclaimable by a later completing stroke
       const id = nextId("mark", out);
       penMarkAge.current.set(id, performance.now());
-      // note ink keeps the per-point pressure so the line can thicken and thin
+      // sketch ink keeps the per-point pressure so the line can thicken and thin
       // along its length the way a pencil does; other ink takes one weight
-      const pp = note ? cps.map(q => (q.p != null ? Math.round(q.p * 100) / 100 : null)) : null;
-      out.push({ id, kind: "mark", pts: cps, x: cps[0].x, y: cps[0].y, ...(note ? { note: true } : {}),
+      const pp = sketch ? cps.map(q => (q.p != null ? Math.round(q.p * 100) / 100 : null)) : null;
+      out.push({ id, kind: "mark", pts: cps, x: cps[0].x, y: cps[0].y, ...(sketch ? { sketch: true } : {}),
         ...(pp && pp.some(v => v != null) ? { press: pp } : {}),
         color: markColor, width: pressW(press), style: markStyle, path: [] });
     };
@@ -4820,7 +5113,7 @@ export default function DrillAnimator() {
           ...(o.net ? { net: o.net } : {}),
         }] };
       } else if (o.op === "mark") {
-        inkMark(o.pts, o.press, o.note);
+        inkMark(o.pts, o.press, o.sketch);
       }
     });
     return out;
@@ -4834,11 +5127,11 @@ export default function DrillAnimator() {
     const cx = m.pts.reduce((a, q) => a + q.x, 0) / m.pts.length;
     const cy = m.pts.reduce((a, q) => a + q.y, 0) / m.pts.length;
     const r = (deg * Math.PI) / 180, c = Math.cos(r), s = Math.sin(r);
-    const pts = m.pts.map(q => ({
+    const pts = fitInside(m.pts.map(q => ({
       ...q,
-      x: clampX(cx + (q.x - cx) * c - (q.y - cy) * s),
-      y: clampY(cy + (q.x - cx) * s + (q.y - cy) * c),
-    }));
+      x: cx + (q.x - cx) * c - (q.y - cy) * s,
+      y: cy + (q.x - cx) * s + (q.y - cy) * c,
+    })));
     updateById(id, { pts, x: pts[0].x, y: pts[0].y });
   }
   // scale a mark's points about its centroid — sx/sy per axis (size & proportion)
@@ -4847,7 +5140,7 @@ export default function DrillAnimator() {
     if (!m || !m.pts || m.pts.length < 2) return;
     const cx = m.pts.reduce((a, q) => a + q.x, 0) / m.pts.length;
     const cy = m.pts.reduce((a, q) => a + q.y, 0) / m.pts.length;
-    const pts = m.pts.map(q => ({ ...q, x: clampX(cx + (q.x - cx) * sx), y: clampY(cy + (q.y - cy) * sy) }));
+    const pts = fitInside(m.pts.map(q => ({ ...q, x: cx + (q.x - cx) * sx, y: cy + (q.y - cy) * sy })));
     updateById(id, { pts, x: pts[0].x, y: pts[0].y });
   }
 
@@ -4876,8 +5169,13 @@ export default function DrillAnimator() {
     if (tool !== "select") {
       const np = makePiece(tool, pt);
       setPieces(ps => [...ps, np]);
-      setSelectedId(np.id);
-      setPopup(tool === "label" ? { type: "piece", id: np.id } : null);   // labels open for text entry
+      // Deliberately NOT selected. A selection takes the Edit bar over with the
+      // modify strip, so auto-selecting what you just placed hid the palette and
+      // you had to tap empty ice before you could place the next one. You can
+      // still tap the piece to select it; a LABEL is the exception, since it's
+      // useless until you type something into it.
+      if (tool === "label") { setSelectedId(np.id); setPopup({ type: "piece", id: np.id }); }
+      else setPopup(null);
       setTool("select");
       return;
     }
@@ -4935,6 +5233,12 @@ export default function DrillAnimator() {
       for (const k of ["y", "cy", "c1y", "c2y"]) if (t[k] != null) t[k] = clampY(t[k] + off);
       return t;
     });
+    // a mark's copy has to carry its pts across, or it lands exactly on top of
+    // the original with only its (derived) x/y offset
+    if (Array.isArray(copy.pts) && copy.pts.length) {
+      copy.pts = fitInside(copy.pts.map(q => ({ ...q, x: q.x + off, y: q.y + off })));
+      copy.x = copy.pts[0].x; copy.y = copy.pts[0].y;
+    }
     // a duplicated puck starts loose (avoid two pucks glued to one carrier)
     if (copy.kind === "puck") { copy.carrier = null; copy.transfers = []; copy.terminals = undefined; copy.pickup = null; }
     setPieces(ps => [...ps, copy]);
@@ -4954,6 +5258,13 @@ export default function DrillAnimator() {
     const ci = (x, y) => boards.clampInside(x, y);
     update(p => {
       if (!has(p.id) || p.lock) return p;   // a locked member never slides with its group
+      // a mark's geometry lives in pts (x/y is just a copy of pts[0]), so it
+      // has to move as a rigid body — moving x/y alone left the ink sitting
+      // still while its position desynced from what's drawn
+      if (p.kind === "mark" && p.pts) {
+        const pts = fitInside(p.pts.map(q => ({ ...q, x: q.x + dx, y: q.y + dy })));
+        return { ...p, pts, x: pts[0].x, y: pts[0].y };
+      }
       const np = ci(p.x + dx, p.y + dy);
       const path = (p.path || []).map(s => {
         const q = ci(s.x + dx, s.y + dy), s2 = { ...s, x: q.x, y: q.y };
@@ -4997,6 +5308,16 @@ export default function DrillAnimator() {
     const rot = (x, y) => { const dx = x - C.x, dy = y - C.y; return boards.clampInside(C.x + dx * ca - dy * sa, C.y + dx * sa + dy * ca); };
     update(p => {
       if (!multiSel.has(p.id)) return p;
+      // a mark rotates through its own points, rigidly (rot() clamps per point,
+      // which would squash it) — x/y then follows pts[0] as everywhere else
+      if (p.kind === "mark" && p.pts) {
+        const pts = fitInside(p.pts.map(q => ({
+          ...q,
+          x: C.x + (q.x - C.x) * ca - (q.y - C.y) * sa,
+          y: C.y + (q.x - C.x) * sa + (q.y - C.y) * ca,
+        })));
+        return { ...p, pts, x: pts[0].x, y: pts[0].y };
+      }
       const np = { ...p }, q = rot(p.x, p.y); np.x = q.x; np.y = q.y;
       if (rotatesFacing(p)) np.facing = (p.facing || 0) + deg;
       np.path = (p.path || []).map(s => {
@@ -5028,6 +5349,11 @@ export default function DrillAnimator() {
         for (const k of ["y", "cy", "c1y", "c2y"]) if (t[k] != null) t[k] = clampY(t[k] + off);
         return t;
       });
+      // as in duplicatePiece: a mark's geometry is pts, so offset that too
+      if (Array.isArray(c.pts) && c.pts.length) {
+        c.pts = fitInside(c.pts.map(q => ({ ...q, x: q.x + off, y: q.y + off })));
+        c.x = c.pts[0].x; c.y = c.pts[0].y;
+      }
       if (c.kind === "puck") {
         if (c.carrier) c.carrier = idMap[c.carrier] || null;                       // carrier outside the group → drop (loose)
         if (c.pickup && c.pickup.to) c.pickup = idMap[c.pickup.to] ? { ...c.pickup, to: idMap[c.pickup.to] } : null;
@@ -5082,13 +5408,17 @@ export default function DrillAnimator() {
     setPieces(ps => [...ps, ...extra]);
   }
 
+  // showPopup also decides whether to SELECT: the quick-add popup wants the new
+  // player open for editing, but a drop from the Edit bar must leave the bar on
+  // its add palette (a selection swaps it for the modify strip) so you can place
+  // the next one without tapping empty ice first.
   function addPlayerWithPuck(pt, showPopup) {
     const pl = makePiece("player", pt);
     const pk = makePiece("puck", pt);
     pk.carrier = pl.id;
     setPieces(ps => [...ps, pl, pk]);
-    setSelectedId(pl.id);
-    setPopup(showPopup ? { type: "piece", id: pl.id } : null);
+    if (showPopup) { setSelectedId(pl.id); setPopup({ type: "piece", id: pl.id }); }
+    else setPopup(null);
   }
 
   function pieceDown(e, id) {
@@ -5101,6 +5431,13 @@ export default function DrillAnimator() {
     // route ends) — keep sketching, never grab the piece
     if (tool === "pen") { setPopup(null); beginPen(e); return; }
     if (wakeEdit()) return;
+    // Grabbing a piece is a different intent from placing one, so it disarms
+    // whatever was armed. Leaving it armed made a HIDDEN mode: a selection
+    // hides the add palette, so the armed chip wasn't on screen any more, yet
+    // the bar still carried its Cancel — two exits at once, one of them for a
+    // tool you could no longer see. ("draw" and "pen" return above; they mean
+    // to act ON this piece.)
+    if (tool !== "select") setTool("select");
     const pt = svgPt(e);
     // a locked piece is grabbed only to select it (so it can open its popup and
     // be unlocked) — never moved. onSvgMove bails on d.locked, keeping d.moved
@@ -5129,7 +5466,11 @@ export default function DrillAnimator() {
     // reshows — but only if it was ALREADY being edited; a bare reposition of a
     // piece whose popup was closed should stay closed.
     const popOpen = pinned || (!!popup && popup.id === id);
-    drag.current = { kind: "piece", id, popOpen, start: pt, last: pt, moved: false, touch: e.pointerType !== "mouse", locked };
+    // a mark moves as a rigid body, so it needs its geometry as it was at grab
+    // time: every move re-derives from pts0, never from the last committed
+    // (possibly boundary-shifted) state — see the mark branch in onSvgMove
+    const pts0 = pc && pc.kind === "mark" && pc.pts ? pc.pts.map(q => ({ ...q })) : null;
+    drag.current = { kind: "piece", id, popOpen, pts0, start: pt, last: pt, moved: false, touch: e.pointerType !== "mouse", locked };
     svgRef.current.setPointerCapture?.(e.pointerId);
   }
 
@@ -5195,6 +5536,9 @@ export default function DrillAnimator() {
     e.stopPropagation();
     if (wakeEdit()) return;
     setOpenMenu(null);
+    // same as pieceDown: taking hold of a waypoint is not placing a piece, so
+    // it disarms the tool rather than leaving it armed but off screen
+    if (tool !== "select" && tool !== "draw") setTool("select");
     if (payload.id) setSelectedId(payload.id);
     const pt = svgPt(e);
     // resize handle: remember the pointer's starting distance from the label
@@ -5238,7 +5582,7 @@ export default function DrillAnimator() {
     const pt = svgPt(e);
     if (d.kind === "drawing") {
       const last = drawRaw.current[drawRaw.current.length - 1];
-      if (Math.hypot(pt.x - last.x, pt.y - last.y) > (d.pen ? inkStepFt(noteRef.current) : 1.1)) {
+      if (Math.hypot(pt.x - last.x, pt.y - last.y) > (d.pen ? inkStepFt(penReadRef.current === "sketch") : 1.1)) {
         if (e.pointerType === "pen" && e.pressure > 0) pt.p = e.pressure;
         drawRaw.current.push(pt);
         setDrawPreview(drawRaw.current.slice());
@@ -5308,11 +5652,11 @@ export default function DrillAnimator() {
       d.moved = true;
       const ang = Math.atan2(pt.y - d.cy, pt.x - d.cx) - d.a0;
       const c = Math.cos(ang), s = Math.sin(ang);
-      const pts = d.pts0.map(q => ({
+      const pts = fitInside(d.pts0.map(q => ({
         ...q,
-        x: clampX(d.cx + (q.x - d.cx) * c - (q.y - d.cy) * s),
-        y: clampY(d.cy + (q.x - d.cx) * s + (q.y - d.cy) * c),
-      }));
+        x: d.cx + (q.x - d.cx) * c - (q.y - d.cy) * s,
+        y: d.cy + (q.x - d.cx) * s + (q.y - d.cy) * c,
+      })));
       updateById(d.id, { pts, x: pts[0].x, y: pts[0].y });
       return;
     }
@@ -5322,7 +5666,9 @@ export default function DrillAnimator() {
       d.moved = true;
       const sx = Math.max(0.12, Math.min(8, (pt.x - d.ax) / ((d.x0 - d.ax) || 1e-6)));
       const sy = Math.max(0.12, Math.min(8, (pt.y - d.ay) / ((d.y0 - d.ay) || 1e-6)));
-      const pts = d.pts0.map(q => ({ ...q, x: clampX(d.ax + (q.x - d.ax) * sx), y: clampY(d.ay + (q.y - d.ay) * sy) }));
+      // fitInside, not a per-point clamp: a shape grown against a wall slides
+      // inward whole (the anchor corner gives) instead of flattening on it
+      const pts = fitInside(d.pts0.map(q => ({ ...q, x: d.ax + (q.x - d.ax) * sx, y: d.ay + (q.y - d.ay) * sy })));
       updateById(d.id, { pts, x: pts[0].x, y: pts[0].y });
       return;
     }
@@ -5344,9 +5690,18 @@ export default function DrillAnimator() {
       const ci = (x, y) => boards.clampInside(x, y);    // clamp to the rounded boards
       update(p => {
         if (p.id !== d.id) return p;
-        if (p.kind === "mark") {   // a marker annotation moves all its points together
-          // spread q first so per-point flags (sharp corners) survive the move
-          const pts = p.pts.map(q => ({ ...q, ...ci(q.x + dx, q.y + dy) }));
+        if (p.kind === "mark") {
+          // A marker annotation is a RIGID body: translate the whole thing by
+          // the total drag, then shift it back inside as a unit. Clamping each
+          // point on its own squashed the shape flat against the boards, and
+          // since the clamped result fed the next move it never came back.
+          // Deriving from pts0 + (pt - start) rather than an incremental delta
+          // is what makes it recoverable: push 10ft past the wall, pull back
+          // 5ft, and the shape sits 5ft off the wall, still under the cursor.
+          const src = d.pts0 || p.pts;
+          const tx = pt.x - d.start.x, ty = pt.y - d.start.y;
+          // spread q first so per-point flags (sharp corners, pressure) survive
+          const pts = fitInside(src.map(q => ({ ...q, x: q.x + tx, y: q.y + ty })));
           return { ...p, pts, x: pts[0].x, y: pts[0].y };
         }
         if (d.line == null) {
@@ -5388,9 +5743,13 @@ export default function DrillAnimator() {
         if (d.kind === "anchor") {
           const dx = cp.x - s.x, dy = cp.y - s.y;
           s.x = cp.x; s.y = cp.y; path[d.seg] = s;
-          // a linked waypoint carries its tangent handles as it slides
-          if ((s.join === "smooth" || s.join === "sym") && d.wp != null)
-            path = translateJointHandles(path, d.wp, dx, dy);
+          // A waypoint carries its curve handles, whatever its join type. This
+          // used to be gated on smooth/sym, so dragging a CORNER waypoint left
+          // its control points behind — a Bézier control is defined relative to
+          // its anchor, so the curve reshaped itself around the move instead of
+          // travelling with it. jointControls returns null for a straight leg or
+          // a route end, so there's nothing to carry in those cases anyway.
+          if (d.wp != null) path = translateJointHandles(path, d.wp, dx, dy);
           return path;
         }
         if (d.kind === "q") { s.cx = cp.x; s.cy = cp.y; }
@@ -5417,7 +5776,7 @@ export default function DrillAnimator() {
     if (d.kind === "drawing") { finishDraw(); return; }
     if (d.kind === "marquee") {
       setMarquee(null);
-      if (!d.moved) { setSelectedId(null); setMultiSel(null); return; }   // a plain tap deselects
+      if (!d.moved) { setSelectedId(null); setMultiSel(null); setDragSel(null); return; }   // a plain tap deselects
       const x0 = Math.min(d.start.x, d.last.x), x1 = Math.max(d.start.x, d.last.x);
       const y0 = Math.min(d.start.y, d.last.y), y1 = Math.max(d.start.y, d.last.y);
       const hit = pieces.filter(p => !p.lock && p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1).map(p => p.id);
@@ -5440,9 +5799,20 @@ export default function DrillAnimator() {
       // when it was already being edited (or a pinned panel): a bare drag of a piece
       // whose popup was closed shouldn't pop the editor open.
       if (pc && pc.path && pc.path.length && d.popOpen) { setSelectedId(d.id); setPopup({ type: "piece", id: d.id }); }
+      setDragSel(null);   // a body move → the bar's piece actions, not a stale point
       return;
     }
-    if (d.moved) return;
+    // a MOVED drag doesn't (re)open the popup, but the bar should still reflect
+    // what was just dragged: a waypoint drag loads that point's actions so Delete
+    // hits the point, not the player. Anything else falls back to piece actions.
+    if (d.moved) {
+      if ((d.kind === "anchor" || d.kind === "wlabel") && d.seg != null)
+        setDragSel({ type: "point", id: d.id, seg: d.seg, ...(d.fork ? { fork: d.fork } : {}) });
+      else
+        setDragSel(null);
+      return;
+    }
+    setDragSel(null);   // a plain tap sets popup below; that becomes the source of truth
     if (d.kind === "wlabel") { setSelectedId(d.id); setPopup({ type: "point", id: d.id, seg: d.seg }); return; }
     if (d.kind === "resize" || d.kind === "markscale" || d.kind === "markrotate") return;
     if (d.kind === "markpt") {
@@ -5474,6 +5844,7 @@ export default function DrillAnimator() {
         // coach hit the leg first, then the dot on a second tap
         const wp = waypointUnderTap(d.id, d.line, d.tapPt, d.fork || null);
         if (wp != null) { setSelectedId(d.id); setPopup({ type: "point", id: d.id, seg: wp, ...(d.fork ? { fork: d.fork } : {}) }); return; }
+        setSelectedId(d.id);
         setPopup({ type: "line", id: d.id, seg: d.line, pt: d.tapPt, ...(d.fork ? { fork: d.fork } : {}) });
         return;
       }
@@ -5799,17 +6170,23 @@ export default function DrillAnimator() {
   }
 
   /* ---- action badges at waypoints ---- */
-  // gap (rink ft) the line leaves around an action badge; badge radius in icon-frame units
-  const ACT_GAP = 3.4, ACT_R = 3.0;
-  // whiteboard mode drops the badge discs, so the line-gap shrinks to a small
-  // central gap the arrows point into (nothing to clear but the waypoint itself)
-  const actGap = whiteboard ? 0.8 : ACT_GAP;
+  // ACT_GAP / ACT_R (the line's gap around a badge, and the disc radius) live in
+  // constants.js: the settings sheet's preview tile draws the same badge.
+  // With no badge discs — whiteboard, or Action badges off — the line-gap shrinks
+  // to a small central gap the arrows point into: there is nothing left to clear
+  // but the waypoint itself, and a 3.4ft hole around nothing reads as a broken
+  // route. This is why the pref cannot just hide the discs with CSS.
+  const actGap = effActCircles ? ACT_GAP : 0.8;
   // route ends converging on one waypoint queue their arrowheads back along their
   // own lines (same idea as the shot stagger in puckPathNodes) instead of clumping
   const ARROW_CLUSTER_R = 2;      // ft: only ends that directly overlap share a stagger group
   const ARROW_STAGGER_STEP = 2.5; // ft each queued arrowhead steps back (~one chevron depth)
   const ARROW_MIN_KEEP = 2;       // ft of last leg that must survive the trim
   const ARROW_LINE_CLEAR = 1.2;   // ft a head keeps clear of any foreign route line
+  // ...and the same vocabulary for the grey shot carets in puckPathNodes
+  const SHOT_TIP_GAP = 6;         // ft a shot's caret stands off its landing point
+  const SHOT_CLUSTER_R = 5;       // ft: only shot heads this close queue behind each other
+  const SHOT_STAGGER_STEP = 9;    // ft each queued shot head steps back along its own axis
   // priority for picking the "main" action shown in a badge with several actions
   const ACT_PRI = { shot: 5, pass: 4, rim: 3, chip: 2, receive: 1, collect: 1, pickup: 1 };
   const stepActionType = st => st.role === "pickup" ? "pickup" : st.role === "receive" ? "receive"
@@ -5926,7 +6303,7 @@ export default function DrillAnimator() {
             if (Math.hypot(dx, dy) < 1e-4) { dx = s.x - prev.x; dy = s.y - prev.y; }
             els.push(routeMark(`${keyPrefix}am${i}`, { x: fin.x, y: fin.y },
               (Math.atan2(dy, dx) * 180) / Math.PI, s.endStop, color));
-            if (!whiteboard) els.push(iconBadge({ x: s.x, y: s.y }, actionIconName(info.type), color, `${keyPrefix}ab${i}`, 1, info.count));
+            if (effActCircles) els.push(iconBadge({ x: s.x, y: s.y }, actionIconName(info.type), color, `${keyPrefix}ab${i}`, 1, info.count));
             continue;
           }
           const near = evalSeg(prev, s, 0.95); tx = s.x - near.x; ty = s.y - near.y;   // near the end → carat aligns with the incoming run
@@ -5940,8 +6317,8 @@ export default function DrillAnimator() {
       const back = arrivalBack("main", mp0.x, mp0.y);
       const mp = back ? gmMove(s.x, s.y, -tx / tl, -ty / tl, actGap + back) : mp0;
       els.push(routeMark(`${keyPrefix}am${i}`, mp, ang, s.endStop, color));
-      // whiteboard: no icon disc — the arrow just stops, pointing into the gap
-      if (!whiteboard) els.push(iconBadge({ x: s.x, y: s.y }, actionIconName(info.type), color, `${keyPrefix}ab${i}`, 1, info.count));
+      // no disc — the arrow just stops, pointing into the gap
+      if (effActCircles) els.push(iconBadge({ x: s.x, y: s.y }, actionIconName(info.type), color, `${keyPrefix}ab${i}`, 1, info.count));
     }
     return <g>{els}</g>;
   }
@@ -5951,6 +6328,34 @@ export default function DrillAnimator() {
   // ghosted, with NO hit area — the spot is derived from the pass plan, so it
   // can't be grabbed, moved, or edited.
   const GHOST_OP = 0.55;
+  // Number a receiver's waypoints on the ice. A pass step's "Catch:" list offers
+  // "@1, @2, @3…", which names points the coach has no way to identify on the
+  // board — so while that step is on screen, its target wears the same numbers.
+  // Base route only: the list also reaches a receiver's reaction forks ("↳ ref
+  // @2"), and those would need per-branch badges to stay unambiguous.
+  function renderWpNumbers(p) {
+    const route = p.path || [];
+    if (!route.length) return null;
+    const col = ink(p.color);
+    return (
+      <g key={`wpn-${p.id}`} pointerEvents="none">
+        {route.map((s, i) => {
+          const cfx = iconXf({ x: s.x, y: s.y, a: 0 });
+          return (
+            <g key={i} transform={cfx.t}>
+              <circle cx={0} cy={0} r={2.2} fill={T["surface-panel"]} stroke={col} strokeWidth={0.5} />
+              {/* un-rotate so the digit reads upright whatever the sheet does */}
+              <g transform={`rotate(${-cfx.th})`}>
+                <text x={0} y={0} textAnchor="middle" dominantBaseline="central" fontSize={2.9}
+                  fontWeight={800} fill={col} style={{ fontFamily: "system-ui, sans-serif" }}>{i + 1}</text>
+              </g>
+            </g>
+          );
+        })}
+      </g>
+    );
+  }
+
   function renderLedCatchMarks(p, ledCs) {
     if (!ledCs || !ledCs.length) return null;
     const els = [];
@@ -5966,7 +6371,7 @@ export default function DrillAnimator() {
       const back = arrivalBack("main", mp0.x, mp0.y);
       const mp = back ? gmMove(e.x, e.y, -tx / tl, -ty / tl, actGap + back) : mp0;
       els.push(routeMark(`lcm-${p.id}-${k}`, mp, ang, false, ink(p.color), GHOST_OP));
-      if (!whiteboard) els.push(iconBadge({ x: e.x, y: e.y }, "collect", p.color, `lcb-${p.id}-${k}`, GHOST_OP));
+      if (effActCircles) els.push(iconBadge({ x: e.x, y: e.y }, "collect", p.color, `lcb-${p.id}-${k}`, GHOST_OP));
     });
     return els.length ? <g>{els}</g> : null;
   }
@@ -5980,7 +6385,7 @@ export default function DrillAnimator() {
   // → shift the brain up to sit tangent above it, so the action circle (and its count
   // bubble) stays readable instead of hiding underneath.
   function reactionBadge(pt, color, key, lift = false) {
-    if (whiteboard) return null;   // whiteboard: branches just fan out of the gap
+    if (!effActCircles) return null;   // no discs: branches just fan out of the gap
     return iconBadge(pt, "brain", color, key, 1, 0, lift ? -(ACT_R * 2 + 0.7) : 0);
   }
 
@@ -6001,7 +6406,7 @@ export default function DrillAnimator() {
   // Several route ends converging on one waypoint would stamp their end marks on
   // the exact same spot — group ends within ARROW_CLUSTER_R and pull each mark
   // back along its OWN line by a spaced interval so the heads queue up readably
-  // (the same de-confliction puckPathNodes does for shots on one net). Shortest
+  // (the same de-confliction puckPathNodes does for converging shot heads). Shortest
   // last leg keeps the true endpoint; the pull-back is clamped so a short leg
   // never trims past its own start. A second pass then RECESSES any head sitting
   // on a foreign route's line until it clears it. Cosmetic only — ref paths/
@@ -6517,7 +6922,7 @@ export default function DrillAnimator() {
     // Handwriting is drawn, not fitted: note ink renders through its own points
     // rather than a Catmull-Rom curve, which would round the corners off every
     // letter and bow the straight strokes.
-    const base = m.note ? m.pts : markCurve(m.pts);
+    const base = m.sketch ? m.pts : markCurve(m.pts);
     const pts = m.style === "wavy" ? wavyPts(base, Math.max(0.5, m.width * 0.9), 2.8) : base;
     const w = m.width || 1.1;
     const dash = m.style === "dashed" ? `${(w * 2.6).toFixed(2)} ${(w * 1.9).toFixed(2)}`
@@ -6537,13 +6942,13 @@ export default function DrillAnimator() {
             run drawn at its own width. Per-point widths would mean one element
             per segment — dozens per word — where bands collapse a stroke to a
             handful and still read as a pencil. */}
-        {pencilPress && m.note && m.press && m.press.length === m.pts.length ? pressRuns(m).map((run, i) => (
+        {pencilPress && m.sketch && m.press && m.press.length === m.pts.length ? pressRuns(m).map((run, i) => (
           <polyline key={`pw${i}`} points={run.pts.map(q => `${clampX(q.x)},${clampY(q.y)}`).join(" ")}
-            fill="none" stroke={m.color} strokeWidth={w * run.k} strokeDasharray={dash}
+            fill="none" stroke={ink(m.color)} strokeWidth={w * run.k} strokeDasharray={dash}
             strokeLinecap="round" strokeLinejoin="round" opacity={0.94}
             pointerEvents={hit ? "none" : undefined} />
         )) : (
-          <polyline points={line} fill="none" stroke={m.color} strokeWidth={w} strokeDasharray={dash}
+          <polyline points={line} fill="none" stroke={ink(m.color)} strokeWidth={w} strokeDasharray={dash}
             strokeLinecap="round" strokeLinejoin="round" opacity={0.94}
             pointerEvents={hit ? "none" : undefined} />
         )}
@@ -6845,11 +7250,12 @@ export default function DrillAnimator() {
           <div className="hd-pophead">
             <span className="hd-poptitle">Edit</span>
             <button className="hd-x on" title="Un-dock" onPointerDown={e => e.stopPropagation()}
-              onClick={toggleDock}><Icon name="sidebar" size={15} /></button>
+              aria-pressed={docked}
+              onClick={toggleDock}><Icon name={docked ? "sidebarOn" : "sidebar"} size={15} /></button>
             <button className="hd-x" title="Close" onPointerDown={e => e.stopPropagation()}
               onClick={() => { setPopup(null); setPinMode(null); }}><Icon name="close" size={15} /></button>
           </div>
-          <div className="hd-poprow" style={{ color: "#8b99a8", fontSize: 12 }}>
+          <div className="hd-poprow hd-stephint">
             Tap a player, puck, or point to edit it here.
           </div>
         </div>
@@ -6879,19 +7285,16 @@ export default function DrillAnimator() {
       const rec = pieces.find(q => q.id === tr.to && q.kind === "player");
       const isSauce = !!tr.sauce;
       const doSauce = () => update(q => q.id !== pk.id ? q : { ...q, transfers: (q.transfers || []).map((x, s) => s === st.stage ? { ...x, sauce: !x.sauce } : x) });
+      // No "caught at [auto][1][2]…" chip row here any more: the step's own
+      // "Catch:" dropdown already sets exactly this, and does it better — the
+      // chips could only address the receiver's BASE path, while the dropdown
+      // also reaches waypoints on their reaction forks. Two controls writing one
+      // field, one of them a strict subset, and on a long route the chips ran to
+      // eight buttons that wrapped across the panel.
       return (
-        <>
-          {rec && rec.path.length >= 2 && (
-            <div className="hd-poprow">
-              <span style={{ fontSize: 11 }}>{tr.via ? "back at" : "caught at"}</span>
-              <button className={`hd-mini${tr.recvAt == null ? " on" : ""}`} onClick={() => setRecvAt(pk.id, st.stage, null)}>auto</button>
-              {rec.path.map((s, wi) => <button key={wi} className={`hd-mini${tr.recvAt === wi ? " on" : ""}`} onClick={() => setRecvAt(pk.id, st.stage, tr.recvAt === wi ? null : wi)}>{wi + 1}</button>)}
-            </div>
-          )}
-          <div className="hd-poprow">
-            <button className={`hd-mini${isSauce ? " on" : ""}`} onClick={doSauce}><Icon name={isSauce ? "check" : "sauce"} size={14} /> Sauce pass</button>
-          </div>
-        </>
+        <div className="hd-poprow">
+          <button className={`hd-mini${isSauce ? " on" : ""}`} onClick={doSauce}><Icon name={isSauce ? "check" : "sauce"} size={14} /> Sauce pass</button>
+        </div>
       );
     };
 
@@ -7097,7 +7500,11 @@ export default function DrillAnimator() {
               const { recvRef, ...rest } = x;
               return { ...rest, recvAt: parseInt(idx, 10), ...(ref ? { recvRef: ref } : {}) };
             });
-            return { ...q, transfers: ts };
+            // chained(): moving WHERE a pass is caught moves it in the chain, so
+            // the transfers have to re-order. main added this to setRecvAt — the
+            // chip row this branch replaced — and this dropdown is now the only
+            // control for recvAt, so the fix has to live here instead.
+            return chained({ ...q, transfers: ts });
           });
           return (<>
             <select className="hd-select on" value={val} onChange={e => { const v = e.target.value;
@@ -7178,43 +7585,39 @@ export default function DrillAnimator() {
       );
       const addRow = key => (
         <div key={key} className="hd-poprow">
-          <span style={{ minWidth: 46, fontSize: 11, color: "#8b99a8" }}>＋ Add</span>
+          <span className="hd-steplbl">＋ Add</span>
           {typeSelect("none", addOpts, t => t !== "none" && createType(t), key)}
         </div>
       );
       return (
-        <div style={{ margin: "6px 0", padding: "7px 8px", background: "rgba(120,140,160,0.12)", borderRadius: 8,
-          opacity: startLocked ? 0.5 : 1, pointerEvents: startLocked ? "none" : "auto" }}>
+        <div className={`hd-actions${startLocked ? " locked" : ""}`}>
           <div className="hd-mh" style={{ marginBottom: 5 }}>Actions</div>
           {startLocked && (
-            <div className="hd-poprow"><span style={{ fontSize: 10.5, color: "#c98a2b" }}>
+            <div className="hd-poprow"><span className="hd-stepwarn">
               This puck is passed or shot at a later route point — set that action there.
             </span></div>
           )}
           {rows.length > 0 && addRow("addtop")}
           {rows.map(({ st, opts }, n) => {
             const t = typeOfStep(st);
-            const accent = t === "shoot" ? "#d7263d" : t === "pass" ? "#1f8a4c" : t === "chip" || t === "rim" ? "#e0731d" : "#2f7fd6";
             return (
-              <div key={n} style={{ margin: "5px 0", padding: "5px 7px 5px 8px", borderRadius: 8,
-                background: "rgba(20,26,34,0.6)", border: "1px solid #2c3846", borderLeft: `3px solid ${accent}`,
-                opacity: st.warn ? 0.7 : 1 }}>
+              <div key={n} className={`hd-step ${t}${st.warn ? " warn" : ""}`}>
                 <div className="hd-poprow">
-                  <span style={{ minWidth: 46, fontWeight: 700, color: "#9fb0c0", fontSize: 11.5 }}>Step {n + 1}</span>
+                  <span className="hd-steplbl">Step {n + 1}</span>
                   {typeSelect(t, opts, v => changeType(st, v), n)}
                   {secondary(st)}
-                  <button className="hd-mini danger" style={{ padding: "3px 8px", minHeight: 0 }} title="Remove step" onClick={st.del}>✕</button>
+                  <button className="hd-mini danger hd-stepx" title="Remove step" onClick={st.del}>✕</button>
                 </div>
-                {st.warn && <div className="hd-poprow"><span style={{ fontSize: 10.5, color: "#c98a2b" }}>⚠ {st.warn}</span></div>}
+                {st.warn && <div className="hd-poprow"><span className="hd-stepwarn">⚠ {st.warn}</span></div>}
                 {t === "pass" && passSubRows(p, i, st)}
                 {isGain(t) && gainSubRows(p, i, st)}
                 {!isGain(t) && handSubRows(p, i, st, t)}
-                {(t === "chip" || t === "rim") && <div className="hd-poprow"><span style={{ fontSize: 10.5, color: "#8b99a8" }}>drag the on-ice handle to aim &amp; set distance</span></div>}
+                {(t === "chip" || t === "rim") && <div className="hd-poprow"><span className="hd-stephint">drag the on-ice handle to aim &amp; set distance</span></div>}
               </div>
             );
           })}
           {rows.length === 0
-            ? <div className="hd-poprow"><span style={{ minWidth: 46, fontWeight: 700, color: "#8b99a8", fontSize: 12 }}>Step 1</span>{typeSelect("none", addOpts, t => t !== "none" && createType(t), "s1")}</div>
+            ? <div className="hd-poprow"><span className="hd-steplbl">Step 1</span>{typeSelect("none", addOpts, t => t !== "none" && createType(t), "s1")}</div>
             : addRow("addbot")}
         </div>
       );
@@ -7234,22 +7637,21 @@ export default function DrillAnimator() {
         <>
           {/* same order as the main Add/draw palette so both grids build one
               muscle memory; the pen leads here too */}
-          <button className="hd-item" onClick={() => { setPopup(null); resetAnim(); setPlaying(false); setTool("pen"); setPenMode(true); }}>
+          <button className="hd-item" onClick={() => { setMode("draw"); }}>
             <Icon name="marker" size={16} /> Smart pen — sketch it
           </button>
+          {/* Driven by the SAME ADD_GROUPS table as the Edit bar, so the two
+              can't drift — they were written out separately and did. Marks are
+              skipped: they're drawn or placed, not dropped at a tapped point. */}
           <div className="hd-toolgrid compact">
-            <button className="hd-tool" {...hov("player")} onClick={() => addPieceAt("player", popup.pt)}>{toolImg("player", whiteboard, wbCircle)}<span>Player</span></button>
-            <button className="hd-tool" {...hov("playerpuck")} onClick={() => addPlayerWithPuck(popup.pt, true)}>{toolImg("playerpuck", whiteboard, wbCircle)}<span>+ Puck</span></button>
-            <button className="hd-tool" {...hov("puck")} onClick={() => addPieceAt("puck", popup.pt)}>{toolImg("puck")}<span>Puck</span></button>
-            <button className="hd-tool" {...hov("net")} onClick={() => addPieceAt("net", popup.pt)}>{toolImg("net")}<span>Net</span></button>
-            <button className="hd-tool" {...hov("cone")} onClick={() => addPieceAt("cone", popup.pt)}>{toolImg("cone")}<span>Cone</span></button>
-            <button className="hd-tool" {...hov("tire")} onClick={() => addPieceAt("tire", popup.pt)}>{toolImg("tire")}<span>Tire</span></button>
-            <button className="hd-tool" {...hov("bumper")} onClick={() => addPieceAt("bumper", popup.pt)}>{toolImg("bumper")}<span>Bumper</span></button>
-            <button className="hd-tool" {...hov("deker")} onClick={() => addPieceAt("deker", popup.pt)}>{toolImg("deker")}<span>Deker</span></button>
-            <button className="hd-tool" {...hov("passer")} onClick={() => addPieceAt("passer", popup.pt)}>{toolImg("passer")}<span>Passer</span></button>
-            <button className="hd-tool" {...hov("stick")} onClick={() => addPieceAt("stick", popup.pt)}>{toolImg("stick")}<span>Stick</span></button>
-            <button className="hd-tool" {...hov("light")} onClick={() => addPieceAt("light", popup.pt)}>{toolImg("light")}<span>Light</span></button>
-            <button className="hd-tool" {...hov("label")} onClick={() => addPieceAt("label", popup.pt)}><span className="hd-toolglyph"><Icon name="label" size={22} /></span><span>Label</span></button>
+            {ADD_GROUPS.slice(0, 2).flatMap(g => g.kinds).map(([k, lbl]) => (
+              <button key={k} className="hd-tool" {...hov(k)} title={lbl}
+                onClick={() => (k === "playerpuck" ? addPlayerWithPuck(popup.pt, true) : addPieceAt(k, popup.pt))}>
+                {toolImg(k, whiteboard, wbCircle)}<span>{lbl}</span>
+              </button>
+            ))}
+            <button className="hd-tool" {...hov("label")} onClick={() => addPieceAt("label", popup.pt)}>
+              <span className="hd-toolglyph"><Icon name="label" size={22} /></span><span>Label</span></button>
           </div>
         </>
       );
@@ -7522,7 +7924,7 @@ export default function DrillAnimator() {
               <div className="hd-field">
                 <div className="hd-sectitle">Style</div>
                 <div className="hd-poprow">
-                  {[["solid", "Solid"], ["dashed", "Dashed"], ["dotted", "Dotted"], ["wavy", "Wavy"]].map(([s, lbl]) => (
+                  {PEN_STYLES.map(([s, lbl]) => (
                     <button key={s} className={`hd-mini${(p.style || "solid") === s ? " on" : ""}`} onClick={() => updateById(p.id, { style: s })}>{lbl}</button>
                   ))}
                 </div>
@@ -7839,16 +8241,14 @@ export default function DrillAnimator() {
               </div>
             </div>
           )}
+          {/* same table the Edit bar's selection strip renders, so the panel and
+              the bar can't offer different things for the same piece */}
           <div className="hd-poprow" style={{ marginTop: 2 }}>
-            {p.path.length > 0 && (
-              <button className="hd-mini" onClick={() => { updateById(p.id, { path: [] }); setPopup(null); flash("Route cleared — Undo restores it"); }}>Clear route</button>
-            )}
-            <button className="hd-mini" onClick={() => duplicatePiece(p.id)}><Icon name="duplicate" size={15} /> Duplicate</button>
-            <button className="hd-mini" title="Pin in place so it can't be moved or edited by accident."
-              onClick={() => updateById(p.id, { lock: true })}>🔒 Lock</button>
-            <button className="hd-mini danger" onClick={() => deletePiece(p.id)}>
-              <Icon name="trash" size={15} /> Delete
-            </button>
+            {pieceActions(p, false).map(a => (
+              <button key={a.key} className={`hd-mini${a.danger ? " danger" : ""}`} title={a.title} onClick={a.on}>
+                {a.icon && <Icon name={a.icon} size={15} />} {a.label}
+              </button>
+            ))}
           </div>
         </>
       );
@@ -8078,7 +8478,7 @@ export default function DrillAnimator() {
               <div className="hd-poprow">{curveButtons(t => addSegment(p.id, t, fork), () => drawRouteMode(p.id, fork))}</div>
             </div>
           ) : (
-            <div className="hd-poprow" style={{ color: "#8b99a8", fontSize: 12 }}>End of {fork ? "reaction" : "route"}</div>
+            <div className="hd-poprow hd-stephint">End of {fork ? "reaction" : "route"}</div>
           )}
           {/* route end: mark that the player stops here → a ‖ stop mark replaces
               the direction arrowhead (skating-diagram convention). Offered on a base
@@ -8179,18 +8579,30 @@ export default function DrillAnimator() {
     // they're independent, so a placed/frozen popup can still carry the user's
     // resize, and an auto-height (popDim.h == null) freeze grows to fit content
     const finalStyle = { ...style };
-    if (!collapsed && popPos) {
+    // Position is honoured even when collapsed — that's what keeps the header
+    // still. Only the HEIGHT is dropped: a collapsed panel is its header.
+    if (popPos) {
       finalStyle.left = `${popPos.left}px`;
       finalStyle.top = `${popPos.top}px`;
       finalStyle.bottom = "auto";
       finalStyle.transform = `translate(${popOff.x}px, ${popOff.y}px)`;   // px position: no centering
     }
-    if (!collapsed && popDim) {
+    if (popDim) {
       finalStyle.width = `${popDim.w}px`;
-      if (popDim.h != null) { finalStyle.height = `${popDim.h}px`; finalStyle.maxHeight = "none"; }
+      if (!collapsed && popDim.h != null) { finalStyle.height = `${popDim.h}px`; finalStyle.maxHeight = "none"; }
     }
     const boxed = !collapsed && (popPos || popDim);
     const usePreset = () => { setPopPos(null); setPopDim(null); };   // presets re-anchor at default size
+    // Collapsing must not MOVE the panel — only shorten it. Pin it to where it
+    // is first, so the header stays under the finger that just tapped it.
+    // Without this the panel fell back to its anchor style, which is derived
+    // from the piece's spot on the ice: it slid sideways, and a bottom-anchored
+    // one flipped to the top of the screen, so minimising looked like the panel
+    // had jumped somewhere else.
+    const freezeHere = () => {
+      const r = popRef.current?.getBoundingClientRect();
+      if (r) setPopPos({ left: Math.round(r.left), top: Math.round(r.top) });
+    };
     return (
       <div className={`hd-pop pinned${docked ? " dock" : ""}`} style={docked ? undefined : finalStyle} ref={popRef}
         onScroll={syncPopScroll} onPointerDown={e => e.stopPropagation()}>
@@ -8206,19 +8618,26 @@ export default function DrillAnimator() {
               margin-left:auto, right-aligning the whole control cluster */}
           <button className={`hd-x${pinMode === "float" ? " on" : ""}`} onPointerDown={e => e.stopPropagation()}
             title={pinMode === "float" ? "Un-pin" : "Pin (floating)"}
-            onClick={togglePin}><Icon name="pin" size={15} /></button>
+            aria-pressed={pinMode === "float"}
+            onClick={togglePin}><Icon name={pinMode === "float" ? "pinOn" : "pinOff"} size={15} /></button>
           {isWide && (
             <button className={`hd-x${docked ? " on" : ""}`} onPointerDown={e => e.stopPropagation()}
               title={docked ? "Un-dock" : "Dock to sidebar"}
-              onClick={toggleDock}><Icon name="sidebar" size={15} /></button>
+              aria-pressed={docked}
+              onClick={toggleDock}><Icon name={docked ? "sidebarOn" : "sidebar"} size={15} /></button>
           )}
           {!docked && !collapsed && (
             <button className="hd-x" onPointerDown={e => e.stopPropagation()} title="Minimize"
-              onClick={() => { usePreset(); setPopState("min"); }}><Icon name="chevronUp" size={15} /></button>
+              onClick={() => { freezeHere(); setPopState("min"); }}><Icon name="chevronUp" size={15} /></button>
           )}
           {!docked && (
             <button className="hd-x" onPointerDown={e => e.stopPropagation()} title={maxed ? "Restore" : "Maximize"}
-              onClick={() => { usePreset(); setPopState(maxed && !boxed ? "mid" : collapsed ? "mid" : "max"); }}>
+              onClick={() => {
+                // expanding a collapsed panel keeps its spot too and grows
+                // downward from the header; only the size PRESETS re-anchor
+                if (!collapsed) usePreset();
+                setPopState(maxed && !boxed ? "mid" : collapsed ? "mid" : "max");
+              }}>
               <Icon name={collapsed ? "chevronDown" : (maxed && !boxed) ? "restore" : "expand"} size={15} /></button>
           )}
           <button className="hd-x" onPointerDown={e => e.stopPropagation()}
@@ -8269,12 +8688,9 @@ export default function DrillAnimator() {
     // a fly leg launches/lands at the player's STICK, ~a stick-length off the
     // waypoint centre where the badge sits — so match within that reach
     const nearBadge = (x, y) => { let best = null, bd = 6; for (const b of badges) { const d = Math.hypot(b.x - x, b.y - y); if (d < bd) { bd = d; best = b; } } return best; };
-    // multiple shots landing on the same net stop at staggered distances so their
-    // arrowheads queue up in front of it instead of piling into one busy clump
-    // group shots by the NET they land on (landings scatter a few feet, so bucket
-    // by nearest net, not exact point), then stagger by LENGTH: the closest
-    // (shortest) shots keep their room right at the net, and the farther (longer)
-    // shots step back — so nothing overlaps and short shots still read accurately
+    // which target a shot lands on — landings scatter a few feet across the mouth,
+    // so bucket by nearest net rather than exact point. Only the repeat-shot dedup
+    // key below uses it; the stagger reads tip positions, not nets.
     const shotTargets = pieces.filter(q => q.kind === "net" || q.kind === "passer" || q.kind === "bumper" || q.kind === "tire");
     const nearNet = (x, y) => { let best = "?", bd = 24; for (const nt of shotTargets) { const d = Math.hypot(nt.x - x, nt.y - y); if (d < bd) { bd = d; best = nt.id; } } return best; };
     // A player firing a pile of pucks from one spot at one net draws the same arrow
@@ -8283,7 +8699,7 @@ export default function DrillAnimator() {
     // by release point (~3ft) rather than exact coordinates: the blade shifts a little
     // between shots as the body settles, and they are still visually the same mark.
     const shotOne = {}, shotN = {};      // `${pk}/${k}` → is the drawn one / how many it stands for
-    const byNet = {}, shotStagger = {};  // `${pk}/${k}` → extra feet in front of the net
+    const shotStagger = {};              // `${pk}/${k}` → extra feet in front of the net
     const groups = {};
     pieces.filter(q => q.kind === "puck" && plans[q.id]).forEach(q => plans[q.id].legs.forEach((L, k, legs) => {
       if (L.type === "fly" && L.shot && (!legs[k + 1] || legs[k + 1].type !== "fly")) {
@@ -8300,14 +8716,39 @@ export default function DrillAnimator() {
       list.forEach(sIt => { shotN[sIt.id] = list.length; });
       shotOne[lead.id] = true;
     });
-    // ...and only the drawn ones queue for room in front of the net
-    pieces.filter(q => q.kind === "puck" && plans[q.id]).forEach(q => plans[q.id].legs.forEach((L, k, legs) => {
-      if (L.type === "fly" && L.shot && (!legs[k + 1] || legs[k + 1].type !== "fly") && shotOne[`${q.id}/${k}`]) {
-        const net = nearNet(L.x1, L.y1);
-        (byNet[net] = byNet[net] || []).push({ id: `${q.id}/${k}`, len: Math.hypot(L.x1 - L.x0, L.y1 - L.y0) });
+    // ...and only the drawn ones queue for room in front of the net. Group by where
+    // the CARET actually lands — the landing point pulled back SHOT_TIP_GAP along the
+    // shot's own axis — and NOT by which net it's aimed at: two shots converging on
+    // one net from clearly different angles have heads yards apart and need no
+    // stagger at all. Same tip rule arrivalBack applies to passes and route carats,
+    // so swinging a shooter round the net dissolves the queue the moment they clear.
+    // Within a cluster the shortest shot keeps the slot at the net and the longer
+    // ones step back, so a close-in shot still reads true against the cage.
+    if (arrowStagger) {
+      const tips = [];
+      pieces.filter(q => q.kind === "puck" && plans[q.id]).forEach(q => plans[q.id].legs.forEach((L, k, legs) => {
+        if (!(L.type === "fly" && L.shot && (!legs[k + 1] || legs[k + 1].type !== "fly") && shotOne[`${q.id}/${k}`])) return;
+        // the same origin and direction the renderer draws with (badge centre when
+        // released at an action circle), so the tip we cluster on is the real one
+        const sb = (k === 0 || legs[k - 1].type !== "fly") ? nearBadge(L.x0, L.y0) : null;
+        const ox = sb ? sb.x : L.x0, oy = sb ? sb.y : L.y0;
+        const len = Math.hypot(L.x1 - ox, L.y1 - oy) || 1;
+        const t = gmMove(L.x1, L.y1, -(L.x1 - ox) / len, -(L.y1 - oy) / len, SHOT_TIP_GAP);
+        // gm space, so the cluster radius reads the same in every direction under
+        // the fill-mode stretch (as the route-end clearance pass does)
+        tips.push({ id: `${q.id}/${k}`, len, x: t.x * gmSar, y: t.y / gmSar });
+      }));
+      const shotClusters = [];
+      for (const t of tips) {
+        let c = shotClusters.find(c2 => Math.hypot(c2.seed.x - t.x, c2.seed.y - t.y) <= SHOT_CLUSTER_R);
+        if (!c) { c = { seed: t, list: [] }; shotClusters.push(c); }
+        c.list.push(t);
       }
-    }));
-    Object.values(byNet).forEach(list => list.sort((a, b) => a.len - b.len).forEach((s, i) => { shotStagger[s.id] = i * 9; }));
+      for (const c of shotClusters) {
+        if (c.list.length < 2) continue;
+        c.list.sort((a, b) => a.len - b.len).forEach((s, i) => { if (i) shotStagger[s.id] = i * SHOT_STAGGER_STEP; });
+      }
+    }
     // a PASS's drawn line comes from the AUTHORED chain (planner geometry:
     // release waypoint → catch waypoint, like renderBranchGhostArrows), NOT the
     // animation plan's fly legs — those launch/land on warped blade positions
@@ -8433,14 +8874,15 @@ export default function DrillAnimator() {
         const len = Math.hypot(L.x1 - ox, L.y1 - oy) || 1, ux = (L.x1 - ox) / len, uy = (L.y1 - oy) / len;
         const sp = sb ? gmMove(sb.x, sb.y, ux, uy, START_OFF) : { x: L.x0, y: L.y0 };
         const sx = sp.x, sy = sp.y;
-        // end: a shot stops just short of the net (+ stagger for several on one net);
-        // a pass/rim/chip into a receiver's badge stops just off its edge. Clamp the
-        // offset so a SHORT leg's arrow never overshoots its own start and reverses.
+        // end: a shot stops just short of the net (+ stagger when another shot's
+        // head lands on top of this one); a pass/rim/chip into a receiver's badge
+        // stops just off its edge. Clamp the offset so a SHORT leg's arrow never
+        // overshoots its own start and reverses.
         const eb = runEnd && !L.shot ? nearBadge(L.x1, L.y1) : null;
         // whiteboard: a chip/rim that lands LOOSE (no collector badge) gets a
         // ghost puck sitting on the landing spot — the line stops just short
         const ghostLand = !flat && whiteboard && runEnd && (L.rim || L.chip) && !eb;
-        let eGap = L.shot && runEnd ? 6 + (shotStagger[`${q.id}/${k}`] || 0) : eb ? START_OFF : ghostLand ? 3.4 : 0;
+        let eGap = L.shot && runEnd ? SHOT_TIP_GAP + (shotStagger[`${q.id}/${k}`] || 0) : eb ? START_OFF : ghostLand ? 3.4 : 0;
         const eCap = Math.max(0, Math.hypot((L.x1 - sx) * gmSar, (L.y1 - sy) / gmSar) - 2);
         if (eGap > 0) eGap = Math.min(eGap, eCap);
         // pass/rim/chip arrivals register their natural TIP so same-direction heads at
@@ -8565,7 +9007,7 @@ export default function DrillAnimator() {
     const arrow = (a, b, shot, key, op = OP_GHOST) => {
       const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1, ux = dx / len, uy = dy / len;
       const sp = gmMove(a.x, a.y, ux, uy, Math.min(START_OFF, len / 2));
-      const base = Math.min(shot ? 6 : START_OFF, Math.max(0, len - 2));
+      const base = Math.min(shot ? SHOT_TIP_GAP : START_OFF, Math.max(0, len - 2));
       const ep0 = gmMove(b.x, b.y, -ux, -uy, base);
       const back = arrivalBack("main", ep0.x, ep0.y);
       const ep = back ? gmMove(b.x, b.y, -ux, -uy, Math.min(base + back, Math.max(0, len - 2))) : ep0;
@@ -8672,7 +9114,7 @@ export default function DrillAnimator() {
       }}>
         <svg viewBox={`0 0 ${2 * R} ${2 * R}`}>
           <g transform={loupeXf}>
-          <RinkMarkings />
+          <RinkMarkings dim={rinkDim} />
           {pieces.map(p => {
             let prev = { x: p.x, y: p.y };
             return p.path.map((s, i) => {
@@ -8714,6 +9156,25 @@ export default function DrillAnimator() {
     );
   }
 
+  // Changing what the pen does COMMITS what you have already drawn first, so a
+  // stroke always lands under the mode it was drawn in. Without this, sketching
+  // and then switching to Manual inside the 1s settle window re-laid those
+  // strokes as ordinary ink — at route fidelity, without their per-point
+  // pressure — and the next Convert could read your handwriting as a player.
+  // Same reason every tool change and setMode already flush.
+  const setPen = v => {
+    if (v !== penRead) flushPen();
+    setPenRead(v);
+    setEraser(false);
+    if (tool !== "pen") setTool("pen");
+  };
+  // "Manual — ink waits until you tap Convert." The stored sentence stands
+  // alone on the bar, so it is sentence-case; joined after the label it reads
+  // as one clause, hence the lowercased first letter.
+  const penSays = () => {
+    const [, label, , says] = penReadRow(penRead);
+    return `${label} — ${says.charAt(0).toLowerCase()}${says.slice(1)}`;
+  };
   const toolHint =
     !playing && !aiPlay && animT > 0
       ? "Paused — tap the ice or a piece to edit (jumps to start)"
@@ -8724,18 +9185,120 @@ export default function DrillAnimator() {
       : tool === "draw"
       ? (selected ? `Drawing ${selected.id}'s route — drag across the ice` : "Drag on the ice — creates a player")
       : tool === "marker" ? "Marker — drag on the ice to draw"
+      // Say what the pen will do with the NEXT stroke, from the same sentence
+      // the bar shows. It used to say "ink becomes pieces" unconditionally —
+      // which was flatly untrue in Sketch, on the one surface a phone has.
       : tool === "pen" ? (stylusOn && stylusMode()
-          ? "Smart pen — Apple Pencil (palm rejection on; fingers ignored on the ice)"
-          : "Smart pen — sketch X's, routes & dashed passes; ink becomes pieces")
-      : tool !== "select" ? "Tap the ice to place" : null;
+          ? `${penSays()} Apple Pencil: palm rejection on.`
+          : penSays())
+      : tool !== "select" ? "Tap the ice to place"
+      // Edit mode's bar has room for a standing hint, so say what the two
+      // gestures are rather than leaving the strip blank
+      : selected ? `${selected.id} selected — drag to move, tap for its settings`
+      : "Tap a piece to edit it · double-tap the ice to add";
+  // The subset worth interrupting the ice for: something is armed or in
+  // progress and the hint tells you how to finish it. Everything else is the
+  // idle standing hint, which on a phone is just noise over the rink.
+  const transientHint =
+    (!playing && !aiPlay && animT > 0) || editingFork || tool !== "select" ? toolHint : null;
 
-  const mlbl = { fontSize: 8, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase",
-    lineHeight: 1, opacity: 0.8, marginTop: 2 };
-  const mbtn = { display: "flex", alignItems: "center", justifyContent: "center", minWidth: 34, height: 34,
-    padding: "0 8px", borderRadius: 999, border: "1px solid rgba(255,255,255,0.14)", background: "rgba(255,255,255,0.06)",
-    color: "#eaf0f6", fontSize: 14, fontWeight: 700, cursor: "pointer" };
+  // ---- presentation: the EDITOR chrome gets out of the way ----------------
+  // Showing a drill to a room, you still want play/pause and the scrubber —
+  // what you don't want is Menu, Rink, the mode switch and Undo/Redo. So the
+  // menu bar slides away and hands its 54px to the ice; the transport stays.
+  // Revealing the menu bar again OVERLAYS (the transport steps up over it)
+  // rather than re-reserving the space, because reserving it would resize the
+  // rink every time the chrome came and went.
+  const [barUp, setBarUp] = useState(false);
+  const barTimer = useRef(0);
+  const presoFull = presentation && mode === "play" && !aiPlay;
+  // idempotent: the desktop pointer fires this continuously, so it must not
+  // toggle — it shows the bar and restarts the idle countdown
+  const showBar = () => {
+    setBarUp(true);
+    clearTimeout(barTimer.current);
+    barTimer.current = setTimeout(() => setBarUp(false), 3000);
+  };
+  const toggleBar = () => {
+    if (barUp) { clearTimeout(barTimer.current); setBarUp(false); } else showBar();
+  };
+  // entering or leaving presentation always starts from hidden
+  useEffect(() => { setBarUp(false); clearTimeout(barTimer.current); }, [presoFull]);
+  useEffect(() => () => clearTimeout(barTimer.current), []);
+  // Desktop pointer in presentation, doing two jobs off one listener:
+  //   · near the bottom edge → bring the editor bar back
+  //   · anywhere → the pointer is "live"; a still one fades out after a beat,
+  //     the way a video player does, so a forgotten cursor doesn't sit over the
+  //     ice for a whole run-through
+  // Touch has neither: there's no cursor, and a swipe from the very bottom is
+  // iOS's own home gesture in standalone, so the app can't count on seeing it —
+  // the chevron on the transport is the way back there.
+  const [cursorIdle, setCursorIdle] = useState(false);
+  const cursorTimer = useRef(0);
+  useEffect(() => {
+    if (!presoFull || coarsePtr) { setCursorIdle(false); return; }
+    const arm = () => {
+      clearTimeout(cursorTimer.current);
+      cursorTimer.current = setTimeout(() => setCursorIdle(true), 2500);
+    };
+    const on = e => {
+      setCursorIdle(false); arm();
+      if (e.clientY > window.innerHeight - 90) showBar();
+    };
+    window.addEventListener("pointermove", on);
+    window.addEventListener("pointerdown", on);
+    arm();                                   // a cursor that never moves still fades
+    return () => {
+      window.removeEventListener("pointermove", on);
+      window.removeEventListener("pointerdown", on);
+      clearTimeout(cursorTimer.current); setCursorIdle(false);
+    };
+  }, [presoFull, coarsePtr]);   // eslint-disable-line
+
+  // Presentation is for showing the drill to a room, so turning it on clears
+  // the editing furniture off the ice: any pinned panel, the docked sidebar
+  // (which costs 320px of rink), and the current selection with its handles.
+  // Turning it OFF leaves the board alone — you re-open what you want.
+  const togglePresentation = () => setPresentation(v => {
+    if (!v) { setPinMode(null); setPopup(null); setSelectedId(null); setMultiSel(null); }
+    return !v;
+  });
+
+  // Switch editor flows. Every clause here is lifted from a place that already
+  // did exactly this before there was a mode to name — the Add sheet's pen rows,
+  // togglePlay, wakeEdit — so this is one definition replacing five copies.
+  //
+  // The one thing it must NOT do is disturb the pen. flushPen() COMMITS buffered
+  // ink (it is not clearInk), and the ink colour, width, style and the pen's
+  // read mode (sketch/manual/auto) all survive a trip through another mode:
+  // draw → edit → draw has always been a free round trip so you can nudge a
+  // piece mid-sketch, and moving that switch from the palette to the bottom bar
+  // mustn't cost it. This comment used to claim the note flag survived while
+  // the code cleared it two lines below; it does now.
+  const setMode = next => {
+    if (next === mode) return;
+    flushPen();
+    setPenPop(null); setOpenMenu(null); setPopup(null);
+    setPlacingStep(null); setEditAnchor(null);
+    setHoldStep(null); holdRef.current = 0;
+    if (next !== "play") {
+      setPlaying(false);
+      // same rule as wakeEdit: you can only edit the board at t=0
+      if (animT > 0) { resetAnim(); flash("Back to start — editing"); }
+    }
+    if (next === "draw") { setTool("pen"); setEraser(false); }
+    else { setTool("select"); setEraser(false); }
+    if (next !== "edit") { setSelectedId(null); setMultiSel(null); setEditingFork(null); }
+    setModeRaw(next);
+  };
+  // Leaving Play with nothing to play. Deleting the last route mid-run would
+  // otherwise strand you looking at an empty transport with a dead scrubber.
+  useEffect(() => {
+    if (mode === "play" && !hasTimeline) setMode("edit");
+  }, [hasTimeline]);  // eslint-disable-line
 
   const togglePlay = () => {
+    if (mode !== "play") setMode("play");   // Space plays from any flow
     flushPen();                    // buffered pen ink lands before playback
     // starting a FRESH run (from the top OR replaying a finished one) re-rolls playSeed
     // → random reactions / cue timings vary each run. NB: check animT >= 1 too — after a
@@ -8761,17 +9324,22 @@ export default function DrillAnimator() {
         else togglePlay();                         // otherwise pause / continue
       } else if (e.key === "Escape") {
         if (playing) { e.preventDefault(); resetPlay(); }   // stop & reset
+      } else if (e.key === "1" || e.key === "2" || e.key === "3") {
+        // the three flows, left to right, matching the bar's own order
+        const m = ["draw", "edit", "play"][+e.key - 1];
+        if (m === "play" && !hasTimeline) return;
+        e.preventDefault(); setMode(m);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [presentation, holdStep, playing]); // eslint-disable-line
+  }, [presentation, holdStep, playing, mode, hasTimeline]); // eslint-disable-line
 
   // during playback the "Routes on play" setting controls what stays visible;
   // while editing everything shows regardless
   // whiteboard keeps the full planner picture on screen through playback
-  const showRoutes = !aiPlay && (editing || whiteboard || playRoutes !== "hide");   // player route lines + stops
-  const showPuckPaths = !aiPlay && (editing || whiteboard || playRoutes === "all"); // planned pass / shot lines
+  const showRoutes = !aiPlay && (editing || whiteboard || routeVis(playRoutes).skaters);   // player route lines + stops
+  const showPuckPaths = !aiPlay && (editing || whiteboard || routeVis(playRoutes).puck);    // planned pass / shot lines
   // converging-waypoint arrow pull-backs; the "Tidy arrowheads" setting turns the
   // whole feature off, landing every mark exactly where its waypoint was drawn
   const endStagger = showRoutes && arrowStagger ? routeEndStagger() : {};
@@ -8837,14 +9405,192 @@ export default function DrillAnimator() {
     }
   }
 
+  // Whether the action bar is showing. ONE expression, read by both the bar's
+  // own render and the root class that reserves its band, so the two can't
+  // disagree about how much ice is spoken for.
+  //
+  // A presentation caption does NOT hide it. The bar used to vanish while a
+  // caption was held, and pulling its band with it resized the ice by 68px on
+  // every beat of a presentation — a jump precisely where the drill is meant to
+  // be sitting still in front of a team. Keeping it up also keeps the transport
+  // reachable, so you can pause or scrub back while a caption is on screen,
+  // which is the moment a coach most wants to. The caption clears the bar on its
+  // own (.hd-preso offsets by --hd-act) and tapping it still advances the hold.
+  const actOn = !aiPlay;
+  // exactly what clearInk would remove, so the button can't promise something
+  // different from what it does — same predicate, same buffer
+  const inkCount = pieces.reduce((n, p) => n + (inkMine(p, isSketch) ? 1 : 0), 0) + penInk.length;
+  // the other pen state's ink, so a dead button can say whose it is
+  const inkOther = pieces.reduce((n, p) => n + (inkMine(p, !isSketch) ? 1 : 0), 0);
+
+  // Which players should wear waypoint numbers: the receivers of any PASS step
+  // shown in the action panel that's currently open. Derived rather than stored,
+  // so it can't get out of step with the panel — it appears when a pass is
+  // showing and goes when the panel closes or the step changes.
+  const numberedIds = (() => {
+    if (!editing || !popup || (popup.type !== "piece" && popup.type !== "point")) return null;
+    const src = pieces.find(q => q.id === popup.id);
+    if (!src || src.kind !== "player") return null;
+    const ids = new Set();
+    for (const st of stepsAt(src, popup.type === "point" ? popup.seg : -1, popup.fork || null)) {
+      if (st.kind !== "pass") continue;
+      const to = ((st.pk?.transfers || [])[st.stage] || {}).to;
+      if (to && to !== src.id) ids.add(to);
+    }
+    return ids.size ? ids : null;
+  })();
+
+  // The pen's three line settings — colour, thickness, style. Wide screens lay
+  // them out inline, ready at the click; narrow ones stack all three inside a
+  // single "Ink" popover so the bar keeps its one line. Built once here and
+  // placed by either layout, so the two can never offer different options.
+  const inkSwatches = PEN_INKS.map(c => (
+    <button key={c} className={`hd-penswatch${markColor === c && !eraser ? " on" : ""}`}
+      style={{ background: ink(c) }} title={`Ink ${c}`}
+      onClick={() => { setMarkColor(c); setEraser(false); }} />
+  ));
+  const sizeSlider = (
+    <>
+      <span className="hd-penpoptip">{markWidth.toFixed(1)}</span>
+      <input className="hd-penrange" type="range" min={0.4} max={3} step={0.1} value={markWidth}
+        onChange={e => setMarkWidth(parseFloat(e.target.value))} />
+    </>
+  );
+  const styleRows = PEN_STYLES.map(([s, lbl]) => (
+    <button key={s} className={`hd-penopt${markStyle === s ? " on" : ""}`} title={`${lbl} line`}
+      onClick={() => { setMarkStyle(s); if (dense) setPenPop(null); }}>
+      <span className={`hd-penstyle ${s}`} /><span>{lbl}</span>
+    </button>
+  ));
+
+  // ---- what you can do to the selected piece ----------------------------
+  // ONE definition, rendered two ways: as .hd-mini rows at the foot of the
+  // inspector, and as chips on the Edit bar. They were written separately, so
+  // the two surfaces could quietly offer different things for the same piece.
+  // `bar` picks the variant: the bar offers a door INTO the inspector, the
+  // inspector offers the route-clearing the bar has no room for.
+  const ROUTABLE = new Set(["player", "puck"]);
+  const pieceActions = (p, bar) => {
+    const a = [];
+    if (bar && ROUTABLE.has(p.kind)) a.push({ key: "route", icon: "pencil",
+      label: p.path?.length ? "Redraw" : "Route",
+      title: `Draw ${p.id}'s route — drag across the ice`, on: () => drawRouteMode(p.id) });
+    if (!bar && p.path?.length) a.push({ key: "clear", label: "Clear route",
+      on: () => { updateById(p.id, { path: [] }); setPopup(null); flash("Route cleared — Undo restores it"); } });
+    a.push({ key: "dup", icon: "duplicate", label: "Duplicate", short: "Copy",
+      title: `Duplicate ${p.id}`, on: () => duplicatePiece(p.id) });
+    a.push({ key: "lock", icon: "lock", label: "Lock",
+      title: "Pin in place so it can't be moved or edited by accident.",
+      on: () => updateById(p.id, { lock: true }) });
+    // "More" is the door to the full inspector — but only where there IS a door
+    // to open. Docked, the panel is a permanent sidebar that already re-targets
+    // itself to whatever you select, so the button had nothing to do and read as
+    // broken. Floating, it's a toggle that lights while its panel is up; before,
+    // pressing it with the panel already open did nothing visible.
+    const panelHas = popup && popup.id === p.id
+      && (popup.type === "piece" || popup.type === "point" || popup.type === "line");
+    if (bar && !docked) a.push({ key: "more", icon: "sliders", label: "More",
+      title: panelHas ? `Hide ${p.id}'s settings` : `Everything else about ${p.id}`,
+      active: panelHas,
+      on: () => setPopup(panelHas ? null : { type: "piece", id: p.id }) });
+    a.push({ key: "del", icon: "trash", label: "Delete", danger: true,
+      title: `Delete ${p.id}`, on: () => deletePiece(p.id) });
+    return a;
+  };
+  // ---- what you can do to a selected WAYPOINT / LEG ---------------------
+  // The bar's selection strip switches to these when the thing you picked is a
+  // point or a leg, so Delete removes just that — not the whole player. Same
+  // chip shape as pieceActions; rendered by the same actionChip.
+  const pointActions = (p, seg, fork) => {
+    const a = [];
+    a.push({ key: "lock", icon: "lock", label: "Lock",
+      title: "Pin this waypoint so it can't be moved by accident.",
+      on: () => updateSeg(p.id, seg, { lock: true }, fork) });
+    const panelHas = popup && popup.type === "point" && popup.id === p.id && popup.seg === seg;
+    if (!docked) a.push({ key: "more", icon: "sliders", label: "More",
+      active: panelHas, title: panelHas ? "Hide this point's settings" : "Everything else about this point",
+      on: () => setPopup(panelHas ? null : { type: "point", id: p.id, seg, ...(fork ? { fork } : {}) }) });
+    a.push({ key: "del", icon: "trash", label: "Delete", danger: true,
+      title: "Delete this waypoint", on: () => deleteSeg(p.id, seg, fork) });
+    return a;
+  };
+  const legActions = (p, seg, pt, fork) => {
+    const a = [];
+    if (pt) a.push({ key: "add", icon: "plus", label: "Add point", short: "Add",
+      title: "Add a waypoint on this leg", on: () => addPointAt(p.id, seg, pt, fork) });
+    const panelHas = popup && popup.type === "line" && popup.id === p.id && popup.seg === seg;
+    if (!docked) a.push({ key: "more", icon: "sliders", label: "More",
+      active: panelHas, title: panelHas ? "Hide this leg's settings" : "Everything else about this leg",
+      on: () => setPopup(panelHas ? null : { type: "line", id: p.id, seg, pt, ...(fork ? { fork } : {}) }) });
+    a.push({ key: "del", icon: "trash", label: "Delete", danger: true,
+      title: "Delete this leg",
+      on: () => { deleteSeg(p.id, seg, fork); flash("Leg removed — Undo restores it"); } });
+    return a;
+  };
+  const actionChip = a => (
+    <button key={a.key} className={`hd-pentool${a.danger ? " danger" : ""}${a.active ? " on" : ""}`}
+      title={a.title} onClick={a.on}>
+      <Icon name={a.icon} size={17} /><span>{dense ? a.label : (a.short || a.label)}</span>
+    </button>
+  );
+
+  // ---- Edit mode's add palette ------------------------------------------
+  // Arm a tool (tap the ice to place it), except shapes, which land straight on
+  // the board — the same two behaviours the Add sheet has always had.
+  const armAdd = k => {
+    setPenPop(null);
+    if (SHAPE_KINDS.has(k)) { resetAnim(); setPlaying(false); addShapeMark(k); return; }
+    setTool(t => (t === k ? "select" : k));   // tapping the armed tool disarms it
+  };
+  // one chip, sized for the bar: the piece's own sprite over a caption, so the
+  // palette and the ice show the same thing
+  const addChip = ([k, lbl, glyph]) => (
+    <button key={k} className={`hd-pentool${tool === k ? " on" : ""}`} title={lbl}
+      onClick={() => armAdd(k)}>
+      {glyph === "marker" ? <Icon name="marker" size={17} />
+        : glyph === "label" ? <Icon name="label" size={17} />
+        : glyph ? <span className="hd-actglyph">{glyph}</span>
+        : toolImg(k, whiteboard, wbCircle)}
+      <span>{lbl}</span>
+    </button>
+  );
+  // the same kinds as a grid, for a group that had to collapse into a popover
+  const addGroupPop = g => (
+    <div key={g.key} className="hd-penwrap">
+      <button className={`hd-pentool${penPop === g.key ? " on" : ""}`} title={g.tip}
+        onClick={() => setPenPop(v => (v === g.key ? null : g.key))}>
+        <Icon name={g.icon} size={17} /><span>{g.label}</span>
+      </button>
+      {penPop === g.key && (
+        <div className="hd-penpop grid">
+          <div className="hd-toolgrid compact">
+            {g.kinds.map(([k, lbl, glyph]) => (
+              <button key={k} className={`hd-tool${tool === k ? " on" : ""}`} title={lbl}
+                onClick={() => { armAdd(k); setPenPop(null); }}>
+                {glyph === "marker" ? <span className="hd-toolglyph"><Icon name="marker" size={22} /></span>
+                  : glyph === "label" ? <span className="hd-toolglyph"><Icon name="label" size={22} /></span>
+                  : glyph ? <span className="hd-toolglyph">{glyph}</span>
+                  : toolImg(k, whiteboard, wbCircle)}
+                <span>{lbl}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
   return (
     // wraps the WHOLE return, so renderLoupe()'s second <RinkMarkings/> subtree
     // gets the same tokens as the main sheet — if the loupe's ice and the board's
     // ice ever disagree, a wrong-shade rim shows at the loupe's corners
     <ThemeCtx.Provider value={T}>
     <InkCtx.Provider value={ink}>
-    <div className={`hd-root${penMode && !aiPlay ? " pen-on" : aiPlay || !hasTimeline ? "" : " scrub-on"}${docked ? " dock-open" : ""}${
-      tool === "pen" || tool === "marker" ? (eraser && tool === "pen" ? " erase-cursor" : " draw-cursor") : ""}`} ref={rootRef}>
+    <div className={`hd-root${actOn ? "" : " act-off"}${dense ? " dense" : ""}${
+      hand === "left" ? " lefty" : ""}${docked ? " dock-open" : ""}${
+      presoFull ? (barUp ? " preso-full bar-up" : " preso-full") : ""}${cursorIdle ? " cursor-idle" : ""}${
+      tool === "pen" || tool === "marker" ? (eraser && tool === "pen" ? " erase-cursor" : " draw-cursor") : ""}`} ref={rootRef}
+      style={{ "--hd-font": fontStack }}>
       <style>{STYLES}</style>
 
       {/* ---------- the ice, filling the screen ---------- */}
@@ -8863,7 +9609,7 @@ export default function DrillAnimator() {
 
             <g transform={zoomXf}>
             <g ref={sceneRef} transform={sceneTransform} clipPath={rink === "half" ? "url(#halfview)" : undefined}>
-            <RinkMarkings yFix={yFix} />
+            <RinkMarkings yFix={yFix} dim={rinkDim} />
 
             {/* freehand marker annotations sit on the ice, under the drill — they
                 are drill markings, so they honour Mark opacity */}
@@ -9214,7 +9960,7 @@ export default function DrillAnimator() {
                     if (!ea) return null;
                     // legacy branch `action` → its circle, else a plain skate carat / ‖ stop
                     const legacy = f.action && f.action !== "skate" ? forkActionIcon(f.action) : null;
-                    if (legacy && !whiteboard) return { ea, legacy };
+                    if (legacy && effActCircles) return { ea, legacy };
                     // several branches can END at the same spot — queue the carats
                     return { ea, bk: arrivalBack("main", ea.endPt.x, ea.endPt.y) };
                   })();
@@ -9361,12 +10107,12 @@ export default function DrillAnimator() {
                 reads as one continuous line until the burst snaps into pieces */}
             {penInk.map((pts, i) => pts.length > 1 && (
               <polyline key={`pen${i}`} points={pts.map(q => `${q.x},${q.y}`).join(" ")} fill="none"
-                stroke={markColor} strokeWidth={penW} strokeLinecap="round" strokeLinejoin="round"
+                stroke={ink(markColor)} strokeWidth={penW} strokeLinecap="round" strokeLinejoin="round"
                 opacity={0.9} pointerEvents="none" />
             ))}
             {drawPreview && drawPreview.length > 1 && (
               tool === "marker" || tool === "pen"
-                ? <polyline points={drawPreview.map(q => `${q.x},${q.y}`).join(" ")} fill="none" stroke={markColor}
+                ? <polyline points={drawPreview.map(q => `${q.x},${q.y}`).join(" ")} fill="none" stroke={ink(markColor)}
                     strokeWidth={tool === "pen" ? penW : markWidth} strokeLinecap="round" strokeLinejoin="round"
                     opacity={0.9} pointerEvents="none" />
                 : <polyline points={drawPreview.map(q => `${q.x},${q.y}`).join(" ")} vectorEffect="non-scaling-stroke"
@@ -9632,6 +10378,9 @@ export default function DrillAnimator() {
                 {/* a reaction fork open for editing gets its own handles */}
                 {editingFork && editingFork.id === p.id && forkOf(p, editingFork.color)
                   ? renderHandles(p, yFix, editingFork.color) : null}
+                {/* a pass receiver wears its waypoint numbers while the step
+                    naming them is on screen */}
+                {numberedIds?.has(p.id) ? renderWpNumbers(p) : null}
               </g>
             ))}
             {renderMarkHandles()}
@@ -9645,43 +10394,6 @@ export default function DrillAnimator() {
           </svg>
           {renderPopout()}
           {renderLoupe()}
-          {multiSel && multiSel.size > 0 && !playing && (
-            <div style={{ position: "absolute", left: "50%", bottom: "calc(74px + env(safe-area-inset-bottom))",
-              transform: "translateX(-50%)", zIndex: 48, display: "flex", alignItems: "center", justifyContent: "center",
-              flexWrap: "wrap", gap: 5, maxWidth: "calc(100vw - 16px)", boxSizing: "border-box",
-              padding: "7px 9px", background: "rgba(20,24,30,0.94)", border: "1px solid rgba(255,255,255,0.12)",
-              borderRadius: 16, boxShadow: "0 6px 22px rgba(0,0,0,0.45)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)" }}>
-              <span style={{ color: "#cdd6df", fontSize: 12, fontWeight: 700, padding: "0 4px", whiteSpace: "nowrap" }}>
-                {selGroupName() ? `◇ ${selGroupName()}` : `${multiSel.size} selected`}
-              </span>
-              <button style={{ ...mbtn, flexDirection: "column", height: 40 }} onClick={() => rotateGroup(-15)} title="Rotate left 15°">
-                <Icon name="rotateCcw" size={15} /><span style={mlbl}>-15°</span></button>
-              <button style={{ ...mbtn, flexDirection: "column", height: 40 }} onClick={() => rotateGroup(15)} title="Rotate right 15°">
-                <Icon name="rotateCw" size={15} /><span style={mlbl}>+15°</span></button>
-              <button style={{ ...mbtn, fontSize: 12, height: 40 }} onClick={() => rotateGroup(90)} title="Rotate 90°">90°</button>
-              <button style={{ ...mbtn, flexDirection: "column", height: 40 }} onClick={duplicateGroup} title="Duplicate the selection">
-                <Icon name="duplicate" size={15} /><span style={mlbl}>Copy</span></button>
-              {/* named-group controls: name the selection, or ungroup it */}
-              {groupInput != null ? (
-                <>
-                  <input autoFocus value={groupInput} onChange={e => setGroupInput(e.target.value)}
-                    onKeyDown={e => { if (e.key === "Enter") { createGroup(groupInput); setGroupInput(null); } if (e.key === "Escape") setGroupInput(null); }}
-                    placeholder="group name" style={{ width: 96, padding: "5px 7px", fontSize: 12, borderRadius: 7, border: "1px solid #33404f", background: "#0f141a", color: "#e8edf2" }} />
-                  <button style={{ ...mbtn, color: "#7fe0a3" }} title="Create group"
-                    onClick={() => { createGroup(groupInput); setGroupInput(null); }}><Icon name="check" size={15} /></button>
-                </>
-              ) : selGroupName() ? (
-                <button style={{ ...mbtn, fontSize: 11.5 }} title="Ungroup" onClick={() => { ungroup(selGroupName()); }}>Ungroup</button>
-              ) : (
-                <button style={{ ...mbtn, fontSize: 11.5 }} title="Group the selection" onClick={() => setGroupInput(selGroupName() || "")}>◇ Group</button>
-              )}
-              <span style={{ width: 1, alignSelf: "stretch", margin: "3px 3px", background: "rgba(255,255,255,0.14)" }} />
-              <button style={{ ...mbtn, flexDirection: "column", height: 40, color: "#ff7a7a", borderColor: "rgba(255,90,90,0.35)" }}
-                onClick={deleteGroup} title="Delete the selection"><Icon name="trash" size={15} /><span style={mlbl}>Delete</span></button>
-              <button style={{ ...mbtn, flexDirection: "column", height: 40 }} onClick={() => { setMultiSel(null); setGroupInput(null); }}
-                title="Clear selection"><Icon name="close" size={15} /><span style={mlbl}>Done</span></button>
-            </div>
-          )}
           {view.s > 1.02 && (
             <button onClick={resetView} title="Reset zoom"
               style={{ position: "absolute", top: "calc(8px + env(safe-area-inset-top))", right: 8, zIndex: 46,
@@ -9744,126 +10456,380 @@ export default function DrillAnimator() {
       })()}
 
       {/* ---------- empty-board coaching hint (new/cleared board only) ---------- */}
-      {editing && !openMenu && !popup && tool === "select" &&
+      {editing && mode === "edit" && !openMenu && !popup && tool === "select" &&
         pieces.every(p => p.kind === "net") && (
         <div className="hd-emptyhint">
-          Tap <b>Add</b> below to place players, or grab the <b>Smart pen</b> and sketch the drill.
+          Tap <b>Add</b> on the bar to place players, or switch to <b>Draw</b> and sketch the drill.
           <span className="hd-ehsub">Quick add: double-tap anywhere on the ice</span>
         </div>
       )}
 
-      {/* ---------- pen palette: takes over the player-bar band while sketching ---------- */}
-      {penMode && !aiPlay && !holdStep && (
-        <div className="hd-pen">
+      {/* ---------- action bar · DRAW: the pen palette ---------- */}
+      {actOn && mode === "draw" && (
+        <div className="hd-act draw">
           {/* what the PEN does */}
           <div className="hd-pengroup">
-            {/* one switch for the two modes: the knob slides to whichever side
-                is live, and a tap anywhere on it flips */}
-            <button className={`hd-penswitch ${tool === "pen" ? "draw" : "edit"}`}
-              title={tool === "pen" ? "Draw mode — tap to edit pieces" : "Edit mode — tap to draw"}
-              onClick={() => {
-                setPopup(null);
-                if (tool === "pen") { flushPen(); setTool("select"); return; }
-                setTool("pen");
-              }}>
-              <span className="hd-penswknob" />
-              <span className="hd-penswopt draw"><Icon name="marker" size={17} /><span>Draw</span></span>
-              <span className="hd-penswopt edit"><Icon name="cursor" size={17} /><span>Edit</span></span>
-            </button>
-            <button className={`hd-pentool${noteMode ? " on" : ""}`}
-              title={noteMode ? "Note ink — never converted; tap for normal ink"
-                : "Note — scribbles and text that the converter leaves alone"}
-              onClick={() => { setNoteMode(v => !v); setEraser(false); if (tool !== "pen") setTool("pen"); }}>
-              <Icon name="note" size={18} /><span>Note</span>
-            </button>
+            {/* No Draw|Edit switch here any more — the bottom bar's three-flow
+                segment owns that, and it's the ~90px this palette needed to fit
+                on one line at phone widths. */}
+            {/* What the pen does with your ink, as ONE control. It used to be
+                a Sketch toggle here and an Auto toggle 100px away in the other
+                group, with Convert next to that — three controls for one idea,
+                split across the bar, and the pair implied a fourth state that
+                does not exist. Each cell says what happens to the NEXT stroke;
+                the sentence under PEN_READ says it in words.
+                On a phone there is no room for three cells, so it cycles —
+                the same idiom as Speed and Lines on the transport.
+                The DSL writes `sketch` on a mark (DSL 10); the old `note`
+                spelling is still read, so older drills keep their ink. */}
+            {dense ? (
+              <div className={`hd-seg hd-penseg ${penRead}`} role="group" aria-label="What the pen does">
+                <span className="hd-segknob" />
+                {PEN_READ.map(([v, label, icon, says]) => (
+                  <button key={v} className={`hd-segopt ${v}`} title={`${label} — ${says}`}
+                    aria-pressed={penRead === v}
+                    onClick={() => { setPen(v); }}>
+                    <Icon name={icon} size={15} /><span>{label}</span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              (() => {
+                const i = PEN_READ.findIndex(([v]) => v === penRead);
+                const [, label, icon, says] = penReadRow(penRead);
+                return (
+                  <button className={`hd-pentool${isSketch ? " on" : ""}`}
+                    title={`${label} — ${says} Tap to change.`}
+                    aria-label={`Pen: ${label}`}
+                    onClick={() => setPen(PEN_READ[(i + 1) % PEN_READ.length][0])}>
+                    <Icon name={icon} size={18} /><span>{label}</span>
+                  </button>
+                );
+              })()
+            )}
+            {/* Convert lives beside the state it belongs to, and ONLY in
+                manual — it is what makes conversion happen there. In sketch
+                nothing is ever read, and in auto it already has been, so a
+                button that swept older ink from either was just a surprise. */}
+            {penRead === "manual" && (
+              <button className="hd-pentool" title="Convert — read the whole drawing now" onClick={convertInk}>
+                <Icon name="wand" size={18} /><span>Convert</span>
+              </button>
+            )}
+            <div className="hd-pensep" />
             {/* a toggle, not a one-way latch — with Draw folded into the mode
-                switch, this is the only way back to inking */}
+                switch, this is the only way back to inking. It does NOT touch
+                what the pen does: arming the eraser used to silently drop you
+                out of Sketch, with no way back but noticing. */}
             <button className={`hd-pentool${eraser ? " on" : ""}`}
               title={eraser ? "Erasing — tap to ink again"
                 : "Erase — stroke over ink, routes or pieces to remove them"}
-              onClick={() => { setEraser(v => !v); setNoteMode(false); if (tool !== "pen") setTool("pen"); }}>
+              onClick={() => { setEraser(v => !v); if (tool !== "pen") setTool("pen"); }}>
               <Icon name="eraser" size={18} /><span>Erase</span>
             </button>
             <div className="hd-pensep" />
-            <div className="hd-peninks" title="Ink colour — also the colour of any piece you draw">
-              {PEN_INKS.map(c => (
-                <button key={c} className={`hd-penswatch${markColor === c && !eraser ? " on" : ""}`}
-                  style={{ background: c }} title={`Ink ${c}`}
-                  onClick={() => { setMarkColor(c); setEraser(false); }} />
-              ))}
-            </div>
-            <div className="hd-pensep" />
-            {/* size: a vertical slider that springs from its own button */}
-            <div className="hd-penwrap">
-              <button className={`hd-pentool${penPop === "size" ? " on" : ""}`} title="Line thickness"
-                onClick={() => setPenPop(v => (v === "size" ? null : "size"))}>
-                <span className="hd-penwdot" style={{ height: Math.max(2, Math.round(markWidth * markWidth * 2.4)) }} />
-                <span>Size</span>
-              </button>
-              {penPop === "size" && (
-                <div className="hd-penpop">
-                  <span className="hd-penpoptip">{markWidth.toFixed(1)}</span>
-                  <input className="hd-penrange" type="range" min={0.4} max={3} step={0.1} value={markWidth}
-                    onChange={e => setMarkWidth(parseFloat(e.target.value))} />
+            {dense ? (
+              /* wide: colour, size and style all out on the bar, one click each */
+              <>
+                <div className="hd-peninks" title="Ink colour — also the colour of any piece you draw">
+                  {inkSwatches}
                 </div>
-              )}
-            </div>
-            {/* style: the four line kinds, stacked above their button */}
-            <div className="hd-penwrap">
-              <button className={`hd-pentool${penPop === "style" ? " on" : ""}`} title="Line style"
-                onClick={() => setPenPop(v => (v === "style" ? null : "style"))}>
-                <span className={`hd-penstyle ${markStyle}`} /><span>Style</span>
-              </button>
-              {penPop === "style" && (
-                <div className="hd-penpop menu">
-                  {[["solid", "Solid"], ["dashed", "Dashed"], ["dotted", "Dotted"], ["wavy", "Wavy"]].map(([s, lbl]) => (
-                    <button key={s} className={`hd-penopt${markStyle === s ? " on" : ""}`} title={`${lbl} line`}
-                      onClick={() => { setMarkStyle(s); setPenPop(null); }}>
-                      <span className={`hd-penstyle ${s}`} /><span>{lbl}</span>
-                    </button>
-                  ))}
+                <div className="hd-pensep" />
+                {/* size: a vertical slider that springs from its own button */}
+                <div className="hd-penwrap">
+                  <button className={`hd-pentool${penPop === "size" ? " on" : ""}`} title="Line thickness"
+                    onClick={() => setPenPop(v => (v === "size" ? null : "size"))}>
+                    <span className="hd-penwdot" style={{ height: Math.max(2, Math.round(markWidth * markWidth * 2.4)) }} />
+                    <span>Size</span>
+                  </button>
+                  {penPop === "size" && <div className="hd-penpop">{sizeSlider}</div>}
                 </div>
-              )}
-            </div>
+                {/* style: the four line kinds, stacked above their button */}
+                <div className="hd-penwrap">
+                  <button className={`hd-pentool${penPop === "style" ? " on" : ""}`} title="Line style"
+                    onClick={() => setPenPop(v => (v === "style" ? null : "style"))}>
+                    <span className={`hd-penstyle ${markStyle}`} /><span>Style</span>
+                  </button>
+                  {penPop === "style" && <div className="hd-penpop menu">{styleRows}</div>}
+                </div>
+              </>
+            ) : (
+              /* narrow: all three behind one button. The trigger wears the live
+                 ink as a swatch — the only place a raw colour is legible, since
+                 .hd-penwdot and .hd-penstyle deliberately follow the BUTTON's
+                 colour so black ink can't vanish against a dark bar. */
+              <div className="hd-penwrap">
+                <button className={`hd-pentool${penPop === "ink" ? " on" : ""}`} title="Ink colour, thickness & style"
+                  onClick={() => setPenPop(v => (v === "ink" ? null : "ink"))}>
+                  <span className="hd-penswatch" style={{ background: ink(markColor), width: 18, height: 18 }} />
+                  <span>Ink</span>
+                </button>
+                {penPop === "ink" && (
+                  <div className="hd-penpop menu">
+                    <div className="hd-inkgrid">{inkSwatches}</div>
+                    <div className="hd-penrule" />
+                    {sizeSlider}
+                    <div className="hd-penrule" />
+                    {styleRows}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
-          <div className="hd-penspacer" />
+          {/* The bar's one flexible child, and until now 450px of dead space on
+              a desktop. It says in plain words what the pen will do with the
+              next stroke — the labels name the state, this says what the state
+              MEANS. On a phone there's no room, so the same sentence goes over
+              the ice through toolHint instead. */}
+          <div className="hd-penspacer">
+            {dense && <span className="hd-pensays">{penReadRow(penRead)[3]}</span>}
+          </div>
 
           {/* what happens to the BOARD */}
           <div className="hd-pengroup">
-            <button className="hd-pentool" title="Convert — read the whole drawing now" onClick={convertInk}>
-              <Icon name="wand" size={18} /><span>Convert</span>
-            </button>
-            <button className={`hd-pentool${autoConv ? " on" : ""}`}
-              title={autoConv ? "Auto: every stroke is read as you draw" : "Manual: ink stays ink until you tap Convert"}
-              onClick={() => setAutoConv(v => !v)}>
-              <Icon name="brain" size={18} /><span>Auto</span>
-            </button>
-            <button className="hd-pentool danger" title="Clear all ink (Undo restores it)" onClick={clearInk}>
-              <Icon name="trash" size={17} /><span>Clear</span>
-            </button>
+            {/* "Clear" beside a trash can, in red, read as "clear the BOARD" —
+                it only ever removes ink, and only the ink this pen state laid.
+                Three things say so: the label names what goes, the count says
+                how much — of THIS state's ink, so switching states changes the
+                number — and with none of it on the sheet the button is dead,
+                which is the strongest signal of all. A board full of players,
+                or of the other state's ink, showing a greyed-out button plainly
+                isn't offering to delete any of it. The title carries the scope,
+                because the label has no room for it at 320px. */}
             <div className="hd-pensep" />
-            <button className="hd-pentool" title="Close the pen palette"
-              onClick={() => { flushPen(); setPenMode(false); setEraser(false); setTool("select"); }}>
-              <Icon name="close" size={17} /><span>Done</span>
+            <button className="hd-pentool danger" disabled={!inkCount} onClick={clearInk}
+              title={inkCount
+                ? `Remove ${inkCount} ${isSketch ? "sketch" : "ink"} mark${inkCount > 1 ? "s" : ""} — your ${isSketch ? "smart-pen ink" : "sketch ink"}, players, routes and props are untouched. Undo restores them.`
+                : inkOther
+                ? `No ${isSketch ? "sketch" : "smart-pen"} ink to clear — the ${inkOther} mark${inkOther > 1 ? "s" : ""} on the sheet ${inkOther > 1 ? "are" : "is"} ${isSketch ? "smart-pen ink. Switch the pen to Manual or Auto" : "sketch ink. Switch the pen to Sketch"} to clear ${inkOther > 1 ? "those" : "it"}.`
+                : "No ink on the sheet to clear"}>
+              <Icon name="trash" size={17} />
+              <span>Clear ink{inkCount ? ` ${inkCount}` : ""}</span>
             </button>
+            {/* no Done either: tapping EDIT or PLAY below is what finishes a
+                sketch, and it commits the buffered ink on the way out */}
           </div>
         </div>
       )}
 
-      {/* ---------- player bar: transport + scrubber in one strip ---------- */}
-      {!penMode && !aiPlay && !holdStep && hasTimeline && (
-        <div className="hd-scrub">
-          <button className="hd-scrubbtn play" onClick={togglePlay} title={playing ? "Pause" : "Play"}>
-            <Icon name={playing ? "pause" : "play"} size={20} /></button>
-          <button className="hd-scrubbtn" onClick={resetPlay} title={playing ? "Stop" : "Reset"}>
-            <Icon name={playing ? "stop" : "reset"} size={17} /></button>
-          <button className={`hd-scrubbtn${loopMode ? " on" : ""}`} onClick={() => setLoopMode(v => !v)} title="Loop">
-            <Icon name="loop" size={17} /></button>
-          <button className={`hd-scrubbtn${presentation ? " on" : ""}`} onClick={() => setPresentation(v => !v)} title="Presentation mode">
-            <Icon name="presentation" size={17} /></button>
-          <button className="hd-scrubbtn" disabled={playing} onClick={addStepHere}
-            title="Add a description at this point"><Icon name="note" size={17} /></button>
+      {/* On a phone the bar has no room for a readable hint, so the ones that
+          say what's happening RIGHT NOW float over the ice instead — where they
+          have the width to be read, and clear of the bar. Only transient
+          states: an armed tool, a route being drawn, a paused animation. The
+          standing "tap a piece to edit it" is dropped, since a hint you've seen
+          a hundred times is just something covering the rink. */}
+      {actOn && !dense && !presoFull && transientHint && (
+        <div className="hd-floathint">{transientHint}</div>
+      )}
+
+      {/* ---------- action bar · EDIT: the add palette ----------
+          What used to be a full-screen sheet you opened, picked from, and closed
+          again. Groups expand onto the bar as the screen earns the room:
+            phone (< DENSE_MIN) — the four mains inline, props behind a popover
+            tablet / desktop    — props come out too, so every common piece is
+                                  one click away, which is the point of the room
+          Keyed on width alone, NOT on isWide's pointer:fine — an iPad reports a
+          COARSE pointer even with a Pencil attached, and a Pencil on a tablet is
+          exactly the case that wants the open palette.
+          desktop / landscape iPad (>= ROOMY_MIN) — the shapes come out too
+          Shapes used to stay grouped at every width, on the grounds that
+          inlining them would push the common pieces off the line. That's true
+          up to about 972px and false above it, so it's a third tier rather
+          than a rule. */}
+      {actOn && mode === "edit" && (
+        <div className="hd-act edit">
+          {/* A selection takes the bar over completely — what you want next is
+              something to DO with the thing you just picked, not another piece.
+              There is deliberately no collapsed [+ Add] here: it assumed you'd
+              add from a selection, when the way back to the palette is to tap
+              the ice, which deselects. That's one tap either way, and it's the
+              tap you were going to make anyway. */}
+          {!selected && !multiSel?.size && (
+            <>
+              {ADD_GROUPS[0].kinds.map(addChip)}
+              <div className="hd-pensep" />
+              {dense ? <>{ADD_GROUPS[1].kinds.map(addChip)}</> : addGroupPop(ADD_GROUPS[1])}
+              {roomy
+                ? <><div className="hd-pensep" />{ADD_GROUPS[2].kinds.map(addChip)}</>
+                : addGroupPop(ADD_GROUPS[2])}
+            </>
+          )}
+          {/* ---- multi-select: was a third floating toolbar over the ice, with
+              its own hand-rolled palette of raw hexes. It's the same kind of
+              thing the bar exists for, so it lives here now. ---- */}
+          {multiSel?.size > 0 && (
+            <>
+              <div className="hd-pensep" />
+              <span className="hd-selchip">{selGroupName() ? `◇ ${selGroupName()}` : `${multiSel.size} selected`}</span>
+              {dense && <>
+                <button className="hd-pentool" title="Rotate left 15°" onClick={() => rotateGroup(-15)}>
+                  <Icon name="rotateCcw" size={17} /><span>-15°</span></button>
+                <button className="hd-pentool" title="Rotate right 15°" onClick={() => rotateGroup(15)}>
+                  <Icon name="rotateCw" size={17} /><span>+15°</span></button>
+                <button className="hd-pentool" title="Rotate 90°" onClick={() => rotateGroup(90)}>
+                  <Icon name="rotateCw" size={17} /><span>90°</span></button>
+              </>}
+              <button className="hd-pentool" title="Duplicate the selection" onClick={duplicateGroup}>
+                <Icon name="duplicate" size={17} /><span>Copy</span></button>
+              {groupInput != null ? (
+                <>
+                  <input className="hd-groupname" autoFocus value={groupInput} placeholder="group name"
+                    onChange={e => setGroupInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter") { createGroup(groupInput); setGroupInput(null); }
+                      if (e.key === "Escape") setGroupInput(null); }} />
+                  <button className="hd-pentool" title="Create group"
+                    onClick={() => { createGroup(groupInput); setGroupInput(null); }}>
+                    <Icon name="check" size={17} /><span>OK</span></button>
+                </>
+              ) : selGroupName() ? (
+                <button className="hd-pentool" title="Ungroup" onClick={() => ungroup(selGroupName())}>
+                  <Icon name="close" size={17} /><span>Ungroup</span></button>
+              ) : (
+                <button className="hd-pentool" title="Group the selection"
+                  onClick={() => setGroupInput(selGroupName() || "")}>
+                  <Icon name="grid" size={17} /><span>Group</span></button>
+              )}
+              <button className="hd-pentool danger" title="Delete the selection" onClick={deleteGroup}>
+                <Icon name="trash" size={17} /><span>Delete</span></button>
+              <div className="hd-pensep" />
+              <button className="hd-pentool exit" title="Clear selection"
+                onClick={() => { setMultiSel(null); setGroupInput(null); }}>
+                <Icon name="close" size={17} /><span>Done</span></button>
+            </>
+          )}
+          {/* ---- one piece selected: the four things you reach for without
+              opening anything. "More" is the door to the full inspector. ---- */}
+          {selected && !multiSel?.size && (() => {
+            // popup wins when it targets this piece; otherwise a just-dragged
+            // waypoint (dragSel) drives the strip, so a drag with no panel still
+            // loads the point's actions.
+            const active = popup && popup.id === selected.id ? popup
+                         : (dragSel && dragSel.id === selected.id ? dragSel : null);
+            const wp  = active && active.type === "point" ? active : null;
+            const leg = active && active.type === "line"  ? active : null;
+            const label = wp  ? `${selected.id} · pt ${wp.seg + 1}`
+                        : leg ? `${selected.id} · leg ${leg.seg + 1}`
+                        : selected.id;
+            const acts  = wp  ? pointActions(selected, wp.seg, wp.fork || null)
+                        : leg ? legActions(selected, leg.seg, leg.pt, leg.fork || null)
+                        : pieceActions(selected, true);
+            return (
+              <>
+                <span className="hd-selchip">{label}</span>
+                {acts.map(actionChip)}
+                <div className="hd-pensep" />
+                <button className="hd-pentool exit" title="Deselect"
+                  onClick={() => { setSelectedId(null); setPopup(null); setDragSel(null); }}>
+                  <Icon name="close" size={17} /><span>Done</span></button>
+              </>
+            );
+          })()}
+          {/* the marker's own ink settings, surfaced only while it's armed —
+              they came off the deleted Add sheet, where they appeared under the
+              same condition */}
+          {tool === "marker" && (
+            <div className="hd-penwrap">
+              <button className={`hd-pentool${penPop === "ink" ? " on" : ""}`} title="Marker colour, thickness & style"
+                onClick={() => setPenPop(v => (v === "ink" ? null : "ink"))}>
+                <span className="hd-penswatch" style={{ background: markColor, width: 18, height: 18 }} />
+                <span>Ink</span>
+              </button>
+              {penPop === "ink" && (
+                <div className="hd-penpop menu">
+                  <div className="hd-inkgrid">{inkSwatches}</div>
+                  <div className="hd-penrule" />
+                  {sizeSlider}
+                  <div className="hd-penrule" />
+                  {styleRows}
+                </div>
+              )}
+            </div>
+          )}
+          {tool !== "select" && (
+            <>
+              <div className="hd-pensep" />
+              <button className="hd-pentool exit" title="Cancel the armed tool — nothing will be placed"
+                onClick={() => setTool("select")}>
+                <Icon name="close" size={17} /><span>Cancel</span>
+              </button>
+            </>
+          )}
+          {/* The hint only earns bar space where it can be READ. On a phone it
+              truncated to "Tap a piece to ..." — worse than nothing — so there
+              it moves over the ice (see .hd-floathint) and only for hints that
+              say what's happening RIGHT NOW, not the standing idle one. */}
+          {dense && !selected && !multiSel?.size
+            ? <div className="hd-acthint">{toolHint || ""}</div>
+            : <div className="hd-actspacer" />}
+        </div>
+      )}
+
+      {/* ---------- action bar · PLAY: transport + scrubber ---------- */}
+      {actOn && mode === "play" && (
+        <div className="hd-act play">
+          {/* In presentation the editor chrome is hidden; this is the way back
+              to it. It lives ON the transport rather than being an edge gesture
+              because the transport is the one thing always on screen — nothing
+              to discover, and no fight with the iOS home swipe. */}
+          {presoFull && (
+            <button className={`hd-scrubbtn${barUp ? " on" : ""}`} onClick={toggleBar}
+              title={barUp ? "Hide the editor bar" : "Show the editor bar"}
+              aria-pressed={barUp}>
+              <Icon name={barUp ? "chevronDown" : "chevronUp"} size={17} /></button>
+          )}
+          {/* Three jobs, three clusters. Transport (what the clock is doing),
+              then how the ice LOOKS while it runs, and — separated by the track
+              itself — the two that change the drill or the room rather than the
+              playback. Grouping is spacing on a phone and a hairline once
+              there's width for one: the separators cost ~26px, which at 375 the
+              scrub track cannot spare. */}
+          <div className="hd-scrubgrp">
+            <button className="hd-scrubbtn play" onClick={togglePlay} title={playing ? "Pause" : "Play"}>
+              <Icon name={playing ? "pause" : "play"} size={20} /></button>
+            <button className="hd-scrubbtn" onClick={resetPlay} title={playing ? "Stop" : "Reset"}>
+              <Icon name={playing ? "stop" : "reset"} size={17} /></button>
+            {dense && (
+              <button className={`hd-scrubbtn${loopMode ? " on" : ""}`} onClick={() => setLoopMode(v => !v)} title="Loop">
+                <Icon name="loop" size={17} /></button>
+            )}
+          </div>
+          <div className="hd-scrubsep" />
+          <div className="hd-scrubgrp vis">
+          {/* What stays drawn while it plays. It belongs here rather than in a
+              settings panel: it's something you change WHILE showing a drill —
+              lines on to explain the pattern, off to watch it move — and the
+              glyph is the answer itself, a route line over a puck path, each
+              lit or dimmed. Tapping cycles the four. */}
+          {(() => {
+            const i = Math.max(0, ROUTE_VIS.findIndex(([v]) => v === playRoutes));
+            const [, label, what] = ROUTE_VIS[i];
+            const vis = routeVis(playRoutes);
+            return (
+              <button className="hd-scrubbtn rv" title={`Lines while playing: ${label} — ${what}. Tap to change.`}
+                aria-label={`Lines while playing: ${label}`}
+                onClick={() => setPlayRoutes(ROUTE_VIS[(i + 1) % ROUTE_VIS.length][0])}>
+                <span className={`hd-rvline${vis.skaters ? " on" : ""}`} />
+                <span className={`hd-rvpuck${vis.puck ? " on" : ""}`} />
+              </button>
+            );
+          })()}
+          {/* Speed. Same reasoning as the lines button beside it: you reach for
+              it mid-demo, so it sits on the transport and not in a menu. It
+              reads out its own state, so there's nothing to remember. */}
+          {(() => {
+            const i = Math.max(0, PLAY_SPEEDS.findIndex(([m]) => m === speedMul));
+            const [, label, what] = PLAY_SPEEDS[i];
+            return (
+              <button className={`hd-scrubbtn spd${speedMul !== 1 ? " on" : ""}`}
+                title={`Speed: ${label} — ${what}. Tap to change.`}
+                aria-label={`Playback speed ${label}`}
+                onClick={() => setSpeedMul(PLAY_SPEEDS[(i + 1) % PLAY_SPEEDS.length][0])}>
+                {label}
+              </button>
+            );
+          })()}
+          </div>
           <div className="hd-scrubtrack">
             {wpTicks.map((f, k) => <span key={"w" + k} className="hd-tick wp" style={{ left: f * 100 + "%" }} />)}
             {stepTicks.map((f, k) => <span key={"s" + k} className="hd-tick step" style={{ left: f * 100 + "%" }} />)}
@@ -9872,55 +10838,157 @@ export default function DrillAnimator() {
               onChange={e => scrubTo(+e.target.value)} />
           </div>
           <span className="hd-scrubtime">{Math.min(animT * totalTime, drillTime).toFixed(1)}/{drillTime.toFixed(1)}s</span>
+          {/* Past the track, deliberately: neither of these is playback.
+              Presentation changes how the room sees the drill, and the note
+              button WRITES to it. Keeping them off the transport cluster means
+              a reach for Stop can't land on "record a caption" mid-demo.
+
+              On a phone this cluster — plus Loop — folds into one button. Seven
+              controls and a draggable scrub track do not both fit at 375px: the
+              track was measuring 25px, which is not something you can put a
+              thumb on. Loop joins them because it is set once per run, where
+              lines and speed get changed mid-demo. */}
+          {dense ? (
+            <>
+              <div className="hd-scrubsep" />
+              <div className="hd-scrubgrp">
+                <button className={`hd-scrubbtn${presentation ? " on" : ""}`} onClick={togglePresentation} title="Presentation mode">
+                  <Icon name="presentation" size={17} /></button>
+                <button className="hd-scrubbtn" disabled={playing} onClick={addStepHere}
+                  title="Add a description at this point"><Icon name="note" size={17} /></button>
+              </div>
+            </>
+          ) : (
+            <div className="hd-penwrap">
+              {/* lit while open, and lit when something inside it is ON — so a
+                  looping or presenting drill still says so with the pair
+                  folded away */}
+              <button className={`hd-scrubbtn${penPop === "more" || loopMode || presentation ? " on" : ""}`}
+                title="Loop, presentation & captions"
+                onClick={() => setPenPop(v => (v === "more" ? null : "more"))}>
+                <Icon name="sliders" size={17} /></button>
+              {penPop === "more" && (
+                <div className="hd-penpop menu more">
+                  <button className={`hd-penopt${loopMode ? " on" : ""}`}
+                    onClick={() => { setLoopMode(v => !v); setPenPop(null); }}>
+                    <Icon name="loop" size={15} /><span>Loop</span></button>
+                  <button className={`hd-penopt${presentation ? " on" : ""}`}
+                    onClick={() => { togglePresentation(); setPenPop(null); }}>
+                    <Icon name="presentation" size={15} /><span>Presentation</span></button>
+                  <button className="hd-penopt" disabled={playing}
+                    onClick={() => { addStepHere(); setPenPop(null); }}>
+                    <Icon name="note" size={15} /><span>Add caption</span></button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
       {/* ---------- bottom menu bar ---------- */}
-      <div className="hd-bar">
-        <button ref={barBtnRefs.settings} className={`hd-barbtn${openMenu === "settings" ? " on" : ""}`} title="Menu"
-          onClick={() => setOpenMenu(m => (m === "settings" ? null : "settings"))}>
-          <Icon name="menu" size={16} /><span className="hd-blbl">Menu</span></button>
+      {/* touching it while it's on loan in presentation restarts the countdown,
+          so it can't slide away mid-reach */}
+      <div className="hd-bar"
+        onPointerDown={presoFull ? showBar : undefined}
+        onPointerMove={presoFull ? showBar : undefined}>
+        {/* Undo and redo LEAD the bar. They used to hold the middle; the flows
+            took it, because the flows are what you touch all session and undo
+            is a rescue — the prime, either-thumb spot goes to the control that
+            earns it. Wrapped as ONE element so the lefty mirror moves the pair
+            without reversing it: undo-then-redo is a direction, not an
+            arrangement. These two buttons are the app's ONLY undo surface — no
+            shortcut, no menu row, and a dozen toasts end "— Undo restores
+            them" — which is why they keep their captions while the switch
+            beside them drops its. */}
+        <div className="hd-undogrp">
+          <button className="hd-barbtn" title="Undo last change" disabled={!undoCount}
+            onClick={undoLast}><Icon name="undo" size={16} /><span className="hd-blbl">Undo</span></button>
+          <button className="hd-barbtn" title="Redo" disabled={!redoCount}
+            onClick={redoLast}><Icon name="redo" size={16} /><span className="hd-blbl">Redo</span></button>
+        </div>
+        <div className="hd-barspacer" />
+        {/* The three editor flows: dead centre, and bigger than anything beside
+            them, because this is the control the whole app is driven from. It
+            is centred by CONSTRUCTION, not by measurement — the block either
+            side of it weighs the same (see .hd-barspacer in styles.js), which
+            is also why it doesn't move when the bar mirrors for a lefty.
+            Icon-only: the glyph plus the knob's colour say which flow is live,
+            and the caption was costing about what the bigger cells now spend.
+            aria-label carries the name instead — a title does nothing on touch.
+            PLAY is disabled with nothing to animate; tapping it while already
+            in Play starts/pauses the run, so a preview is one tap from anywhere
+            without spending bar width on a separate transport button — which is
+            why its accessible name follows what the tap will actually do. */}
+        <div className={`hd-mode ${mode}`} role="group" aria-label="Editor mode">
+          <span className="hd-modeknob" />
+          {[["draw", "marker", "Draw", "Sketch the drill with the smart pen"],
+            ["edit", "cursor", "Edit", "Add and change pieces, routes and settings"],
+            ["play", "play", "Play", "Animate, scrub and present"]].map(([m, icon, lbl, tip]) => (
+            <button key={m} className={`hd-modeopt ${m}`} title={tip}
+              aria-label={m !== "play" ? lbl
+                : !hasTimeline ? "Play — draw a route first"
+                : mode === "play" ? (playing ? "Pause" : "Play") : lbl}
+              disabled={m === "play" && !hasTimeline}
+              aria-pressed={mode === m}
+              onClick={() => (mode === m ? (m === "play" && togglePlay()) : setMode(m))}>
+              <Icon name={m === "play" && mode === "play" && playing ? "pause" : icon} size={22} />
+            </button>
+          ))}
+        </div>
+        <div className="hd-barspacer" />
         <button ref={barBtnRefs.rinkmenu} className={`hd-barbtn${openMenu === "rinkmenu" ? " on" : ""}`} title="Rink"
           onClick={() => setOpenMenu(m => (m === "rinkmenu" ? null : "rinkmenu"))}>
           <Icon name="rink" size={16} />
           <span className="hd-blbl">{rink === "full" ? "Full"
             : rink === "half" ? `Half ${halfNS ? (halfFlip ? "↑" : "↓") : (halfFlip ? "←" : "→")}`
-            : "¼ ice"}</span>
+            : QUARTERS.find(q => q[0] === rink)?.[2] || "¼ ice"}</span>
         </button>
-        <button ref={barBtnRefs.tools} className={`hd-barbtn${tool !== "select" || openMenu === "tools" ? " on" : ""}`} title="Add / draw"
-          onClick={() => setOpenMenu(m => (m === "tools" ? null : "tools"))}>
-          <Icon name="pencil" size={16} /><span className="hd-blbl">Add</span></button>
-        <button ref={barBtnRefs.prefs} className={`hd-barbtn${openMenu === "prefs" ? " on" : ""}`} title="Settings"
-          onClick={() => setOpenMenu(m => (m === "prefs" ? null : "prefs"))}>
-          <Icon name="sliders" size={16} /><span className="hd-blbl">Tune</span></button>
-        <button className="hd-barbtn" title="Undo last change" disabled={!undoCount}
-          onClick={undoLast}><Icon name="undo" size={16} /><span className="hd-blbl">Undo</span></button>
-        <button className="hd-barbtn" title="Redo" disabled={!redoCount}
-          onClick={redoLast}><Icon name="redo" size={16} /><span className="hd-blbl">Redo</span></button>
-        <div className="hd-barhint">{toolHint || ""}</div>
-        <div className="hd-ver"><span className="hd-vernum">v{APP_VERSION}</span><span className="hd-verstamp">&nbsp;· {BUILD_STAMP}</span></div>
+        <button ref={barBtnRefs.settings} className={`hd-barbtn${openMenu === "settings" ? " on" : ""}`} title="Menu"
+          onClick={() => setOpenMenu(m => (m === "settings" ? null : "settings"))}>
+          <Icon name="menu" size={16} /><span className="hd-blbl">Menu</span></button>
       </div>
 
       {/* ---------- menus ---------- */}
       {openMenu === "settings" && (
         <div className="hd-menu" style={menuAnchor}>
-          <div className="hd-mh">Drill</div>
+          {/* Sectioned by what a row DOES, and it keeps one grammar throughout:
+              a chevron means the row opens another surface, a switch means it
+              toggles something here, and a bare row acts immediately. The
+              settings that used to sit in this list (ice zones, locked-item
+              selection, the caption pause) moved to App & drill settings, where
+              every row gets a line explaining it — a menu is for verbs. */}
+          <div className="hd-mh">This drill</div>
           <input className="hd-input" placeholder="Drill name" value={drillTitle}
             onChange={e => setDrillTitle(e.target.value)} />
           {/* 62, not 46: under border-box the padding and border are inside the
               min-height, and 46 would render 16px shorter than it always has */}
           <textarea className="hd-input" style={{ minHeight: 62, resize: "vertical", fontFamily: "inherit" }}
             placeholder="Description" value={drillDesc} onChange={e => setDrillDesc(e.target.value)} spellCheck={false} />
-          <button className="hd-item" onClick={() => setOpenMenu("notes")}><Icon name="note" size={16} /> Notes / writeup{drillNotes.trim() ? " ✓" : ""}<span className="hd-chev"><Icon name="chevronRight" size={14} /></span></button>
-          <button className="hd-item" onClick={() => setOpenMenu("inventory")}><Icon name="grid" size={16} /> Inventory / gear<span className="hd-chev"><Icon name="chevronRight" size={14} /></span></button>
+          <button className="hd-item" onClick={() => setOpenMenu("notes")}>
+            <Icon name="note" size={16} /> Notes / writeup{drillNotes.trim() ? " ✓" : ""}
+            <span className="hd-chev"><Icon name="chevronRight" size={14} /></span></button>
+          <button className="hd-item" onClick={() => setOpenMenu("steps")}>
+            <Icon name="presentation" size={16} /> Steps &amp; captions
+            {drillSteps.length ? ` · ${drillSteps.length}` : ""}
+            <span className="hd-chev"><Icon name="chevronRight" size={14} /></span></button>
+          <button className="hd-item" onClick={() => setOpenMenu("inventory")}>
+            <Icon name="grid" size={16} /> Inventory / gear
+            <span className="hd-chev"><Icon name="chevronRight" size={14} /></span></button>
+
+          <div className="hd-mh hd-prefsec">Share</div>
+          <button className="hd-item" onClick={() => { previewLink(); setOpenMenu(null); }}><Icon name="share" size={16} /> Share preview link</button>
+          <button className="hd-item" onClick={() => { copyMd(); setOpenMenu(null); }}><Icon name="duplicate" size={16} /> Copy markdown</button>
           <button className="hd-item" onClick={() => { printSheet(); setOpenMenu(null); }}><Icon name="printer" size={16} /> Print sheet…</button>
-          <button className="hd-item" onClick={openText}><Icon name="keyboard" size={16} /> Text editor<span className="hd-chev"><Icon name="chevronRight" size={14} /></span></button>
+          <button className="hd-item" onClick={() => { exportImage(); setOpenMenu(null); }}><Icon name="image" size={16} /> Export image</button>
           <button className="hd-item" onClick={() => { exportTxt(); setOpenMenu(null); }}><Icon name="download" size={16} /> Export .txt</button>
           <button className="hd-item" onClick={() => { exportMd(); setOpenMenu(null); }}><Icon name="download" size={16} /> Export .md</button>
-          <button className="hd-item" onClick={() => { exportImage(); setOpenMenu(null); }}><Icon name="image" size={16} /> Export image</button>
-          <button className="hd-item" onClick={() => { copyMd(); setOpenMenu(null); }}><Icon name="duplicate" size={16} /> Copy markdown</button>
-          <button className="hd-item" onClick={() => { previewLink(); setOpenMenu(null); }}><Icon name="share" size={16} /> Share preview link</button>
+
+          <div className="hd-mh hd-prefsec">Open</div>
           <button className="hd-item" onClick={() => fileRef.current?.click()}><Icon name="upload" size={16} /> Load .txt / .md</button>
+          <button className="hd-item" disabled={!!photoBusy} onClick={() => { setOpenMenu(null); photoRef.current?.click(); }}><Icon name="camera" size={16} /> Import from photo…</button>
+          <button className="hd-item" onClick={openText}>
+            <Icon name="keyboard" size={16} /> Text editor
+            <span className="hd-chev"><Icon name="chevronRight" size={14} /></span></button>
           {crashBackup && (
             <button className="hd-item" onClick={() => {
               const r = parseDrill(crashBackup);
@@ -9934,56 +11002,35 @@ export default function DrillAnimator() {
               flash("Board restored", 2600);
             }}><Icon name="reset" size={16} /> Restore last board</button>
           )}
-          <button className="hd-item" disabled={!!photoBusy} onClick={() => { setOpenMenu(null); photoRef.current?.click(); }}><Icon name="camera" size={16} /> Import from photo…</button>
-          <button className="hd-item"
-            onClick={() => setShowZones(s => !s)}>
-            <Icon name="grid" size={16} /> Ice zones<span className={`hd-sw${showZones ? " on" : ""}`} />
+
+          <div className="hd-mh hd-prefsec">Board</div>
+          <button className="hd-item" onClick={toggleLockAll}>
+            <Icon name={anyLocked ? "unlock" : "lock"} size={16} /> {anyLocked ? "Unlock all" : "Lock board"}
+            <span className={`hd-sw${anyLocked ? " on" : ""}`} />
           </button>
-          <button className="hd-item"
-            onClick={toggleLockAll}>
-            <Icon name={anyLocked ? "unlock" : "lock"} size={16} /> {anyLocked ? "Unlock all" : "Lock board"}<span className={`hd-sw${anyLocked ? " on" : ""}`} />
+          <button className="hd-item" onClick={() => setOpenMenu("game")}>
+            <Icon name="react" size={16} /> Game mode
+            <span className="hd-chev"><Icon name="chevronRight" size={14} /></span>
           </button>
-          <button className="hd-item"
-            onClick={() => setLockedSelectable(s => !s)}>
-            <Icon name="lock" size={16} /> Allow selecting locked items<span className={`hd-sw${lockedSelectable ? " on" : ""}`} />
-          </button>
-          <button className="hd-item"
-            onClick={() => setShowDiag(s => !s)}>
-            <Icon name="gauge" size={16} /> Diagnostics<span className={`hd-sw${showDiag ? " on" : ""}`} />
-          </button>
+
+          <div className="hd-mh hd-prefsec">App</div>
           <button className="hd-item" onClick={() => setOpenMenu("prefs")}>
-            <Icon name="sliders" size={16} /> App &amp; drill settings<span className="hd-chev"><Icon name="chevronRight" size={14} /></span>
+            <Icon name="sliders" size={16} /> App &amp; drill settings
+            <span className="hd-chev"><Icon name="chevronRight" size={14} /></span>
           </button>
-          <div className="hd-mh" style={{ marginTop: 4 }}>Let AI play</div>
-          <div className="hd-poprow">
-            <span>5v5 for</span>
-            <Stepper value={aiMins} onChange={setAiMins} step={1} min={1} suffix="m" />
-            <button className="hd-mini" onClick={startAiPlay}><Icon name="play" size={13} /> Start</button>
-          </div>
-          <div className="hd-mh" style={{ marginTop: 4 }}>Presentation</div>
-          <div className="hd-poprow">
-            <button className={`hd-mini${presentation ? " on" : ""}`}
-              onClick={() => setPresentation(v => !v)}>{presentation ? "✓ On" : "Off"}</button>
-            <span>Min pause</span>
-            <Stepper value={presoDelay} onChange={setPresoDelay} step={0.5} min={0} />
-          </div>
-          <div className="hd-poprow">
-            <span>Read</span>
-            <Stepper value={readPace} onChange={setReadPace} step={1} min={0} max={READ_PACES.length - 1}
-              fmt={i => (READ_PACES[i] || READ_PACES[READ_PACE_DEFAULT]).label} />
-            <span className="hd-sechint">longer captions hold longer</span>
-          </div>
-          <div className="hd-poprow">
-            <button className={`hd-mini${minorDesc ? " on" : ""}`}
-              onClick={() => setMinorDesc(v => !v)}>{minorDesc ? "✓ Minor steps" : "Minor steps"}</button>
-            <span className="hd-sechint">auto-caption the areas each player skates through</span>
-          </div>
-          <div className="hd-poprow">
-            <button className="hd-mini" onClick={() => setOpenMenu("steps")}><Icon name="pencil" size={13} /> Edit steps</button>
-            <span className="hd-sechint">{drillSteps.length ? `${drillSteps.length} step${drillSteps.length > 1 ? "s" : ""} — play pauses at each` : "scrub, pause, add your own"}</span>
-          </div>
+          {/* The version watermark used to sit in the bottom bar. It moved in
+              here so the bar could be controls only — it's the build stamp you
+              check after a deploy, so it stays a tap away rather than being
+              buried, and it doubles as the way into About. */}
+          <button className="hd-item hd-verrow" onClick={() => setOpenMenu("about")}>
+            <Icon name="info" size={16} />
+            <span className="hd-vernum">v{APP_VERSION}</span>
+            <span className="hd-verstamp">{BUILD_STAMP}</span>
+            <span className="hd-chev"><Icon name="chevronRight" size={14} /></span>
+          </button>
+
           {/* destructive action lives alone at the very bottom, behind a divider */}
-          <div style={{ height: 1, background: "#2c3846", margin: "4px 0" }} />
+          <div className="hd-rule" />
           <button className="hd-item danger"
             onClick={() => {
               setPlaying(false); resetAnim();
@@ -9993,186 +11040,323 @@ export default function DrillAnimator() {
               setSelectedId(null); setPopup(null); setOpenMenu(null);
               flash("Board cleared — Undo restores it", 3000);
             }}><Icon name="trash" size={16} /> Clear all</button>
-          <div className="hd-note">
-            Tap a piece, route point, or line for its settings.
-            Double-tap a line to add a point. Drag to move; touch drags show a magnifier.
+        </div>
+      )}
+
+      {openMenu === "about" && (
+        <div className="hd-sheet">
+          <div className="hd-mh">About DrillBoard</div>
+          <div className="hd-prefbody">
+            <div className="hd-pref">
+              <div className="hd-prefhead"><span className="hd-preftitle">Version</span>
+                <span className="hd-vernum">v{APP_VERSION}</span></div>
+              <div className="hd-prefdesc">
+                Built {BUILD_STAMP}. Drill format DSL&nbsp;{DSL_VERSION} — the version stamped into
+                every drill you save or share.
+              </div>
+            </div>
+            <div className="hd-pref">
+              <div className="hd-prefhead"><span className="hd-preftitle">What this is</span></div>
+              <div className="hd-prefdesc">
+                A full-screen drill animator for the bench. Sketch a drill with the smart pen or
+                place pieces by hand, then play it back — skating, passes, shots and reactions all
+                timed from real rink distances rather than from anything on screen.
+              </div>
+            </div>
+            <div className="hd-pref">
+              <div className="hd-prefhead"><span className="hd-preftitle">Where drills live</span></div>
+              <div className="hd-prefdesc">
+                On this device. The board autosaves as you work, and a crash keeps a recoverable
+                copy. Share a drill with <b>Share preview link</b> — the whole thing travels in the
+                URL, so nothing is uploaded anywhere.
+              </div>
+            </div>
+            <div className="hd-pref">
+              <div className="hd-prefhead"><span className="hd-preftitle">Something wrong?</span>
+                <button className="hd-mini" onClick={() => { setShowDiag(true); setOpenMenu(null); }}>
+                  Open diagnostics</button></div>
+              <div className="hd-prefdesc">
+                Diagnostics shows live viewport, safe-area and rink numbers — the fastest way to
+                describe a layout problem on a phone. For ink that won&rsquo;t convert, use
+                <b> Copy diagnostics</b> in App &amp; drill settings.
+              </div>
+            </div>
+            <div className="hd-note">
+              Add to Home Screen for the full-screen version — that&rsquo;s the one this is built for.
+            </div>
+          </div>
+          <div className="hd-row">
+            <button className="hd-btn" onClick={() => setOpenMenu("settings")}><Icon name="chevronLeft" size={14} /> Menu</button>
+            <button className="hd-btn exit" onClick={() => setOpenMenu(null)}>Done</button>
           </div>
         </div>
       )}
 
       {openMenu === "prefs" && (
-        <div className="hd-menu" style={menuAnchor}>
+        /* A sheet, not a corner menu. Every row now carries a sentence of
+           explanation, and 18 of them in a 230px column wrap to five lines
+           each — unreadable. Notes, Inventory and Steps are all sheets for the
+           same reason. The body scrolls and the measure is capped so the prose
+           stays a comfortable width on a desktop. */
+        <div className="hd-sheet">
           <div className="hd-mh">App &amp; drill settings</div>
-          <div className="hd-mh" style={{ marginTop: 2, color: "var(--db-text-faint)" }}>Display</div>
-          <div className="hd-poprow">
-            <span className="hd-sectitle" style={{ width: "100%" }}>Theme</span>
-            {THEME_ORDER.map(v => (
-              <button key={v} className={`hd-mini${themePref === v ? " on" : ""}`}
-                onClick={() => setThemePref(v)}>
-                {THEME_LABEL[v] || v}
-              </button>
-            ))}
-            <span className="hd-sechint">
-              {themePref === "auto"
-                ? `follows your phone’s appearance — currently ${themeName}`
-                : `pinned to ${themePref}, ignoring your phone’s appearance`}
-            </span>
-          </div>
-          <div className="hd-poprow">
-            <button className={`hd-mini${realisticShots ? " on" : ""}`}
-              onClick={() => setRealisticShots(v => !v)}>{realisticShots ? "✓ Realistic shots" : "Realistic shots"}</button>
-            <span className="hd-sechint">shots randomly score, hit the post, or miss — off: every shot goes in along the ice</span>
-          </div>
-          <div className="hd-poprow">
-            <button className={`hd-mini${showResult ? " on" : ""}`}
-              onClick={() => setShowResult(v => !v)}>{showResult ? "✓ Goal splashes" : "Goal splashes"}</button>
-            <span className="hd-sechint">GOAL! / SAVE! / POST! calls over the net</span>
-          </div>
-          <div className="hd-poprow">
-            <button className={`hd-mini${detailAnim ? " on" : ""}`}
-              onClick={() => setDetailAnim(v => !v)}>{detailAnim ? "✓ Detailed animations" : "Detailed animations"}</button>
-            <span className="hd-sechint">skater stride, stick swing, puck cradle, airborne shots</span>
-          </div>
-          <div className="hd-poprow">
-            <button className={`hd-mini${stretchFill ? " on" : ""}`}
-              onClick={() => setStretchFill(v => !v)}>{stretchFill ? "✓ Stretch to fill" : "Stretch to fill"}</button>
-            <span className="hd-sechint">full ice fills the screen — off letterboxes it to true 200′×85′ proportions</span>
-          </div>
-          <div className="hd-poprow">
-            <button className={`hd-mini${whiteboard ? " on" : ""}`}
-              onClick={() => setWhiteboard(v => !v)}>{whiteboard ? "✓ Whiteboard mode" : "Whiteboard mode"}</button>
-            <span className="hd-sechint">classic X &amp; O player symbols, plain arrowed routes; shots stay on the ice, no splashes or detail animations</span>
-          </div>
+          <div className="hd-prefbody">
+
+          {/* The rows whose effect is a PICTURE show the picture and let you tap
+              it — see pref-preview.jsx. The rest keep their sentence: a sample
+              that can't show the difference is noise, so timings, odds and the
+              settings that only change how the SIMULATION behaves stay prose. */}
+          <div className="hd-mh hd-prefsec">Display</div>
+          <PrefPick title="Theme" scene="theme" ctx={pvCtx} value={themePref} set={setThemePref}
+            opts={THEME_ORDER.map(v => [v, THEME_LABEL[v] || v])}
+            desc={themePref === "auto"
+              ? `Which palette the board and chrome use. Auto follows your device's appearance — currently ${themeName}.`
+              : `Which palette the board and chrome use. Pinned to ${themePref}, ignoring your device's appearance.`} />
+          {/* the one visual row with no board in it: a typeface shows itself, so
+              each pill is set in the face it offers */}
+          <PrefRow title="Typeface"
+            desc="Which face the interface uses. All four are already on the device — nothing is downloaded, so this works with no signal. Rounded is Apple's SF Pro Rounded and only looks different on an iPhone or iPad.">
+            <div className="hd-pills">
+              {TYPEFACES.map(([v, lab, stack]) => (
+                <button key={v} className={`hd-mini${typeface === v ? " on" : ""}`} aria-pressed={typeface === v}
+                  style={{ fontFamily: stack }} onClick={() => setTypeface(v)}>{lab}</button>
+              ))}
+            </div>
+          </PrefRow>
+          <PrefPick title="Handedness" scene="hand" ctx={pvCtx} value={hand} set={setHand}
+            opts={[["left", "Left"], ["right", "Right"]]}
+            desc="Which side the bar's controls sit on. Left mirrors the bottom bar and the Draw and Edit palettes, so Menu, Rink and the tools fall under your left thumb instead of reaching across the ice. The rink and everything on it stay exactly where they are." />
+          <PrefPick title="Stretch to fill" scene="stretch" ctx={pvCtx} value={stretchFill} set={setStretchFill}
+            opts={[[true, "Stretch"], [false, "True shape"]]}
+            desc="Full ice stretches to fill the screen. Off letterboxes it to true 200′ × 85′ proportions, so distances on the board match distances on the rink." />
+          <PrefToggle title="Detailed animations" on={detailAnim} set={setDetailAnim}
+            desc="Skater stride, stick swing, puck cradle and airborne shots. Turn off for a plainer picture, or if playback stutters on an older device." />
+          <PrefPick title="Goal splashes" scene="splash" ctx={pvCtx} value={showResult} set={setShowResult}
+            opts={[[true, "On"], [false, "Off"]]}
+            desc="Call GOAL! / SAVE! / POST! over the net as each shot resolves." />
+          <PrefPick title="Ice zones" scene="zones" ctx={pvCtx} value={showZones} set={setShowZones}
+            opts={[[true, "On"], [false, "Off"]]}
+            desc="Name the areas of the sheet over the rink — slot, half wall, neutral zone. Useful when writing captions that refer to them." />
+          <PrefSample title="Line thickness" scene="thickness" ctx={pvCtx} value={lineScale}
+            desc="Scales every route line, arrow and mark. Worth raising when projecting to a room."
+            control={<Stepper value={lineScale} onChange={setLineScale} step={0.25}
+              min={LINE_RANGE[0]} max={LINE_RANGE[1]} suffix="×" />} />
+          <PrefSample title="Mark opacity" scene="opacity" ctx={pvCtx} value={markOpacity}
+            desc={`How solid freehand marker ink and shapes are drawn — ${Math.round(markOpacity * 100)}% now. Lower lets rink markings read through your annotations.`}>
+            <input type="range" min={MARK_RANGE[0]} max={MARK_RANGE[1]} step={0.05} value={markOpacity} style={{ width: "100%" }}
+              onChange={e => setMarkOpacity(parseFloat(e.target.value))} />
+          </PrefSample>
+          {/* The mirror of Mark opacity, and next to it on purpose: that one
+              quiets what you drew so the rink reads through it, this one quiets
+              the rink so what you drew reads over it. */}
+          <PrefSample title="Rink markings" scene="rinkdim" ctx={pvCtx} value={rinkDim}
+            desc={rinkDim < 1
+              ? `How strongly the rink's own lines, circles and creases are drawn — ${Math.round(rinkDim * 100)}% now. The ice itself doesn't change, so the sheet stays solid and only the markings step back.`
+              : "How strongly the rink's own lines, circles and creases are drawn. Turn it down to let a busy drill read over the sheet, or to calm a projector."}>
+            <input type="range" min={RINKDIM_RANGE[0]} max={RINKDIM_RANGE[1]} step={0.05} value={rinkDim} style={{ width: "100%" }}
+              onChange={e => setRinkDim(parseFloat(e.target.value))} />
+          </PrefSample>
+          <PrefPick title="Action badges" scene="badges" ctx={pvCtx} value={actionCircles} set={setActionCircles}
+            opts={[[true, "Show"], [false, "Hide"]]}
+            dim={whiteboard}
+            desc={whiteboard
+              ? "The icon discs marking where a player passes, shoots or picks the puck up. Whiteboard mode never draws them, so this has no effect until you switch back to Graphic in the Rink menu."
+              : "The icon discs marking where a player passes, shoots or picks the puck up. Hidden, the route just runs an arrow into the waypoint — the same look whiteboard mode has always had. What happens where is still listed in the piece's Chain of events."} />
+
+          {/* Whiteboard mode itself is a board choice, not a preference — it
+              lives in the Rink menu next to full/half/quarter. What stays here
+              is how its symbols are drawn, and only while it is on. */}
           {whiteboard && (
             <>
-              <div className="hd-poprow">
-                <button className={`hd-mini${wbCircle ? " on" : ""}`}
-                  onClick={() => setWbCircle(v => !v)}>{wbCircle ? "✓ Circled symbols" : "Circled symbols"}</button>
-                <span className="hd-sechint">draw each X / O on an opaque white disc, like the action circles</span>
-              </div>
-              <div className="hd-poprow">
-                <button className={`hd-mini${wbNames ? " on" : ""}`}
-                  onClick={() => setWbNames(v => !v)}>{wbNames ? "✓ Player names" : "Player names"}</button>
-                <span className="hd-sechint">name tag under each X / O — off still shows them while a player's popup is open</span>
-              </div>
+              <div className="hd-mh hd-prefsec">Whiteboard</div>
+              <PrefPick title="Circled symbols" scene="wbcircle" ctx={pvCtx} value={wbCircle} set={setWbCircle}
+                opts={[[true, "Circled"], [false, "Bare"]]}
+                desc="Put each X or O on an opaque disc so it stays readable where it crosses a rink line. Whiteboard mode itself is in the Rink menu." />
+              <PrefPick title="Player names" scene="wbnames" ctx={pvCtx} value={wbNames} set={setWbNames}
+                opts={[[true, "On"], [false, "Off"]]}
+                desc="Show a name tag under every symbol. Off still names a player while their panel is open." />
             </>
           )}
-          <div className="hd-poprow">
-            <span>Line thickness</span>
-            <Stepper value={lineScale} onChange={setLineScale} step={0.25} min={0.5} max={3} suffix="×" />
-          </div>
-          <div className="hd-poprow">
-            <span>Mark opacity <b style={{ color: "#c8d2dc" }}>{Math.round(markOpacity * 100)}%</b></span>
-            <input type="range" min={0.1} max={1} step={0.05} value={markOpacity} style={{ flex: 1, minWidth: 80 }}
-              onChange={e => setMarkOpacity(parseFloat(e.target.value))} />
-          </div>
-          <div className="hd-mh" style={{ marginTop: 4, color: "#6b7a8c" }}>Routes &amp; playback</div>
-          <div className="hd-poprow">
-            <button className={`hd-mini${collisions ? " on" : ""}`}
-              onClick={() => setCollisions(v => !v)}>{collisions ? "✓ Route avoidance" : "Route avoidance"}</button>
-            <span className="hd-sechint">curve routes around nets / goalie / players</span>
-          </div>
+
+          {/* Smart pen — settings that outlive a sketch, so they belong with the
+              standing preferences rather than inside the Draw palette (which is
+              a strip, not a settings panel, and only exists while drawing). */}
+          <div className="hd-mh hd-prefsec">Board</div>
+          <PrefToggle title="Allow selecting locked items" on={lockedSelectable} set={setLockedSelectable}
+            desc="A locked piece normally ignores taps entirely, so you can draw over it freely. Turn this on to still select one — its panel opens with an Unlock button instead of its settings." />
+
+          <div className="hd-mh hd-prefsec">Presentation</div>
+          <PrefRow title="Minimum caption pause"
+            desc={`The least time play holds at any caption — ${presoDelay}s. A longer note holds longer than this on its own (see below). Tapping the ice skips ahead without waiting.`}
+            control={<Stepper value={presoDelay} onChange={setPresoDelay} step={0.5} min={0} suffix="s" />} />
+          <PrefRow title="Reading pace"
+            desc={(READ_PACES[readPace] || READ_PACES[READ_PACE_DEFAULT]).cps
+              ? "Long captions hold past the minimum, scaled to how much there is to read. Brisk assumes a quick reader; Relaxed gives a room more time."
+              : "Fixed — every caption holds for exactly the minimum above, however much it says."}
+            control={<Stepper value={readPace} onChange={setReadPace} step={1} min={0} max={READ_PACES.length - 1}
+              fmt={i => (READ_PACES[i] || READ_PACES[READ_PACE_DEFAULT]).label} />} />
+          <PrefToggle title="Minor steps" on={minorDesc} set={setMinorDesc}
+            desc="Auto-caption the areas each player skates through, on top of the steps you wrote yourself. A quick way to narrate a drill you haven't annotated." />
+
+          <div className="hd-mh hd-prefsec">Smart pen</div>
+          <PrefToggle title="Palm rejection" on={palmReject} set={setPalmReject}
+            desc="While an Apple Pencil is in use, ignore fingers on the ice so a resting hand can't draw or drag a piece." />
+          <PrefPick title="Pencil pressure" scene="pressure" ctx={pvCtx} value={pencilPress} set={setPencilPress}
+            opts={[[true, "Varying"], [false, "Flat"]]}
+            desc="Vary line weight with how hard you press. Off draws every stroke at the chosen width, and flattens ink already on the board." />
+          <PrefRow title="Won't convert?"
+            desc="Copies what the recogniser saw for the last burst of ink. Paste it into a bug report when a stroke refuses to become a piece."
+            control={<button className="hd-mini" onClick={copyPenDiag}>Copy diagnostics</button>} />
+
+          <div className="hd-mh hd-prefsec">Routes &amp; playback</div>
+          <PrefPick title="Route avoidance" scene="avoid" ctx={pvCtx} value={collisions} set={setCollisions}
+            opts={[[true, "Around"], [false, "Through"]]}
+            desc="Skaters curve around nets, the goalie and each other instead of passing through them." />
           {collisions && (
-            <div className="hd-poprow">
-              <button className={`hd-mini${avoidanceVisuals ? " on" : ""}`}
-                onClick={() => setAvoidanceVisuals(v => !v)}>{avoidanceVisuals ? "✓ Route avoidance visuals" : "Route avoidance visuals"}</button>
-              <span className="hd-sechint">draw the curved detour + ghost (off = straight lines; the skater still avoids)</span>
-            </div>
+            <PrefPick title="Show the detour" scene="detour" ctx={pvCtx} value={avoidanceVisuals} set={setAvoidanceVisuals}
+              opts={[[true, "Draw it"], [false, "Hide it"]]}
+              desc="Draw the curved path around an obstacle, with a ghost of the line you drew. Off keeps the drawn line straight while the skater still avoids." />
           )}
-          <div className="hd-poprow">
-            <button className={`hd-mini${arrowStagger ? " on" : ""}`}
-              onClick={() => setArrowStagger(v => !v)}>{arrowStagger ? "✓ Tidy arrowheads" : "Tidy arrowheads"}</button>
-            <span className="hd-sechint">nudges overlapping arrows apart so every arrowhead stays readable — off lands them exactly where drawn</span>
-          </div>
-          <div className="hd-poprow">
-            <button className={`hd-mini${previewAllBranches ? " on" : ""}`}
-              onClick={() => setPreviewAllBranches(v => !v)}>{previewAllBranches ? "✓ Preview all branches" : "Preview all branches"}</button>
-            <span className="hd-sechint">on play, ghost the player through every possible reaction at once</span>
-          </div>
-          <div className="hd-poprow">
-            <span>Route lines</span>
-            {[["player", "Player"], ["hide", "None"], ["all", "All + puck"]].map(([v, lab]) => (
-              <button key={v} className={`hd-mini${playRoutes === v ? " on" : ""}`}
-                onClick={() => setPlayRoutes(v)}>{lab}</button>
-            ))}
-            <span style={{ fontSize: 11, color: "#8b99a8", width: "100%" }}>which route lines stay visible while the drill plays</span>
-          </div>
-          <div className="hd-poprow">
-            <span>New player speed</span>
-            <Stepper value={defaultSpeed} onChange={setDefaultSpeed} step={0.1} min={0.5} max={3} suffix="×" />
-          </div>
-          <div className="hd-poprow">
-            <span>Loop end pause</span>
-            <Stepper value={loopPause} onChange={setLoopPause} step={0.5} min={0} suffix="s" />
-          </div>
-          <div className="hd-mh" style={{ marginTop: 4 }}>Default drill pace</div>
-          <div style={{ fontSize: 12, color: "#8b99a8" }}>
-            {pace} ft/s · run {drillTime.toFixed(1)}s
-            <input type="range" min={6} max={30} step={1} value={pace} style={{ width: "100%" }}
-              onChange={e => setPace(parseFloat(e.target.value))} />
-          </div>
-          <div className="hd-mh" style={{ marginTop: 4, color: "#6b7a8c" }}>App</div>
+          <PrefPick title="Tidy arrowheads" scene="arrows" ctx={pvCtx} value={arrowStagger} set={setArrowStagger}
+            opts={[[true, "Nudged apart"], [false, "As drawn"]]}
+            desc="Nudge arrowheads apart where routes end close together, so each one stays readable. Off lands every arrow exactly where it was drawn." />
+          <PrefPick title="Preview all branches" scene="branches" ctx={pvCtx} value={previewAllBranches} set={setPreviewAllBranches}
+            opts={[[true, "All at once"], [false, "One at random"]]}
+            desc="Where a player has reactions to a cue, play ghosts them through every option at once instead of picking one at random." />
+          {/* "Lines while playing" is deliberately NOT here — it lives on the
+              transport, where you change it mid-presentation. One setting, one
+              control. */}
+          <PrefRow title="New player speed"
+            desc="The skating speed given to players you add from now on. Players already on the board keep theirs."
+            control={<Stepper value={defaultSpeed} onChange={setDefaultSpeed} step={0.1} min={0.5} max={3} suffix="×" />} />
+          <PrefRow title="Loop end pause"
+            desc="How long a looping drill holds on the last frame before it starts again."
+            control={<Stepper value={loopPause} onChange={setLoopPause} step={0.5} min={0} suffix="s" />} />
+          {/* "Drill pace" is deliberately NOT here — it lives on the transport
+              as the speed button, for the same reason "Lines while playing"
+              does: you change it while showing a drill. One setting, one
+              control. */}
+
+          <div className="hd-mh hd-prefsec">App</div>
           {keyEdit == null ? (
-            <div className="hd-poprow">
-              <button className="hd-mini" onClick={() => setKeyEdit(localStorage.getItem(ANTHROPIC_KEY_STORE) || "")}>Claude API key…</button>
-              <span className="hd-sechint">{localStorage.getItem(ANTHROPIC_KEY_STORE) ? "set — used by Import from photo" : "needed for Import from photo"}</span>
-            </div>
+            <PrefRow title="Claude API key"
+              desc={`Used by Import from photo to read a drill off a whiteboard or sheet. Stored only on this device — ${localStorage.getItem(ANTHROPIC_KEY_STORE) ? "one is set." : "none set yet."}`}
+              control={<button className="hd-mini" onClick={() => setKeyEdit(localStorage.getItem(ANTHROPIC_KEY_STORE) || "")}>
+                {localStorage.getItem(ANTHROPIC_KEY_STORE) ? "Change…" : "Set…"}</button>} />
           ) : (
-            <div className="hd-poprow">
-              <input className="hd-input" type="password" autoFocus placeholder="sk-ant-…" value={keyEdit}
-                autoComplete="off" style={{ flex: 1, minWidth: 0, fontFamily: "ui-monospace, monospace", fontSize: 12 }}
-                onChange={e => setKeyEdit(e.target.value)} />
-              <button className="hd-mini" onClick={() => {
-                if (keyEdit.trim()) { localStorage.setItem(ANTHROPIC_KEY_STORE, keyEdit.trim()); flash("API key saved"); }
-                else { localStorage.removeItem(ANTHROPIC_KEY_STORE); flash("API key cleared"); }
-                setKeyEdit(null);
-              }}>Save</button>
-              <button className="hd-mini" onClick={() => setKeyEdit(null)}><Icon name="close" size={13} /></button>
-              <span style={{ fontSize: 11, color: "#8b99a8", width: "100%" }}>
-                Stored only on this device — use a spend-capped key. Empty + Save clears it.</span>
-            </div>
+            <PrefRow title="Claude API key"
+              desc="Use a spend-capped key. Saving an empty box clears it.">
+              <div className="hd-poprow">
+                <input className="hd-input" type="password" autoFocus placeholder="sk-ant-…" value={keyEdit}
+                  autoComplete="off" style={{ flex: 1, minWidth: 0, fontFamily: "ui-monospace, monospace", fontSize: 12 }}
+                  onChange={e => setKeyEdit(e.target.value)} />
+                <button className="hd-mini" onClick={() => {
+                  if (keyEdit.trim()) { localStorage.setItem(ANTHROPIC_KEY_STORE, keyEdit.trim()); flash("API key saved"); }
+                  else { localStorage.removeItem(ANTHROPIC_KEY_STORE); flash("API key cleared"); }
+                  setKeyEdit(null);
+                }}>Save</button>
+                <button className="hd-mini" onClick={() => setKeyEdit(null)}><Icon name="close" size={13} /></button>
+              </div>
+            </PrefRow>
           )}
+
+          {/* Sits directly above the odds it governs. It went missing in the
+              settings rewrite — the only way to reach it had become the "Turn
+              it on" button inside the collapsed Advanced warning, so it could
+              be switched on and never off again. */}
+          <div className="hd-mh hd-prefsec">Shots</div>
+          <PrefToggle title="Realistic shots" on={realisticShots} set={setRealisticShots}
+            desc="Shots resolve by chance — saved, off the post, wide, over, or in. Off, every shot goes in flat along the ice, which is clearer when you're teaching the pattern rather than the outcome." />
+
           <button className={`hd-item${showAdvanced ? " on" : ""}`} style={{ marginTop: 4 }}
-            onClick={() => setShowAdvanced(v => !v)}>
-            <Icon name="target" size={16} /> {showAdvanced ? "▾" : "▸"} Advanced · shot odds
+            aria-expanded={showAdvanced} onClick={() => setShowAdvanced(v => !v)}>
+            <Icon name="target" size={16} /> Advanced · shot odds
+            <span className="hd-chev"><Icon name={showAdvanced ? "chevronDown" : "chevronRight"} size={14} /></span>
           </button>
           {showAdvanced && (() => {
             const pct = v => Math.round(v * 100);
             const goalPct = Math.max(0, 1 - shotOdds.post - shotOdds.wide - shotOdds.over);
-            const odd = (label, key, hint) => (
-              <div style={{ fontSize: 11, color: "#8b99a8", marginTop: 2 }}>
-                {label} <b style={{ color: "#c8d2dc" }}>{pct(shotOdds[key])}%</b>{hint ? ` · ${hint}` : ""}
+            const odd = (title, key, desc) => (
+              <PrefRow key={key} title={`${title} · ${pct(shotOdds[key])}%`} desc={desc} dim={!realisticShots}>
                 <input type="range" min={0} max={1} step={0.05} value={shotOdds[key]} style={{ width: "100%" }}
                   onChange={e => setShotOdds(o => ({ ...o, [key]: parseFloat(e.target.value) }))} />
-              </div>
+              </PrefRow>
             );
             return (
-              <div style={{ opacity: realisticShots ? 1 : 0.5 }}>
-                {!realisticShots && <div style={{ fontSize: 11, color: "#c98b3a", marginTop: 2 }}>Turn on “Realistic shots” for these to apply.</div>}
-                {odd("Goalie save", "save", "else a goal on net")}
-                <div className="hd-mh" style={{ marginTop: 4 }}>Empty net · miss odds</div>
-                {odd("Off the post", "post")}
-                {odd("Wide", "wide")}
-                {odd("Over the net", "over")}
-                <div style={{ fontSize: 11, color: "#8b99a8", marginTop: 2 }}>
-                  Goal <b style={{ color: goalPct > 0 ? "#3ecf7a" : "#e05a5a" }}>{pct(goalPct)}%</b>
-                  {goalPct > 0 ? " — the remainder" : " — misses exceed 100%"}
+              <>
+                {!realisticShots && (
+                  <div className="hd-prefwarn">
+                    These only apply with <b>Realistic shots</b> on — right now every shot goes in along the ice.
+                    <button className="hd-mini" style={{ marginLeft: 6 }} onClick={() => setRealisticShots(true)}>Turn it on</button>
+                  </div>
+                )}
+                {odd("Goalie save", "save", "Chance a shot on a net WITH a goalie is stopped. The rest beat them.")}
+                <div className="hd-mh hd-prefsec">Empty net · how a shot misses</div>
+                {odd("Off the post", "post", "Rings the post and rebounds back into play.")}
+                {odd("Wide", "wide", "Sails wide and runs into the corner.")}
+                {odd("Over the net", "over", "Flies over — always an airborne shot.")}
+                <div className="hd-prefdesc" style={{ padding: "0 2px" }}>
+                  Goal <b style={{ color: goalPct > 0 ? "var(--db-good)" : "var(--db-danger)" }}>{pct(goalPct)}%</b>
+                  {goalPct > 0 ? " — whatever the three misses leave." : " — the misses add up past 100%, so nothing scores."}
                 </div>
-                <div className="hd-mh" style={{ marginTop: 4 }}>Any shot</div>
-                {odd("Airborne", "air", "sauce-style rise + shadow")}
-                <div className="hd-mh" style={{ marginTop: 4 }}>Miss physics</div>
-                {odd("Board / post bounce", "bounce", "speed kept per carom — lower absorbs more")}
+                <div className="hd-mh hd-prefsec">Any shot</div>
+                {odd("Airborne", "air", "Chance a shot is lifted rather than kept flat — a sauce-style rise with a shadow, dropping at the net.")}
+                {odd("Board / post bounce", "bounce", "How much speed a missed puck keeps each time it caroms. Lower boards absorb more.")}
                 <button className="hd-mini" style={{ marginTop: 4 }}
-                  onClick={() => setShotOdds({ save: SAVE_PROB, post: MISS_POST, wide: MISS_WIDE, over: MISS_OVER, air: SHOT_AIR_PROB, bounce: BOUNCE_REST })}>Reset to defaults</button>
-              </div>
+                  onClick={() => setShotOdds({ save: SAVE_PROB, post: MISS_POST, wide: MISS_WIDE, over: MISS_OVER, air: SHOT_AIR_PROB, bounce: BOUNCE_REST })}>Reset shot odds</button>
+              </>
             );
           })()}
-          <div className="hd-note">Preferences apply to this session and to how new pieces are added.</div>
+            <div className="hd-note">These are saved for this device, not with the drill — except the pace and shot odds, which belong to the drill you're editing.</div>
+          </div>
+          <div className="hd-row">
+            <button className="hd-btn" onClick={() => setOpenMenu("settings")}><Icon name="chevronLeft" size={14} /> Menu</button>
+            <button className="hd-btn exit" onClick={() => setOpenMenu(null)}>Done</button>
+          </div>
+        </div>
+      )}
+
+      {openMenu === "game" && (
+        <div className="hd-sheet">
+          <div className="hd-mh">Game mode</div>
+          <div className="hd-prefbody">
+            <div className="hd-pref">
+              <div className="hd-prefhead"><span className="hd-preftitle">Let AI play</span></div>
+              <div className="hd-prefdesc">
+                Ten skaters and two goalies play a live 5v5 on the sheet — no drill, no routes,
+                just a game. Useful for showing a shape or a situation you haven't drawn, or for
+                letting the board run while you talk.
+              </div>
+            </div>
+            <PrefRow title="Length"
+              desc={`How long the run lasts before it stops on its own — ${aiMins} minute${aiMins > 1 ? "s" : ""}. You can stop it any time from the scoreboard at the top of the ice.`}
+              control={<Stepper value={aiMins} onChange={setAiMins} step={1} min={1} suffix="m" />} />
+            <div className="hd-pref">
+              <div className="hd-prefhead"><span className="hd-preftitle">Your board is safe</span></div>
+              <div className="hd-prefdesc">
+                The game runs OVER your drill without touching it — nothing is added, moved or
+                saved while it plays, and your board is exactly as you left it when it ends.
+              </div>
+            </div>
+          </div>
+          <div className="hd-row">
+            <button className="hd-btn" onClick={() => setOpenMenu("settings")}><Icon name="chevronLeft" size={14} /> Menu</button>
+            <button className="hd-btn exit" onClick={startAiPlay}><Icon name="play" size={14} /> Start game</button>
+          </div>
         </div>
       )}
 
       {openMenu === "rinkmenu" && (
+        /* One menu answering "what surface, drawn which way". Style sits on top
+           because it is the same class of choice as full-vs-half — which board
+           you are drawing on — and it deliberately does NOT close the menu, so
+           the coach can see the board flip and change their mind. The surface
+           rows below do close it, as they always have. */
         <div className="hd-menu" style={menuAnchor}>
+          <div className="hd-mh">Board style</div>
+          <Pills value={whiteboard ? "wb" : "graphic"} set={v => setWhiteboard(v === "wb")}
+            opts={[["graphic", "Graphic"], ["wb", "Whiteboard"]]} />
+          <div className="hd-rule" />
           <div className="hd-mh">Ice surface</div>
           <button className={`hd-item${rink === "full" ? " on" : ""}`}
             onClick={() => { setRink("full"); setOpenMenu(null); }}>Full ice</button>
@@ -10184,116 +11368,32 @@ export default function DrillAnimator() {
             onClick={() => { setRink("half"); setHalfNS(true); setHalfFlip(false); setOpenMenu(null); }}>Half ice · net ↓</button>
           <button className={`hd-item${rink === "half" && halfNS && halfFlip ? " on" : ""}`}
             onClick={() => { setRink("half"); setHalfNS(true); setHalfFlip(true); setOpenMenu(null); }}>Half ice · net ↑</button>
-          <button className={`hd-item${rink === "quarter" ? " on" : ""}`}
-            onClick={() => { setRink("quarter"); setOpenMenu(null); }}>Quarter sheet</button>
+          {/* the pad is laid out the way the quadrants sit on the sheet, so
+              picking one is a glance rather than a read */}
+          <div className="hd-mh hd-prefsec">Quarter sheet</div>
+          <div className="hd-quadpad">
+            {QUARTERS.map(([v, label]) => (
+              <button key={v} className={`hd-mini${rink === v ? " on" : ""}`} aria-pressed={rink === v}
+                onClick={() => { setRink(v); setOpenMenu(null); }}>{label}</button>
+            ))}
+          </div>
         </div>
       )}
 
-      {openMenu === "tools" && (
-        <div className="hd-menu" style={menuAnchor}>
-          <button className="hd-item" onClick={() => { resetAnim(); setPlaying(false); setPopup(null); setTool("pen"); setPenMode(true); setOpenMenu(null); }}>
-            <Icon name="marker" size={16} /> Smart pen — sketch it
-          </button>
-          <div className="hd-mh">Main items</div>
-          <div className="hd-toolgrid">
-            {[["player", "Player"], ["playerpuck", "+ Puck"], ["puck", "Puck"], ["net", "Net"]].map(([k, lbl]) => (
-              <button key={k} className={`hd-tool${tool === k ? " on" : ""}`} onClick={() => { setTool(k); setOpenMenu(null); }}>
-                {toolImg(k, whiteboard, wbCircle)}<span>{lbl}</span>
-              </button>
-            ))}
-          </div>
-          <div className="hd-mh" style={{ marginTop: 4 }}>Tools</div>
-          <div className="hd-toolgrid">
-            {[["cone", "Cone"], ["tire", "Tire"], ["bumper", "Bumper"], ["deker", "Deker"],
-              ["passer", "Passer"], ["stick", "Stick"], ["light", "Light"]].map(([k, lbl]) => (
-              <button key={k} className={`hd-tool${tool === k ? " on" : ""}`} onClick={() => { setTool(k); setOpenMenu(null); }}>
-                {toolImg(k, whiteboard, wbCircle)}<span>{lbl}</span>
-              </button>
-            ))}
-          </div>
-          <div className="hd-mh" style={{ marginTop: 4 }}>Ice markers &amp; overlays</div>
-          <div className="hd-toolgrid">
-            <button className={`hd-tool${tool === "marker" ? " on" : ""}`}
-              onClick={() => { resetAnim(); setPlaying(false); setPopup(null); setTool("marker"); }}>
-              <span className="hd-toolglyph"><Icon name="marker" size={22} /></span><span>Marker</span>
-            </button>
-            {/* close the sheet on pick — on a phone it covers most of the ice,
-                and the next thing you want to do is draw */}
-            <button className={`hd-tool${tool === "pen" ? " on" : ""}`}
-              onClick={() => { resetAnim(); setPlaying(false); setPopup(null); setTool("pen"); setPenMode(true); setOpenMenu(null); }}>
-              <span className="hd-toolglyph"><Icon name="marker" size={22} /></span><span>Smart pen</span>
-            </button>
-            {[["square", "□", "Square"], ["circle", "○", "Circle"], ["triangle", "△", "Triangle"]].map(([k, glyph, lbl]) => (
-              <button key={k} className="hd-tool" onClick={() => { resetAnim(); setPlaying(false); addShapeMark(k); setOpenMenu(null); }}>
-                <span className="hd-toolglyph">{glyph}</span><span>{lbl}</span>
-              </button>
-            ))}
-            <button className={`hd-tool${tool === "label" ? " on" : ""}`} onClick={() => { setTool("label"); setOpenMenu(null); }}>
-              <span className="hd-toolglyph"><Icon name="label" size={22} /></span><span>Label</span>
-            </button>
-          </div>
-          {/* marker style/colour/thickness, shown once the marker (or pen —
-              shared settings style its fallback ink) is picked */}
-          {(tool === "marker" || tool === "pen") && (
-            <>
-              <div className="hd-poprow">
-                {PEN_INKS.map(c => (
-                  <div key={c} className={`hd-swatch${markColor === c ? " on" : ""}`} style={{ background: c }}
-                    onClick={() => setMarkColor(c)} />
-                ))}
-              </div>
-              <div className="hd-poprow">
-                <span>Style</span>
-                {[["solid", "Solid"], ["dashed", "Dashed"], ["dotted", "Dotted"], ["wavy", "Wavy"]].map(([s, lbl]) => (
-                  <button key={s} className={`hd-mini${markStyle === s ? " on" : ""}`} onClick={() => setMarkStyle(s)}>{lbl}</button>
-                ))}
-              </div>
-              {tool === "pen" && (
-                <>
-                  <div className="hd-poprow">
-                    <span>Apple Pencil</span>
-                    <button className={`hd-mini${palmReject ? " on" : ""}`} onClick={() => setPalmReject(v => !v)}>
-                      <Icon name={palmReject ? "check" : "close"} size={13} /> Palm rejection
-                    </button>
-                    <button className={`hd-mini${pencilPress ? " on" : ""}`} onClick={() => setPencilPress(v => !v)}
-                      title="Pressure varies line weight — off draws every stroke at the chosen width">
-                      <Icon name={pencilPress ? "check" : "close"} size={13} /> Pressure
-                    </button>
-                  </div>
-                  <div className="hd-poprow">
-                    <span>Won't convert?</span>
-                    <button className="hd-mini" onClick={copyPenDiag}>Copy diagnostics</button>
-                  </div>
-                </>
-              )}
-              <div className="hd-poprow">
-                <span>Thickness</span>
-                <input type="range" min={0.5} max={3} step={0.1} value={markWidth} style={{ flex: 1, minWidth: 80 }}
-                  onChange={e => setMarkWidth(parseFloat(e.target.value))} />
-              </div>
-              <span style={{ fontSize: 11, color: "#8b99a8", padding: "0 2px" }}>{tool === "pen"
-                ? "sketch X's and O's, routes, dashed passes, a dot for the puck — the ink becomes real pieces (unrecognized strokes stay ink)"
-                : "drag on the ice to draw; tap a mark to restyle, resize by its corners, or delete"}</span>
-            </>
-          )}
-          {tool !== "select" && (
-            <button className="hd-item" onClick={() => { setTool("select"); setOpenMenu(null); }}><Icon name="close" size={16} /> Cancel tool</button>
-          )}
-        </div>
-      )}
 
       {openMenu === "notes" && (
         <div className="hd-sheet">
-          <div className="hd-mh">Coaching notes <span style={{ fontWeight: 400, color: "#8b99a8", textTransform: "none", letterSpacing: 0 }}>· markdown</span></div>
+          <div className="hd-mh">Coaching notes <span style={{ fontWeight: 400, color: "var(--db-text-muted)", textTransform: "none", letterSpacing: 0 }}>· markdown</span></div>
           <textarea className="hd-ta" value={drillNotes} placeholder={"# Setup\n\n1. F1 carries out of the corner\n2. **Chip** off the glass past the D\n\n- Coach cue: head up through the neutral zone"}
             onChange={e => setDrillNotes(e.target.value)} spellCheck={false} />
           {drillNotes.trim() && (
             <div className="hd-mdprev" dangerouslySetInnerHTML={{ __html: mdBlock(drillNotes) }} />
           )}
           <div className="hd-row">
-            <button className="hd-btn primary" onClick={() => setOpenMenu(null)}>Done</button>
-            <button className="hd-btn danger" style={{ marginLeft: "auto" }}
+            <button className="hd-btn" onClick={() => setOpenMenu("settings")}><Icon name="chevronLeft" size={14} /> Menu</button>
+            <button className="hd-btn danger"
               onClick={() => { setDrillNotes(""); flash("Notes cleared — Undo restores them"); }}>Clear</button>
+            <button className="hd-btn exit" onClick={() => setOpenMenu(null)}>Done</button>
           </div>
           <div className="hd-note">
             A written writeup shown on the print sheet and preview page. Supports markdown:
@@ -10308,7 +11408,7 @@ export default function DrillAnimator() {
         const rows = deriveInventory(pieces, drillItems);
         return (
           <div className="hd-sheet">
-            <div className="hd-mh">Inventory <span style={{ fontWeight: 400, color: "#8b99a8", textTransform: "none", letterSpacing: 0 }}>· what you need</span></div>
+            <div className="hd-mh">Inventory <span style={{ fontWeight: 400, color: "var(--db-text-muted)", textTransform: "none", letterSpacing: 0 }}>· what you need</span></div>
             {/* capped width so label · count · action read as columns, not opposite screen edges */}
             <div className="hd-steplist" style={{ maxWidth: 560 }}>
               {rows.length === 0 ? (
@@ -10319,7 +11419,7 @@ export default function DrillAnimator() {
                     ? <input className="hd-input" style={{ flex: 1, minWidth: 0 }} value={r.label}
                         placeholder="Gear…" onChange={e => setCustomItem(r, { label: e.target.value })} />
                     : <span style={{ flex: 1, minWidth: 0 }}>{r.label}
-                        {r.count !== r.autoCount && <span style={{ color: "#8b99a8", fontSize: 11 }}> · {r.autoCount} on ice</span>}</span>}
+                        {r.count !== r.autoCount && <span style={{ color: "var(--db-text-muted)", fontSize: 11 }}> · {r.autoCount} on ice</span>}</span>}
                   <Stepper value={r.count} min={0} step={1} suffix=""
                     onChange={n => (r.custom ? setCustomItem(r, { count: n }) : setCanonItem(r, { count: n }))} />
                   {r.custom
@@ -10330,8 +11430,9 @@ export default function DrillAnimator() {
               ))}
             </div>
             <div className="hd-row">
+              <button className="hd-btn" onClick={() => setOpenMenu("settings")}><Icon name="chevronLeft" size={14} /> Menu</button>
               <button className="hd-btn" onClick={addCustomItem}>＋ Add gear</button>
-              <button className="hd-btn primary" onClick={() => setOpenMenu(null)}>Done</button>
+              <button className="hd-btn exit" onClick={() => setOpenMenu(null)}>Done</button>
             </div>
             <div className="hd-note">
               Auto-counted from the pieces on the ice. Edit a count to override it, <b>hide</b> a row to
@@ -10371,7 +11472,7 @@ export default function DrillAnimator() {
             </div>
           )}
           <div className="hd-row" style={{ alignItems: "center" }}>
-            <span style={{ fontSize: 12, color: "#8b99a8" }}>Export</span>
+            <span style={{ fontSize: 12, color: "var(--db-text-muted)" }}>Export</span>
             <button className="hd-btn" onClick={exportTxt}>.txt</button>
             <button className="hd-btn" onClick={exportMd}>.md</button>
             <button className="hd-btn" onClick={exportImage}>Image</button>
@@ -10380,7 +11481,7 @@ export default function DrillAnimator() {
             <summary style={{ cursor: "pointer", fontSize: 12.5, fontWeight: 700, color: "#93a3b5", padding: "4px 0" }}>
               DSL reference — every command, tap to expand</summary>
           <div className="hd-note">
-            Feet: x 0–200, y 0–85. <b>RINK</b> full|half|quarter ·
+            Feet: x 0–200, y 0–85. <b>RINK</b> full|half|quarter-tl|quarter-tr|quarter-bl|quarter-br ·
             <b> PIECE</b> id player|puck|cone|net|bumper|deker|passer|label|tire x y [#color] [label] [speed=1.2] [hand=L] [sym=LW] [on=F1]
             (<code>sym=</code> is a player&apos;s whiteboard symbol — ≤3 chars, shown instead of the skater when <b>Whiteboard mode</b> is on; <code>△</code>/<code>○</code>/<code>□</code> draw as real shapes; unset falls back to the player&apos;s name, or X if that&apos;s still the auto id like P1)
             (a <b>bumper</b> is a solid barrier — players skate around it and pucks carom off it; a <b>deker</b> a stickhandling gate, a <b>passer</b> a rebounder box — all take <code>face=deg</code>)
@@ -10513,9 +11614,10 @@ export default function DrillAnimator() {
             </div>
           )}
           <div className="hd-row">
-            <button className="hd-btn primary" onClick={() => { setOpenMenu(null); setEditAnchor(null); }}>Done</button>
+            <button className="hd-btn" onClick={() => setOpenMenu("settings")}><Icon name="chevronLeft" size={14} /> Menu</button>
             <button className={`hd-btn${presentation ? " primary" : ""}`}
-              onClick={() => setPresentation(v => !v)}>Presentation: {presentation ? "On" : "Off"}</button>
+              onClick={togglePresentation}>Presentation: {presentation ? "On" : "Off"}</button>
+            <button className="hd-btn exit" onClick={() => { setOpenMenu(null); setEditAnchor(null); }}>Done</button>
           </div>
           <div className="hd-note">
             Scrub the timeline, pause, then “＋ Add here” drops a note — near a route point it
@@ -10549,7 +11651,7 @@ export default function DrillAnimator() {
       )}
       {/* toast rides above the player-bar / pen-palette band, not across its controls */}
       {toast && (
-        <div style={{ position: "fixed", left: "50%", bottom: "calc(64px + var(--hd-b) + var(--hd-scrub))",
+        <div style={{ position: "fixed", left: "50%", bottom: "calc(var(--hd-menubar) + 10px + var(--hd-b) + var(--hd-act))",
           transform: "translateX(-50%)", background: "rgba(20,26,32,0.92)", color: "#eaf2f8",
           padding: "6px 14px", borderRadius: 8, fontSize: 13, zIndex: 9999, pointerEvents: "none" }}>{toast}</div>
       )}

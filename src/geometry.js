@@ -5,6 +5,26 @@ import { RINK } from "./constants.js";
 
 export const clampX = v => Math.max(0, Math.min(RINK.W, v));
 export const clampY = v => Math.max(0, Math.min(RINK.H, v));
+// Shift a whole point set back inside the rink box WITHOUT deforming it: the
+// boundary may MOVE a shape, never reshape it. Clamping each point on its own
+// (what this replaces for marks) pins the points that cross the wall while the
+// rest keep going, so the shape squashes — and on an incremental drag the
+// squash accumulates into the saved geometry and never comes back. The axes
+// shift independently, which is what lets a shape slide along a wall rather
+// than stick to it. A shape bigger than the rink is centred, not pinned.
+// Returns pts by identity when it's already inside, so callers don't churn.
+export function fitInside(pts) {
+  if (!pts || !pts.length) return pts;
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (const q of pts) {
+    if (q.x < x0) x0 = q.x; if (q.x > x1) x1 = q.x;
+    if (q.y < y0) y0 = q.y; if (q.y > y1) y1 = q.y;
+  }
+  const fit = (lo, hi, max) => (hi - lo > max ? (max - lo - hi) / 2 : lo < 0 ? -lo : hi > max ? max - hi : 0);
+  const dx = fit(x0, x1, RINK.W), dy = fit(y0, y1, RINK.H);
+  if (!dx && !dy) return pts;
+  return pts.map(q => ({ ...q, x: q.x + dx, y: q.y + dy }));
+}
 export const segEnd = (p, i) => (i < 0 ? { x: p.x, y: p.y } : { x: p.path[i].x, y: p.path[i].y });
 
 export function segD(prev, s) {

@@ -7,6 +7,11 @@ import { useTheme, useInk } from "./theme-react.jsx";
    One monochrome, stroke-based set drawn on a 24×24 grid in currentColor, so
    every button inherits its text colour and they all read as one family. */
 const F = { fill: "currentColor", stroke: "none" };
+// The stick's "no opinion" colours — one from the DSL parser, one from the
+// board editor, kept apart by a table that had drifted. A stick carrying either
+// follows the theme instead; neither is offered by the colour picker, so this
+// can't swallow a real choice.
+const STICK_AUTO = new Set(["#20242a", "#14171a"]);
 const ICONS = {
   play: <path d="M7 5.5v13l11-6.5z" {...F} />,
   pause: <><rect x="6.5" y="5" width="3.6" height="14" rx="1.1" {...F} /><rect x="13.9" y="5" width="3.6" height="14" rx="1.1" {...F} /></>,
@@ -27,6 +32,7 @@ const ICONS = {
   chevronUp: <path d="M6 15l6-6 6 6" />,
   chevronDown: <path d="M6 9.5l6 6 6-6" />,
   chevronRight: <path d="M9.5 6l6 6-6 6" />,
+  chevronLeft: <path d="M14.5 6l-6 6 6 6" />,
   printer: <><path d="M7 8V4h10v4" /><rect x="4" y="8" width="16" height="8" rx="2" /><path d="M7 13h10v7H7z" /></>,
   camera: <><path d="M4 7h3l2-2.5h6L17 7h3a1.5 1.5 0 0 1 1.5 1.5V18a1.5 1.5 0 0 1-1.5 1.5H4A1.5 1.5 0 0 1 2.5 18V8.5A1.5 1.5 0 0 1 4 7z" /><circle cx="12" cy="13" r="3.4" /></>,
   // corner arrows out = maximize; corner arrows in = restore
@@ -61,10 +67,22 @@ const ICONS = {
   label: <><path d="M5 6h14" /><path d="M12 6v13" /></>,
   puck: <ellipse cx="12" cy="12" rx="8" ry="4.4" {...F} />,
   check: <path d="M5 12.5l4.5 4.5L19 6.5" />,
+  info: <><circle cx="12" cy="12" r="9" /><path d="M12 11v5.5" /><path d="M12 7.7v.01" /></>,
   grip: <><circle cx="9" cy="7" r="1.4" {...F} /><circle cx="15" cy="7" r="1.4" {...F} /><circle cx="9" cy="12" r="1.4" {...F} /><circle cx="15" cy="12" r="1.4" {...F} /><circle cx="9" cy="17" r="1.4" {...F} /><circle cx="15" cy="17" r="1.4" {...F} /></>,
   // a pushpin (keep the editor floating) + a panel with a right column (dock to sidebar)
   pin: <><path d="M9.5 3.5h5l-.8 5 2.8 2.8v1.7H7.5v-1.7l2.8-2.8-.8-5z" /><path d="M12 13v7.5" /></>,
+  /* Toggle pairs. A state shown ONLY by colour is a weak signal — on the light
+     theme the "on" teal and the resting grey are both mid-dark, so a pinned
+     panel looked the same as an unpinned one. These differ in silhouette AND
+     fill, so the state survives at 15px whatever the theme.
+     Not pinned: the pin lies over at an angle, outlined — loose, not driven in.
+     Pinned: upright and solid. */
+  pinOff: <g transform="rotate(-42 12 12)"><path d="M9.5 3.5h5l-.8 5 2.8 2.8v1.7H7.5v-1.7l2.8-2.8-.8-5z" /><path d="M12 13v7.5" /></g>,
+  pinOn: <><path d="M9.5 3.5h5l-.8 5 2.8 2.8v1.7H7.5v-1.7l2.8-2.8-.8-5z" {...F} /><path d="M12 13v7.5" /></>,
   sidebar: <><rect x="3.5" y="4.5" width="17" height="15" rx="2" /><path d="M14.5 4.5v15" /></>,
+  /* …same for the dock, which sits right beside the pin with the same problem:
+     the sidebar column fills in once the panel is actually docked into it. */
+  sidebarOn: <><rect x="3.5" y="4.5" width="17" height="15" rx="2" /><path d="M14.5 4.5v15" /><rect x="14.5" y="4.5" width="6" height="15" {...F} /></>,
   share: <><circle cx="6" cy="12" r="2.6" /><circle cx="17.5" cy="6" r="2.6" /><circle cx="17.5" cy="18" r="2.6" /><path d="M8.3 10.8l7-3.6M8.3 13.2l7 3.6" /></>,
   download: <><path d="M12 3.5v11" /><path d="M7.5 10l4.5 4.5L16.5 10" /><path d="M4.5 19.5h15" /></>,
   upload: <><path d="M12 20.5v-11" /><path d="M7.5 14l4.5-4.5L16.5 14" /><path d="M4.5 4.5h15" /></>,
@@ -75,6 +93,11 @@ const ICONS = {
   // a caption card with text lines + a plus = add a step note
   note: <><rect x="3" y="5.5" width="13.5" height="13" rx="2" /><path d="M6.5 10h6.5M6.5 13.5h4" /><path d="M18.5 13.5v6M15.5 16.5h6" /></>,
   grid: <><rect x="3.5" y="3.5" width="7" height="7" rx="1" /><rect x="13.5" y="3.5" width="7" height="7" rx="1" /><rect x="3.5" y="13.5" width="7" height="7" rx="1" /><rect x="13.5" y="13.5" width="7" height="7" rx="1" /></>,
+  // the shapes group: a square with a circle over it, which is the universal
+  // "shapes" glyph. The marker pen it replaced named ONE of the five tools in
+  // the group and read as "draw freehand" — the wrong promise for a menu whose
+  // point is the zone shapes.
+  shapes: <><rect x="3.2" y="8.4" width="10" height="10" rx="1.4" /><circle cx="15.4" cy="9.2" r="5.4" /></>,
   // a closed padlock (lock board) and an open shackle (unlock)
   lock: <><rect x="4.5" y="10.5" width="15" height="10" rx="2" /><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" /></>,
   unlock: <><rect x="4.5" y="10.5" width="15" height="10" rx="2" /><path d="M8 10.5V7.5a4 4 0 0 1 7.7-1.5" /></>,
@@ -176,7 +199,7 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
   else if (p.kind === "net") {
     // top-down hockey goal: the mouth (goal line) faces local +x, the caged
     // frame bows back toward -x with a rounded back. ~±3.75 ≈ a 6 ft mouth.
-    const red = p.color || "#c81e33";
+    const red = ink(p.color || "#c81e33");
     // mouth (goal line) faces +x at x=0; the cage bows back to a rounded back at -x
     const CAGE = "M 0 -3.75 L -1.7 -3.75 Q -4.15 -3.75 -4.15 -1.5 L -4.15 1.5 Q -4.15 3.75 -1.7 3.75 L 0 3.75";
     body = (
@@ -201,7 +224,10 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
     );
   } else if (p.kind === "tire") {
     // agility tire, top-down: a black rubber ring with tread ticks (~r 2.6 ≈ 4 ft)
-    const rub = p.color || "#1c1c1e";
+    // through ink(): black rubber on a dark rink was ~1.1:1, an invisible ring.
+    // The tread ticks and edge lines are already darker than the body, so they
+    // keep reading once it flips light — only the body needs to move.
+    const rub = ink(p.color || "#1c1c1e");
     const ticks = [];
     for (let k = 0; k < 12; k++) {
       const a = (k / 12) * Math.PI * 2, c = Math.cos(a), s = Math.sin(a);
@@ -251,7 +277,9 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
   else if (p.kind === "bumper") {
     // solid barrier laid on the ice — a black rectangle; runs along local +x,
     // rotate with facing (drawn oversize vs true 6 ft so it reads on the sheet)
-    const foam = p.color && p.color !== "#4d6fa6" ? p.color : "#1b1e22";
+    // same as the tire — the foam body flips with the sheet; its outline and
+    // segment dividers are darker than it, so they survive the flip
+    const foam = ink(p.color && p.color !== "#4d6fa6" ? p.color : "#1b1e22");
     body = (
       <g pointerEvents="none">
         {selected && <rect x={-8.1} y={-1.9} width={16.2} height={3.8} rx={0.9} fill="none" stroke={SEL} strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
@@ -264,7 +292,16 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
   } else if (p.kind === "stick") {
     // a hockey stick laid on the ice: shaft along local +x, blade angled off the
     // toe end; rotate with facing. A subtle ground shadow for depth.
-    const wood = p.color || "#20242a";
+    // Themed, not a literal: the stick painted near-black, which on a dark
+    // sheet (#0d151c) left it all but invisible.
+    // Two historical "no opinion" values have to count as unset — the DSL
+    // parser defaulted a stick to #20242a and the board editor to #14171a,
+    // which is the drift that hid this. Neither is one of the six colours the
+    // picker offers, so treating both as unset cannot override a choice the
+    // user actually made, and boards already saved either way start following
+    // the theme.
+    const auto = !p.color || STICK_AUTO.has(p.color.toLowerCase());
+    const wood = auto ? T["ice-stick"] : p.color;
     body = (
       <g pointerEvents="none">
         {selected && <rect x={-6.2} y={-3.0} width={12.6} height={5.6} rx={0.8} fill="none" stroke={SEL} strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
@@ -287,7 +324,7 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
   } else if (p.kind === "deker") {
     // stickhandling gate: a hockey stick laid across two pegs — the puck goes
     // UNDER the shaft. The stick runs along local x; rotate with facing.
-    const wood = p.color || "#c79a4e";
+    const wood = ink(p.color || "#c79a4e");
     body = (
       <g pointerEvents="none">
         {selected && <rect x={-3.6} y={-2.4} width={7.2} height={4.8} rx={0.8} fill="none" stroke={SEL} strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
@@ -303,7 +340,7 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
     );
   } else if (p.kind === "passer") {
     // a rectangular rebounder box; pucks carom off the face (local +x)
-    const col = p.color || "#57636f";
+    const col = ink(p.color || "#57636f");
     body = (
       <g pointerEvents="none">
         {selected && <rect x={-2.1} y={-3.1} width={4.4} height={6.2} rx={0.7} fill="none" stroke={SEL} strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
