@@ -4230,10 +4230,18 @@ export default function DrillAnimator() {
   // definition, rendered in two places that are both the right place to look for
   // it: the route's own settings, and the last waypoint, which is where it
   // actually happens and where a coach who just authored a shot expects it.
-  const routeFinishField = p => {
+  // The two end-of-route questions, kept apart because they are different
+  // questions: WHERE they go when this route ends, and HOW MANY TIMES the whole
+  // thing runs. They used to share one box titled "When they finish", which made
+  // a rep look like something that happens at the end of this route rather than a
+  // property of the whole loop.
+
+  // 1. Where they go. One definition, rendered both in the route's own settings
+  //    and at its last waypoint — the two places you'd look for it.
+  const routeNextField = p => {
     const others = pieces.filter(q => q.kind === "route" && q.id !== p.id);
     const branchy = (p.forks || []).length > 0;
-    const chained = chainOf(pieces, p.id);
+    const dest = pieces.find(q => q.id === p.next);
     return (
       <div className="hd-field">
         <div className="hd-sectitle">When they finish</div>
@@ -4247,36 +4255,50 @@ export default function DrillAnimator() {
                 {others.map(q => <option key={q.id} value={q.id}>{nameOf(q.id)}</option>)}
               </select>
             </div>
-            {p.next && (
-              <>
-                <div className="hd-sechint">
-                  They cross the ice to that line&rsquo;s start, going around nets, props
-                  and anyone standing still.
-                </div>
-                {branchy && <div className="hd-sechint">This route branches, so only the first leg runs — branches and recycling don&rsquo;t combine yet.</div>}
-                {!(pieces.find(q => q.id === p.next) || {}).connector && (
-                  <div className="hd-poprow">
-                    <button className="hd-mini" onClick={() => shapeCrossing(p.id)}>Shape the crossing ›</button>
-                  </div>
-                )}
-              </>
+            <div className="hd-sechint">
+              {p.next
+                ? "They cross the ice to that line's start, going around nets, props and anyone standing still."
+                : "They stop at the last point of this route."}
+            </div>
+            {p.next && branchy && <div className="hd-sechint">This route branches, so only the first leg runs — branches and recycling don&rsquo;t combine yet.</div>}
+            {p.next && !(dest || {}).connector && (
+              <div className="hd-poprow">
+                <button className="hd-mini" onClick={() => shapeCrossing(p.id)}>Shape the crossing ›</button>
+                <span className="hd-sechint">to steer the skate across</span>
+              </div>
             )}
           </>
         ) : <div className="hd-sechint">Add another route to send them on to.</div>}
-        {/* A rep is one pass through the WHOLE connected chain, so the count
-            belongs to the chain, not to any one route in it — setting it here
-            writes it to every route joined to this one. Offered even with nothing
-            connected: for a lone route, going again means back to its own head. */}
+      </div>
+    );
+  };
+
+  // 2. How many times. A rep is one pass through the WHOLE connected chain, so
+  //    the number belongs to the chain and setting it writes to every route in
+  //    it. Naming the loop is the clearest way to say what one rep actually is.
+  const routeRepsField = p => {
+    const chained = chainOf(pieces, p.id);
+    // the loop in the order it is skated, so the hint reads like the drill
+    const order = [];
+    for (let cur = p, n = 0; cur && n <= chained.size; n++) {
+      order.push(cur.id);
+      const nxt = pieces.find(q => q.id === cur.next && q.kind === "route");
+      if (!nxt || nxt.id === p.id || order.includes(nxt.id)) break;
+      cur = nxt;
+    }
+    const loop = order.map(id => nameOf(id)).join(" → ");
+    return (
+      <div className="hd-field">
+        <div className="hd-sectitle">Reps</div>
         <div className="hd-poprow">
           <span>Run it</span>
           <Stepper value={p.reps == null ? 1 : p.reps} min={1} max={8} step={1}
             fmt={v => `${v}\u00d7`} onChange={v => setChainReps(p.id, v)} />
-          <span className="hd-sechint">{chained.size > 1 ? `with ${chained.size - 1} more route${chained.size > 2 ? "s" : ""}` : "times"}</span>
         </div>
         <div className="hd-sechint">
-          {chained.size > 1
-            ? "One rep is a full lap of the whole chain, so every route in it counts the same number."
-            : "Nothing connected, so they loop back to this route's own start each time."}
+          {order.length > 1
+            ? `One rep is a full lap of ${loop} and back. Every route in the chain runs the same number of times.`
+            : "Nothing connected, so each rep sends them back to this route's own start."}
         </div>
       </div>
     );
@@ -8621,7 +8643,6 @@ export default function DrillAnimator() {
                     <span className="hd-sechint">between skaters</span>
                   </div>
                 </div>)}
-                {routeFinishField(p)}
                 {/* How the line takes its turns. The trigger is positional — "the
                     one ahead of me" — so unlike DelayTrigger there is no player to
                     pick; the rule is authored once and resolved per member. */}
@@ -8662,6 +8683,8 @@ export default function DrillAnimator() {
                     </div>
                   );
                 })()}
+                {routeNextField(p)}
+                {routeRepsField(p)}
               </>
             );
           })()}
@@ -8998,7 +9021,7 @@ export default function DrillAnimator() {
           })()}
           {/* ...and the route's own action: where they go when they finish it.
               Offered at the END, because that is when it happens. */}
-          {p.kind === "route" && !fork && i === route.length - 1 && routeFinishField(p)}
+          {p.kind === "route" && !fork && i === route.length - 1 && (<>{routeNextField(p)}{routeRepsField(p)}</>)}
           {/* Cosmetics last. This is a note pinned to a spot, not something the
               drill DOES, and it was sitting between the actions and the leg
               controls — splitting "what happens here" from "how they leave". */}
