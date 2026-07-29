@@ -1,6 +1,5 @@
-// Piece icons (screen-true frames), stepper control, diagnostics overlay.
-import { useState, useRef, useEffect } from "react";
-import { APP_VERSION, BUILD_STAMP, ICON_SCALE, DSL_VERSION, symOf, PLAYER_SCALE } from "./constants.js";
+// Piece icons (screen-true frames) and the stepper control.
+import { ICON_SCALE, symOf, PLAYER_SCALE } from "./constants.js";
 import { useTheme, useInk } from "./theme-react.jsx";
 
 /* ---------------- unified action icons ----------------
@@ -123,54 +122,6 @@ export function Icon({ name, size = 17, style }) {
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
       strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
       style={{ display: "block", flex: "0 0 auto", ...style }}>{p}</svg>
-  );
-}
-
-/* ---------------- diagnostics overlay (toggled from ☰ menu) ---------------- */
-
-export function DiagPanel({ drillVersion }) {
-  const probeRef = useRef(null);
-  const [txt, setTxt] = useState("");
-  useEffect(() => {
-    const tick = () => {
-      const cs = probeRef.current ? getComputedStyle(probeRef.current) : null;
-      const vv = window.visualViewport;
-      const g = sel => {
-        const el = document.querySelector(sel);
-        if (!el) return "n/a";
-        const b = el.getBoundingClientRect();
-        return `${Math.round(b.height)} bot${Math.round(b.bottom)}`;
-      };
-      const standalone = navigator.standalone === true ||
-        (window.matchMedia && matchMedia("(display-mode: standalone)").matches);
-      setTxt(
-        `v${APP_VERSION} · ${BUILD_STAMP}\n` +
-        `dsl    ${drillVersion ?? "?"} / app ${DSL_VERSION}\n` +
-        `mode   ${standalone ? "standalone" : "browser"}\n` +
-        `inner  ${window.innerWidth}x${window.innerHeight}\n` +
-        `vv     ${vv ? Math.round(vv.width) + "x" + Math.round(vv.height) + " ot" + Math.round(vv.offsetTop) : "n/a"}\n` +
-        `screen ${screen.width}x${screen.height}\n` +
-        `safe   t${cs ? cs.paddingTop : "?"} b${cs ? cs.paddingBottom : "?"}\n` +
-        `root   ${g(".hd-root")}\n` +
-        `stage  ${g(".hd-stage")}\n` +
-        `ice    ${g(".hd-canvas")}`
-      );
-    };
-    tick();
-    const id = setInterval(tick, 500);
-    return () => clearInterval(id);
-  }, []);
-  return (
-    <>
-      <div ref={probeRef} style={{ position: "fixed", visibility: "hidden",
-        paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }} />
-      <div style={{ position: "fixed", left: 8, top: 120, zIndex: 9999,
-        background: "rgba(0,0,0,.78)", color: "#7CFC00",
-        font: "11px ui-monospace, monospace", padding: "6px 8px",
-        borderRadius: 6, pointerEvents: "none", whiteSpace: "pre" }}>
-        {txt}
-      </div>
-    </>
   );
 }
 

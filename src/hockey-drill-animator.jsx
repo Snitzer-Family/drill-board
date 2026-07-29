@@ -12,7 +12,8 @@ import * as boards from "./boards.js";
 import { netShapes, bumperShapes, solidShapes, detourRoute, segCrossesNet } from "./net-collide.js";
 import { RinkMarkings } from "./rink.jsx";
 import { ZONES, zoneAt } from "./zones.js";
-import { PieceIcon, Stepper, DiagPanel, Icon, ICONS } from "./icons.jsx";
+import { PieceIcon, Stepper, Icon, ICONS } from "./icons.jsx";
+import DiagView, { hashDiag, copyText } from "./diagnostics.jsx";
 import { createTiming, resolveNearest } from "./timing.js";
 import { buildLedger, mayHoldOn, mayHoldEntering, orderTransfers } from "./possession.js";
 import { classifyPenGroup, SYMBOL_MAX, SYMBOL_MAX_PX } from "./sketch-recognize.js";
@@ -680,19 +681,7 @@ export default function DrillAnimator() {
       ops: d.ops.map(o => ({ op: o.op, sym: o.sym, srcs: o.srcs })),
       strokes: d.strokes.map(s => s.pts.map(p => [round(p.x), round(p.y)])),
     });
-    // best-effort on BOTH paths: the async clipboard API can hang forever when
-    // the document isn't focused, so never gate the feedback on its promise
-    let ok = false;
-    const ta = document.createElement("textarea");
-    ta.value = txt;
-    ta.style.cssText = "position:fixed;top:-1000px;left:0;opacity:0";
-    document.body.appendChild(ta);
-    ta.select();
-    ta.setSelectionRange(0, txt.length);      // iOS needs the explicit range
-    try { ok = document.execCommand("copy"); } catch { /* fall through */ }
-    ta.remove();
-    try { navigator.clipboard?.writeText?.(txt); } catch { /* best effort */ }
-    flash(ok ? "Pen diagnostics copied — paste them to Claude"
+    flash(copyText(txt) ? "Pen diagnostics copied — paste them to Claude"
       : "Copied (if the paste is empty, screenshot this instead)");
   }
   const penMarkAge = useRef(new Map());   // pen-fallback mark id → committed-at ms
@@ -1531,7 +1520,15 @@ export default function DrillAnimator() {
     };
   }, []);
 
-  const [showDiag, setShowDiag] = useState(false);
+  // Diagnostics: null when closed, else { tab, dock }. It boots open from a
+  // `#diag` on the URL — an independent key on the same hash the share link
+  // uses, never written back and never part of a preview link.
+  const [diag, setDiag] = useState(() =>
+    hashDiag(typeof window !== "undefined" ? window.location.hash : ""));
+  // the thunk the diagnostics view polls. Reassigned in the render body below
+  // (the pressRef idiom); building nothing until someone asks keeps a closed
+  // panel down to one arrow-function allocation per frame.
+  const diagRef = useRef(null);
 
   // iOS 26 standalone bug: the viewport is sized as if the status bar were
   // opaque (screen − safeTop) but positioned as if translucent (at y=0),
@@ -9149,6 +9146,9 @@ export default function DrillAnimator() {
         if (presentation && holdStep) skipHold();  // caption held → advance early
         else togglePlay();                         // otherwise pause / continue
       } else if (e.key === "Escape") {
+        // diagnostics first: it's the thing you just opened, and it shares this
+        // one listener rather than racing a second one against stop-and-reset
+        if (diag) { e.preventDefault(); setDiag(null); return; }
         if (playing) { e.preventDefault(); resetPlay(); }   // stop & reset
       } else if (e.key === "1" || e.key === "2" || e.key === "3") {
         // the three flows, left to right, matching the bar's own order
@@ -9159,7 +9159,7 @@ export default function DrillAnimator() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [presentation, holdStep, playing, mode, hasTimeline]); // eslint-disable-line
+  }, [presentation, holdStep, playing, mode, hasTimeline, diag]); // eslint-disable-line
 
   // during playback the "Routes on play" setting controls what stays visible;
   // while editing everything shows regardless
@@ -10836,12 +10836,13 @@ export default function DrillAnimator() {
             </div>
             <div className="hd-pref">
               <div className="hd-prefhead"><span className="hd-preftitle">Something wrong?</span>
-                <button className="hd-mini" onClick={() => { setShowDiag(true); setOpenMenu(null); }}>
+                <button className="hd-mini" onClick={() => { setDiag({ tab: "drill", dock: "half" }); setOpenMenu(null); }}>
                   Open diagnostics</button></div>
               <div className="hd-prefdesc">
-                Diagnostics shows live viewport, safe-area and rink numbers — the fastest way to
-                describe a layout problem on a phone. For ink that won&rsquo;t convert, use
-                <b> Copy diagnostics</b> in App &amp; drill settings.
+                Three tabs. <b>Drill</b> explains what the animation is actually doing — who has the
+                puck, when each leg runs, and which passes can&rsquo;t fire. <b>Pen</b> shows what the
+                smart pen measured and why it decided. <b>Layout</b> has the viewport and safe-area
+                numbers. Each one copies as JSON you can paste back to me.
               </div>
             </div>
             <div className="hd-note">
@@ -11374,7 +11375,8 @@ export default function DrillAnimator() {
           transform: "translateX(-50%)", background: "rgba(20,26,32,0.92)", color: "#eaf2f8",
           padding: "6px 14px", borderRadius: 8, fontSize: 13, zIndex: 9999, pointerEvents: "none" }}>{toast}</div>
       )}
-      {showDiag && <DiagPanel drillVersion={drillVersion} />}
+      {diag && <DiagView diag={diag} setDiag={setDiag} feedRef={diagRef}
+        drillVersion={drillVersion} flash={flash} />}
     </div>
     </InkCtx.Provider>
     </ThemeCtx.Provider>

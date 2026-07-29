@@ -854,4 +854,60 @@ export const STYLES = `
           border:2px solid var(--db-border-strong); box-shadow:var(--db-fx-shadow-lg), 0 0 0 1px var(--db-fx-edge);
           overflow:hidden; pointer-events:none; background:var(--db-ice); }
         .hd-loupe svg { width:100%; height:100%; display:block; }
+
+        /* ---------- diagnostics ----------
+           Two docks, one tree. HALF is a bottom drawer that clears the same
+           band every other bottom-anchored thing does, so the board stays
+           visible AND animating above it — diagnosing a misfire means watching
+           the wrong thing happen while you read the numbers describing it.
+           FULL borrows .hd-sheet's geometry for reading long tables.
+           Never vh/dvh: fixed insets plus --hd-b, per the iOS lesson. */
+        .hd-diag { position:fixed; z-index:55; left:0; right:0;
+          bottom:calc(var(--hd-menubar) + var(--hd-b) + var(--hd-act));
+          max-height:min(340px, 45%);
+          display:flex; flex-direction:column;
+          background:var(--db-surface-panel); border-top:1px solid var(--db-border-strong);
+          box-shadow:var(--db-fx-shadow-lg); }
+        .hd-diag.full { position:absolute; inset:0; max-height:none;
+          border-top:none; background:var(--db-fx-scrim);
+          padding-top:env(safe-area-inset-top); }
+        .hd-diaghead { display:flex; align-items:center; gap:6px; flex:none;
+          padding:6px 8px; border-bottom:1px solid var(--db-border-hair); }
+        .hd-diagtabs { display:flex; gap:4px; flex:1; min-width:0; }
+        .hd-diagtab { padding:5px 11px; font-size:12.5px; font-weight:600; min-height:30px;
+          border:1px solid var(--db-border); background:var(--db-surface-raised);
+          color:var(--db-text-soft); border-radius:7px; cursor:pointer; }
+        .hd-diagtab.on { background:var(--db-accent); border-color:var(--db-accent);
+          color:var(--db-text-on-accent); }
+        .hd-diagx { flex:none; display:inline-flex; align-items:center; justify-content:center;
+          width:30px; height:30px; border:1px solid var(--db-border); border-radius:7px;
+          background:var(--db-surface-raised); color:var(--db-text-soft); cursor:pointer; }
+        .hd-diagbody { flex:1; min-height:0; overflow-y:auto; overscroll-behavior:contain;
+          padding:7px 9px; display:flex; flex-direction:column; gap:2px;
+          font-family:ui-monospace, monospace; font-size:11.5px; line-height:1.45; }
+        .hd-diagfoot { flex:none; display:flex; align-items:center; gap:6px;
+          padding:6px 8px; border-top:1px solid var(--db-border-hair); }
+        /* a label/value pair. The key column is fixed so a column of numbers
+           lines up and a wrong one is visible by shape, not by reading. */
+        .hd-diagrow { display:flex; gap:8px; align-items:baseline; }
+        .hd-diagk { flex:0 0 84px; color:var(--db-text-faint); }
+        .hd-diagv { flex:1; min-width:0; color:var(--db-text-soft);
+          font-variant-numeric:tabular-nums; word-break:break-word; }
+        .hd-diagv.ok { color:var(--db-good); }
+        .hd-diagv.warn { color:var(--db-warn); }
+        .hd-diagv.bad { color:var(--db-danger); }
+        .hd-diagbanner { padding:5px 8px; border-radius:6px; margin-bottom:4px;
+          font-weight:600; border:1px solid var(--db-border); }
+        .hd-diagbanner.ok { color:var(--db-good); background:var(--db-surface-sunken); }
+        .hd-diagbanner.warn { color:var(--db-warn); background:var(--db-surface-sunken); }
+        .hd-diagbanner.bad { color:var(--db-danger); background:var(--db-danger-bg);
+          border-color:var(--db-danger-border); }
+        .hd-diagsec { margin-top:4px; }
+        .hd-diagsechead { display:flex; align-items:center; gap:5px; width:100%;
+          padding:4px 2px; background:none; border:none; cursor:pointer;
+          font:inherit; font-weight:600; color:var(--db-text-muted); text-align:left; }
+        .hd-diagsechead small { margin-left:auto; font-weight:400; color:var(--db-text-faint); }
+        .hd-diagsecbody { padding:2px 0 2px 16px; display:flex; flex-direction:column; gap:2px; }
+        .hd-diagpre { white-space:pre-wrap; word-break:break-all; color:var(--db-text-soft); }
+        .hd-diagnote { color:var(--db-text-muted); padding:6px 2px; }
       `;
