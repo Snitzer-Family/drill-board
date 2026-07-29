@@ -68,10 +68,12 @@ One statement per line. Order is mostly free, but a `PATH` must come after the
 
 ### `DSL <n>`
 The DSL schema version this drill was written in, stamped as the first line on
-every save (e.g. `DSL 1`). Optional on input — if omitted, a reader assumes the
-current version. Lets a production build eventually render a drill according to
-the version that wrote it. Bumped only on a **breaking** DSL change; there is no
-compatibility gating yet, so today it is informational.
+every save (e.g. `DSL 10` — the current version). Optional on input — if
+omitted, a reader assumes the current version. Lets a production build
+eventually render a drill according to the version that wrote it. Bumped only
+on a **breaking** DSL change; there is no compatibility gating yet, so today it
+is informational. Version 10 renamed the mark flag `note` to `sketch` (an older
+reader drops the unknown token and would convert that ink).
 
 ### `RINK full | half | quarter`
 The ice surface shown. Defaults to `full`.

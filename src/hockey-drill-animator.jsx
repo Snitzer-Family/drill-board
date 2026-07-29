@@ -9045,10 +9045,12 @@ export default function DrillAnimator() {
   // togglePlay, wakeEdit — so this is one definition replacing five copies.
   //
   // The one thing it must NOT do is disturb the pen. flushPen() COMMITS buffered
-  // ink (it is not clearInk), and the ink colour, width, style, note flag and
-  // auto-convert setting all survive a trip through another mode: draw → edit →
-  // draw has always been a free round trip so you can nudge a piece mid-sketch,
-  // and moving that switch from the palette to the bottom bar mustn't cost it.
+  // ink (it is not clearInk), and the ink colour, width, style and the pen's
+  // read mode (sketch/manual/auto) all survive a trip through another mode:
+  // draw → edit → draw has always been a free round trip so you can nudge a
+  // piece mid-sketch, and moving that switch from the palette to the bottom bar
+  // mustn't cost it. This comment used to claim the note flag survived while
+  // the code cleared it two lines below; it does now.
   const setMode = next => {
     if (next === mode) return;
     flushPen();
