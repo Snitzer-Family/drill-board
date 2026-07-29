@@ -910,4 +910,24 @@ export const STYLES = `
         .hd-diagsecbody { padding:2px 0 2px 16px; display:flex; flex-direction:column; gap:2px; }
         .hd-diagpre { white-space:pre-wrap; word-break:break-all; color:var(--db-text-soft); }
         .hd-diagnote { color:var(--db-text-muted); padding:6px 2px; }
+        /* the diagnostics transport. Its own, not the player dock's: that one is
+           hidden in some modes, and frame-step is the whole point here. */
+        .hd-diagscrub { display:flex; align-items:center; gap:5px; padding:3px 0 5px; }
+        .hd-diagscrub input[type=range] { flex:1; min-width:0; accent-color:var(--db-accent); }
+        .hd-diagstep { flex:none; min-width:30px; height:26px; padding:0 6px;
+          display:inline-flex; align-items:center; justify-content:center;
+          border:1px solid var(--db-border); border-radius:6px; cursor:pointer;
+          background:var(--db-surface-raised); color:var(--db-text-soft);
+          font:inherit; font-size:10.5px; }
+        .hd-diagt { flex:none; color:var(--db-text); font-variant-numeric:tabular-nums; }
+        .hd-diagsublab { margin-top:6px; color:var(--db-text-faint);
+          text-transform:uppercase; letter-spacing:.1em; font-size:9.5px; }
+        .hd-diagfault { margin:2px 0; padding:4px 7px; border-radius:6px;
+          background:var(--db-danger-bg); border:1px solid var(--db-danger-border); }
+        .hd-diagwhy { color:var(--db-text-muted); }
+        .hd-diagblock { margin:3px 0; padding:4px 7px; border-radius:6px;
+          background:var(--db-surface-sunken); border:1px solid var(--db-border-hair); }
+        /* leg tables: pre so the padStart columns actually line up */
+        .hd-diagleg { white-space:pre; overflow-x:auto; color:var(--db-text-muted); }
+        .hd-diagleg.on { color:var(--db-accent); font-weight:700; }
       `;

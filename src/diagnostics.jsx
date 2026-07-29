@@ -19,20 +19,9 @@
 import { useState, useRef, useEffect, useCallback, memo } from "react";
 import { APP_VERSION, BUILD_STAMP, DSL_VERSION } from "./constants.js";
 import { Icon } from "./icons.jsx";
-
-export const DIAG_TABS = [["drill", "Drill"], ["pen", "Pen"], ["layout", "Layout"]];
-
-// Read a `#diag` / `#diag=pen` flag off the URL. Parsed ALONGSIDE the share
-// link's `#d=`, never inside it — the two are independent keys on one hash and
-// neither can fake the other (base64url excludes both `#` and `&`, and `#d=`'s
-// capture stops at a `&`). The lookahead is what keeps `#diagram` out.
-export function hashDiag(hash) {
-  const m = /[#&]diag(?:=([a-z]+))?(?=&|$)/.exec(hash || "");
-  if (!m) return null;
-  const tab = DIAG_TABS.some(([k]) => k === m[1]) ? m[1] : "drill";
-  // the drill tab wants the board visible behind it; the other two are reading
-  return { tab, dock: tab === "drill" ? "half" : "full" };
-}
+// DIAG_TABS and hashDiag live in the pure module so the node suite can pin the
+// hash regex against the share link's — see the note there.
+import { DIAG_TABS } from "./diag-report.js";
 
 // Clipboard, both ways round. The async API can hang forever when the document
 // isn't focused, so the synchronous textarea path runs first and the feedback
@@ -130,6 +119,135 @@ function Sec({ id, title, open, toggle, children, count }) {
   );
 }
 
+/* ---------------- drill ---------------- */
+
+const f2 = n => (typeof n === "number" ? n.toFixed(2) : "—");
+const f3 = n => (typeof n === "number" ? n.toFixed(3) : "—");
+const pid = id => (id == null ? "—" : "#" + id);
+
+// A transport of its own, not the player dock's — that one is hidden in some
+// modes, and the frame-step is the point. "The puck leaves the blade at 3.43s
+// but the plan's fly leg starts at 3.51s" is a sentence you can only write by
+// stepping one frame at a time with the leg table next to you.
+function Scrub({ clock, act }) {
+  const seek = f => act.current && act.current.seek(Math.max(0, Math.min(1, f)));
+  const step = ds => clock.total > 0 && seek(clock.animT + ds / clock.total);
+  return (
+    <div className="hd-diagscrub">
+      <button className="hd-diagstep" title={clock.playing ? "Pause" : "Play"}
+        onClick={() => act.current && act.current.play(!clock.playing)}>
+        <Icon name={clock.playing ? "pause" : "play"} size={13} />
+      </button>
+      <button className="hd-diagstep" title="Back one frame" onClick={() => step(-1 / 30)}>-1f</button>
+      <button className="hd-diagstep" title="On one frame" onClick={() => step(1 / 30)}>+1f</button>
+      <input type="range" min="0" max="1" step="0.001" value={clock.animT}
+        onChange={e => seek(+e.target.value)} aria-label="Playback position" />
+      <span className="hd-diagt">{f3(clock.t)}s</span>
+    </div>
+  );
+}
+
+function DrillTab({ snap, open, toggle, act }) {
+  if (!snap) return <div className="hd-diagnote">no feed — the board hasn't rendered yet.</div>;
+  const D = snap;
+  const legFlags = L => ["shot", "goal", "sauce", "rise", "rim", "chip", "back", "catch", "open"]
+    .filter(k => L[k]).join(" ");
+  return (
+    <>
+      <div className={"hd-diagbanner " + D.health.level}>{D.health.msg}</div>
+      <Scrub clock={D.clock} act={act} />
+      <Row k="clock" v={`${f2(D.clock.t)} / ${f2(D.clock.total)}s · drill ${f2(D.clock.drill)} + hold ${f2(D.clock.hold)}`} />
+      <Row k="run" v={`${D.clock.playing ? "playing" : "paused"} · ${D.clock.mode} · pace ${f2(D.plan.pace)} · seed ${D.plan.seed}`} />
+      <Row k="plan" v={`cache ${D.plan.cache} · sig ${f2(D.plan.sig)} · ${D.plan.realisticShots ? "realistic" : "intent"} shots · detail ${D.plan.detail ? "on" : "off"}`} />
+      {/* the two ways what PLAYS differs from what you authored */}
+      {(D.resolved.nearestRebound || D.resolved.forkPlayers > 0) && (
+        <Row k="resolved" tone="warn"
+          v={[D.resolved.forkPlayers > 0 && `${D.resolved.forkPlayers} branching, ${D.resolved.branchesTaken} taken`,
+            D.resolved.nearestRebound && "nearest puck re-bound"].filter(Boolean).join(" · ")} />
+      )}
+
+      {/* The headline. Two independent answers to "who has the puck": the plan's
+          ride leg, and the blade the renderer actually put it on. */}
+      {D.agreement.length > 0 && <div className="hd-diagsublab">puck vs blade</div>}
+      {D.agreement.map(a => (
+        <Row key={a.puck} k={"puck " + pid(a.puck)} tone={a.agree ? "ok" : "bad"}
+          v={a.agree
+            ? `${a.legType}${a.planHolder != null ? " " + pid(a.planHolder) : ""} · blade ${pid(a.bladeId)}${a.d != null ? ` @${f2(a.d)}ft` : ""} ok`
+            : `WRONG STICK — plan says ${a.legType}${a.planHolder != null ? " " + pid(a.planHolder) : " (loose)"}, blade says ${pid(a.bladeId)}${a.d != null ? ` @${f2(a.d)}ft` : ""}`} />
+      ))}
+
+      {/* possession.js proves these unviable; nothing else in the app says so */}
+      {D.faults.length > 0 && <div className="hd-diagsublab">transfer faults</div>}
+      {D.faults.map(f => (
+        <div key={f.key} className="hd-diagfault">
+          <div className="hd-diagv bad">{f.label}: {f.verdict}</div>
+          <div className="hd-diagwhy">{f.why}</div>
+        </div>
+      ))}
+
+      <Sec id="pucks" title="Puck timelines" open={open} toggle={toggle} count={D.pucks.length}>
+        {D.pucks.map(p => (
+          <div key={p.id} className="hd-diagblock">
+            <div className="hd-diagv">{pid(p.id)} · final {pid(p.final)}{p.rel != null ? ` · releases ${f2(p.rel)}s` : ""}{p.inGoal ? " · IN GOAL" : ""}</div>
+            {p.legs.map((L, i) => (
+              <div key={i} className={"hd-diagleg" + (i === p.activeLeg ? " on" : "")}>
+                {String(i).padStart(2, " ")} {L.type.padEnd(5, " ")} {f2(L.t0)}
+                {L.t1 != null ? `→${f2(L.t1)}` : ""}
+                {L.id != null ? ` ${pid(L.id)}` : ""}{L.by != null ? ` by${pid(L.by)}` : ""}
+                {legFlags(L) ? " " + legFlags(L) : ""}
+              </div>
+            ))}
+          </div>
+        ))}
+      </Sec>
+
+      <Sec id="players" title="Player timing" open={open} toggle={toggle} count={D.players.length}>
+        {D.players.map(p => (
+          <div key={p.id} className="hd-diagblock">
+            <div className="hd-diagv">
+              {pid(p.id)}{p.label ? " " + p.label : ""} · {f2(p.time)}s · {p.hand}
+              {p.speed !== 1 ? ` · ×${p.speed}` : ""}{p.defense ? " · defense" : ""}
+            </div>
+            <div className="hd-diagwhy">
+              at {f2(p.at.x)},{f2(p.at.y)} a{f2(p.at.a)}
+              {p.at.aStep != null && Math.abs(p.at.aStep - p.at.a) > 0.5 ? ` (aStep ${f2(p.at.aStep)})` : ""}
+              {p.at.v != null ? ` v${f2(p.at.v)}` : ""}
+              {p.startWait ? ` · waits ${f2(p.startWait)}s` : ""}
+              {p.warp ? ` · warp ×${f2(p.warp.f)} to leg ${p.warp.upto}` : ""}
+              {p.hold ? ` · holds ${f2(p.hold.dur)}s at leg ${p.hold.seg}` : ""}
+              {p.opens ? ` · ${p.opens} open-up` : ""}{p.pivots ? " · pivots" : ""}
+              {p.branches.length ? ` · branch ${p.branches.join(",")}` : ""}
+            </div>
+            {p.legs.map(s => (
+              <div key={s.i} className="hd-diagleg">
+                {String(s.i).padStart(2, " ")} {s.mode.padEnd(6, " ")} {s.dir}
+                {s.rate !== 1 ? ` rate${s.rate}` : ""}{s.stop ? ` stop${s.stop}` : ""}
+                {s.t != null ? ` → ${f2(s.t)}s` : ""}
+              </div>
+            ))}
+          </div>
+        ))}
+      </Sec>
+
+      <Sec id="board" title="Board" open={open} toggle={toggle}>
+        <Row k="rink" v={`${D.board.rink} · zoom ${f2(D.board.view.s)} pan ${f2(D.board.view.tx)},${f2(D.board.view.ty)}`} />
+        <Row k="pieces" v={Object.entries(D.board.counts).map(([k, n]) => `${n} ${k}`).join(" · ") || "empty"} />
+        <Row k="flags" v={["dense", "roomy", "whiteboard", "presentation", "collisions", "realisticShots", "detail"]
+          .filter(k => D.board[k]).join(" ") || "none"} />
+      </Sec>
+
+      <Sec id="solved" title="Solved branches" open={open} toggle={toggle}>
+        <div className="hd-diagpre">{JSON.stringify(D.solved, null, 1)}</div>
+      </Sec>
+
+      <div className="hd-diagnote">
+        Copy JSON also carries the possession ledger, the full warp / hold / pivot
+        tables and the drill&rsquo;s DSL — everything needed to reproduce this.
+      </div>
+    </>
+  );
+}
+
 function LayoutTab({ snap, open, toggle }) {
   if (!snap) return <div className="hd-diagnote">measuring…</div>;
   const L = snap;
@@ -167,7 +285,7 @@ function LayoutTab({ snap, open, toggle }) {
 
 /* ---------------- the view ---------------- */
 
-function DiagView({ diag, setDiag, feedRef, drillVersion, flash }) {
+function DiagView({ diag, setDiag, feedRef, actRef, drillVersion, flash }) {
   const { tab, dock } = diag;
   const probeRef = useRef(null);
   const [snap, setSnap] = useState(null);
@@ -217,7 +335,7 @@ function DiagView({ diag, setDiag, feedRef, drillVersion, flash }) {
         </div>
         <div className="hd-diagbody">
           {tab === "layout" && <LayoutTab snap={snap} open={open} toggle={toggle} />}
-          {tab === "drill" && <div className="hd-diagnote">The drill report lands here next.</div>}
+          {tab === "drill" && <DrillTab snap={snap} open={open} toggle={toggle} act={actRef} />}
           {tab === "pen" && <div className="hd-diagnote">The pen report lands here next.</div>}
         </div>
         <div className="hd-diagfoot">

@@ -13,7 +13,8 @@ import { netShapes, bumperShapes, solidShapes, detourRoute, segCrossesNet } from
 import { RinkMarkings } from "./rink.jsx";
 import { ZONES, zoneAt } from "./zones.js";
 import { PieceIcon, Stepper, Icon, ICONS } from "./icons.jsx";
-import DiagView, { hashDiag, copyText } from "./diagnostics.jsx";
+import DiagView, { copyText } from "./diagnostics.jsx";
+import { drillReport, jsonSafe, hashDiag } from "./diag-report.js";
 import { createTiming, resolveNearest } from "./timing.js";
 import { buildLedger, mayHoldOn, mayHoldEntering, orderTransfers } from "./possession.js";
 import { classifyPenGroup, SYMBOL_MAX, SYMBOL_MAX_PX } from "./sketch-recognize.js";
@@ -683,6 +684,14 @@ export default function DrillAnimator() {
     });
     flash(copyText(txt) ? "Pen diagnostics copied — paste them to Claude"
       : "Copied (if the paste is empty, screenshot this instead)");
+  }
+  // The Pen tab's payload. Fed by the last burst if there is one; the tab's own
+  // "re-run on board ink" swaps in a dry run instead. Filled out in step 4.
+  const penDry = useRef(null);
+  function penDiagReport() {
+    const d = penDry.current || penLast.current;
+    if (!d) return { tab: "pen", empty: true };
+    return jsonSafe({ tab: "pen", source: penDry.current ? "board ink" : "last burst", ...d });
   }
   const penMarkAge = useRef(new Map());   // pen-fallback mark id → committed-at ms
   // Apple Pencil: once a stylus draws, the ice stops listening to skin —
@@ -1529,6 +1538,29 @@ export default function DrillAnimator() {
   // (the pressRef idiom); building nothing until someone asks keeps a closed
   // panel down to one arrow-function allocation per frame.
   const diagRef = useRef(null);
+  const diagActRef = useRef(null);
+  // The browser harness's door in. Everything is a FUNCTION except the three
+  // scalars, so mounting it costs nothing and nothing is computed until a suite
+  // asks. `at()` is the useful one: it answers "what does the plan say at t"
+  // without driving RAF for four seconds or taking a screenshot.
+  // window.__pen is deliberately left exactly as it was — five existing suites
+  // read it — and aliased here rather than moved.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.__db = {
+      v: APP_VERSION, stamp: BUILD_STAMP, ready: true,
+      get: (tab = "drill") => (diagRef.current ? diagRef.current(tab) : null),
+      json: (tab = "drill") => JSON.stringify(diagRef.current ? diagRef.current(tab) : null),
+      at: (f, tab = "drill") => (diagRef.current ? diagRef.current(tab, f) : null),
+      seekT: f => { const t = Math.max(0, Math.min(1, f)); animRef.current = t; setAnimT(t); setPlaying(false); },
+      play: on => setPlaying(!!on),
+      open: (tab = "drill") => setDiag({ tab, dock: tab === "drill" ? "half" : "full" }),
+      close: () => setDiag(null),
+      get pen() { return window.__pen; },
+    };
+    // deleted on teardown so a hot reload can't leave a stale copy answering
+    return () => { delete window.__db; };
+  }, []);
 
   // iOS 26 standalone bug: the viewport is sized as if the status bar were
   // opaque (screen − safeTop) but positioned as if translucent (at y=0),
@@ -1777,6 +1809,108 @@ export default function DrillAnimator() {
   const totalTime = drillTime + END_HOLD;
   const hasTimeline = totalTime > 0.1001; // static board (no routes/cues) → no player bar
   totalRef.current = totalTime;
+
+  /* ---------- diagnostics feed ----------
+     Gather everything the Drill tab explains, at a time of the caller's
+     choosing. Sampling has to live here (every leg time comes off the mounted
+     SVG, and the blade probe needs the renderer's own scan), but nothing here
+     JUDGES: diag-report.js decides what counts as a fault, a disagreement or an
+     unhealthy plan, which is what makes that half node-testable.
+     `atFrac` defaults to the live clock; window.__db.at() passes a different
+     one to ask "what would this look like at t" without moving the UI. */
+  function sampleDrill(atFrac) {
+    const f = atFrac == null ? animT : atFrac;
+    const e = f <= 0 ? 0 : f * totalTime;
+    const cacheHit = !!(planCache.current && planCache.current.key === effPieces);
+    const plan = getPlan();
+    // segRefs are never pruned, so count the keys this board actually wants
+    let expected = 0, mounted = 0;
+    effPieces.forEach(p => (p.path || []).forEach((_, i) => {
+      expected++;
+      if (segRefs.current[`${p.id}/${i}`]) mounted++;
+    }));
+    const legAt = pl => {
+      let k = 0;
+      pl.legs.forEach((L, i) => { if (e >= L.t0) k = i; });
+      return k;
+    };
+    const probes = [], pucks = [];
+    effPieces.filter(p => p.kind === "puck").forEach(p => {
+      const pl = plan.plans[p.id];
+      const inFlight = puckInFlight(p.id, e);
+      const ap = catchApproach(p.id, e);
+      // the same position the renderer hands nearestBladeTo (displayPosRaw is a
+      // pass-through for pucks), so the two answers are compared like for like
+      const res = displayPosAt(p, e);
+      const near = inFlight ? null : nearestBladeTo(res, e);
+      const k = pl ? legAt(pl) : -1;
+      const leg = pl ? pl.legs[k] : null;
+      probes.push({
+        puck: p.id, inFlight, approachId: ap ? ap.id : null,
+        legType: leg ? leg.type : null, legId: leg ? leg.id : null,
+        blade: near ? { id: near.q.id, d: near.d } : null,
+      });
+      pucks.push({
+        id: p.id, activeLeg: k, final: pl ? pl.final : null, rel: plan.rel[p.id],
+        inGoal: puckInGoal(p, e), at: { x: res.x, y: res.y },
+        legs: pl ? pl.legs : [],
+      });
+    });
+    const players = effPieces.filter(p => p.kind === "player").map(p => {
+      const pos = displayPosAt(p, e);
+      return {
+        id: p.id, label: p.label || null, hand: p.hand || "R", defense: !!p.defense,
+        speed: p.speed || 1, time: pieceTime(p),
+        at: { x: pos.x, y: pos.y, a: pos.a, aStep: pos.aStep, flip: pos.flip, v: pos.v },
+        // `dir` per leg is the ONLY place route-dir.js's sticky write is visible
+        legs: (p.path || []).map((s, i) => ({
+          i, mode: s.mode || "carry", dir: s.dir || "fwd", rate: s.rate || 1,
+          stop: s.stop || 0, t: waypointTime(p, i),
+        })),
+        warp: plan.warp[p.id] || null,
+        hold: plan.holds[p.id] || null,
+        startWait: plan.startWait[p.id] || 0,
+        opens: (plan.opens[p.id] || []).length,
+        pivots: !!plan.pivots[p.id],
+        branches: solvedRef.current.routes ? [...(solvedRef.current.routes[p.id] || [])] : [],
+      };
+    });
+    const counts = {};
+    pieces.forEach(p => { counts[p.kind] = (counts[p.kind] || 0) + 1; });
+    return {
+      t: e, animT: f, drillTime, totalTime, playing, mode, pace, seed: playSeed,
+      plan, cacheHit, segs: { mounted, expected },
+      pieces, ledger: posLedger, solved: solvedRef.current, probes, players, pucks,
+      resolved: {
+        // resolveNearest returns the SAME array when nothing migrated, so
+        // identity IS the answer here. resolveForks doesn't work that way — it
+        // rebuilds the array on every board to lower puck terminals to flat
+        // indices, so comparing identity would flag "forks spliced" on a drill
+        // with no branches at all. Count the branching the board actually has.
+        nearestRebound: rpieces !== pieces,
+        forkPlayers: pieces.filter(p => (p.forks || []).length).length,
+        branchesTaken: Object.values(solvedRef.current.routes || {})
+          .reduce((n, s) => n + [...(s || [])].length, 0),
+      },
+      board: { rink, view, counts, dense, roomy, whiteboard, presentation,
+        collisions, realisticShots: effRealistic, detail: effDetail },
+      dsl: serializeDrill(rink, pieces, drillTitle, drillDesc, drillSteps, drillNotes, drillItems),
+    };
+  }
+  // One arrow-function allocation per render while nothing is open — the report
+  // is only ever built by the panel's 5Hz poll or by window.__db. Assigned in
+  // the render body (the pressRef idiom above) so a reader always gets THIS
+  // render's closure instead of one captured when the panel mounted.
+  diagRef.current = (tab, atFrac) =>
+    tab === "pen" ? penDiagReport() : drillReport(sampleDrill(atFrac));
+  // ...and the few things the panel does back to the app. A second ref rather
+  // than props, for the same reason: props that change every frame would defeat
+  // the memo the whole design rests on.
+  diagActRef.current = {
+    // any manual step stops playback — scrubbing against a running RAF fights it
+    seek: f => { setPlaying(false); scrubTo(f); },
+    play: on => setPlaying(!!on),
+  };
 
   // natural phrase for an area name mid-sentence ("Dot lane" -> "the dot lane")
   const areaPhrase = z => {
@@ -3636,30 +3770,14 @@ export default function DrillAnimator() {
     // whose raw (undetoured) route may sweep right through another carrier's
     // spot and steal the puck for a few frames as they pass by.
     if (p.kind === "puck") {
-      let cq = null, cSide = 1, cd = 2.2;
       // A puck the plan says is in the air is NOT on anyone's stick, however close it
       // still is to the one that fired it — only the catch approach below may claim
       // it. Without this the proximity match holds a just-released puck on the blade
       // for a frame or two and then hands over the whole gap at once.
-      const inAir = puckInFlight(p.id, animT <= 0 ? 0 : animT * totalTime);
-      for (const q of inAir ? [] : pieces) {
-        if (q.kind !== "player" || q.defense) continue;   // (defense never carries; avoids recursion)
-        // Match against the ROUTE pose, not displayPosRaw: the puck's own position
-        // comes off that same pose (carriedPuckAt), while displayPosRaw adds the
-        // stride/plant lean. A deep hockey-stop plant swings a leaned blade several
-        // feet, which used to push the carrier past this 2.2ft gate and drop the puck
-        // off the stick for as long as the lean lasted.
-        const e = animT <= 0 ? 0 : animT * totalTime;
-        const raw = displayPosAt(q, e);
-        const side = q.hand === "L" ? -1 : 1;
-        // ...and against the SAME lever the puck is sitting on: through a shot/pass
-        // wind-up that lever swings out to the release spot, which would otherwise
-        // carry the puck straight out of this gate's reach mid-wind-up
-        const sp = stickSpot(q.id, e);
-        const bladeRaw = bladeAtWorld(raw.x, raw.y, raw.a || 0, sp.fwd * ICON_SCALE * PLAYER_SCALE, sp.lat * ICON_SCALE * PLAYER_SCALE, side);
-        const d = Math.hypot(res.x - bladeRaw.x, res.y - bladeRaw.y);
-        if (d < cd) { cd = d; cq = q; cSide = side; }
-      }
+      const e = animT <= 0 ? 0 : animT * totalTime;
+      const inAir = puckInFlight(p.id, e);
+      const near = inAir ? null : nearestBladeTo(res, e);
+      let cq = near ? near.q : null, cSide = near ? near.side : 1;
       // ...or it is the last stretch of a pass on its way to them. The plan already
       // steers the flight onto the receiver's route-pose blade; only here do we know
       // where that blade really is once the body lean, plant and shield are on it, so
@@ -3692,6 +3810,34 @@ export default function DrillAnimator() {
       }
     }
     return res;
+  }
+  // Which blade a puck sitting at `res` is on: the CLOSEST within 2.2 ft, never
+  // the first player in piece order — an undetoured route may sweep straight
+  // through another carrier's spot and steal the puck for a few frames as they
+  // pass by. Matched against the ROUTE pose, not displayPosRaw: the puck's own
+  // position comes off that same pose (carriedPuckAt), while displayPosRaw adds
+  // the stride/plant lean, and a deep hockey-stop plant swings a leaned blade
+  // several feet — which used to push the carrier past this gate and drop the
+  // puck off the stick for as long as the lean lasted. Matched against the SAME
+  // lever the puck rides, too: through a wind-up that lever swings out to the
+  // release spot, which would otherwise carry the puck out of reach mid-swing.
+  //
+  // Two callers on purpose. displayPos uses it to PLACE the puck; diagnostics
+  // uses it to compare that answer against the plan's `ride` leg. Those are the
+  // app's two independent answers to "who has the puck", and a diagnostic that
+  // re-derived one of them could drift away from the thing it is checking.
+  function nearestBladeTo(res, e) {
+    let cq = null, cSide = 1, cd = 2.2;
+    for (const q of pieces) {
+      if (q.kind !== "player" || q.defense) continue;   // (defense never carries; avoids recursion)
+      const raw = displayPosAt(q, e);
+      const side = q.hand === "L" ? -1 : 1;
+      const sp = stickSpot(q.id, e);
+      const bladeRaw = bladeAtWorld(raw.x, raw.y, raw.a || 0, sp.fwd * ICON_SCALE * PLAYER_SCALE, sp.lat * ICON_SCALE * PLAYER_SCALE, side);
+      const d = Math.hypot(res.x - bladeRaw.x, res.y - bladeRaw.y);
+      if (d < cd) { cd = d; cq = q; cSide = side; }
+    }
+    return cq ? { q: cq, side: cSide, d: cd } : null;
   }
   function displayPosRaw(p) {
     p = effOf(p);
@@ -11375,7 +11521,7 @@ export default function DrillAnimator() {
           transform: "translateX(-50%)", background: "rgba(20,26,32,0.92)", color: "#eaf2f8",
           padding: "6px 14px", borderRadius: 8, fontSize: 13, zIndex: 9999, pointerEvents: "none" }}>{toast}</div>
       )}
-      {diag && <DiagView diag={diag} setDiag={setDiag} feedRef={diagRef}
+      {diag && <DiagView diag={diag} setDiag={setDiag} feedRef={diagRef} actRef={diagActRef}
         drillVersion={drillVersion} flash={flash} />}
     </div>
     </InkCtx.Provider>
