@@ -8,7 +8,9 @@
 // Precedence contract (classifyPenGroup): puck-gate → dash-group → symbol →
 // (zigzag | shot | route) → mark. Every captured stroke lands in exactly one
 // op; `mark` (plain ink) is the universal fallback, so recognition can only
-// ever add meaning, never lose ink.
+// ever add meaning, never lose ink. The one place the board outranks the ink:
+// a closed loop is a zone overlay only when it did NOT start on a skater —
+// a loop off a player is that player's swing route (see `swing`/`loopsBack`).
 //
 // $P (Vatavu et al.) rather than $1/$Q on purpose: it is stroke-order and
 // stroke-direction invariant (left-handed coaches draw an X's strokes in any
@@ -644,6 +646,19 @@ export function classifyPenGroup(strokes, ctx = {}) {
   const sourceAt = pt => nearest(pt, passR, roster, e => e.hasPath ? e.end : { x: e.x, y: e.y });
   const spotAt = (pt, r, skip) => nearest(pt, r, roster.filter(e => e !== skip), e => ({ x: e.x, y: e.y }));
   const netAt = pt => nearest(pt, netR, nets, n => toU(n));
+  // A route can start at a player who has no route yet, or at the TIP of one
+  // that does — starting where a route ends continues it, which is how you
+  // build a path in stages. Whichever anchor is nearer wins; ties go to the tip.
+  const skaterAt = pt => {
+    const free = nearest(pt, attachR, roster.filter(e => !e.hasPath), e => ({ x: e.x, y: e.y }));
+    const tip = nearest(pt, attachR, roster.filter(e => e.hasPath), e => e.end);
+    const dFree = free ? dist(pt, { x: free.x, y: free.y }) : Infinity;
+    const dTip = tip ? dist(pt, tip.end) : Infinity;
+    return dTip <= dFree ? tip : free;
+  };
+  // did the pen come back to where it started? (bbox-relative, so it reads the
+  // same at any size) — the closedness test the shape branch turns on
+  const loopsBack = s => dist(s.pts[0], s.pts[s.pts.length - 1]) / s.diag < 0.3;
 
   // pts = screen units (all geometry); ptsFt = the original feet, kept for the
   // things that must stay in drill space: route fitting and fallback ink
@@ -652,8 +667,14 @@ export function classifyPenGroup(strokes, ctx = {}) {
     // press rides along untouched: it only matters if the stroke ends as ink
     return { pts, ptsFt: s.pts, press: s.press, idx, diag: strokesDiag([pts]) };
   });
-  const shorts = S.filter(s => s.diag < symMax);
-  const longs = S.filter(s => s.diag >= symMax);
+  // A closed loop wide enough to be an overlay, drawn off a skater, is a swing
+  // — send it down the route pipeline whatever its size. Without the size gate
+  // this would steal the O you drop BESIDE an existing player, which is a
+  // player token and something coaches do constantly; at overlayMin and up the
+  // ring is already too big to be one.
+  const swing = s => loopsBack(s) && s.diag >= overlayMin && !!skaterAt(s.pts[0]);
+  const shorts = S.filter(s => s.diag < symMax && !swing(s));
+  const longs = S.filter(s => s.diag >= symMax || swing(s));
 
   // ---- dash-groups out of the shorts first: a dashed line's dashes sit close
   // together and would otherwise cluster into a bogus "symbol"; collinearity
@@ -908,18 +929,26 @@ export function classifyPenGroup(strokes, ctx = {}) {
   const routeEnds = [];
   [...longs, ...fallThrough].sort((a, b) => a.idx - b.idx).forEach(s => {
     const pts = s.pts, last = pts[pts.length - 1];
-    if (dist(pts[0], last) / s.diag < 0.3) {
+    const skater = skaterAt(pts[0]);
+    if (loopsBack(s)) {
       const rec = recognizeSymbol([pts]);
       if (rec && ["O", "□", "△"].includes(rec.sym)) {
         if (rec.sym === "△" && s.diag < coneMax) {
           const c = centerOf(s.ptsFt);
           addOp({ op: "cone", x: c.x, y: c.y, srcs: [s.idx] });
-        } else {
+          return;
+        }
+        // …but a closed loop is a zone overlay only if it started nowhere near
+        // a skater. One that starts ON a player (or on the tip of their route)
+        // is a swing or a circle-back, and the route branch below claims it —
+        // an overlay drawn AROUND players starts on its own rim, which at this
+        // size is farther from their icons than attachR.
+        if (!skater) {
           const b = bboxOf(s.ptsFt);
           const shape = rec.sym === "O" ? "circle" : rec.sym === "□" ? "square" : "triangle";
           addOp({ op: "shape", shape, cx: b.x + b.w / 2, cy: b.y + b.h / 2, w: b.w, h: b.h, srcs: [s.idx] });
+          return;
         }
-        return;
       }
     }
     const mid = zigzagMidline(pts);
@@ -931,18 +960,11 @@ export function classifyPenGroup(strokes, ctx = {}) {
         if (by) { addOp({ op: "shot", by: by.who, net: net.id, srcs: [s.idx] }); return; }
       }
     }
-    // A stroke can start at a player who has no route yet, or at the TIP of one
-    // that does — starting where a route ends continues it, which is how you
-    // build a path in stages. Whichever anchor is nearer wins.
-    const free = nearest(pts[0], attachR, roster.filter(e => !e.hasPath), e => ({ x: e.x, y: e.y }));
-    const tip = nearest(pts[0], attachR, roster.filter(e => e.hasPath), e => e.end);
-    const dFree = free ? dist(pts[0], { x: free.x, y: free.y }) : Infinity;
-    const dTip = tip ? dist(pts[0], tip.end) : Infinity;
-    const skater = dTip <= dFree ? tip : free;
+    // the stroke skates off whichever anchor skaterAt found for its first point
     if (skater) {
       const shaped = mid || stripArrowhead(pts, arrowLeg);   // screen units
       const raw = shaped.map(toFt);                          // fitRoute works in feet
-      addOp({ op: "route", to: skater.who, raw, bwd: !!mid, extend: skater === tip, srcs: [s.idx] });
+      addOp({ op: "route", to: skater.who, raw, bwd: !!mid, extend: skater.hasPath, srcs: [s.idx] });
       skater.hasPath = true;
       skater.end = shaped[shaped.length - 1];
       routeEnds.push(skater.end);
