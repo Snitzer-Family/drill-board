@@ -297,6 +297,31 @@ PIECE P3 player 18 20 #d7263d F3 route=R1 q=3
 - A route may carry `BRANCH`es like a player. Every member reads them
   independently, so three skaters on one reactive route each get their own answer.
 
+**Pucks.** Author the puck work on the skater at the **head** of the line, exactly
+as you would for a lone player — and everyone behind them does the same thing,
+provided a puck is actually available:
+
+```drill
+PIECE R1 route 30 22 #3f7f8c Shooters queue=lead:18
+PATH  R1 L 90,22 Q 130,22 165,45
+PIECE P1 player 30 22 #d7263d F1 route=R1 q=1
+PIECE P2 player 24 22 #d7263d F2 route=R1 q=2
+PIECE P3 player 18 22 #d7263d F3 route=R1 q=3
+PIECE PK1 puck 31 25 pickup=P1@0 shoot=3
+PIECE PK2 puck 25 25
+PIECE PK3 puck 19 25
+```
+
+A pile is just **loose pucks** — no special piece. At load time the head skater's
+chain is copied onto each of the others and re-pointed at them, taking one spare
+puck each, nearest the front of the line first. Everything the chain aims at is
+left alone, so three skaters feeding the same net or the same `F4` all do.
+
+A skater with no puck to collect **runs the route empty-handed and does no puck
+work at all** — which is what having no chain already means everywhere else in the
+format. So a three-deep line with two pucks is legal and does the obvious thing.
+In the app, *+ Pucks* on the route's popup drops the pile for you.
+
 **Recirculating.** `next=` sends a line's finishers to another line's head, which
 is how a full-ice drill actually runs:
 

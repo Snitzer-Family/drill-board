@@ -164,6 +164,75 @@ export function transitPoly(routeA, routeB, obstacles) {
   return pts.length ? [{ x: end.x, y: end.y }, ...pts.map(s => ({ x: s.x, y: s.y }))] : null;
 }
 
+/* ----- the line's puck work ----- */
+
+// A puck chain is "headed by" a player when they start with it on their blade or
+// collect it. That player is the one whose rep the chain describes.
+const chainHead = pk => (pk.kind === "puck" ? pk.carrier || (pk.pickup && pk.pickup.to) || null : null);
+
+// A puck nobody has spoken for: no carrier, no collector, no passes, no terminal.
+// These are the pile at the top of the line.
+const isSpare = pk => pk.kind === "puck" && !pk.carrier && !pk.pickup
+  && !(pk.transfers || []).length && !(pk.terminals || []).length;
+
+// Rewrite every player reference in a chain from one skater to another. This is
+// the whole of "everyone on the line does what the first one does": the chain's
+// shape, its waypoint indices and anyone it passes to are untouched, so three
+// skaters feeding the same net or the same F4 all still do.
+function retarget(pk, fromId, toId) {
+  const sw = id => (id === fromId ? toId : id);
+  const out = { ...pk };
+  if (pk.carrier) out.carrier = sw(pk.carrier);
+  if (pk.pickup) out.pickup = { ...pk.pickup, to: sw(pk.pickup.to) };
+  if ((pk.transfers || []).length) out.transfers = pk.transfers.map(t => ({
+    ...t, to: sw(t.to), ...(t.by ? { by: sw(t.by) } : {}), ...(t.via ? { via: sw(t.via) } : {}),
+  }));
+  if ((pk.terminals || []).length) out.terminals = pk.terminals.map(t => ({
+    ...t, ...(t.by ? { by: sw(t.by) } : {}),
+  }));
+  return out;
+}
+
+// Give every skater on the line the same puck work as the one at its head — but
+// only if there is actually a puck for them.
+//
+// That last clause is the rule, and it is why this reads availability rather than
+// conjuring pucks: a skater who can't get one runs the route empty-handed and
+// simply has no chain, which is already what "no puck actions" means everywhere
+// else in the engine. A pile at the top of a line is N ordinary pucks, so the
+// possession ledger keeps its one-carrier-per-puck assumption and `pickup=…*`
+// keeps working untouched.
+//
+// Returns a Map of puckId -> replacement piece (empty when there is nothing to do).
+export function shareLinePucks(pieces, line, spots) {
+  const out = new Map();
+  if (line.length < 2) return out;
+  const head = line[0].id;
+  const templates = pieces.filter(pk => pk.kind === "puck" && chainHead(pk) === head);
+  if (!templates.length) return out;
+
+  // the pile, nearest the head of the line first, so a skater takes the puck a
+  // coach would hand them rather than one from across the ice
+  const spare = pieces.filter(isSpare)
+    .map(pk => ({ pk, d: Math.hypot(pk.x - spots[0].x, pk.y - spots[0].y) }))
+    .sort((a, b) => a.d - b.d)
+    .map(e => e.pk);
+
+  let n = 0;
+  for (let k = 1; k < line.length; k++) {
+    // one spare per template, or this skater gets nothing — all or nothing per
+    // skater, so a two-puck rep never lands half-done
+    if (n + templates.length > spare.length) break;
+    templates.forEach(t => {
+      const pk = spare[n++];
+      const re = retarget(t, head, line[k].id);
+      // it keeps its OWN spot in the pile, and its own id; only the chain moves
+      out.set(pk.id, { ...re, id: pk.id, x: pk.x, y: pk.y });
+    });
+  }
+  return out;
+}
+
 // Materialize every line into plain players and drop the route pieces, which are
 // authoring objects the engine must never see (they would otherwise land in
 // drillTime as zero-length routes and in the timing plan as bogus skaters).
@@ -214,11 +283,16 @@ export function lowerRoutes(pieces) {
   };
 
   const lowered = new Map();
+  const pucks = new Map();
   for (const [id, R] of routes) {
     const gap = R.gap > 0 ? R.gap : QUEUE_GAP;
     const line = queueOf(list, id);
+    const spots = line.map((_, k) => stackSpot(R, k, gap));
+    // whatever the head of the line does with a puck, the rest do — if the pile
+    // has one for them. Everyone else just skates it.
+    for (const [pid, pk] of shareLinePucks(list, line, spots)) pucks.set(pid, pk);
     line.forEach((P, k) => {
-      const spot = stackSpot(R, k, gap);
+      const spot = spots[k];
       // the head of the line goes on the whistle; everyone behind waits their turn.
       // A member's OWN wait= is overwritten, not merged: the line owns the release.
       const wait = k > 0 ? queueRelease(R, line[k - 1].id) : null;
@@ -238,6 +312,5 @@ export function lowerRoutes(pieces) {
       });
     });
   }
-  if (!lowered.size) return list.filter(p => p.kind !== "route");
-  return list.filter(p => p.kind !== "route").map(p => lowered.get(p.id) || p);
+  return list.filter(p => p.kind !== "route").map(p => lowered.get(p.id) || pucks.get(p.id) || p);
 }

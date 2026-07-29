@@ -211,5 +211,67 @@ const routeB = (over = {}) => ({
   T('a branching route does not recycle', legs.some(s => s.transit), false);
 }
 
+// ---- the line's puck work ----
+// The rule: a skater does the route's puck work only if a puck is actually
+// available to them. Otherwise they run the route empty-handed.
+const puck = (id, x, y, over = {}) => ({ id, kind: 'puck', x, y, carrier: null, pickup: null, transfers: [], ...over });
+// the head skater collects a puck at the start and shoots it at point 2
+const tmpl = (id, x, y) => puck(id, x, y, { pickup: { to: 'P1', at: -1 }, terminals: [{ kind: 'shot', at: 1, ref: '' }] });
+const chainOf = (out, id) => { const p = out.find(q => q.id === id); return [p.pickup && p.pickup.to, (p.terminals || []).map(t => t.kind + '@' + t.at).join()]; };
+
+{ // a full pile: everyone on the line gets the same rep
+  const ps = [route(), skater('P1', 1), skater('P2', 2), skater('P3', 3),
+    tmpl('PK1', 59, 40), puck('PK2', 54, 41), puck('PK3', 49, 41)];
+  const out = lowerRoutes(ps);
+  T('the head keeps its own chain', chainOf(out, 'PK1'), ['P1', 'shot@1']);
+  T('the second skater gets the same work', chainOf(out, 'PK2'), ['P2', 'shot@1']);
+  T('the third too', chainOf(out, 'PK3'), ['P3', 'shot@1']);
+  T('a shared puck keeps its own spot in the pile', [out.find(q => q.id === 'PK2').x, out.find(q => q.id === 'PK2').y], [54, 41]);
+}
+{ // the gate: not enough pucks, so the back of the line skates it empty-handed
+  const ps = [route(), skater('P1', 1), skater('P2', 2), skater('P3', 3),
+    tmpl('PK1', 59, 40), puck('PK2', 54, 41)];
+  const out = lowerRoutes(ps);
+  T('a skater with a puck gets the work', chainOf(out, 'PK2'), ['P2', 'shot@1']);
+  T('a skater with no puck gets no chain, and just skates',
+    out.filter(q => q.kind === 'puck' && q.pickup && q.pickup.to === 'P3').length, 0);
+  T('the spare pool is never over-drawn', out.filter(q => q.kind === 'puck' && q.pickup).length, 2);
+}
+{ // no pile at all — the line runs, only the head does puck work
+  const ps = [route(), skater('P1', 1), skater('P2', 2), tmpl('PK1', 59, 40)];
+  const out = lowerRoutes(ps);
+  T('with no spare pucks only the head has a chain', out.filter(q => q.kind === 'puck' && q.pickup).length, 1);
+  T('the rest still skate the route', out.find(q => q.id === 'P2').path.length, 2);
+}
+{ // a puck already busy elsewhere is not in the pile
+  const ps = [route(), skater('P1', 1), skater('P2', 2), tmpl('PK1', 59, 40),
+    puck('PKX', 55, 41, { carrier: 'PZ' })];
+  T('a carried puck is not spare', lowerRoutes(ps).filter(q => q.kind === 'puck' && q.pickup).length, 1);
+  const ps2 = [route(), skater('P1', 1), skater('P2', 2), tmpl('PK1', 59, 40),
+    puck('PKY', 55, 41, { transfers: [{ at: 0, to: 'PZ', kind: 'pass' }] })];
+  T('a puck already in a chain is not spare', lowerRoutes(ps2).filter(q => q.kind === 'puck' && q.pickup).length, 1);
+}
+{ // passes to someone OFF the line are left alone — three skaters feeding one
+  // net or one F4 is the drill, not a bug
+  const ps = [route(), skater('P1', 1), skater('P2', 2),
+    puck('PK1', 59, 40, { pickup: { to: 'P1', at: -1 }, transfers: [{ at: 0, to: 'F4', recvAt: null, kind: 'pass' }] }),
+    puck('PK2', 54, 41)];
+  const out = lowerRoutes(ps);
+  T('the replicated chain still feeds the same target', out.find(q => q.id === 'PK2').transfers[0].to, 'F4');
+  T('...but is collected by the new skater', out.find(q => q.id === 'PK2').pickup.to, 'P2');
+}
+{ // a chain that starts ON the blade replicates too
+  const ps = [route(), skater('P1', 1), skater('P2', 2),
+    puck('PK1', 60, 40, { carrier: 'P1', terminals: [{ kind: 'shot', at: 1, ref: '' }] }),
+    puck('PK2', 54, 41)];
+  T('a carried chain replicates to the next skater', lowerRoutes(ps).find(q => q.id === 'PK2').carrier, 'P2');
+}
+{ // nothing to share, nothing to do
+  const ps = [route(), skater('P1', 1), puck('PK1', 54, 41)];
+  const out = lowerRoutes(ps);
+  T('a one-skater line shares nothing', out.find(q => q.id === 'PK1').pickup, null);
+  T('sharing is deterministic', JSON.stringify(lowerRoutes(ps)) === JSON.stringify(out), true);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

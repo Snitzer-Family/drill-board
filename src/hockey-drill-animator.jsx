@@ -4209,6 +4209,26 @@ export default function DrillAnimator() {
     const spot = stackSpot(R, k, R.gap > 0 ? R.gap : QUEUE_GAP);
     return settleLine([...ps, { ...makePiece("player", spot, ps), route: routeId, q: k }], routeId);
   });
+  // Drop a pile of loose pucks beside the line — one per skater who hasn't got
+  // one. They are ordinary pucks: lowering hands them out nearest-first, and a
+  // skater who doesn't get one simply skates the route.
+  const addLinePucks = routeId => setPieces(ps => {
+    const R = ps.find(q => q.id === routeId && q.kind === "route");
+    if (!R) return ps;
+    const gap = R.gap > 0 ? R.gap : QUEUE_GAP;
+    const line = queueOf(ps, routeId);
+    const spare = ps.filter(q => q.kind === "puck" && !q.carrier && !q.pickup
+      && !(q.transfers || []).length && !(q.terminals || []).length).length;
+    const want = Math.max(0, line.length - 1 - spare);
+    if (!want) { flash("The line already has a puck each"); return ps; }
+    const out = ps.slice();
+    for (let i = 0; i < want; i++) {
+      // beside the stack, not on it, so they read as a pile rather than a carry
+      const at = stackSpot(R, spare + i + 1, gap);
+      out.push({ ...makePiece("puck", { x: clampX(at.x + 1.6), y: clampY(at.y + 3.2) }, out) });
+    }
+    return out;
+  });
   // promote a hand-drawn route into a route object, with its author at the head.
   // The path is MOVED, not copied: two sources of truth for one line is the exact
   // drift this feature exists to remove.
@@ -8300,6 +8320,7 @@ export default function DrillAnimator() {
                   ))}
                   <div className="hd-poprow">
                     <button className="hd-mini" onClick={() => addSkater(p.id)}>+ Add skater</button>
+                    {line.length > 1 && <button className="hd-mini" onClick={() => addLinePucks(p.id)}>+ Pucks</button>}
                     {free.length > 0 && (
                       <select className="hd-select" value="" onChange={e => e.target.value && joinLine(e.target.value, p.id)}>
                         <option value="">— add existing —</option>
@@ -8307,6 +8328,13 @@ export default function DrillAnimator() {
                       </select>
                     )}
                   </div>
+                  {line.length > 1 && (
+                    <div className="hd-sechint">
+                      Whatever {nameOf(line[0].id)} does with a puck, the rest do — as long as
+                      there&rsquo;s a loose one for them to pick up. Anyone who can&rsquo;t get one
+                      just skates the route.
+                    </div>
+                  )}
                 </div>
                 <div className="hd-field">
                   <div className="hd-sectitle">Spacing</div>
