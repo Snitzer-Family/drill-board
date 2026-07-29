@@ -246,7 +246,19 @@ check("default prop bodies are visible on every sheet", () => {
   const BODIES = {
     tire: "#1c1c1e", bumper: "#1b1e22", cone: "#e0731d", deker: "#c79a4e",
     passer: "#57636f", light: "#2ea043", net: "#c81e33", stick: "#20242a",
+    // The keeper's jersey (GOALIE_COLOR). Not a prop, but the same rule applies,
+    // and it is the one body colour nobody can override from the UI — so if this
+    // guard doesn't hold it, nothing does.
+    goalie: "#2f9e57",
   };
+  // …and that one is the only entry here with a named constant behind it, so
+  // pin the two together: a table testing a colour the app no longer paints is
+  // worse than no table at all.
+  const src = readFileSync(new URL("../src/constants.js", import.meta.url), "utf8");
+  const m = src.match(/GOALIE_COLOR\s*=\s*"(#[0-9a-fA-F]{6})"/);
+  assert.ok(m, "constants.js no longer exports a GOALIE_COLOR hex");
+  assert.equal(m[1].toLowerCase(), BODIES.goalie,
+    "GOALIE_COLOR moved but this table didn't — it is guarding a dead colour");
   for (const theme of Object.keys(THEMES)) {
     const ice = THEMES[theme].ice;
     for (const [kind, stored] of Object.entries(BODIES)) {

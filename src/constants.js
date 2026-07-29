@@ -51,7 +51,7 @@ export const TYPEFACES = [
 ];
 export const TYPEFACE_KEY = "drillboard:typeface";
 
-export const APP_VERSION = "7.00";
+export const APP_VERSION = "7.01";
 // DSL schema version, stamped into every serialized drill (`DSL <n>` header) so
 // production builds can eventually render a drill per the version that wrote it.
 // Bump ONLY on a breaking DSL change (new kinds/modifiers that older builds would
@@ -64,6 +64,11 @@ export const ICON_SCALE = 0.8;
 // riding it) into rink feet must fold this in too, or the puck floats off the end
 // of the blade — the glyph shrank but the lever it hangs off did not.
 export const PLAYER_SCALE = 0.93;
+// The keeper's own jersey, deliberately NOT the net's colour: a goalie wearing
+// the goal frame's red reads as part of the hardware rather than as a person.
+// This green is not new — the static export, the AI 5v5 overlay and the preview
+// legend already drew the goalie in it; the on-ice sprite was the odd one out.
+export const GOALIE_COLOR = "#2f9e57";
 // a route line starts this many rink feet clear of the player icon (drawing only —
 // timing still measures from the true start point)
 export const ROUTE_START_GAP = 3;

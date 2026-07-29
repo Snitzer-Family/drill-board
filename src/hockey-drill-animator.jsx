@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo, Fragment } from "react";
 import { VIEWS, isQuarter, COLORS, vb, APP_VERSION, ICON_SCALE, PLAYER_SCALE, ROUTE_START_GAP, BUILD_STAMP, DEFAULT_TEXT, SPEED,
   SAVE_PROB, MISS_POST, MISS_WIDE, MISS_OVER, SHOT_AIR_PROB, BOUNCE_REST, WB_SYMS, symOf,
-  DSL_VERSION, TYPEFACES, TYPEFACE_KEY, READ_PACES, READ_PACE_DEFAULT, captionHold } from "./constants.js";
+  DSL_VERSION, TYPEFACES, TYPEFACE_KEY, READ_PACES, READ_PACE_DEFAULT, captionHold, GOALIE_COLOR } from "./constants.js";
 import { parseDrill, serializeDrill, extractDrill, deriveInventory, ensureShotNet } from "./drill-format.js";
 import { prepareImage, drillFromImage, ANTHROPIC_KEY_STORE } from "./drill-vision.js";
 import { drillSvg } from "./drill-svg.js";
@@ -12,7 +12,7 @@ import * as boards from "./boards.js";
 import { netShapes, bumperShapes, solidShapes, detourRoute, segCrossesNet } from "./net-collide.js";
 import { RinkMarkings } from "./rink.jsx";
 import { ZONES, zoneAt } from "./zones.js";
-import { PieceIcon, Stepper, DiagPanel, Icon, ICONS } from "./icons.jsx";
+import { PieceIcon, GoalieIcon, Stepper, DiagPanel, Icon, ICONS } from "./icons.jsx";
 import { createTiming, resolveNearest } from "./timing.js";
 import { buildLedger, mayHoldOn, mayHoldEntering, orderTransfers } from "./possession.js";
 import { classifyPenGroup, SYMBOL_MAX, SYMBOL_MAX_PX } from "./sketch-recognize.js";
@@ -2385,12 +2385,16 @@ export default function DrillAnimator() {
   // the goalie is solid too — a keep-out disc at its current crease position.
   // Uses displayPosRaw for puck tracking so it never recurses back into a
   // carrier's displayPos. Cached for the render pass.
-  const GOALIE_R = 2.7;
+  // Radius tracks the drawn sprite, which measures y -4.20…4.26 icon units:
+  // 4.26 × ICON_SCALE = 3.41 ft. It scales with the host piece for the same
+  // reason the sprite does — a mite net's keeper is a smaller body. Was 2.7 for
+  // the old, much smaller sprite; skaters now arc a touch wider round a crease.
+  const goalieR = net => 3.4 * (net.size || 1);
   let _goalieDiscs = null;
   const goalieDiscs = () => {
     if (_goalieDiscs) return _goalieDiscs;
     _goalieDiscs = pieces.filter(q => (q.kind === "net" || q.kind === "tire") && q.goalie)
-      .map(net => { const g = goaliePos(net, displayPosRaw); return { cx: g.x, cy: g.y, r: GOALIE_R }; });
+      .map(net => { const g = goaliePos(net, displayPosRaw); return { cx: g.x, cy: g.y, r: goalieR(net) }; });
     return _goalieDiscs;
   };
   // smallest disc enclosing two discs — used to fuse a net's keep-out with its
@@ -2411,7 +2415,7 @@ export default function DrillAnimator() {
     const net = netPieces[i];
     if (!net || !net.goalie) return sh;
     const g = goaliePos(net, displayPosRaw);
-    return mergeDiscs({ cx: sh.cx, cy: sh.cy, r: sh.r }, { cx: g.x, cy: g.y, r: GOALIE_R });
+    return mergeDiscs({ cx: sh.cx, cy: sh.cy, r: sh.r }, { cx: g.x, cy: g.y, r: goalieR(net) });
   });
   // the round props (roughly circular footprints): passers, tires, dekers
   const roundPropDiscs = () => [
@@ -6922,8 +6926,9 @@ export default function DrillAnimator() {
   function renderGoalie(net) {
     const gp = goaliePos(net);
     const fx = iconXf(gp);
+    // whiteboard mode stays the coach's letter, in the net's own colour — that
+    // is notation, not artwork, and it is deliberately untouched by the sprite
     const col = net.color || "#c81e33";
-    const dark = "#1d2126";
     if (whiteboard) return (
       <g key={`goalie-${net.id}`} transform={fx.t} pointerEvents="none">
         {wbCircle && <circle cx={0} cy={0} r={3.3} fill="#fff" stroke={col} strokeWidth={0.5} />}
@@ -6935,20 +6940,7 @@ export default function DrillAnimator() {
         </text>
       </g>
     );
-    return (
-      <g key={`goalie-${net.id}`} transform={fx.t} pointerEvents="none">
-        <ellipse cx={0.4} cy={0} rx={2.9} ry={2.6} fill="#0a1016" opacity={0.16} />
-        <path d="M 2.3 2.2 L 3.9 1 M 3.9 1.1 L 4.5 -1.1" stroke={dark} strokeWidth={1} strokeLinecap="round" />
-        <rect x={-1.7} y={-1.5} width={2.4} height={3} rx={1.05} fill={col} stroke="#fff" strokeWidth={0.3} />
-        <rect x={0.2} y={-1.85} width={2.6} height={1.5} rx={0.42} fill="#eef2f6" stroke="#2a2f36" strokeWidth={0.3} />
-        <rect x={0.2} y={0.35} width={2.6} height={1.5} rx={0.42} fill="#eef2f6" stroke="#2a2f36" strokeWidth={0.3} />
-        <circle cx={1.95} cy={-2.4} r={1.05} fill="#e8edf2" stroke="#2a2f36" strokeWidth={0.32} />
-        <circle cx={1.95} cy={-2.4} r={0.48} fill="none" stroke="#2a2f36" strokeWidth={0.18} opacity={0.55} />
-        <rect x={1.35} y={1.6} width={1.85} height={1.5} rx={0.28} fill="#e8edf2" stroke="#2a2f36" strokeWidth={0.32} />
-        <circle cx={-0.15} cy={0} r={0.92} fill={col} stroke="#fff" strokeWidth={0.3} />
-        <path d="M 0.35 -0.55 Q 0.85 0 0.35 0.55" fill="none" stroke="#fff" strokeWidth={0.16} opacity={0.55} />
-      </g>
-    );
+    return <GoalieIcon key={`goalie-${net.id}`} xf={fx.t} hand={net.hand} size={net.size || 1} />;
   }
 
   // Result splash for each net's latest shot (GOAL/SAVE/POST/WIDE/OVER). Parks in
@@ -9459,7 +9451,7 @@ export default function DrillAnimator() {
                 })}
                 {aiRef.current.goalies.map((gl, i) => {
                   const fx = iconXf({ x: gl.x, y: gl.y, a: gl.a });
-                  const col = "#2f9e57", dark = "#1d2126";
+                  const col = GOALIE_COLOR;
                   if (whiteboard) return (
                     <g key={`aig-${i}`} transform={fx.t}>
                       {wbCircle && <circle cx={0} cy={0} r={3.3} fill="#fff" stroke={col} strokeWidth={0.5} />}
@@ -9471,18 +9463,7 @@ export default function DrillAnimator() {
                       </text>
                     </g>
                   );
-                  return (
-                    <g key={`aig-${i}`} transform={fx.t}>
-                      <ellipse cx={0.4} cy={0} rx={2.9} ry={2.6} fill="#0a1016" opacity={0.16} />
-                      <path d="M 2.3 2.2 L 3.9 1 M 3.9 1.1 L 4.5 -1.1" stroke={dark} strokeWidth={1} strokeLinecap="round" />
-                      <rect x={-1.7} y={-1.5} width={2.4} height={3} rx={1.05} fill={col} stroke="#fff" strokeWidth={0.3} />
-                      <rect x={0.2} y={-1.85} width={2.6} height={1.5} rx={0.42} fill="#eef2f6" stroke="#2a2f36" strokeWidth={0.3} />
-                      <rect x={0.2} y={0.35} width={2.6} height={1.5} rx={0.42} fill="#eef2f6" stroke="#2a2f36" strokeWidth={0.3} />
-                      <circle cx={1.95} cy={-2.4} r={1.05} fill="#e8edf2" stroke="#2a2f36" strokeWidth={0.32} />
-                      <rect x={1.35} y={1.6} width={1.85} height={1.5} rx={0.28} fill="#e8edf2" stroke="#2a2f36" strokeWidth={0.32} />
-                      <circle cx={-0.15} cy={0} r={0.92} fill={col} stroke="#fff" strokeWidth={0.3} />
-                    </g>
-                  );
+                  return <GoalieIcon key={`aig-${i}`} xf={fx.t} />;
                 })}
                 {(() => { const fx = iconXf({ x: aiRef.current.puck.x, y: aiRef.current.puck.y }); return (
                   <g transform={fx.t}><circle cx={0} cy={0} r={1.5} fill={T["ice-ink"]} stroke={T.ice} strokeWidth={0.4} /></g>); })()}

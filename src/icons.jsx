@@ -1,6 +1,6 @@
 // Piece icons (screen-true frames), stepper control, diagnostics overlay.
 import { useState, useRef, useEffect } from "react";
-import { APP_VERSION, BUILD_STAMP, ICON_SCALE, DSL_VERSION, symOf, PLAYER_SCALE } from "./constants.js";
+import { APP_VERSION, BUILD_STAMP, ICON_SCALE, DSL_VERSION, symOf, PLAYER_SCALE, GOALIE_COLOR } from "./constants.js";
 import { useTheme, useInk } from "./theme-react.jsx";
 
 /* ---------------- unified action icons ----------------
@@ -440,6 +440,115 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
         <circle cx={4.7 * PLAYER_SCALE} cy={(p.hand === "L" ? -2.55 : 2.55) * PLAYER_SCALE} r={3.3} fill="transparent"
           pointerEvents={hPE} style={{ cursor: "grab" }} onPointerDown={onStickDown} />
       )}
+    </g>
+  );
+}
+
+/* ---------------- goalie icon ----------------
+   Not a piece kind — a goalie is a `goalie` flag on a net or a tire, positioned
+   every frame by goaliePos(). It lives here anyway so it draws in the same
+   language as the skater beside it, and so there is ONE copy: the board and the
+   AI 5v5 overlay both render this, and the two hand-rolled copies they used to
+   carry had already drifted apart by two shapes and a colour.
+
+   Local +x = out of the net toward the shooter, +y = the blocker/stick side.
+   1 local unit = 0.8 ft = 9.6 in, so the real numbers behind the shapes below
+   (USA Hockey's equipment limits: 11" x 35" leg pad, 8" x 15" blocker, 26"
+   paddle, 15.5" blade) land at roughly the sizes drawn — exaggerated only where
+   a true width would be under a pixel on a full-rink view.
+
+   The pose is NOT the butterfly, and that was the hard-won part. A butterfly is
+   the only goalie stance with a distinctive overhead plan — pads flat, splayed
+   sideways across most of the 6 ft mouth — so it is the obvious thing to draw,
+   and it was drawn, twice. Both times it failed for the same reason: a wide low
+   bar at the ~28px a full-rink view gives you is a smudge, and the chest sitting
+   over the middle of it turns the pads into a white outline round a blob. What
+   reads is a skater's build with the legs projecting forward: the body stays the
+   dominant mass exactly as it is on a player, and the gear reads as gear.
+
+   Spans y -4.20…4.26 against the skater's ±3.07 — a third wider, which is what
+   makes the two tell apart at a glance. GOALIE_R in the animator is derived from
+   that; if these numbers move, move it too. */
+
+// Every pale piece is two-tone on purpose, and the two tones are near-inverses:
+// on a white sheet the pale fill vanishes and the dark edge draws the shape; on
+// a dark sheet the edge vanishes and the fill draws it. One of them always
+// reads. Pads and gloves then differ from each other by a step of tone, because
+// when all four were the same white they stopped being four things and became
+// confetti round a green blob.
+const PAD_FILL = "#eef2f6", GLOVE_FILL = "#ccd6e0", PAD_EDGE = "#2a2f36";
+
+export function GoalieIcon({ xf, color, hand, size = 1 }) {
+  const T = useTheme();
+  const ink = useInk();
+  const jersey = ink(color || GOALIE_COLOR);
+  // the paddle takes the stick token rather than the skater's near-black: that
+  // black is 1.14:1 on the dark sheet, and a goalie stick is one of the few
+  // shapes still doing identifying work once the sprite is down to ~28px
+  const wood = T["ice-stick"];
+  // One leg pad, drawn on the +y side and mirrored for the other. They pivot at
+  // the hip and project FORWARD past the chest rather than splaying flat: a
+  // true overhead butterfly is a wide low bar, and at 28px a wide low bar is
+  // just a smudge. Legs out front read as legs.
+  const pad = s => (
+    <g key={s} transform={s < 0 ? "scale(1 -1)" : undefined}>
+      <g transform="rotate(16 0.6 0.3)">
+        <rect x={0.6} y={0.3} width={2.8} height={1.55} rx={0.5}
+          fill={PAD_FILL} stroke={PAD_EDGE} strokeWidth={0.3} />
+        {/* knee rolls — under a pixel on a full-rink view, legible zoomed in,
+            which is the same way the net's mesh earns its keep */}
+        <path d="M 1.6 0.5 L 1.6 1.65 M 2.55 0.5 L 2.55 1.65"
+          fill="none" stroke={PAD_EDGE} strokeWidth={0.16} opacity={0.55} />
+      </g>
+    </g>
+  );
+  const body = (
+    <>
+      <ellipse cx={0.1} cy={0} rx={3.3} ry={4.2} fill="#0a1016" opacity={0.16} />
+      {/* The skater's own capsule, near enough full size — the chest stays the
+          dominant mass exactly as it does on a player, and the goalie reads as
+          the same KIND of drawing. Earlier cuts shrank it to let the pads show
+          and ended up with a green crescent wrapped in white confetti. */}
+      <path d="M 1.24 0 C 1.24 -1.87 0.57 -2.72 -0.48 -2.81 C -1.9 -2.89 -2.66 -1.87 -2.66 -0.94 L -2.66 0.94 C -2.66 1.87 -1.9 2.89 -0.48 2.81 C 0.57 2.72 1.24 1.87 1.24 0 Z"
+        fill={jersey} stroke="#fff" strokeWidth={0.32} />
+      <path d="M -1.43 -2.68 Q -0.52 0 -1.43 2.68" fill="none" stroke="#fff" strokeWidth={0.42} opacity={0.75} />
+      {/* arms in the jersey colour, shoulder out to each hand — the skater has
+          these too, and without them the trapper and blocker float unattached */}
+      <g transform={hand === "L" ? "scale(1 -1)" : undefined}>
+        <path d="M -0.35 -2.21 C 0.55 -2.3 0.7 -3.1 1.25 -3.1" fill="none" stroke={jersey} strokeWidth={1.2} strokeLinecap="round" />
+        <path d="M -0.35 2.21 C 0.55 2.3 0.7 3.1 1.25 3.1" fill="none" stroke={jersey} strokeWidth={1.2} strokeLinecap="round" />
+      </g>
+      {[1, -1].map(pad)}
+      {/* everything the goalie holds swaps sides with the catching hand, the
+          same mirror the skater's stick arm uses */}
+      <g transform={hand === "L" ? "scale(1 -1)" : undefined}>
+        {/* trapper, pocket opening toward the shooter */}
+        <circle cx={1.6} cy={-3.1} r={1.05} fill={GLOVE_FILL} stroke={PAD_EDGE} strokeWidth={0.3} />
+        <path d="M 2.1 -2.5 A 0.85 0.85 0 0 0 2.1 -3.7" fill="none" stroke={PAD_EDGE} strokeWidth={0.24} opacity={0.7} />
+        {/* blocker, squared up to the shooter */}
+        <g transform="rotate(-20 1.6 3.1)">
+          <rect x={0.9} y={2.12} width={1.4} height={1.96} rx={0.3}
+            fill={GLOVE_FILL} stroke={PAD_EDGE} strokeWidth={0.3} />
+        </g>
+        {/* paddle out of the blocker hand, then the blade flat on the ice in
+            front of the pads. Both kept clear of the pad faces — a pale stick
+            over a pale pad is 1.9:1 on the dark sheets */}
+        <path d="M 2.1 2.55 L 3.1 1.1" stroke={wood} strokeWidth={0.64} strokeLinecap="round" />
+        <path d="M 3.05 1.2 L 3.7 -0.7" stroke={wood} strokeWidth={0.9} strokeLinecap="round" />
+      </g>
+      {/* mask: the skater's helmet treatment (jersey colour knocked back by a
+          black wash, plus the highlight) with a cage bow added. Kept LARGER than
+          the trapper on purpose — when the glove was the bigger pale disc it
+          read as the head and the whole piece pointed the wrong way. */}
+      <circle cx={0.55} cy={0} r={1.35} fill={jersey} />
+      <circle cx={0.55} cy={0} r={1.35} fill="#000" opacity={0.45} />
+      <path d="M 1.07 -0.96 Q 2.0 0 1.07 0.96" fill="none" stroke="#fff" strokeWidth={0.2} opacity={0.5} />
+      <path d="M -0.11 -0.89 Q 0.57 -1.32 1.25 -0.89" fill="none" stroke="#fff" strokeWidth={0.22} opacity={0.35} />
+    </>
+  );
+  return (
+    <g transform={xf} pointerEvents="none">
+      {size !== 1 ? <g transform={`scale(${size})`}>{body}</g> : body}
     </g>
   );
 }
