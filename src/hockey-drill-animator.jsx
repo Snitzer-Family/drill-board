@@ -10277,7 +10277,7 @@ export default function DrillAnimator() {
         <div className="hd-act draw">
           {/* what the PEN does */}
           <div className="hd-pengroup">
-            {/* No Draw|Edit switch here any more — the bottom bar's DRAW·EDIT·PLAY
+            {/* No Draw|Edit switch here any more — the bottom bar's three-flow
                 segment owns that, and it's the ~90px this palette needed to fit
                 on one line at phone widths. */}
             {/* What the pen does with your ink, as ONE control. It used to be
@@ -10685,35 +10685,49 @@ export default function DrillAnimator() {
       <div className="hd-bar"
         onPointerDown={presoFull ? showBar : undefined}
         onPointerMove={presoFull ? showBar : undefined}>
-        {/* The three editor flows, always on screen so the chrome says which one
-            you're in. PLAY is disabled with nothing to animate; tapping it while
-            already in Play starts/pauses the run, so a preview is one tap from
-            anywhere without spending bar width on a separate transport button. */}
+        {/* Undo and redo LEAD the bar. They used to hold the middle; the flows
+            took it, because the flows are what you touch all session and undo
+            is a rescue — the prime, either-thumb spot goes to the control that
+            earns it. Wrapped as ONE element so the lefty mirror moves the pair
+            without reversing it: undo-then-redo is a direction, not an
+            arrangement. These two buttons are the app's ONLY undo surface — no
+            shortcut, no menu row, and a dozen toasts end "— Undo restores
+            them" — which is why they keep their captions while the switch
+            beside them drops its. */}
+        <div className="hd-undogrp">
+          <button className="hd-barbtn" title="Undo last change" disabled={!undoCount}
+            onClick={undoLast}><Icon name="undo" size={16} /><span className="hd-blbl">Undo</span></button>
+          <button className="hd-barbtn" title="Redo" disabled={!redoCount}
+            onClick={redoLast}><Icon name="redo" size={16} /><span className="hd-blbl">Redo</span></button>
+        </div>
+        <div className="hd-barspacer" />
+        {/* The three editor flows: dead centre, and bigger than anything beside
+            them, because this is the control the whole app is driven from. It
+            is centred by CONSTRUCTION, not by measurement — the block either
+            side of it weighs the same (see .hd-barspacer in styles.js), which
+            is also why it doesn't move when the bar mirrors for a lefty.
+            Icon-only: the glyph plus the knob's colour say which flow is live,
+            and the caption was costing about what the bigger cells now spend.
+            aria-label carries the name instead — a title does nothing on touch.
+            PLAY is disabled with nothing to animate; tapping it while already
+            in Play starts/pauses the run, so a preview is one tap from anywhere
+            without spending bar width on a separate transport button — which is
+            why its accessible name follows what the tap will actually do. */}
         <div className={`hd-mode ${mode}`} role="group" aria-label="Editor mode">
           <span className="hd-modeknob" />
           {[["draw", "marker", "Draw", "Sketch the drill with the smart pen"],
             ["edit", "cursor", "Edit", "Add and change pieces, routes and settings"],
             ["play", "play", "Play", "Animate, scrub and present"]].map(([m, icon, lbl, tip]) => (
             <button key={m} className={`hd-modeopt ${m}`} title={tip}
+              aria-label={m !== "play" ? lbl
+                : !hasTimeline ? "Play — draw a route first"
+                : mode === "play" ? (playing ? "Pause" : "Play") : lbl}
               disabled={m === "play" && !hasTimeline}
               aria-pressed={mode === m}
               onClick={() => (mode === m ? (m === "play" && togglePlay()) : setMode(m))}>
-              <Icon name={m === "play" && mode === "play" && playing ? "pause" : icon} size={16} />
-              <span className="hd-blbl">{lbl}</span>
+              <Icon name={m === "play" && mode === "play" && playing ? "pause" : icon} size={22} />
             </button>
           ))}
-        </div>
-        {/* Undo/redo sit in the MIDDLE, between the flows on one side and the
-            menu on the other — a spacer either side. They belong to neither
-            half, and centring them keeps both thumbs' reach uncluttered.
-            Wrapped as ONE element so the lefty mirror moves the pair without
-            reversing it: undo-then-redo is a direction, not an arrangement. */}
-        <div className="hd-barspacer" />
-        <div className="hd-undogrp">
-          <button className="hd-barbtn" title="Undo last change" disabled={!undoCount}
-            onClick={undoLast}><Icon name="undo" size={16} /><span className="hd-blbl">Undo</span></button>
-          <button className="hd-barbtn" title="Redo" disabled={!redoCount}
-            onClick={redoLast}><Icon name="redo" size={16} /><span className="hd-blbl">Redo</span></button>
         </div>
         <div className="hd-barspacer" />
         <button ref={barBtnRefs.rinkmenu} className={`hd-barbtn${openMenu === "rinkmenu" ? " on" : ""}`} title="Rink"
