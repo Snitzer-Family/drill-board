@@ -269,6 +269,22 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
         <rect x={-1.42} y={-2.25} width={2.84} height={1.5} rx={0.32} fill="#ffffff" opacity={0.16} />
       </g>
     );
+  } else if (p.kind === "route") {
+    // The head of a line: a gate the skaters set off through. Deliberately NOT a
+    // body — a route is a place, and drawing one as a figure would read as a
+    // player who never moves. The open ring marks the start point, the chevron
+    // says which way the line leaves, and both aim along local +x so the piece's
+    // heading rotates them together with the stack behind it.
+    const lane = ink(p.color || "#3f7f8c");
+    body = (
+      <g pointerEvents="none">
+        {selected && <circle cx={0} cy={0} r={3.5} fill="none" stroke={SEL} strokeWidth={0.4} strokeDasharray="1.2 0.9" />}
+        <circle cx={0} cy={0} r={2.5} fill={lane} opacity={0.13} />
+        <circle cx={0} cy={0} r={2.5} fill="none" stroke={lane} strokeWidth={0.42} strokeDasharray="1.5 1.05" />
+        <path d="M 0.35 -1.5 L 2.35 0 L 0.35 1.5" fill="none" stroke={lane}
+          strokeWidth={0.62} strokeLinecap="round" strokeLinejoin="round" />
+      </g>
+    );
   } else if (p.kind === "cone")
     body = (
       <path d="M 0 -2.4 L 2.2 1.8 L -2.2 1.8 Z"
@@ -432,6 +448,8 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
     ? <rect x={-1.9} y={-2.9} width={3.8} height={5.8} fill="transparent" onPointerDown={onDown} pointerEvents={hPE} style={{ cursor: "grab" }} />
     : p.kind === "light"
     ? <rect x={-2.4} y={-3.1} width={4.8} height={6.2} fill="transparent" onPointerDown={onDown} pointerEvents={hPE} style={{ cursor: "grab" }} />
+    : p.kind === "route"
+    ? <circle cx={0} cy={0} r={3.2} fill="transparent" onPointerDown={onDown} pointerEvents={hPE} style={{ cursor: "grab" }} />
     : <circle cx={0} cy={0} r={p.kind === "puck" ? 3.4 : 6.8} fill="transparent" onPointerDown={onDown} pointerEvents={hPE} style={{ cursor: "grab" }} />;
   return (
     <g opacity={dim ? 0.92 : 1} transform={frame}>

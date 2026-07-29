@@ -51,7 +51,7 @@ export const TYPEFACES = [
 ];
 export const TYPEFACE_KEY = "drillboard:typeface";
 
-export const APP_VERSION = "7.04";
+export const APP_VERSION = "7.10";
 // DSL schema version, stamped into every serialized drill (`DSL <n>` header) so
 // production builds can eventually render a drill per the version that wrote it.
 // Bump ONLY on a breaking DSL change (new kinds/modifiers that older builds would
@@ -67,6 +67,9 @@ export const PLAYER_SCALE = 0.93;
 // a route line starts this many rink feet clear of the player icon (drawing only —
 // timing still measures from the true start point)
 export const ROUTE_START_GAP = 3;
+// feet between skaters stacked in a line behind a route's start. Out here because
+// the DSL serializer omits the token at this value and route-lines.js applies it.
+export const QUEUE_GAP = 5;
 // The action badge at a pass / shoot / pickup: the gap (rink ft) the route line
 // leaves around one, and the disc's radius in icon-frame units. Out here rather
 // than in the animator because the settings sheet's preview tile draws the same

@@ -315,6 +315,13 @@ function piece(p) {
   if (p.kind === "passer")
     return `<g transform="${rot()}"><rect x="-1.6" y="-2.6" width="3.2" height="5.2" rx="0.5" fill="rgba(210,225,240,0.14)" stroke="${p.color}" stroke-width="0.5"/>`
       + `<rect x="0.85" y="-2.6" width="0.75" height="5.2" rx="0.3" fill="${p.color}"/></g>`;
+  // the head of a line: an open ring on the start point, a chevron the way it
+  // leaves. Mirrors the board's route glyph in icons.jsx — a route is a place,
+  // so it never draws a body.
+  if (p.kind === "route")
+    return `<g transform="${rot()}"><circle cx="0" cy="0" r="2.5" fill="${p.color}" fill-opacity="0.13"/>`
+      + `<circle cx="0" cy="0" r="2.5" fill="none" stroke="${p.color}" stroke-width="0.42" stroke-dasharray="1.5 1.05"/>`
+      + `<path d="M0.35 -1.5 L2.35 0 L0.35 1.5" fill="none" stroke="${p.color}" stroke-width="0.62" stroke-linecap="round" stroke-linejoin="round"/></g>`;
   return "";
 }
 

@@ -146,10 +146,18 @@ restart so the settings watcher reloads it.
   alone: above it the Shapes group inlines too. It exists because the five
   shape tools cost ~204px more than the popover button they replace, and the
   bar's flexible child is the standing hint — so "the bar fits" stays true long
-  after the hint has become a stub. 1000 keeps it at 136px, no worse than the
-  130px it already has at 768. Landscape iPad and up; portrait iPad stays
+  after the hint has become a stub. Landscape iPad and up; portrait iPad stays
   grouped. Width-only, deliberately NOT `isWide`'s `pointer:fine` — an iPad
   reports a coarse pointer even with a Pencil attached.
+- **Every tool added to `ADD_GROUPS` costs the standing hint ~48px at every
+  width ≥ `DENSE_MIN`** — both the main and props tiers are inline there, so it
+  doesn't matter which group it lands in. `bar-fit` will NOT catch it (the bar
+  still fits); `/tmp/db-verify/add-tiers.mjs` measures the hint and will.
+  The hint floor was 128px when the bar had one fewer tool; the Route tool took
+  it to 82px at 768 and 112px at 1024, and that was accepted deliberately — the
+  hint is a standing instruction, the cheapest thing on the bar. The next tool
+  after that has nothing left to spend, so it needs a real decision, not a
+  threshold nudge.
 - `setMode()` must never disturb the pen: it commits buffered ink (`flushPen`,
   not `clearInk`) and leaves ink colour/width/style and the pen's read mode
   alone, so draw → edit → draw stays a free round trip.

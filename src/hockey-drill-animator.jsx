@@ -8,6 +8,7 @@ import { drillSvg } from "./drill-svg.js";
 import { mdEscape, mdInline, mdBlock } from "./md.js";
 import { clampX, clampY, fitInside, segEnd, segD, nearestT, splitSeg, zigzagPoints, wigglePoints, wigglePoly, zigzagPoly, convertSeg, fitRoute, evalSeg, rdp, catmullToBezier, alignJoint, mirrorJoint, translateJointHandles, trimSegStart, trimSegEnd, trimPolyStart, trimPolyEnd, gapPolyAt } from "./geometry.js";
 import { dirOf, dirAtWaypoint, spreadDir } from "./route-dir.js";
+import { lowerRoutes, queueOf, stackSpot, isMobile, unbindLine, headHeadingDeg as routeHeadDeg, QUEUE_GAP } from "./route-lines.js";
 import * as boards from "./boards.js";
 import { netShapes, bumperShapes, solidShapes, detourRoute, segCrossesNet } from "./net-collide.js";
 import { RinkMarkings } from "./rink.jsx";
@@ -45,6 +46,7 @@ const TOOL_GLYPH = {
   tire: { vb: "-3.3 -3.3 6.6 6.6", color: "#1c1c1e" },
   stick: { vb: "-6.4 -2.4 13.4 4.8", color: "#8a929c" },
   light: { vb: "-3.7 -3.7 7.4 7.4", color: "#2ea043" },
+  route: { vb: "-3.6 -3.6 7.2 7.2", color: "#3f7f8c" },
 };
 // What stays drawn on the ice once the drill is running. Two independent
 // things — the skaters' routes and the puck's passes/shots — so the four modes
@@ -145,8 +147,8 @@ const TOOL_KINDS = ["cone", "tire", "bumper", "deker", "passer", "stick", "light
 //   marks — annotation, not equipment
 // `k` is the tool/kind name; a `glyph` renders an Icon instead of a piece sprite.
 const ADD_GROUPS = [
-  { key: "main", label: "Players", tip: "Players, pucks and nets", icon: "player", kinds: [
-    ["player", "Player"], ["playerpuck", "+ Puck"], ["puck", "Puck"], ["net", "Net"]] },
+  { key: "main", label: "Players", tip: "Players, pucks, nets and routes", icon: "player", kinds: [
+    ["player", "Player"], ["playerpuck", "+ Puck"], ["puck", "Puck"], ["net", "Net"], ["route", "Route"]] },
   { key: "props", label: "Props", tip: "Cones, tires and training gear", icon: "grid", kinds: [
     ["cone", "Cone"], ["tire", "Tire"], ["bumper", "Bumper"], ["deker", "Deker"],
     ["passer", "Passer"], ["stick", "Stick"], ["light", "Light"]] },
@@ -166,7 +168,7 @@ const defaultColor = (kind, playerColor) =>
     // its own copy of this table and defaults a stick to #20242a, so the two
     // silently disagreed depending on whether a board was placed or loaded.
     // tests/theme-contrast.mjs now pins the two tables together.
-    : kind === "stick" ? "#20242a" : "#14171a";
+    : kind === "stick" ? "#20242a" : kind === "route" ? "#3f7f8c" : "#14171a";
 const toolImg = (kind, wb = false, wbCircle = false) => {
   const k = kind === "playerpuck" ? "player" : kind;
   const g = TOOL_GLYPH[k];
@@ -486,11 +488,16 @@ const DENSE_MIN = 700;
 // ...and one tier above it, for the Edit palette only. At DENSE_MIN the props
 // come out onto the bar; the five shape tools need ~204px more than the popover
 // button they replace, and the standing hint has to survive that. The hint
-// measures 130px at 768 today, so that is the floor worth keeping: 980 would
-// leave it 116px — narrower than what already ships — and 1000 leaves 136px.
+// measured 130px at 768 when this number was chosen, and 1000 left it 136px.
 // It lands where it should either way: every iPad in LANDSCAPE (1024-1194)
 // opens the shapes out, while a portrait iPad (768-834) keeps them grouped,
 // because there genuinely isn't room. Measured, not guessed.
+// The Route tool later added ~48px to the always-inline tiers, which comes
+// straight out of the hint: 82px at 768, 112px here. That was taken knowingly —
+// a first-class route is worth more than a standing instruction that truncates —
+// so this number stays where it is and LANDSCAPE IPAD KEEPS ITS SHAPE TOOLS.
+// Raising it to 1050 would buy the hint back and cost the 1024 iPad those five
+// tools; don't, without deciding that trade again.
 const ROOMY_MIN = 1000;
 // Corner-menu anchoring. MENU_W must equal --hd-menu-w in styles.js (asserted by
 // tests/theme-contrast.mjs) — the panel is sized by CSS but centred by JS, so a
@@ -1830,11 +1837,20 @@ export default function DrillAnimator() {
   // cue at the instant they arrive. The branch arrival time depends only on the
   // BASE route, so we can pick the fork and splice it onto the path here — before
   // timing runs — leaving the timing engine unchanged (it just sees a longer path).
-  const effPieces = resolveForks(rpieces);
+  // Lines come first: a `route` piece owns geometry, and the players queued on it
+  // are materialized into ordinary players standing in a stack, each carrying the
+  // route's legs. Route pieces are authoring objects and are dropped here, so
+  // neither resolveForks nor the timing engine ever sees one. Returns `rpieces` by
+  // identity when the board has no route, keeping the plan cache warm.
+  const lpieces = lowerRoutes(rpieces);
+  const effPieces = resolveForks(lpieces);
   // branching players are animated along their spliced (base+fork) path — map id
   // → effective piece so position sampling follows the reaction, not the base end
   const effById = new Map(effPieces.map(p => [p.id, p]));
-  const effOf = p => p && p.kind === "player" && (p.forks || []).length ? (effById.get(p.id) || p) : p;
+  // ...and a route-bound player has NO path of their own until lowering, so they
+  // need the effective piece for the same reason. Without `p.route` here every
+  // queue member samples an empty route and stands still on their mark.
+  const effOf = p => p && p.kind === "player" && ((p.forks || []).length || p.route) ? (effById.get(p.id) || p) : p;
   const { getPlan, pieceTime, displayPosAt, stickSwing, stickSpot, catchApproach, puckInFlight, waypointTime, puckInGoal } = createTiming({ pieces: effPieces, pace, segRefs, planCache, seed: playSeed, realisticShots: effRealistic, detail: effDetail, odds: shotOdds });
   // intent plan for the route preview (identical to the main plan but with misses
   // off, so shots always route on net). Only built when realistic shots are on and
@@ -2446,8 +2462,11 @@ export default function DrillAnimator() {
   const PLAYER_R = 2.9;
   // stationary players (no route) act like static obstacles — routes arc around
   // them just like nets. Moving players are handled per-frame in displayPos.
+  // `isMobile`, not `path.length`: a player queued on a route has no path of their
+  // own until lowering, and filing a whole line as scenery would make every other
+  // route in the drill detour around skaters that are about to leave.
   const stationaryDiscs = pieces
-    .filter(q => q.kind === "player" && !q.path.length && !q.defense)
+    .filter(q => q.kind === "player" && !isMobile(q) && !q.defense)
     .map(q => ({ cx: q.x, cy: q.y, r: PLAYER_R }));
   // the goalie is solid too — a keep-out disc at its current crease position.
   // Uses displayPosRaw for puck tracking so it never recurses back into a
@@ -2550,7 +2569,9 @@ export default function DrillAnimator() {
   }
   function routeDetour(p) {
     if (!collisions) return null;                    // avoidance off — draw routes exactly as authored
-    if (!p.path.length || (p.kind !== "player" && p.kind !== "puck")) return null;
+    // routes bend too: the line a coach SEES has to arc around the same net the
+    // skaters standing on it will, or the drawing and the animation disagree
+    if (!p.path.length || (p.kind !== "player" && p.kind !== "puck" && p.kind !== "route")) return null;
     // Key by path LENGTH too: the drawn line passes the base piece while the
     // animation passes the fork-inclusive `effOf` piece (longer path). Sharing by
     // id alone let a base-only detour (ending at the branch point) drive the
@@ -3679,8 +3700,10 @@ export default function DrillAnimator() {
         if (q.kind !== "player" || q.id === p.id) continue;
         const rq = displayPosRaw(q);
         others.push({ cx: rq.x, cy: rq.y, r: PLAYER_R });
-        // deviate around a moving/reactive player (parked ones are in the detour)
-        if (collisions && p.path.length && (q.path.length || q.defense)) {
+        // deviate around a moving/reactive player (parked ones are in the detour).
+        // isMobile, not path.length: a queue member's raw path is empty, and reading
+        // them as parked would leave the line to pass through itself.
+        if (collisions && p.path.length && (isMobile(q) || q.defense)) {
           const dx = x - rq.x, dy = y - rq.y, d = Math.hypot(dx, dy), MIN = PLAYER_R * 2;
           if (d < MIN && d > 1e-3) { const push = (MIN - d) * 0.5; x += (dx / d) * push; y += (dy / d) * push; }
         }
@@ -3777,6 +3800,10 @@ export default function DrillAnimator() {
   }
   function displayPosRaw(p) {
     p = effOf(p);
+    // A route is a place, not a skater. It owns a path, so the generic sampler
+    // would happily walk its head marker along its own line during playback —
+    // pin it to its start, aimed the way the line sets off.
+    if (p.kind === "route") return { x: p.x, y: p.y, a: routeHeadDeg(p) };
     if (p.kind === "player" && p.defense) return animT > 0 ? dmanPos(p) : { x: p.x, y: p.y, a: p.facing || 0 };
     const dp = displayPosAt(p, animT <= 0 ? 0 : animT * totalTime);
     if (!effDetail || p.kind !== "player" || animT <= 0) return dp; // detail off / editing board: still frame
@@ -3960,6 +3987,9 @@ export default function DrillAnimator() {
     // a player whose start-trigger / pause-trigger was the removed player loses it
     if (q.kind === "player") {
       let nq = q;
+      // ...and a line whose route was deleted disbands, rather than leaving every
+      // member pointing at nothing and silently standing still
+      if (q.route === goneId) nq = unbindLine(nq);
       if (q.wait && q.wait.on === goneId) nq = { ...nq, wait: null };
       if ((q.path || []).some(s => s.waitOn && s.waitOn.on === goneId))
         nq = { ...nq, path: q.path.map(s => (s.waitOn && s.waitOn.on === goneId ? { ...s, waitOn: null } : s)) };
@@ -4005,6 +4035,22 @@ export default function DrillAnimator() {
     }
     lastSnapRef.current = now;
   }, [pieces, rink, drillTitle, drillDesc, drillSteps, drillNotes, drillItems]);
+
+  // Keep every line's stored stand spots in step with its route. Dragging the
+  // route, changing its spacing, deleting a member or loading a hand-written
+  // drill can each leave them stale, and settling here means none of those edit
+  // paths has to remember to. settleLine returns the SAME array when nothing
+  // moved, so React bails out of the update and this cannot feed itself; and a
+  // real restack lands inside the undo snapshot's 130 ms coalescing window, so it
+  // never becomes an undo step of its own.
+  useEffect(() => {
+    if (aiPlay) return;                 // AI play mutates pieces transiently, not as edits
+    setPieces(ps => {
+      let out = ps;
+      for (const R of ps) if (R.kind === "route") out = settleLine(out, R.id);
+      return out;
+    });
+  }, [pieces, aiPlay]);
 
   // auto-save the whole board to localStorage so it survives a refresh / the
   // app being killed. Debounced so a drag's frames coalesce into one write.
@@ -4079,7 +4125,8 @@ export default function DrillAnimator() {
   function nextId(kind, arr = pieces) {
     const prefix = kind === "player" ? "P" : kind === "puck" ? "PK" : kind === "net" ? "N"
       : kind === "bumper" ? "B" : kind === "deker" ? "DK" : kind === "passer" ? "PS"
-      : kind === "label" ? "L" : kind === "tire" ? "T" : kind === "stick" ? "ST" : kind === "light" ? "LT" : kind === "mark" ? "MK" : "C";
+      : kind === "label" ? "L" : kind === "tire" ? "T" : kind === "stick" ? "ST" : kind === "light" ? "LT" : kind === "mark" ? "MK"
+      : kind === "route" ? "R" : "C";
     let n = 1;
     while (arr.some(p => p.id === prefix + n)) n++;
     return prefix + n;
@@ -4093,8 +4140,79 @@ export default function DrillAnimator() {
       facing: kind === "net" && pt.x >= 100 ? 180 : 0, transfers: [], pickup: null, net: null, holdLine: false, goalie: false, defense: false,
       color: defaultColor(kind, COLORS[colorIdx]),
       label: kind === "player" ? id : "", text: kind === "label" ? "Label" : "", size: 1, path: [],
+      // a route owns geometry and a line; it never skates itself
+      ...(kind === "route" ? { gap: QUEUE_GAP, forks: [] } : {}),
     };
   }
+
+  /* ----- lines: the players queued on a route ----- */
+  // route-lines.js owns the stand-spot arithmetic and the animation reads it
+  // directly, but the spots are ALSO written into each player's x/y, because
+  // hit-testing, box-select, group moves and the static SVG export all read x/y
+  // off the raw piece — a purely derived spot would draw a skater somewhere their
+  // tap target isn't. Every one of these helpers ends by settling the line, and
+  // each returns the SAME array when nothing moved so the self-healing effect
+  // below can't feed itself.
+  const restack = (ps, routeId) => {
+    const R = ps.find(q => q.id === routeId && q.kind === "route");
+    if (!R) return ps;
+    const gap = R.gap > 0 ? R.gap : QUEUE_GAP;
+    const spots = new Map(queueOf(ps, routeId).map((q, k) => [q.id, stackSpot(R, k, gap)]));
+    let moved = false;
+    const out = ps.map(q => {
+      const s = spots.get(q.id);
+      if (!s || (Math.abs(q.x - s.x) < 1e-6 && Math.abs(q.y - s.y) < 1e-6)) return q;
+      moved = true;
+      return { ...q, x: s.x, y: s.y };
+    });
+    return moved ? out : ps;
+  };
+  // close the gaps in `q` after a leave or a reorder, so the line is always 0..n-1
+  const renumber = (ps, routeId) => {
+    const order = queueOf(ps, routeId).map(q => q.id);
+    let changed = false;
+    const out = ps.map(q => {
+      const i = order.indexOf(q.id);
+      if (i < 0 || q.q === i) return q;
+      changed = true;
+      return { ...q, q: i };
+    });
+    return changed ? out : ps;
+  };
+  const settleLine = (ps, routeId) => restack(renumber(ps, routeId), routeId);
+
+  // a player joining a line gives up their own route — the route owns it now
+  const joinLine = (playerId, routeId) => setPieces(ps => settleLine(
+    ps.map(q => (q.id === playerId ? { ...q, route: routeId, q: queueOf(ps, routeId).length, path: [], forks: [] } : q)), routeId));
+  const leaveLine = playerId => setPieces(ps => {
+    const P = ps.find(q => q.id === playerId);
+    if (!P || !P.route) return ps;
+    return settleLine(ps.map(q => (q.id === playerId ? unbindLine(q) : q)), P.route);
+  });
+  const reorderLine = (routeId, from, to) => setPieces(ps => {
+    const order = queueOf(ps, routeId).map(q => q.id);
+    if (to < 0 || to >= order.length || from === to) return ps;
+    order.splice(to, 0, order.splice(from, 1)[0]);
+    const ix = new Map(order.map((id, i) => [id, i]));
+    return settleLine(ps.map(q => (ix.has(q.id) ? { ...q, q: ix.get(q.id) } : q)), routeId);
+  });
+  const addSkater = routeId => setPieces(ps => {
+    const R = ps.find(q => q.id === routeId && q.kind === "route");
+    if (!R) return ps;
+    const k = queueOf(ps, routeId).length;
+    const spot = stackSpot(R, k, R.gap > 0 ? R.gap : QUEUE_GAP);
+    return settleLine([...ps, { ...makePiece("player", spot, ps), route: routeId, q: k }], routeId);
+  });
+  // promote a hand-drawn route into a route object, with its author at the head.
+  // The path is MOVED, not copied: two sources of truth for one line is the exact
+  // drift this feature exists to remove.
+  const makeLine = playerId => setPieces(ps => {
+    const P = ps.find(q => q.id === playerId);
+    if (!P || !P.path.length) return ps;
+    const R = { ...makePiece("route", { x: P.x, y: P.y }, ps), path: P.path, forks: P.forks || [], label: "" };
+    return settleLine(
+      [R, ...ps.map(q => (q.id === playerId ? { ...q, route: R.id, q: 0, path: [], forks: [] } : q))], R.id);
+  });
 
   // a shot authored on a netless board conjures its target: an empty net in
   // the shooter's nearest crease (drill loads get the same via parseDrill).
@@ -7634,7 +7752,8 @@ export default function DrillAnimator() {
         : p.kind === "net" ? `Net ${p.id}` : p.kind === "bumper" ? `Bumper ${p.id}`
         : p.kind === "deker" ? `Deker ${p.id}` : p.kind === "passer" ? `Passer ${p.id}`
         : p.kind === "label" ? `Label ${p.id}` : p.kind === "tire" ? `Tire ${p.id}` : p.kind === "stick" ? `Stick ${p.id}`
-        : p.kind === "light" ? `Light ${p.id}` : p.kind === "mark" ? `Mark ${p.id}` : `Cone ${p.id}`;
+        : p.kind === "light" ? `Light ${p.id}` : p.kind === "mark" ? `Mark ${p.id}`
+        : p.kind === "route" ? `Route ${p.label || p.id}` : `Cone ${p.id}`;
       body = (
         <>
           {p.kind === "label" && (
@@ -8149,6 +8268,68 @@ export default function DrillAnimator() {
           })()}
           {/* Route — pucks build their own path here; players have it at the top */}
           {p.kind === "puck" && !p.defense && routeField()}
+          {/* A route: the line that stands on it, and how far apart they stack.
+              The route owns the geometry; the skaters bound to it just run it. */}
+          {p.kind === "route" && (() => {
+            const line = queueOf(pieces, p.id);
+            const free = pieces.filter(q => q.kind === "player" && !q.route);
+            return (
+              <>
+                {routeField()}
+                <div className="hd-field">
+                  <div className="hd-sectitle">Line ({line.length})</div>
+                  <div className="hd-sechint">
+                    {line.length
+                      ? "They run this route in turn. Drag one out to take it off the line."
+                      : "Add skaters to stack them behind the start."}
+                  </div>
+                  {line.map((q, k) => (
+                    <div className="hd-poprow" key={q.id}>
+                      <span className="hd-sechint" style={{ minWidth: 18 }}>{k + 1}.</span>
+                      <button className="hd-mini" onClick={() => { setSelectedId(q.id); setPopup({ type: "piece", id: q.id }); }}>{nameOf(q.id)}</button>
+                      <button className="hd-mini" title="Move up" disabled={k === 0} onClick={() => reorderLine(p.id, k, k - 1)}>↑</button>
+                      <button className="hd-mini" title="Move down" disabled={k === line.length - 1} onClick={() => reorderLine(p.id, k, k + 1)}>↓</button>
+                      <button className="hd-mini" title="Take off the line" onClick={() => leaveLine(q.id)}>✕</button>
+                    </div>
+                  ))}
+                  <div className="hd-poprow">
+                    <button className="hd-mini" onClick={() => addSkater(p.id)}>+ Add skater</button>
+                    {free.length > 0 && (
+                      <select className="hd-select" value="" onChange={e => e.target.value && joinLine(e.target.value, p.id)}>
+                        <option value="">— add existing —</option>
+                        {free.map(q => <option key={q.id} value={q.id}>{nameOf(q.id)}</option>)}
+                      </select>
+                    )}
+                  </div>
+                </div>
+                <div className="hd-field">
+                  <div className="hd-sectitle">Spacing</div>
+                  <div className="hd-poprow">
+                    <Stepper value={p.gap > 0 ? p.gap : QUEUE_GAP} min={2} max={20} step={1} suffix=" ft"
+                      onChange={v => updateById(p.id, { gap: v })} />
+                    <span className="hd-sechint">between skaters</span>
+                  </div>
+                </div>
+              </>
+            );
+          })()}
+          {/* A player standing on a route: which line, and the way off it */}
+          {p.kind === "player" && p.route && (() => {
+            const R = pieces.find(q => q.id === p.route && q.kind === "route");
+            const k = queueOf(pieces, p.route).findIndex(q => q.id === p.id);
+            return (
+              <div className="hd-field">
+                <div className="hd-sectitle">On a line</div>
+                <div className="hd-sechint">
+                  {R ? `Number ${k + 1} on ${nameOf(R.id)} — it owns the route.` : "Its route is gone; this binding does nothing."}
+                </div>
+                <div className="hd-poprow">
+                  {R && <button className="hd-mini" onClick={() => { setSelectedId(R.id); setPopup({ type: "piece", id: R.id }); }}>Edit the route</button>}
+                  <button className="hd-mini" onClick={() => leaveLine(p.id)}>Leave the line</button>
+                </div>
+              </div>
+            );
+          })()}
           {(p.kind === "player" || p.kind === "puck") && (
             <div className="hd-field">
               <div className="hd-sectitle">{p.kind === "player" ? "Skating speed" : "Speed"} ×{(p.speed || 1).toFixed(2)}</div>
@@ -9431,7 +9612,7 @@ export default function DrillAnimator() {
   // the two surfaces could quietly offer different things for the same piece.
   // `bar` picks the variant: the bar offers a door INTO the inspector, the
   // inspector offers the route-clearing the bar has no room for.
-  const ROUTABLE = new Set(["player", "puck"]);
+  const ROUTABLE = new Set(["player", "puck", "route"]);
   const pieceActions = (p, bar) => {
     const a = [];
     if (bar && ROUTABLE.has(p.kind)) a.push({ key: "route", icon: "pencil",
@@ -9439,6 +9620,11 @@ export default function DrillAnimator() {
       title: `Draw ${p.id}'s route — drag across the ice`, on: () => drawRouteMode(p.id) });
     if (!bar && p.path?.length) a.push({ key: "clear", label: "Clear route",
       on: () => { updateById(p.id, { path: [] }); setPopup(null); flash("Route cleared — Undo restores it"); } });
+    // a route a player drew alone becomes a route others can queue on. Inspector
+    // only: it's a one-off conversion, not something to reach for mid-drag.
+    if (!bar && p.kind === "player" && p.path?.length && !p.route)
+      a.push({ key: "line", label: "Make this a line",
+        on: () => { makeLine(p.id); setPopup(null); flash("Route lifted out — add skaters to the line"); } });
     a.push({ key: "dup", icon: "duplicate", label: "Duplicate", short: "Copy",
       title: `Duplicate ${p.id}`, on: () => duplicatePiece(p.id) });
     a.push({ key: "lock", icon: "lock", label: "Lock",
@@ -9805,9 +9991,12 @@ export default function DrillAnimator() {
             {/* (A) resolved-index refs for the CHOSEN path of every branching player —
                 timing measures each spliced segment at `id/i`. Rendered over the whole
                 effective path (not base-length + append) so a mid-route branch, which
-                truncates the trunk, still lands its segments at the right indices. */}
+                truncates the trunk, still lands its segments at the right indices.
+                A route-bound player needs this for the same reason and more urgently:
+                their raw path is EMPTY, so without a ref here segLen returns 0 for
+                every leg and the whole line teleports to the route's end. */}
             {!aiPlay && effPieces.map(p => {
-              if (p.kind !== "player" || !(p.forks || []).length) return null;
+              if (p.kind !== "player" || (!(p.forks || []).length && !p._line)) return null;
               let prev = { x: p.x, y: p.y };
               return (
                 <g key={`fkm-${p.id}`}>
@@ -9824,8 +10013,10 @@ export default function DrillAnimator() {
                 branch-arrival times BEFORE the light picks a branch. Origin of a branch
                 is its parent's `at` waypoint (route end by default). Rendered for ALL
                 players (not just branching ones) so a NON-branching player watched by a
-                `when=…@wp`/`link=` condition still has measured reach-times to race on. */}
-            {!aiPlay && pieces.map(p => {
+                `when=…@wp`/`link=` condition still has measured reach-times to race on.
+                Reads the LOWERED array, not the raw one, so a queue member — whose raw
+                path is empty — still measures the route it is standing on. */}
+            {!aiPlay && lpieces.map(p => {
               if (p.kind !== "player" || !(p.path || []).length) return null;
               const els = [];
               const emit = (segs, origin, ref, branches) => {
