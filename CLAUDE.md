@@ -121,6 +121,18 @@ restart so the settings watcher reloads it.
 - `mode` is `"draw" | "edit" | "play"`, set only by `setMode()` and shown by the
   `.hd-mode` segment in the bottom bar. `penMode` is derived (`mode === "draw"`),
   not stored. Mode is **not** persisted and **not** in the DSL.
+- That segment is the app's primary control, and the chrome says so: it holds
+  the **centre** of `.hd-bar`, it's the one thing there taller than a bar button
+  (48 vs 44), it is **icon-only** — the only bar control without a `.hd-blbl`
+  caption, so `aria-label` carries each cell's name — and its knob wears a
+  colour per flow (Draw `--db-mode-draw`, Edit `--db-accent`, Play
+  `--db-brand-red`). It is centred by *construction*, not measurement: undo+redo
+  and rink+menu weigh exactly the same (92px, 106 dense), so it lands on the
+  centre line and the lefty `row-reverse` mirror leaves it there. Change a width
+  on either side and it silently stops being centred.
+- `.hd-mode` and the draw bar's `.hd-penseg` share the knob maths in
+  `styles.js`, but **not** their size — each overrides `--mw`/`height` on its own
+  selector. Never resize one by editing the shared block.
 - `.hd-act` is ONE element whose contents swap per mode. It is `height:
   var(--hd-barh)` and `flex-wrap:nowrap`, and the ice's reserved band
   (`--hd-act`) is computed from the same `--hd-barh` — never a literal, never a

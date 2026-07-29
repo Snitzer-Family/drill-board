@@ -70,6 +70,17 @@ const LIGHT = {
     "ui-select": "#a06400",
     "brand-red": "#d7263d",
 
+    // The DRAW flow's colour on the mode switch's sliding knob. Edit wears
+    // `accent` and Play wears `brand-red` (the red the transport's own Play
+    // button already carries), so only the third flow needs a token — and it
+    // borrows nothing, because every amber already here flips LIGHT in dark
+    // mode. `warn`, `ui-select` and `act-loose` all do, and a knob whose whole
+    // job is to carry a white glyph can't. Same value on both themes, like
+    // accent and brand-red themselves: it has to hold white at 4.5:1 AND clear
+    // 3:1 against the sunken track it slides in, and one value does both on
+    // every sheet (4.87 / 3.80-4.65).
+    "mode-draw": "#ad5c0b",
+
     /* what a puck ACTION does, as a stripe down the side of its step card.
        Named for the move, not the hue: the puck arrives (gain), goes to a
        teammate (pass), goes at the net (shot), or goes to space off the boards
@@ -142,6 +153,9 @@ const DARK = {
     "track-thumb": "#e8eef4",
     "ui-select": "#ffd447",
     "brand-red": "#d7263d",
+
+    // see the light theme — deliberately the same value there and here
+    "mode-draw": "#ad5c0b",
 
     /* see the light theme for what these mean */
     "act-gain": "#6ea8ff",
@@ -361,6 +375,11 @@ export const PAIRS = [
   { fg: "text-faint", bg: "surface-bar", min: 4.5, why: ".hd-ver version watermark" },
   { fg: "text-on-accent", bg: "accent", min: 4.5, why: "every .on state" },
   { fg: "text-on-accent", bg: "brand-red", min: 4.5, why: ".hd-scrubbtn.play" },
+  // The mode switch's knob wears a different fill per flow, and with the
+  // captions gone the glyph riding it IS the control — so 4.5, not the 3:1 a
+  // decorative icon would take. Edit's fill is `accent` and Play's is
+  // `brand-red`, both covered by the two pairs above.
+  { fg: "text-on-accent", bg: "mode-draw", min: 4.5, why: "the DRAW glyph on its knob" },
   { fg: "danger", bg: "surface-raised", min: 4.5, why: ".hd-item.danger, .hd-mini.danger" },
   { fg: "danger", bg: "surface-panel", min: 4.5, why: ".hd-err" },
   { fg: "warn", bg: "surface-panel", min: 4.5, why: "step warnings, unapplied-edit notes" },
@@ -384,6 +403,14 @@ export const PAIRS = [
   { fg: "warn", bg: "fx-glass", over: "ice", min: 3, why: ".hd-tick.step marker" },
   { fg: "ui-select", bg: "surface-panel", min: 3, why: ".hd-swatch.on selected ring" },
   { fg: "accent", bg: "surface-panel", min: 3, why: ".hd-mini.on fill vs the panel" },
+  // the mode knob against the sunken track it slides in — position is half of
+  // what that control says, so the knob has to be findable, not just legible
+  { fg: "mode-draw", bg: "surface-sunken", min: 3, why: ".hd-modeknob on Draw vs its track" },
+  { fg: "accent", bg: "surface-sunken", min: 3, why: ".hd-modeknob on Edit vs its track" },
+  { fg: "brand-red", bg: "surface-sunken", min: 3, why: ".hd-modeknob on Play vs its track" },
+  // the two UNLIT mode cells. Never asserted before because they had a caption
+  // to fall back on; now the grey glyph is the whole cell.
+  { fg: "text-muted", bg: "surface-sunken", min: 4.5, why: ".hd-modeopt, flow not live" },
 
   /* ice / diagram — 3:1 against the sheet they're drawn on */
   { fg: "ice-line-red", bg: "ice", min: 3, why: "goal + centre lines, faceoff circles" },

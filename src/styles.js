@@ -224,13 +224,17 @@ export const STYLES = `
            trio for one popover), and a stylesheet can't do that. One source of
            truth, so the two halves can't disagree about which layout is live. */
         .hd-root:not(.dense) .hd-act { gap:3px; }
-        /* the bottom bar is the tightest strip in the app at 375px — Menu, Rink,
-           the three-way mode switch and Undo/Redo all have to fit and still
-           leave the version watermark legible, since that is how a deploy gets
-           verified. Measured, not derived: see bar-fit.mjs. */
+        /* the bottom bar is the tightest strip in the app at 375px — Undo/Redo,
+           the three-way mode switch, Rink and Menu all have to fit on one line.
+           The switch is the one thing here that grew: it is what the whole app
+           is driven from, so it gets 46px cells against the 44px buttons either
+           side, and everything else keeps its width. Measured at 375: 12
+           padding + 20 gaps + 92 undo/redo + 146 switch + 88 rink/menu = 358,
+           leaving 17px for the two spacers. Measured, not derived: see
+           bar-fit.mjs, where 320px is over by design and reported, not fatal. */
         .hd-root:not(.dense) .hd-bar { gap:4px; padding:0 6px var(--hd-b); }
         .hd-root:not(.dense) .hd-barbtn { width:44px; }
-        .hd-root:not(.dense) .hd-mode { --mw:40px; }
+        .hd-root:not(.dense) .hd-mode { --mw:46px; }
         .hd-root:not(.dense) .hd-act.draw { padding:5px 5px; }
         .hd-root:not(.dense) .hd-pentool { min-width:40px; padding:3px 3px 2px; }
         .hd-root:not(.dense) .hd-penswatch { width:24px; height:24px; }
@@ -351,14 +355,20 @@ export const STYLES = `
         /* Shared by the bottom bar's DRAW/EDIT/PLAY switch and the draw bar's
            pen segment. The mode switch keeps its own class names because the
            browser suites select .hd-modeopt.draw by name; the two share these
-           rules rather than a second copy of the knob maths. */
+           rules rather than a second copy of the knob maths.
+           They no longer share a SIZE. The bar's switch is the app's primary
+           control; the pen segment is a setting inside a palette. Each
+           overrides --mw and height further down on its own selector — .hd-mode
+           and .hd-penseg. Never resize one of them by editing the numbers in
+           this block: you will silently resize the other. */
         .hd-mode, .hd-modeknob, .hd-modeopt,
         .hd-seg, .hd-segknob, .hd-segopt { box-sizing:border-box; }
         .hd-mode, .hd-seg { --mw:44px; position:relative; flex:none; display:flex; height:44px;
           padding:3px; border-radius:10px; background:var(--db-surface-sunken);
           border:1px solid var(--db-border-strong); }
         .hd-modeknob, .hd-segknob { position:absolute; top:3px; bottom:3px; left:3px; width:var(--mw);
-          border-radius:8px; background:var(--db-accent); transition:transform .16s ease;
+          border-radius:8px; background:var(--db-accent);
+          transition:transform .16s ease, background-color .16s ease;
           pointer-events:none; }
         .hd-mode.edit .hd-modeknob { transform:translateX(var(--mw)); }
         .hd-mode.play .hd-modeknob { transform:translateX(calc(var(--mw) * 2)); }
@@ -373,6 +383,34 @@ export const STYLES = `
         /* the knob is what shows "you are here", so a dimmed PLAY cell must not
            also dim the knob sitting under it */
         .hd-modeopt:disabled, .hd-segopt:disabled { opacity:.4; cursor:default; }
+        /* The mode switch is the app's primary control, so it is the ONE thing
+           in this bar bigger than a bar button: 48px tall against their 44, and
+           no caption at all. Icon-only is what pays for the extra width — the
+           caption is what made a 40px cell feel cramped, and with it gone the
+           glyph gets the whole box. The name moved to aria-label on each cell;
+           a title is a no-op on touch and this is a touch-first app.
+           Scoped to .hd-mode alone: .hd-penseg shares the rules above and has
+           to keep sitting level with the .hd-pentool buttons beside it.
+           Padding stays 3px — the knob's top/bottom/left offsets are that
+           number written out, so changing one means changing all four. */
+        .hd-mode { --mw:52px; height:48px; border-radius:12px; }
+        .hd-mode .hd-modeknob { border-radius:10px; box-shadow:var(--db-fx-shadow); }
+        /* Inside the segment's padding a cell is 42px tall, under Apple's 44pt
+           floor. The same invisible extension .hd-barbtn::after uses takes it
+           back past 48. VERTICAL ONLY: sideways it would overlap the next cell
+           and steal its taps. (.hd-modeopt is already position:relative above.) */
+        .hd-mode .hd-modeopt::after { content:""; position:absolute; inset:-4px 0; }
+        /* One colour per flow, carried by the knob. Where you are is the thing
+           this control exists to say, so it says it twice — by position and by
+           hue. The colour is on the FILL, never the glyph: an unlit cell stays
+           plain grey, so exactly one thing in the bar is ever coloured.
+           EDIT has no rule because it wears the app's own accent, which is the
+           point — the home flow looks like every other "on" thing in the app,
+           and the three themes that retune the accent retune this with it.
+           PLAY wears the same brand-red as the transport's play button. Only
+           DRAW needed a token of its own; see mode-draw in theme.js. */
+        .hd-mode.draw .hd-modeknob { background:var(--db-mode-draw); }
+        .hd-mode.play .hd-modeknob { background:var(--db-brand-red); }
         /* the pen segment: what the pen does with your ink. Sized to sit level
            with the .hd-pentool buttons beside it (42px), with cells wide enough
            for a word rather than a four-letter caption. */
@@ -387,11 +425,22 @@ export const STYLES = `
         /* what the pen will do, in words, in the bar's flexible slack */
         .hd-pensays { flex:1 1 auto; min-width:0; font-size:11.5px; color:var(--db-text-muted);
           white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-        /* caption under each bar icon — tooltips don't exist on touch */
+        /* caption under each bar icon — tooltips don't exist on touch. The
+           three mode cells are the deliberate exception: they are big enough
+           and coloured enough to read as themselves, and aria-label carries
+           the name for anything that isn't looking. */
         .hd-blbl { font-size:8.5px; font-weight:700; letter-spacing:.05em; line-height:1;
           text-transform:uppercase; opacity:.8; white-space:nowrap; }
-        /* the bar's two flexible children: what you're DOING sits on one side of
-           them, where things LIVE on the other — which side is the handedness */
+        /* The bar's two flexible children, and the reason the switch reads as
+           centred: what sits on one side of them (Undo+Redo) and what sits on
+           the other (Rink+Menu) weigh EXACTLY the same — 92px at phone widths,
+           106px when dense — so the switch lands on the bar's true centre line
+           with nothing measuring anything. Change a width on either side and it
+           quietly stops being centred; keep the two blocks equal.
+           It is also why the left-handed mirror leaves the switch alone:
+           row-reverse swaps two blocks of identical width, so the middle does
+           not move. The handedness is which side the RESCUE (undo) and the
+           DESTINATIONS (rink, menu) fall on. */
         .hd-barspacer { flex:1 1 auto; min-width:0; }
         /* Undo+Redo as ONE element. gap:inherit takes the bar's own 6px (4px
            when not dense), so wrapping them cost no width and bar-fit is
@@ -409,6 +458,11 @@ export const STYLES = `
            Play/Stop belong where every player on the device puts them. Flipping
            it would fight a stronger habit than handedness. Draw and Edit are
            where the reaching actually happens.
+           The DRAW·EDIT·PLAY switch is unmoved by this in practice: it sits
+           between two blocks of equal width (see .hd-barspacer), so reversing
+           them leaves it on the same centre line. Only Undo/Redo and Rink/Menu
+           trade ends. That is deliberate — the control you touch most should
+           not be somewhere different in the two hands.
            row-reverse reverses DIRECT CHILDREN ONLY, which is exactly what's
            wanted: .hd-mode, .hd-pengroup and .hd-undogrp are each their own
            flex container, so DRAW·EDIT·PLAY still reads in order and the knob's

@@ -6,7 +6,7 @@ import { parseDrill, serializeDrill, extractDrill, deriveInventory, ensureShotNe
 import { prepareImage, drillFromImage, ANTHROPIC_KEY_STORE } from "./drill-vision.js";
 import { drillSvg } from "./drill-svg.js";
 import { mdEscape, mdInline, mdBlock } from "./md.js";
-import { clampX, clampY, segEnd, segD, nearestT, splitSeg, zigzagPoints, wigglePoints, wigglePoly, zigzagPoly, convertSeg, fitRoute, evalSeg, rdp, catmullToBezier, alignJoint, mirrorJoint, translateJointHandles, trimSegStart, trimSegEnd, trimPolyStart, trimPolyEnd, gapPolyAt } from "./geometry.js";
+import { clampX, clampY, fitInside, segEnd, segD, nearestT, splitSeg, zigzagPoints, wigglePoints, wigglePoly, zigzagPoly, convertSeg, fitRoute, evalSeg, rdp, catmullToBezier, alignJoint, mirrorJoint, translateJointHandles, trimSegStart, trimSegEnd, trimPolyStart, trimPolyEnd, gapPolyAt } from "./geometry.js";
 import { dirOf, dirAtWaypoint, spreadDir } from "./route-dir.js";
 import * as boards from "./boards.js";
 import { netShapes, bumperShapes, solidShapes, detourRoute, segCrossesNet } from "./net-collide.js";
@@ -542,6 +542,12 @@ export default function DrillAnimator() {
   const [marquee, setMarquee] = useState(null);    // {x0,y0,x1,y1} while dragging a box
   const [groupInput, setGroupInput] = useState(null);   // pending group-name text while naming, or null
   const [popup, setPopup] = useState(null);
+  // what the Edit bar should offer after a DRAG that didn't (re)open the popup —
+  // {type:"point", id, seg, fork?} for a moved waypoint. The bar reads this only
+  // when popup is absent, so a dragged point loads its own actions (Delete hits
+  // just that point) even though no inspector panel appeared. Guarded by id, so a
+  // stale descriptor from one piece never leaks onto another's strip.
+  const [dragSel, setDragSel] = useState(null);
   const [tool, setTool] = useState("select");
   // freehand marker (annotation) settings, remembered between strokes
   const [markColor, setMarkColor] = useState("#111318");   // black ink by default
@@ -5090,11 +5096,11 @@ export default function DrillAnimator() {
     const cx = m.pts.reduce((a, q) => a + q.x, 0) / m.pts.length;
     const cy = m.pts.reduce((a, q) => a + q.y, 0) / m.pts.length;
     const r = (deg * Math.PI) / 180, c = Math.cos(r), s = Math.sin(r);
-    const pts = m.pts.map(q => ({
+    const pts = fitInside(m.pts.map(q => ({
       ...q,
-      x: clampX(cx + (q.x - cx) * c - (q.y - cy) * s),
-      y: clampY(cy + (q.x - cx) * s + (q.y - cy) * c),
-    }));
+      x: cx + (q.x - cx) * c - (q.y - cy) * s,
+      y: cy + (q.x - cx) * s + (q.y - cy) * c,
+    })));
     updateById(id, { pts, x: pts[0].x, y: pts[0].y });
   }
   // scale a mark's points about its centroid — sx/sy per axis (size & proportion)
@@ -5103,7 +5109,7 @@ export default function DrillAnimator() {
     if (!m || !m.pts || m.pts.length < 2) return;
     const cx = m.pts.reduce((a, q) => a + q.x, 0) / m.pts.length;
     const cy = m.pts.reduce((a, q) => a + q.y, 0) / m.pts.length;
-    const pts = m.pts.map(q => ({ ...q, x: clampX(cx + (q.x - cx) * sx), y: clampY(cy + (q.y - cy) * sy) }));
+    const pts = fitInside(m.pts.map(q => ({ ...q, x: cx + (q.x - cx) * sx, y: cy + (q.y - cy) * sy })));
     updateById(id, { pts, x: pts[0].x, y: pts[0].y });
   }
 
@@ -5196,6 +5202,12 @@ export default function DrillAnimator() {
       for (const k of ["y", "cy", "c1y", "c2y"]) if (t[k] != null) t[k] = clampY(t[k] + off);
       return t;
     });
+    // a mark's copy has to carry its pts across, or it lands exactly on top of
+    // the original with only its (derived) x/y offset
+    if (Array.isArray(copy.pts) && copy.pts.length) {
+      copy.pts = fitInside(copy.pts.map(q => ({ ...q, x: q.x + off, y: q.y + off })));
+      copy.x = copy.pts[0].x; copy.y = copy.pts[0].y;
+    }
     // a duplicated puck starts loose (avoid two pucks glued to one carrier)
     if (copy.kind === "puck") { copy.carrier = null; copy.transfers = []; copy.terminals = undefined; copy.pickup = null; }
     setPieces(ps => [...ps, copy]);
@@ -5215,6 +5227,13 @@ export default function DrillAnimator() {
     const ci = (x, y) => boards.clampInside(x, y);
     update(p => {
       if (!has(p.id) || p.lock) return p;   // a locked member never slides with its group
+      // a mark's geometry lives in pts (x/y is just a copy of pts[0]), so it
+      // has to move as a rigid body — moving x/y alone left the ink sitting
+      // still while its position desynced from what's drawn
+      if (p.kind === "mark" && p.pts) {
+        const pts = fitInside(p.pts.map(q => ({ ...q, x: q.x + dx, y: q.y + dy })));
+        return { ...p, pts, x: pts[0].x, y: pts[0].y };
+      }
       const np = ci(p.x + dx, p.y + dy);
       const path = (p.path || []).map(s => {
         const q = ci(s.x + dx, s.y + dy), s2 = { ...s, x: q.x, y: q.y };
@@ -5258,6 +5277,16 @@ export default function DrillAnimator() {
     const rot = (x, y) => { const dx = x - C.x, dy = y - C.y; return boards.clampInside(C.x + dx * ca - dy * sa, C.y + dx * sa + dy * ca); };
     update(p => {
       if (!multiSel.has(p.id)) return p;
+      // a mark rotates through its own points, rigidly (rot() clamps per point,
+      // which would squash it) — x/y then follows pts[0] as everywhere else
+      if (p.kind === "mark" && p.pts) {
+        const pts = fitInside(p.pts.map(q => ({
+          ...q,
+          x: C.x + (q.x - C.x) * ca - (q.y - C.y) * sa,
+          y: C.y + (q.x - C.x) * sa + (q.y - C.y) * ca,
+        })));
+        return { ...p, pts, x: pts[0].x, y: pts[0].y };
+      }
       const np = { ...p }, q = rot(p.x, p.y); np.x = q.x; np.y = q.y;
       if (rotatesFacing(p)) np.facing = (p.facing || 0) + deg;
       np.path = (p.path || []).map(s => {
@@ -5289,6 +5318,11 @@ export default function DrillAnimator() {
         for (const k of ["y", "cy", "c1y", "c2y"]) if (t[k] != null) t[k] = clampY(t[k] + off);
         return t;
       });
+      // as in duplicatePiece: a mark's geometry is pts, so offset that too
+      if (Array.isArray(c.pts) && c.pts.length) {
+        c.pts = fitInside(c.pts.map(q => ({ ...q, x: q.x + off, y: q.y + off })));
+        c.x = c.pts[0].x; c.y = c.pts[0].y;
+      }
       if (c.kind === "puck") {
         if (c.carrier) c.carrier = idMap[c.carrier] || null;                       // carrier outside the group → drop (loose)
         if (c.pickup && c.pickup.to) c.pickup = idMap[c.pickup.to] ? { ...c.pickup, to: idMap[c.pickup.to] } : null;
@@ -5401,7 +5435,11 @@ export default function DrillAnimator() {
     // reshows — but only if it was ALREADY being edited; a bare reposition of a
     // piece whose popup was closed should stay closed.
     const popOpen = pinned || (!!popup && popup.id === id);
-    drag.current = { kind: "piece", id, popOpen, start: pt, last: pt, moved: false, touch: e.pointerType !== "mouse", locked };
+    // a mark moves as a rigid body, so it needs its geometry as it was at grab
+    // time: every move re-derives from pts0, never from the last committed
+    // (possibly boundary-shifted) state — see the mark branch in onSvgMove
+    const pts0 = pc && pc.kind === "mark" && pc.pts ? pc.pts.map(q => ({ ...q })) : null;
+    drag.current = { kind: "piece", id, popOpen, pts0, start: pt, last: pt, moved: false, touch: e.pointerType !== "mouse", locked };
     svgRef.current.setPointerCapture?.(e.pointerId);
   }
 
@@ -5583,11 +5621,11 @@ export default function DrillAnimator() {
       d.moved = true;
       const ang = Math.atan2(pt.y - d.cy, pt.x - d.cx) - d.a0;
       const c = Math.cos(ang), s = Math.sin(ang);
-      const pts = d.pts0.map(q => ({
+      const pts = fitInside(d.pts0.map(q => ({
         ...q,
-        x: clampX(d.cx + (q.x - d.cx) * c - (q.y - d.cy) * s),
-        y: clampY(d.cy + (q.x - d.cx) * s + (q.y - d.cy) * c),
-      }));
+        x: d.cx + (q.x - d.cx) * c - (q.y - d.cy) * s,
+        y: d.cy + (q.x - d.cx) * s + (q.y - d.cy) * c,
+      })));
       updateById(d.id, { pts, x: pts[0].x, y: pts[0].y });
       return;
     }
@@ -5597,7 +5635,9 @@ export default function DrillAnimator() {
       d.moved = true;
       const sx = Math.max(0.12, Math.min(8, (pt.x - d.ax) / ((d.x0 - d.ax) || 1e-6)));
       const sy = Math.max(0.12, Math.min(8, (pt.y - d.ay) / ((d.y0 - d.ay) || 1e-6)));
-      const pts = d.pts0.map(q => ({ ...q, x: clampX(d.ax + (q.x - d.ax) * sx), y: clampY(d.ay + (q.y - d.ay) * sy) }));
+      // fitInside, not a per-point clamp: a shape grown against a wall slides
+      // inward whole (the anchor corner gives) instead of flattening on it
+      const pts = fitInside(d.pts0.map(q => ({ ...q, x: d.ax + (q.x - d.ax) * sx, y: d.ay + (q.y - d.ay) * sy })));
       updateById(d.id, { pts, x: pts[0].x, y: pts[0].y });
       return;
     }
@@ -5619,9 +5659,18 @@ export default function DrillAnimator() {
       const ci = (x, y) => boards.clampInside(x, y);    // clamp to the rounded boards
       update(p => {
         if (p.id !== d.id) return p;
-        if (p.kind === "mark") {   // a marker annotation moves all its points together
-          // spread q first so per-point flags (sharp corners) survive the move
-          const pts = p.pts.map(q => ({ ...q, ...ci(q.x + dx, q.y + dy) }));
+        if (p.kind === "mark") {
+          // A marker annotation is a RIGID body: translate the whole thing by
+          // the total drag, then shift it back inside as a unit. Clamping each
+          // point on its own squashed the shape flat against the boards, and
+          // since the clamped result fed the next move it never came back.
+          // Deriving from pts0 + (pt - start) rather than an incremental delta
+          // is what makes it recoverable: push 10ft past the wall, pull back
+          // 5ft, and the shape sits 5ft off the wall, still under the cursor.
+          const src = d.pts0 || p.pts;
+          const tx = pt.x - d.start.x, ty = pt.y - d.start.y;
+          // spread q first so per-point flags (sharp corners, pressure) survive
+          const pts = fitInside(src.map(q => ({ ...q, x: q.x + tx, y: q.y + ty })));
           return { ...p, pts, x: pts[0].x, y: pts[0].y };
         }
         if (d.line == null) {
@@ -5696,7 +5745,7 @@ export default function DrillAnimator() {
     if (d.kind === "drawing") { finishDraw(); return; }
     if (d.kind === "marquee") {
       setMarquee(null);
-      if (!d.moved) { setSelectedId(null); setMultiSel(null); return; }   // a plain tap deselects
+      if (!d.moved) { setSelectedId(null); setMultiSel(null); setDragSel(null); return; }   // a plain tap deselects
       const x0 = Math.min(d.start.x, d.last.x), x1 = Math.max(d.start.x, d.last.x);
       const y0 = Math.min(d.start.y, d.last.y), y1 = Math.max(d.start.y, d.last.y);
       const hit = pieces.filter(p => !p.lock && p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1).map(p => p.id);
@@ -5719,9 +5768,20 @@ export default function DrillAnimator() {
       // when it was already being edited (or a pinned panel): a bare drag of a piece
       // whose popup was closed shouldn't pop the editor open.
       if (pc && pc.path && pc.path.length && d.popOpen) { setSelectedId(d.id); setPopup({ type: "piece", id: d.id }); }
+      setDragSel(null);   // a body move → the bar's piece actions, not a stale point
       return;
     }
-    if (d.moved) return;
+    // a MOVED drag doesn't (re)open the popup, but the bar should still reflect
+    // what was just dragged: a waypoint drag loads that point's actions so Delete
+    // hits the point, not the player. Anything else falls back to piece actions.
+    if (d.moved) {
+      if ((d.kind === "anchor" || d.kind === "wlabel") && d.seg != null)
+        setDragSel({ type: "point", id: d.id, seg: d.seg, ...(d.fork ? { fork: d.fork } : {}) });
+      else
+        setDragSel(null);
+      return;
+    }
+    setDragSel(null);   // a plain tap sets popup below; that becomes the source of truth
     if (d.kind === "wlabel") { setSelectedId(d.id); setPopup({ type: "point", id: d.id, seg: d.seg }); return; }
     if (d.kind === "resize" || d.kind === "markscale" || d.kind === "markrotate") return;
     if (d.kind === "markpt") {
@@ -5753,6 +5813,7 @@ export default function DrillAnimator() {
         // coach hit the leg first, then the dot on a second tap
         const wp = waypointUnderTap(d.id, d.line, d.tapPt, d.fork || null);
         if (wp != null) { setSelectedId(d.id); setPopup({ type: "point", id: d.id, seg: wp, ...(d.fork ? { fork: d.fork } : {}) }); return; }
+        setSelectedId(d.id);
         setPopup({ type: "line", id: d.id, seg: d.line, pt: d.tapPt, ...(d.fork ? { fork: d.fork } : {}) });
         return;
       }
@@ -9398,6 +9459,36 @@ export default function DrillAnimator() {
       title: `Delete ${p.id}`, on: () => deletePiece(p.id) });
     return a;
   };
+  // ---- what you can do to a selected WAYPOINT / LEG ---------------------
+  // The bar's selection strip switches to these when the thing you picked is a
+  // point or a leg, so Delete removes just that — not the whole player. Same
+  // chip shape as pieceActions; rendered by the same actionChip.
+  const pointActions = (p, seg, fork) => {
+    const a = [];
+    a.push({ key: "lock", icon: "lock", label: "Lock",
+      title: "Pin this waypoint so it can't be moved by accident.",
+      on: () => updateSeg(p.id, seg, { lock: true }, fork) });
+    const panelHas = popup && popup.type === "point" && popup.id === p.id && popup.seg === seg;
+    if (!docked) a.push({ key: "more", icon: "sliders", label: "More",
+      active: panelHas, title: panelHas ? "Hide this point's settings" : "Everything else about this point",
+      on: () => setPopup(panelHas ? null : { type: "point", id: p.id, seg, ...(fork ? { fork } : {}) }) });
+    a.push({ key: "del", icon: "trash", label: "Delete", danger: true,
+      title: "Delete this waypoint", on: () => deleteSeg(p.id, seg, fork) });
+    return a;
+  };
+  const legActions = (p, seg, pt, fork) => {
+    const a = [];
+    if (pt) a.push({ key: "add", icon: "plus", label: "Add point", short: "Add",
+      title: "Add a waypoint on this leg", on: () => addPointAt(p.id, seg, pt, fork) });
+    const panelHas = popup && popup.type === "line" && popup.id === p.id && popup.seg === seg;
+    if (!docked) a.push({ key: "more", icon: "sliders", label: "More",
+      active: panelHas, title: panelHas ? "Hide this leg's settings" : "Everything else about this leg",
+      on: () => setPopup(panelHas ? null : { type: "line", id: p.id, seg, pt, ...(fork ? { fork } : {}) }) });
+    a.push({ key: "del", icon: "trash", label: "Delete", danger: true,
+      title: "Delete this leg",
+      on: () => { deleteSeg(p.id, seg, fork); flash("Leg removed — Undo restores it"); } });
+    return a;
+  };
   const actionChip = a => (
     <button key={a.key} className={`hd-pentool${a.danger ? " danger" : ""}${a.active ? " on" : ""}`}
       title={a.title} onClick={a.on}>
@@ -10340,7 +10431,7 @@ export default function DrillAnimator() {
         <div className="hd-act draw">
           {/* what the PEN does */}
           <div className="hd-pengroup">
-            {/* No Draw|Edit switch here any more — the bottom bar's DRAW·EDIT·PLAY
+            {/* No Draw|Edit switch here any more — the bottom bar's three-flow
                 segment owns that, and it's the ~90px this palette needed to fit
                 on one line at phone widths. */}
             {/* What the pen does with your ink, as ONE control. It used to be
@@ -10571,17 +10662,31 @@ export default function DrillAnimator() {
           )}
           {/* ---- one piece selected: the four things you reach for without
               opening anything. "More" is the door to the full inspector. ---- */}
-          {selected && !multiSel?.size && (
-            <>
-              <div className="hd-pensep" />
-              <span className="hd-selchip">{selected.id}</span>
-              {pieceActions(selected, true).map(actionChip)}
-              <div className="hd-pensep" />
-              <button className="hd-pentool exit" title="Deselect"
-                onClick={() => { setSelectedId(null); setPopup(null); }}>
-                <Icon name="close" size={17} /><span>Done</span></button>
-            </>
-          )}
+          {selected && !multiSel?.size && (() => {
+            // popup wins when it targets this piece; otherwise a just-dragged
+            // waypoint (dragSel) drives the strip, so a drag with no panel still
+            // loads the point's actions.
+            const active = popup && popup.id === selected.id ? popup
+                         : (dragSel && dragSel.id === selected.id ? dragSel : null);
+            const wp  = active && active.type === "point" ? active : null;
+            const leg = active && active.type === "line"  ? active : null;
+            const label = wp  ? `${selected.id} · pt ${wp.seg + 1}`
+                        : leg ? `${selected.id} · leg ${leg.seg + 1}`
+                        : selected.id;
+            const acts  = wp  ? pointActions(selected, wp.seg, wp.fork || null)
+                        : leg ? legActions(selected, leg.seg, leg.pt, leg.fork || null)
+                        : pieceActions(selected, true);
+            return (
+              <>
+                <span className="hd-selchip">{label}</span>
+                {acts.map(actionChip)}
+                <div className="hd-pensep" />
+                <button className="hd-pentool exit" title="Deselect"
+                  onClick={() => { setSelectedId(null); setPopup(null); setDragSel(null); }}>
+                  <Icon name="close" size={17} /><span>Done</span></button>
+              </>
+            );
+          })()}
           {/* the marker's own ink settings, surfaced only while it's armed —
               they came off the deleted Add sheet, where they appeared under the
               same condition */}
@@ -10748,35 +10853,49 @@ export default function DrillAnimator() {
       <div className="hd-bar"
         onPointerDown={presoFull ? showBar : undefined}
         onPointerMove={presoFull ? showBar : undefined}>
-        {/* The three editor flows, always on screen so the chrome says which one
-            you're in. PLAY is disabled with nothing to animate; tapping it while
-            already in Play starts/pauses the run, so a preview is one tap from
-            anywhere without spending bar width on a separate transport button. */}
+        {/* Undo and redo LEAD the bar. They used to hold the middle; the flows
+            took it, because the flows are what you touch all session and undo
+            is a rescue — the prime, either-thumb spot goes to the control that
+            earns it. Wrapped as ONE element so the lefty mirror moves the pair
+            without reversing it: undo-then-redo is a direction, not an
+            arrangement. These two buttons are the app's ONLY undo surface — no
+            shortcut, no menu row, and a dozen toasts end "— Undo restores
+            them" — which is why they keep their captions while the switch
+            beside them drops its. */}
+        <div className="hd-undogrp">
+          <button className="hd-barbtn" title="Undo last change" disabled={!undoCount}
+            onClick={undoLast}><Icon name="undo" size={16} /><span className="hd-blbl">Undo</span></button>
+          <button className="hd-barbtn" title="Redo" disabled={!redoCount}
+            onClick={redoLast}><Icon name="redo" size={16} /><span className="hd-blbl">Redo</span></button>
+        </div>
+        <div className="hd-barspacer" />
+        {/* The three editor flows: dead centre, and bigger than anything beside
+            them, because this is the control the whole app is driven from. It
+            is centred by CONSTRUCTION, not by measurement — the block either
+            side of it weighs the same (see .hd-barspacer in styles.js), which
+            is also why it doesn't move when the bar mirrors for a lefty.
+            Icon-only: the glyph plus the knob's colour say which flow is live,
+            and the caption was costing about what the bigger cells now spend.
+            aria-label carries the name instead — a title does nothing on touch.
+            PLAY is disabled with nothing to animate; tapping it while already
+            in Play starts/pauses the run, so a preview is one tap from anywhere
+            without spending bar width on a separate transport button — which is
+            why its accessible name follows what the tap will actually do. */}
         <div className={`hd-mode ${mode}`} role="group" aria-label="Editor mode">
           <span className="hd-modeknob" />
           {[["draw", "marker", "Draw", "Sketch the drill with the smart pen"],
             ["edit", "cursor", "Edit", "Add and change pieces, routes and settings"],
             ["play", "play", "Play", "Animate, scrub and present"]].map(([m, icon, lbl, tip]) => (
             <button key={m} className={`hd-modeopt ${m}`} title={tip}
+              aria-label={m !== "play" ? lbl
+                : !hasTimeline ? "Play — draw a route first"
+                : mode === "play" ? (playing ? "Pause" : "Play") : lbl}
               disabled={m === "play" && !hasTimeline}
               aria-pressed={mode === m}
               onClick={() => (mode === m ? (m === "play" && togglePlay()) : setMode(m))}>
-              <Icon name={m === "play" && mode === "play" && playing ? "pause" : icon} size={16} />
-              <span className="hd-blbl">{lbl}</span>
+              <Icon name={m === "play" && mode === "play" && playing ? "pause" : icon} size={22} />
             </button>
           ))}
-        </div>
-        {/* Undo/redo sit in the MIDDLE, between the flows on one side and the
-            menu on the other — a spacer either side. They belong to neither
-            half, and centring them keeps both thumbs' reach uncluttered.
-            Wrapped as ONE element so the lefty mirror moves the pair without
-            reversing it: undo-then-redo is a direction, not an arrangement. */}
-        <div className="hd-barspacer" />
-        <div className="hd-undogrp">
-          <button className="hd-barbtn" title="Undo last change" disabled={!undoCount}
-            onClick={undoLast}><Icon name="undo" size={16} /><span className="hd-blbl">Undo</span></button>
-          <button className="hd-barbtn" title="Redo" disabled={!redoCount}
-            onClick={redoLast}><Icon name="redo" size={16} /><span className="hd-blbl">Redo</span></button>
         </div>
         <div className="hd-barspacer" />
         <button ref={barBtnRefs.rinkmenu} className={`hd-barbtn${openMenu === "rinkmenu" ? " on" : ""}`} title="Rink"
