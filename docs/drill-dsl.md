@@ -158,6 +158,7 @@ Places a piece. `id` is any unique token (e.g. `F1`, `PK1`, `N2`).
 | `next=<routeId>` | route | When they finish, they skate to that route's head and run it — going around nets, props and anyone standing still. |
 | `hops=<n>` | route | How many `next=` links one skater follows (default `1`, omitted then). `0` draws the link without running it. Two routes pointed at each other recirculate, and this is what ends it. |
 | `regroup=<n>` | route | Pace multiplier for the skate between routes (default `0.65` — a glide, not another rep). |
+| `connector` | route | This route **is** a crossing between two lines, shaped by hand instead of drawn automatically. It has no line of its own, and following it does **not** spend one of the source route's `hops`. (Bare word.) |
 | `feed` | route | The line supplies its own pucks: a fresh one for every rep that needs one, so a recirculating drill never runs dry. Only ever acts where puck work is already authored. Fed pucks exist only while the drill runs — they are never written back to the text. (Bare word.) |
 | `defense` | player | Auto-reacting defenceman (holds the slot, stays goal-side) |
 | `lock` | any | Pin the piece in place — it can't be dragged, rotated, or edited until unlocked. Toggle *🔒 Lock* on the piece popup, or lock/unlock everything via **☰ → Lock board**. (Bare word, parsed before the jersey-label catch-all.) |
@@ -344,8 +345,30 @@ then the crossing, then route B, and so on. The crossing is real route geometry 
 timed like any other leg, and arced around whatever is in the way — drawn as a
 faint dashed link so it reads as travel rather than as part of the drill.
 
+**Shaping a crossing.** The automatic path goes more or less straight, bending
+only around what's in the way. To walk skaters somewhere specific on the way
+across — round the back of a net, along the boards, through a regroup — mark a
+route `connector` and put it in the middle:
+
+```drill
+PIECE R1 route 30 22 #3f7f8c Shooters next=RC
+PATH  R1 L 90,22 Q 130,24 160,40
+PIECE RC route 160 40 #3f7f8c next=R2 connector
+PATH  RC RATE 0.65 L 120,50 L 80,60 L 40,70
+PIECE R2 route 40 70 #b06a2e Regroup
+PATH  R2 L 100,70
+```
+
+A connector is an ordinary route in every other way, so every route tool works on
+it: drag its points, add more, curve them, set the pace per leg. Starting it on
+the source route's last waypoint and finishing it on the destination's head makes
+the automatic crossings either side collapse to nothing. In the app, *Shape the
+crossing ›* on the source route's popup builds one for you, seeded with the path
+it was already drawing.
+
 Two routes pointing at each other is a cycle, and deliberately so. `hops` is what
-bounds it: it counts down once per crossing, so the unfold always terminates.
+bounds it: it counts down once per crossing (a `connector` is free), so the
+unfold always terminates.
 Branches and recycling don't combine yet — a route that carries a `BRANCH` runs
 its own legs and stops.
 

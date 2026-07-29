@@ -4228,6 +4228,11 @@ export default function DrillAnimator() {
                   recirculate; the link count is what ends it.
                 </div>
                 {branchy && <div className="hd-sechint">This route branches, so only the first leg runs — branches and recycling don&rsquo;t combine yet.</div>}
+                {!(pieces.find(q => q.id === p.next) || {}).connector && (
+                  <div className="hd-poprow">
+                    <button className="hd-mini" onClick={() => shapeCrossing(p.id)}>Shape the crossing ›</button>
+                  </div>
+                )}
               </>
             )}
           </>
@@ -4305,6 +4310,35 @@ export default function DrillAnimator() {
       out.push({ ...makePiece("puck", { x: clampX(at.x + 1.6), y: clampY(at.y + 3.2) }, out) });
     }
     return out;
+  });
+  // Turn the automatic crossing into a route you can shape. It becomes a real
+  // route piece seeded with the path the app was already drawing, so every route
+  // tool works on it — drag its points, add more, curve them, send it the long way
+  // round a net. Marked `connector` so it reads as a crossing and doesn't spend one
+  // of the source route's hops; sitting exactly on both ends means the automatic
+  // crossings either side of it collapse to nothing.
+  const shapeCrossing = routeId => setPieces(ps => {
+    const A = ps.find(q => q.id === routeId && q.kind === "route");
+    const B = A && ps.find(q => q.id === A.next && q.kind === "route");
+    if (!A || !B || !A.path.length) return ps;
+    const end = A.path[A.path.length - 1];
+    const poly = transitPoly(A, B, collisions ? transitObstacles(ps) : []) || [{ x: end.x, y: end.y }, { x: B.x, y: B.y }];
+    // A crossing with nothing in the way seeds as a single straight leg — one
+    // point, nothing to take hold of. Split it so there are handles to drag from
+    // the moment it appears; that IS the feature.
+    let pts = poly.slice(1);
+    if (pts.length < 2) {
+      const a = poly[0], z = pts[pts.length - 1] || { x: B.x, y: B.y };
+      pts = [1, 2, 3].map(i => ({ x: a.x + (z.x - a.x) * (i / 3), y: a.y + (z.y - a.y) * (i / 3) }));
+    }
+    const { queue: _q, gap: _g, ...base } = makePiece("route", { x: end.x, y: end.y }, ps);
+    const C = {
+      ...base,                                  // no queue rule, no spacing: it has no line
+      color: A.color, connector: true, next: B.id, label: "",
+      path: pts.map(q => ({ type: "L", x: q.x, y: q.y, mode: "carry", dir: "fwd", stop: 0, rate: TRANSIT_RATE })),
+    };
+    flash("Crossing is now a route — drag its points to shape it");
+    return [...ps.map(q => (q.id === A.id ? { ...q, next: C.id } : q)), C];
   });
   // promote a hand-drawn route into a route object, with its author at the head.
   // The path is MOVED, not copied: two sources of truth for one line is the exact
@@ -7858,7 +7892,7 @@ export default function DrillAnimator() {
         : p.kind === "deker" ? `Deker ${p.id}` : p.kind === "passer" ? `Passer ${p.id}`
         : p.kind === "label" ? `Label ${p.id}` : p.kind === "tire" ? `Tire ${p.id}` : p.kind === "stick" ? `Stick ${p.id}`
         : p.kind === "light" ? `Light ${p.id}` : p.kind === "mark" ? `Mark ${p.id}`
-        : p.kind === "route" ? `Route ${p.label || p.id}` : `Cone ${p.id}`;
+        : p.kind === "route" ? `${p.connector ? "Crossing" : "Route"} ${p.label || p.id}` : `Cone ${p.id}`;
       body = (
         <>
           {p.kind === "label" && (
@@ -8396,10 +8430,23 @@ export default function DrillAnimator() {
                   </div>
                 )}
                 {routeField()}
+                {/* A crossing is the skate BETWEEN two lines, shaped by hand. It
+                    has no line of its own, so everything below about queueing and
+                    puck work would be answering a question nobody asked. */}
+                {p.connector && (
+                  <div className="hd-field">
+                    <div className="hd-sectitle">Crossing</div>
+                    <div className="hd-sechint">
+                      The skate from one line into the next. Drag its points, add more, or
+                      curve them to send skaters round the traffic. It doesn&rsquo;t count as a
+                      lap.
+                    </div>
+                  </div>
+                )}
                 {/* Point 0's actions, in the same slot the pager's other points
                     put them — "collect a puck before you go" is how most shooting
                     lines start, and it had nowhere visible to live. */}
-                {lineProxy(p)
+                {!p.connector && (lineProxy(p)
                   ? (
                     <>
                       {ActionSteps(lineProxy(p), -1)}
@@ -8410,8 +8457,8 @@ export default function DrillAnimator() {
                       </div>
                     </>
                   )
-                  : <div className="hd-poprow hd-stephint">Add a skater to this line to give it puck actions.</div>}
-                <div className="hd-field">
+                  : <div className="hd-poprow hd-stephint">Add a skater to this line to give it puck actions.</div>)}
+                {!p.connector && (<div className="hd-field">
                   <div className="hd-sectitle">Line ({line.length})</div>
                   <div className="hd-sechint">
                     {line.length
@@ -8455,20 +8502,20 @@ export default function DrillAnimator() {
                       ? "The line never runs dry — it supplies a puck for every rep it needs, so a recirculating drill keeps shooting."
                       : "Off: the line uses only the loose pucks on the ice, and skates empty-handed once they run out."}
                   </div>
-                </div>
-                <div className="hd-field">
+                </div>)}
+                {!p.connector && (<div className="hd-field">
                   <div className="hd-sectitle">Spacing</div>
                   <div className="hd-poprow">
                     <Stepper value={p.gap > 0 ? p.gap : QUEUE_GAP} min={2} max={20} step={1} suffix=" ft"
                       onChange={v => updateById(p.id, { gap: v })} />
                     <span className="hd-sechint">between skaters</span>
                   </div>
-                </div>
+                </div>)}
                 {routeFinishField(p)}
                 {/* How the line takes its turns. The trigger is positional — "the
                     one ahead of me" — so unlike DelayTrigger there is no player to
                     pick; the rule is authored once and resolved per member. */}
-                {(() => {
+                {!p.connector && (() => {
                   const q = p.queue, mode = q ? q.mode : "none";
                   const set = v => updateById(p.id, { queue: v });
                   return (

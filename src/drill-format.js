@@ -249,6 +249,7 @@ export function parseDrill(text) {
         let routeId = null, qIx = null, gapFt = null, queue = null;
         let nextRoute = null, hops = null, regroup = null;   // route: where finishers go next
         let feedPucks = false;                               // route: keep the line supplied with pucks
+        let connector = false;                               // route: this IS a crossing, not a line of its own
         const transfers = [];
         rest.forEach(r => {
           if (quoted(r)) { text = unq(r); }              // a "quoted string" → label text
@@ -397,6 +398,7 @@ export function parseDrill(text) {
               if (!isNaN(n) && n > 0) regroup = n;
             } else if (key === "group") group = v.replace(/_/g, " ").trim() || null;   // named group membership
           } else if (r === "feed") feedPucks = true;   // route: supply the line's pucks itself
+          else if (r === "connector") connector = true;   // route: an editable crossing between two lines
           else if (r === "goalie") goalie = true;
           else if (r === "crease") crease = true;
           else if (r === "defense") defense = true;
@@ -406,7 +408,7 @@ export function parseDrill(text) {
         const mode = lmode || (rand === false ? "sequence" : "reactive");   // legacy rand=off → sequence
         // a bare net= token targets every shot terminal that didn't carry its own >net
         if (net) terminals.forEach(t => { if (t.kind === "shot" && !t.net) t.net = net; });
-        const p = { id, kind, x, y, color, label, text, size, speed, hand, sym, carrier, facing, transfers, pickup, ...(terminals.length ? { terminals } : {}), net, holdLine, goalie, defense, wait, group, crease, lock, cues, mode, alwaysColor, lightId, ...(routeId ? { route: routeId } : {}), ...(qIx != null ? { q: qIx } : {}), ...(gapFt != null ? { gap: gapFt } : {}), ...(queue ? { queue } : {}), ...(nextRoute ? { next: nextRoute } : {}), ...(hops != null ? { hops } : {}), ...(regroup != null ? { regroup } : {}), ...(feedPucks ? { feed: true } : {}), ...(bg ? { bg } : {}), ...(bgOp != null ? { bgOp } : {}), ...(border ? { border } : {}), ...(borderOp != null ? { borderOp } : {}), ...(textOp != null ? { textOp } : {}), forks: [], path: [] };
+        const p = { id, kind, x, y, color, label, text, size, speed, hand, sym, carrier, facing, transfers, pickup, ...(terminals.length ? { terminals } : {}), net, holdLine, goalie, defense, wait, group, crease, lock, cues, mode, alwaysColor, lightId, ...(routeId ? { route: routeId } : {}), ...(qIx != null ? { q: qIx } : {}), ...(gapFt != null ? { gap: gapFt } : {}), ...(queue ? { queue } : {}), ...(nextRoute ? { next: nextRoute } : {}), ...(hops != null ? { hops } : {}), ...(regroup != null ? { regroup } : {}), ...(feedPucks ? { feed: true } : {}), ...(connector ? { connector: true } : {}), ...(bg ? { bg } : {}), ...(bgOp != null ? { bgOp } : {}), ...(border ? { border } : {}), ...(borderOp != null ? { borderOp } : {}), ...(textOp != null ? { textOp } : {}), forks: [], path: [] };
         pieces.push(p); byId[id] = p;
       } else if (cmd === "PATH") {
         const id = tok[1];
@@ -709,6 +711,7 @@ export function serializeDrill(rink, pieces, title = "", desc = "", steps = [], 
       ? ` next=${p.next}${p.hops != null && p.hops !== 1 ? " hops=" + p.hops : ""}${p.regroup > 0 && p.regroup !== TRANSIT_RATE ? " regroup=" + f2(p.regroup) : ""}`
       : "";
     const lfeed = p.kind === "route" && p.feed ? " feed" : "";
+    const lconn = p.kind === "route" && p.connector ? " connector" : "";
     const cue = p.kind === "light" && (p.cues || []).length
       ? ` cues=${p.cues.map(c => `${String(c.color || "").replace("#", "")}:${f1(c.dur || 0)}`).join(";")}` : "";
     // lights are reactive (shuffle + loop) by default; note any other route mode.
@@ -719,7 +722,7 @@ export function serializeDrill(rink, pieces, title = "", desc = "", steps = [], 
           ? ` mode=always${p.alwaysColor || (p.cues && p.cues[0] && p.cues[0].color) ? ":" + String(p.alwaysColor || p.cues[0].color).replace("#", "") : ""}`
           : ` mode=${lm}`)
       : "";
-    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${sm}${car}${gp}${pas}${terms}${hld}${wt}${fac}${gl}${crs}${df}${lck}${siz}${grp}${lgt}${lin}${lgap}${lq}${lnx}${lfeed}${cue}${rnd}${spd}`);
+    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${sm}${car}${gp}${pas}${terms}${hld}${wt}${fac}${gl}${crs}${df}${lck}${siz}${grp}${lgt}${lin}${lgap}${lq}${lnx}${lfeed}${lconn}${cue}${rnd}${spd}`);
     if (p.path.length) out.push(`PATH ${p.id} ${p.path.map(segToStr).join(" ")}`);
     // route branches (players): one conditional continuation per cue colour, with
     // the action the player performs at its end (skate default → omitted). Branches

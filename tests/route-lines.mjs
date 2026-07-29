@@ -366,5 +366,41 @@ const chainOf = (out, id) => { const p = out.find(q => q.id === id); return [p.p
   T('...and only the authored rep has a chain', out.filter(p => p.kind === 'puck' && p.pickup).length, 1);
 }
 
+// ---- connector: the crossing, made editable ----
+{
+  // A -> C(connector, shaped by hand) -> B, with A asking for a single hop
+  const A = route({ id: 'R1', x: 30, y: 22, path: [{ type: 'L', x: 90, y: 22 }], next: 'RC', hops: 1 });
+  const C = { id: 'RC', kind: 'route', x: 90, y: 22, color: '#3f7f8c', forks: [], connector: true, next: 'R2',
+    // seeded the way shapeCrossing does: starts on A's end, finishes on B's head
+    path: [{ type: 'L', x: 95, y: 60 }, { type: 'L', x: 120, y: 66 }, { type: 'L', x: 150, y: 66 }] };
+  const B = routeB({ id: 'R2', x: 150, y: 66, path: [{ type: 'L', x: 190, y: 70 }] });
+  const P = { id: 'P1', kind: 'player', x: 30, y: 22, route: 'R1', q: 1, path: [], forks: [] };
+  const legs = lowerRoutes([A, C, B, P]).find(p => p.id === 'P1').path;
+  const at = (x, y) => legs.some(s => Math.abs(s.x - x) < 0.01 && Math.abs(s.y - y) < 0.01);
+  T('the shaped crossing is skated, waypoint by waypoint', [at(95, 60), at(120, 66)], [true, true]);
+  T('...and it still reaches the far route', at(190, 70), true);
+  // the whole point: a connector must not eat the hop that gets you to B
+  T('a connector does not spend a hop', legs[legs.length - 1].x, 190);
+  T('sitting on both ends, it needs no auto-crossing of its own',
+    legs.filter(s => s.transit).length, 0);
+}
+{ // without the connector flag it WOULD eat the hop — this is what the flag buys
+  const A = route({ id: 'R1', x: 30, y: 22, path: [{ type: 'L', x: 90, y: 22 }], next: 'RC', hops: 1 });
+  const C = { id: 'RC', kind: 'route', x: 90, y: 22, color: '#3f7f8c', forks: [], next: 'R2',
+    path: [{ type: 'L', x: 95, y: 60 }] };
+  const B = routeB({ id: 'R2', x: 150, y: 66, path: [{ type: 'L', x: 190, y: 70 }] });
+  const P = { id: 'P1', kind: 'player', x: 30, y: 22, route: 'R1', q: 1, path: [], forks: [] };
+  const legs = lowerRoutes([A, C, B, P]).find(p => p.id === 'P1').path;
+  T('a plain route in the middle stops the walk one short', legs.some(s => s.x === 190), false);
+}
+{ // a ring of connectors spends no hops at all, so the link counter is what ends it
+  const mk = (id, next) => ({ id, kind: 'route', x: 30, y: 22, color: '#3f7f8c', forks: [], connector: true, next,
+    path: [{ type: 'L', x: 60, y: 40 }] });
+  const A = route({ id: 'R1', x: 30, y: 22, path: [{ type: 'L', x: 90, y: 22 }], next: 'C1', hops: 2 });
+  const P = { id: 'P1', kind: 'player', x: 30, y: 22, route: 'R1', q: 1, path: [], forks: [] };
+  const legs = lowerRoutes([A, mk('C1', 'C2'), mk('C2', 'C1'), P]).find(p => p.id === 'P1').path;
+  T('an all-connector cycle still terminates', legs.length > 0 && legs.length < LINE_LEG_CAP, true);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

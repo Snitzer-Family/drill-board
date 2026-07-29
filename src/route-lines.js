@@ -341,7 +341,14 @@ export function lowerRoutes(pieces) {
     const laps = [{ base: 0, x: R.x, y: R.y, route: R.id }];
     let cur = R;
     let hops = Math.max(0, Math.min(HOPS_MAX, R.hops == null ? 1 : R.hops));
-    while (hops > 0) {
+    // A CONNECTOR is the crossing itself, made editable — a path the coach shaped
+    // to walk a skater round the ice into the next line, not another route in the
+    // drill. Following one must not spend a hop, or inserting one would silently
+    // halve how far a recirculating skater gets. That means hops alone no longer
+    // bounds the walk, so links are counted too: a ring of nothing but connectors
+    // would otherwise loop forever.
+    let links = 0;
+    while (hops > 0 && links < HOPS_MAX * 2 + 4) {
       const nxt = routes.get(cur.next);
       if (!nxt || !legs.length || legs.length >= LINE_LEG_CAP) break;
       // Branching and recycling don't compose yet: a fork's `at` is an index into
@@ -349,7 +356,8 @@ export function lowerRoutes(pieces) {
       // mean what they say. Stop at the last fork-free route rather than splice a
       // branch onto the wrong waypoint.
       if ((cur.forks || []).length || (nxt.forks || []).length) break;
-      hops--;
+      links++;
+      if (!nxt.connector) hops--;
       const end = legs[legs.length - 1];
       const rate = cur.regroup > 0 ? cur.regroup : TRANSIT_RATE;
       legs.push(...transitLegs({ x: end.x, y: end.y }, { x: nxt.x, y: nxt.y }, obstacles, rate));
