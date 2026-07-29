@@ -4159,6 +4159,63 @@ export default function DrillAnimator() {
   // tap target isn't. Every one of these helpers ends by settling the line, and
   // each returns the SAME array when nothing moved so the self-healing effect
   // below can't feed itself.
+  // The piece a route's puck actions really belong to: the skater at the head of
+  // its line, wearing the route's geometry. Puck actions address a PLAYER id and a
+  // waypoint index — that is how the whole format works — but the coach is looking
+  // at the route, and the route is where the waypoints they can see live. Since a
+  // line member's leg i IS the route's waypoint i, the two compose exactly: reads
+  // resolve against the route's points, writes land on the head skater's chain,
+  // and lowering then hands that same work to everyone else on the line.
+  // Null when nothing is standing on the route yet — there is no one to act.
+  const lineHead = route => (route && route.kind === "route" ? queueOf(pieces, route.id)[0] || null : null);
+  const lineProxy = route => {
+    const head = lineHead(route);
+    return head ? { ...head, path: route.path || [], forks: route.forks || [] } : null;
+  };
+  // ...and for anything that just needs "the piece whose actions this route draws"
+  const actOwner = p => (p.kind === "route" ? lineProxy(p) : p);
+
+  // "Go to route" — where this line's finishers head when they're done. ONE
+  // definition, rendered in two places that are both the right place to look for
+  // it: the route's own settings, and the last waypoint, which is where it
+  // actually happens and where a coach who just authored a shot expects it.
+  const routeFinishField = p => {
+    const others = pieces.filter(q => q.kind === "route" && q.id !== p.id);
+    const branchy = (p.forks || []).length > 0;
+    return (
+      <div className="hd-field">
+        <div className="hd-sectitle">When they finish</div>
+        {others.length ? (
+          <>
+            <div className="hd-poprow">
+              <span>go to</span>
+              <select className="hd-select on" value={p.next || ""}
+                onChange={e => updateById(p.id, { next: e.target.value || null })}>
+                <option value="">— stop there —</option>
+                {others.map(q => <option key={q.id} value={q.id}>{nameOf(q.id)}</option>)}
+              </select>
+            </div>
+            {p.next && (
+              <>
+                <div className="hd-poprow">
+                  <span>following</span>
+                  <Stepper value={p.hops == null ? 1 : p.hops} min={0} max={8} step={1}
+                    fmt={v => `${v} link${v === 1 ? "" : "s"}`} onChange={v => updateById(p.id, { hops: v })} />
+                </div>
+                <div className="hd-sechint">
+                  They cross the ice to that line&rsquo;s start, going around nets, props
+                  and anyone standing still. Two lines pointed at each other
+                  recirculate; the link count is what ends it.
+                </div>
+                {branchy && <div className="hd-sechint">This route branches, so only the first leg runs — branches and recycling don&rsquo;t combine yet.</div>}
+              </>
+            )}
+          </>
+        ) : <div className="hd-sechint">Add another route to send them on to.</div>}
+      </div>
+    );
+  };
+
   const restack = (ps, routeId) => {
     const R = ps.find(q => q.id === routeId && q.kind === "route");
     if (!R) return ps;
@@ -8344,45 +8401,7 @@ export default function DrillAnimator() {
                     <span className="hd-sechint">between skaters</span>
                   </div>
                 </div>
-                {/* Recycling: where this line's finishers go. Authored on the route
-                    because everyone on it recycles the same way — it's a property of
-                    the drill's shape, not of one skater. */}
-                {(() => {
-                  const others = pieces.filter(q => q.kind === "route" && q.id !== p.id);
-                  const branchy = (p.forks || []).length > 0;
-                  return (
-                    <div className="hd-field">
-                      <div className="hd-sectitle">When they finish</div>
-                      {others.length ? (
-                        <>
-                          <div className="hd-poprow">
-                            <span>go to</span>
-                            <select className="hd-select on" value={p.next || ""}
-                              onChange={e => updateById(p.id, { next: e.target.value || null })}>
-                              <option value="">— stop there —</option>
-                              {others.map(q => <option key={q.id} value={q.id}>{nameOf(q.id)}</option>)}
-                            </select>
-                          </div>
-                          {p.next && (
-                            <>
-                              <div className="hd-poprow">
-                                <span>following</span>
-                                <Stepper value={p.hops == null ? 1 : p.hops} min={0} max={8} step={1}
-                                  fmt={v => `${v} link${v === 1 ? "" : "s"}`} onChange={v => updateById(p.id, { hops: v })} />
-                              </div>
-                              <div className="hd-sechint">
-                                They cross the ice to that line&rsquo;s start, going around
-                                nets, props and anyone standing still. Two lines pointed at
-                                each other recirculate; the link count is what ends it.
-                              </div>
-                              {branchy && <div className="hd-sechint">This route branches, so only the first leg runs — branches and recycling don&rsquo;t combine yet.</div>}
-                            </>
-                          )}
-                        </>
-                      ) : <div className="hd-sechint">Add another route to send them on to.</div>}
-                    </div>
-                  );
-                })()}
+                {routeFinishField(p)}
                 {/* How the line takes its turns. The trigger is positional — "the
                     one ahead of me" — so unlike DelayTrigger there is no player to
                     pick; the rule is authored once and resolved per member. */}
@@ -8485,6 +8504,9 @@ export default function DrillAnimator() {
           {/* Actions panel at the player's standing/start spot — just above the
               bottom row of buttons */}
           {p.kind === "player" && ActionSteps(p, -1)}
+          {/* the head of the line's standing spot — where "collect a puck before
+              you go" is authored, which is how most shooting lines start */}
+          {p.kind === "route" && lineProxy(p) && ActionSteps(lineProxy(p), -1)}
           {TOOL_KINDS.includes(p.kind) && (
             <div className="hd-field">
               <div className="hd-sectitle">Change to</div>
@@ -8568,12 +8590,23 @@ export default function DrillAnimator() {
           {/* whose route this waypoint belongs to — quick facts + a click-through
               into that piece's own editor (position preserved when pinned) */}
           <div className="hd-field">
-            <div className="hd-sectitle">{p.kind === "player" ? "Player" : "Puck"} on this {fork ? "reaction" : "route"}</div>
+            <div className="hd-sectitle">
+              {p.kind === "player" ? "Player" : p.kind === "route" ? "Line" : "Puck"} on this {fork ? "reaction" : "route"}
+            </div>
             <div className="hd-poprow">
               <span className="hd-swatch" style={{ background: p.color, width: 16, height: 16, cursor: "default" }} />
               <span style={{ fontWeight: 700 }}>{nameOf(p.id)}</span>
-              <button className="hd-mini" onClick={() => navPopup({ type: "piece", id: p.id })}>Open ›</button>
+              <button className="hd-mini" onClick={() => navPopup({ type: "piece", id: p.id })}>
+                {p.kind === "route" ? "Line settings ›" : "Open ›"}
+              </button>
             </div>
+            {p.kind === "route" && (
+              <div className="hd-sechint">
+                {queueOf(pieces, p.id).length
+                  ? `${queueOf(pieces, p.id).length} on this line — spacing and turn-taking live in its settings.`
+                  : "Nobody is on this line yet."}
+              </div>
+            )}
           </div>
           {/* the branch waypoint carries the reaction controls: the base route's end
               (light reactions), or a SKATE reaction's end (chain another reaction) */}
@@ -8759,6 +8792,22 @@ export default function DrillAnimator() {
             );
           })()}
           {p.kind === "player" && ActionSteps(p, i, fork)}
+          {/* A route's waypoints carry the same Actions the skater's would — see
+              lineProxy. Authored on the head of the line and handed to the rest. */}
+          {p.kind === "route" && (lineProxy(p)
+            ? (
+              <>
+                {ActionSteps(lineProxy(p), i, fork)}
+                <div className="hd-sechint">
+                  Authored on {nameOf(lineHead(p).id)} at the head of the line. Everyone
+                  behind them does the same, as long as there&rsquo;s a loose puck for them.
+                </div>
+              </>
+            )
+            : <div className="hd-poprow hd-stephint">Add a skater to this line to give it puck actions.</div>)}
+          {/* ...and the route's own action: where they go when they finish it.
+              Offered at the END, because that is when it happens. */}
+          {p.kind === "route" && !fork && i === route.length - 1 && routeFinishField(p)}
           <div className="hd-poprow" style={{ marginTop: 2 }}>
             <button className="hd-mini" title="Pin this waypoint in place so it can't be moved or edited by accident."
               onClick={() => uSeg(i, { lock: true })}>🔒 Lock point</button>
@@ -9977,8 +10026,13 @@ export default function DrillAnimator() {
               // routeDetour (displayPos) is separate, so the skater still curves either way
               const rd = showRoutes && effAvoidVis ? routeDetour(p) : null;   // arc detour around a crossed net
               const bent = rd && rd.pts;
-              const carry = p.kind === "player" ? carrySegs(p) : null;   // segments skated with the puck
-              const acts = showRoutes && p.kind === "player" ? actionWaypoints(p) : new Map();
+              // A route draws its LINE's puck work: the badges belong to the skater
+              // at its head, but the geometry they sit on is the route's. Without
+              // this the coach authors a shot on the route and sees nothing, because
+              // the head skater's own raw path is empty.
+              const ao = actOwner(p) || p;
+              const carry = ao.kind === "player" ? carrySegs(ao) : null;   // segments skated with the puck
+              const acts = showRoutes && ao.kind === "player" ? actionWaypoints(ao) : new Map();
               // branch-departure waypoints: their reaction badge (and incoming carat)
               // needs the same visible-line gap as an action circle, so a possession
               // wiggle doesn't run underneath into the badge
@@ -9989,7 +10043,7 @@ export default function DrillAnimator() {
               // computed catch, so the ledger's receive badge at its waypoint
               // retires (the ghost replaces it) and any early wiggle between the
               // credited waypoint and the catch segment un-wiggles
-              const ledCs = p.kind === "player" ? (ledCatchByRec.get(p.id) || []) : [];
+              const ledCs = ao.kind === "player" ? (ledCatchByRec.get(ao.id) || []) : [];
               for (const e of ledCs) {
                 const a = e.rw >= 0 ? acts.get(e.rw) : null;
                 if (a) { if (a.count <= 1 && (a.type === "receive" || a.type === "collect" || a.type === "pickup")) acts.delete(e.rw); else a.count -= 1; }
