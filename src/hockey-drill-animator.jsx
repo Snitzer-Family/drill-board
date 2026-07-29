@@ -507,6 +507,12 @@ export default function DrillAnimator() {
   const [marquee, setMarquee] = useState(null);    // {x0,y0,x1,y1} while dragging a box
   const [groupInput, setGroupInput] = useState(null);   // pending group-name text while naming, or null
   const [popup, setPopup] = useState(null);
+  // what the Edit bar should offer after a DRAG that didn't (re)open the popup —
+  // {type:"point", id, seg, fork?} for a moved waypoint. The bar reads this only
+  // when popup is absent, so a dragged point loads its own actions (Delete hits
+  // just that point) even though no inspector panel appeared. Guarded by id, so a
+  // stale descriptor from one piece never leaks onto another's strip.
+  const [dragSel, setDragSel] = useState(null);
   const [tool, setTool] = useState("select");
   // freehand marker (annotation) settings, remembered between strokes
   const [markColor, setMarkColor] = useState("#111318");   // black ink by default
@@ -5678,7 +5684,7 @@ export default function DrillAnimator() {
     if (d.kind === "drawing") { finishDraw(); return; }
     if (d.kind === "marquee") {
       setMarquee(null);
-      if (!d.moved) { setSelectedId(null); setMultiSel(null); return; }   // a plain tap deselects
+      if (!d.moved) { setSelectedId(null); setMultiSel(null); setDragSel(null); return; }   // a plain tap deselects
       const x0 = Math.min(d.start.x, d.last.x), x1 = Math.max(d.start.x, d.last.x);
       const y0 = Math.min(d.start.y, d.last.y), y1 = Math.max(d.start.y, d.last.y);
       const hit = pieces.filter(p => !p.lock && p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1).map(p => p.id);
@@ -5701,9 +5707,20 @@ export default function DrillAnimator() {
       // when it was already being edited (or a pinned panel): a bare drag of a piece
       // whose popup was closed shouldn't pop the editor open.
       if (pc && pc.path && pc.path.length && d.popOpen) { setSelectedId(d.id); setPopup({ type: "piece", id: d.id }); }
+      setDragSel(null);   // a body move → the bar's piece actions, not a stale point
       return;
     }
-    if (d.moved) return;
+    // a MOVED drag doesn't (re)open the popup, but the bar should still reflect
+    // what was just dragged: a waypoint drag loads that point's actions so Delete
+    // hits the point, not the player. Anything else falls back to piece actions.
+    if (d.moved) {
+      if ((d.kind === "anchor" || d.kind === "wlabel") && d.seg != null)
+        setDragSel({ type: "point", id: d.id, seg: d.seg, ...(d.fork ? { fork: d.fork } : {}) });
+      else
+        setDragSel(null);
+      return;
+    }
+    setDragSel(null);   // a plain tap sets popup below; that becomes the source of truth
     if (d.kind === "wlabel") { setSelectedId(d.id); setPopup({ type: "point", id: d.id, seg: d.seg }); return; }
     if (d.kind === "resize" || d.kind === "markscale" || d.kind === "markrotate") return;
     if (d.kind === "markpt") {
@@ -5735,6 +5752,7 @@ export default function DrillAnimator() {
         // coach hit the leg first, then the dot on a second tap
         const wp = waypointUnderTap(d.id, d.line, d.tapPt, d.fork || null);
         if (wp != null) { setSelectedId(d.id); setPopup({ type: "point", id: d.id, seg: wp, ...(d.fork ? { fork: d.fork } : {}) }); return; }
+        setSelectedId(d.id);
         setPopup({ type: "line", id: d.id, seg: d.line, pt: d.tapPt, ...(d.fork ? { fork: d.fork } : {}) });
         return;
       }
@@ -9378,6 +9396,36 @@ export default function DrillAnimator() {
       title: `Delete ${p.id}`, on: () => deletePiece(p.id) });
     return a;
   };
+  // ---- what you can do to a selected WAYPOINT / LEG ---------------------
+  // The bar's selection strip switches to these when the thing you picked is a
+  // point or a leg, so Delete removes just that — not the whole player. Same
+  // chip shape as pieceActions; rendered by the same actionChip.
+  const pointActions = (p, seg, fork) => {
+    const a = [];
+    a.push({ key: "lock", icon: "lock", label: "Lock",
+      title: "Pin this waypoint so it can't be moved by accident.",
+      on: () => updateSeg(p.id, seg, { lock: true }, fork) });
+    const panelHas = popup && popup.type === "point" && popup.id === p.id && popup.seg === seg;
+    if (!docked) a.push({ key: "more", icon: "sliders", label: "More",
+      active: panelHas, title: panelHas ? "Hide this point's settings" : "Everything else about this point",
+      on: () => setPopup(panelHas ? null : { type: "point", id: p.id, seg, ...(fork ? { fork } : {}) }) });
+    a.push({ key: "del", icon: "trash", label: "Delete", danger: true,
+      title: "Delete this waypoint", on: () => deleteSeg(p.id, seg, fork) });
+    return a;
+  };
+  const legActions = (p, seg, pt, fork) => {
+    const a = [];
+    if (pt) a.push({ key: "add", icon: "plus", label: "Add point", short: "Add",
+      title: "Add a waypoint on this leg", on: () => addPointAt(p.id, seg, pt, fork) });
+    const panelHas = popup && popup.type === "line" && popup.id === p.id && popup.seg === seg;
+    if (!docked) a.push({ key: "more", icon: "sliders", label: "More",
+      active: panelHas, title: panelHas ? "Hide this leg's settings" : "Everything else about this leg",
+      on: () => setPopup(panelHas ? null : { type: "line", id: p.id, seg, pt, ...(fork ? { fork } : {}) }) });
+    a.push({ key: "del", icon: "trash", label: "Delete", danger: true,
+      title: "Delete this leg",
+      on: () => { deleteSeg(p.id, seg, fork); flash("Leg removed — Undo restores it"); } });
+    return a;
+  };
   const actionChip = a => (
     <button key={a.key} className={`hd-pentool${a.danger ? " danger" : ""}${a.active ? " on" : ""}`}
       title={a.title} onClick={a.on}>
@@ -10551,17 +10599,31 @@ export default function DrillAnimator() {
           )}
           {/* ---- one piece selected: the four things you reach for without
               opening anything. "More" is the door to the full inspector. ---- */}
-          {selected && !multiSel?.size && (
-            <>
-              <div className="hd-pensep" />
-              <span className="hd-selchip">{selected.id}</span>
-              {pieceActions(selected, true).map(actionChip)}
-              <div className="hd-pensep" />
-              <button className="hd-pentool exit" title="Deselect"
-                onClick={() => { setSelectedId(null); setPopup(null); }}>
-                <Icon name="close" size={17} /><span>Done</span></button>
-            </>
-          )}
+          {selected && !multiSel?.size && (() => {
+            // popup wins when it targets this piece; otherwise a just-dragged
+            // waypoint (dragSel) drives the strip, so a drag with no panel still
+            // loads the point's actions.
+            const active = popup && popup.id === selected.id ? popup
+                         : (dragSel && dragSel.id === selected.id ? dragSel : null);
+            const wp  = active && active.type === "point" ? active : null;
+            const leg = active && active.type === "line"  ? active : null;
+            const label = wp  ? `${selected.id} · pt ${wp.seg + 1}`
+                        : leg ? `${selected.id} · leg ${leg.seg + 1}`
+                        : selected.id;
+            const acts  = wp  ? pointActions(selected, wp.seg, wp.fork || null)
+                        : leg ? legActions(selected, leg.seg, leg.pt, leg.fork || null)
+                        : pieceActions(selected, true);
+            return (
+              <>
+                <span className="hd-selchip">{label}</span>
+                {acts.map(actionChip)}
+                <div className="hd-pensep" />
+                <button className="hd-pentool exit" title="Deselect"
+                  onClick={() => { setSelectedId(null); setPopup(null); setDragSel(null); }}>
+                  <Icon name="close" size={17} /><span>Done</span></button>
+              </>
+            );
+          })()}
           {/* the marker's own ink settings, surfaced only while it's armed —
               they came off the deleted Add sheet, where they appeared under the
               same condition */}
