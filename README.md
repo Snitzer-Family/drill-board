@@ -158,6 +158,16 @@ facing; drag the knob (fat hit target, visible in the loupe). Both persist to
 flowing straight into the new piece's settings card. Same 350 ms / 3 ft
 double-tap grammar as adding a point on a line.
 
+**Diagnostics.** ☰ → About → Open diagnostics, or `#diag` on the URL. Three
+tabs, each copyable as JSON. *Drill* explains a misfire: the app answers "who
+has the puck" twice — the timing plan's `ride` leg and the renderer's
+nearest-blade scan — and shows both, plus the possession ledger's proof of why
+a pass can't fire, leg tables and a frame-step scrubber. *Pen* shows the sketch
+recogniser's working: which of its branches decided, every template score and
+shape guard, and whether ink that stayed ink missed on the score or on a guard.
+It can re-read the board without changing it, and emit the result as a test
+fixture. *Layout* has the viewport, safe-area and rect numbers.
+
 ---
 
 ## Implementation notes worth stealing

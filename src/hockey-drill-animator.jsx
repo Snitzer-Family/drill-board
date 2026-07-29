@@ -13,7 +13,9 @@ import { netShapes, bumperShapes, solidShapes, detourRoute, segCrossesNet } from
 import { RinkMarkings } from "./rink.jsx";
 import { ZONES, zoneAt } from "./zones.js";
 import { PieceIcon, Stepper, Icon, ICONS } from "./icons.jsx";
-import DiagView, { copyText } from "./diagnostics.jsx";
+// NOT copyText: this file already has a local one (the text editor's), and an
+// import of that name would sit in an outer scope the component shadows
+import DiagView, { layoutProbe } from "./diagnostics.jsx";
 import { drillReport, penReport, hashDiag } from "./diag-report.js";
 import { createTiming, resolveNearest } from "./timing.js";
 import { buildLedger, mayHoldOn, mayHoldEntering, orderTransfers } from "./possession.js";
@@ -660,31 +662,16 @@ export default function DrillAnimator() {
       : "Nothing recognised in the ink");
   }
 
-  // the last pen burst, kept so it can be copied off-device when a symbol
-  // won't convert — a screenshot can't show stroke data
+  // The last pen burst: its strokes, and the board they were read against. A
+  // screenshot can't show stroke data, and "why didn't that become a pass" is
+  // usually answered by how far the nearest player was — including where their
+  // route ENDS, since a pass or shot binds to the route end rather than to the
+  // player's own position once they have a path.
+  //
+  // This used to feed a bespoke copyPenDiag JSON dump. The Pen tab supersedes
+  // it and carries strictly more (scores, guards, the resolved thresholds, the
+  // branch that decided), so the dump is gone and this is its source instead.
   const penLast = useRef(null);
-  function copyPenDiag() {
-    const d = penLast.current;
-    if (!d) { flash("Draw something with the pen first"); return; }
-    const round = v => Math.round(v * 100) / 100;
-    const txt = JSON.stringify({
-      v: APP_VERSION, pxFtX: round(d.ctx.pxFtX * 10000) / 10000, pxFtY: round(d.ctx.pxFtY * 10000) / 10000,
-      screen: [Math.round(window.innerWidth), Math.round(window.innerHeight)],
-      // the board the strokes were read against: without it, "why didn't this
-      // become a pass" can't be answered — the answer is usually how far the
-      // nearest player was
-      // …including where a route ENDS, not just that there is one: a pass or
-      // shot binds to the route end, so "is there a shooter in reach" can't be
-      // read off the player's own position once they have a path
-      players: (d.ctx.players || []).map(p => [p.id, round(p.x), round(p.y),
-        p.hasPath ? 1 : 0, ...(p.hasPath && p.end ? [round(p.end.x), round(p.end.y)] : [])]),
-      nets: (d.ctx.nets || []).map(n => [n.id, round(n.x), round(n.y)]),
-      ops: d.ops.map(o => ({ op: o.op, sym: o.sym, srcs: o.srcs })),
-      strokes: d.strokes.map(s => s.pts.map(p => [round(p.x), round(p.y)])),
-    });
-    flash(copyText(txt) ? "Pen diagnostics copied — paste them to Claude"
-      : "Copied (if the paste is empty, screenshot this instead)");
-  }
   // The Pen tab's payload: the last burst, or the board's own ink if you asked
   // for a dry run. The TRACE is not collected during commitPen — recording it
   // costs a full template sweep on the geometric paths that exist precisely to
@@ -1925,7 +1912,9 @@ export default function DrillAnimator() {
   // the render body (the pressRef idiom above) so a reader always gets THIS
   // render's closure instead of one captured when the panel mounted.
   diagRef.current = (tab, atFrac) =>
-    tab === "pen" ? penDiagReport() : drillReport(sampleDrill(atFrac));
+    tab === "pen" ? penDiagReport()
+    : tab === "layout" ? layoutProbe(null, drillVersion)
+    : drillReport(sampleDrill(atFrac));
   // ...and the few things the panel does back to the app. A second ref rather
   // than props, for the same reason: props that change every frame would defeat
   // the memo the whole design rests on.
@@ -11107,8 +11096,10 @@ export default function DrillAnimator() {
           <PrefToggle title="Pencil pressure" on={pencilPress} set={setPencilPress}
             desc="Vary line weight with how hard you press. Off draws every stroke at the chosen width, and flattens ink already on the board." />
           <PrefRow title="Won't convert?"
-            desc="Copies what the recogniser saw for the last burst of ink. Paste it into a bug report when a stroke refuses to become a piece."
-            control={<button className="hd-mini" onClick={copyPenDiag}>Copy diagnostics</button>} />
+            desc="Opens the pen diagnostics: what the recogniser measured for the last burst, which test decided it, and — when a stroke stays ink — whether it missed on the score or on a shape guard."
+            control={<button className="hd-mini"
+              onClick={() => { setDiag({ tab: "pen", dock: "full" }); setOpenMenu(null); }}>
+              Why not?</button>} />
 
           <div className="hd-mh hd-prefsec">Routes &amp; playback</div>
           <PrefToggle title="Route avoidance" on={collisions} set={setCollisions}

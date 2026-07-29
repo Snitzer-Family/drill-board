@@ -80,7 +80,7 @@ restart so the settings watcher reloads it.
 - `rink.jsx` — rink markings (goal lines at x=11/189 (regulation 11ft from the boards), end-zone dots at 31/169 (20ft from the goal line)
   — intentionally NOT regulation; yFix prop counter-corrects fill-stretch so
   circles render round)
-- `icons.jsx` — PieceIcon (screen-true matrix frames), Stepper, DiagPanel
+- `icons.jsx` — PieceIcon (screen-true matrix frames), Stepper, the icon set
 - `styles.js` — ALL CSS, including the hard-won safe-area layout rules. Colours
   are `var(--db-*)` tokens only — a raw hex here fails `tests/theme-contrast.mjs`
 - `theme.js` — the colour system: semantic tokens per theme, the CSS emitter,
@@ -98,6 +98,12 @@ restart so the settings watcher reloads it.
   down the branches too" until a later one flips. Pure, node-tested
 - `timing.js` — createTiming() factory: leg timing, pass/shot/pickup planner,
   receiver time-warps, warp-aware positions
+- `diag-report.js` — the diagnostics payload builders, and the only part of the
+  panel worth testing: the plan-vs-renderer agreement rule and its noise guards,
+  possession verdicts as prose, plan health, the `#diag` hash, the
+  Infinity/Map sanitizer, and the test-fixture emitter. Pure, node-tested
+- `diagnostics.jsx` — the three-tab view. `memo()`'d and polling a thunk off a
+  ref at 5Hz, so it never re-renders from the animator (see below)
 - `hockey-drill-animator.jsx` — App shell: state, pointer interaction, popouts,
   loupe, menus
 
@@ -160,8 +166,22 @@ restart so the settings watcher reloads it.
   testing on-device.
 - Safari's hidden-toolbar band is browser-reserved and unfixable; standalone
   (Add to Home Screen) is the primary target platform.
-- Diagnostics: ☰ → Diagnostics shows live viewport/inset/rect numbers — use
-  it (via user screenshots) before theorizing about layout on-device.
+- Diagnostics ships in the production build, because the bugs it exists for
+  happen on the phone against the live Pages build. Open it from ☰ → About →
+  Open diagnostics, or with `#diag` (`#diag=pen` / `#diag=layout`) appended to
+  the URL — an independent key on the same hash the share link uses. Three tabs:
+  - **Drill** — the plan-vs-renderer puck agreement (the app answers "who has
+    the puck" twice, independently; when those disagree the puck is on the wrong
+    stick), possession.js's transfer verdicts as prose, leg tables with each
+    leg's `dir`, and a frame-step scrubber.
+  - **Pen** — the recogniser's decision trace: which branch decided, the
+    resolved threshold table (`SCALED` vs the rink-feet fallback answers half of
+    "converts in the test, not on my phone"), every guard pass and fail, and the
+    cluster contest.
+  - **Layout** — viewport/inset/rect numbers, plus `.hd-act`'s scrollWidth vs
+    clientWidth, so `bar-fit`'s invariant is checkable on the actual device.
+  Each tab copies as JSON. **Ask for that paste before theorizing** — it is
+  strictly more than a screenshot can carry.
 - iOS touch scrolling is suppressed with native non-passive touchstart/
   touchmove listeners on the SVG (React synthetic handlers can't preventDefault).
 
@@ -190,14 +210,14 @@ commits, so the watermark + Actions history make bisection trivial.
 
 ## Verifying pen / UI changes (browser harness)
 
-The node suite (`node tests/sketch-recognize.mjs`, ~1s, 216 tests) is free —
+The node suite (`node tests/sketch-recognize.mjs`, ~1s, 316 tests) is free —
 run it on every change. The browser suites live outside the repo in
 `/tmp/db-verify` (puppeteer-core, no repo dep) and drive real pointer/touch
 input against the dev server. Run them with the parallel runner, not one at a
 time:
 
 - `node /tmp/db-verify/run.mjs ui <url>` — bar fit, palette, modes, cursor,
-  convert, extend. Use for UI/markup/CSS changes.
+  convert, extend, diagnostics. Use for UI/markup/CSS changes.
 - `node /tmp/db-verify/run.mjs recog <url>` — the recognition suites. Use when
   `sketch-recognize.js` or the capture path changes.
 - `node /tmp/db-verify/run.mjs '' <url>` — everything. Before a deploy, or after
@@ -213,6 +233,31 @@ markup this branch had already deleted.
 asserts `scrollWidth <= clientWidth`, that the bar's height still equals
 `--hd-barh`, and that the ice ends above the bar. Layout arithmetic in this app
 has been wrong three times; measure with this, don't reason from the CSS.
+
+`diag.mjs` drives the diagnostics surface end to end and is the only suite that
+asserts a drill's *behaviour* rather than its markup — that the puck is on the
+right stick, that an unfireable pass is reported, that `at()` reads another time
+without moving the UI. It re-checks bar-fit **through the app's own Layout
+report**: if that report and the DOM ever disagree, a screenshot of the panel on
+a phone stops being trustworthy, which is the only reason the tab exists.
+
+### Getting real ink into the node suite
+
+The Pen tab is the intended path now, and it replaces hand-transcribing a
+clipboard dump (which is how every `REAL` block in `tests/sketch-recognize.mjs`
+got there, with the `[[x,y]] → [{x,y}]` adapter written out ten times):
+
+1. Draw it on the device, or tap **Read board ink** to re-run the recogniser
+   over ink already on the board — it reports and materializes nothing, so the
+   loop is draw → read → adjust with no undo in between.
+2. **Copy as fixture** emits a paste-ready case. The assertion it writes pins
+   what the classifier does *today*; if what you drew was the bug, change the
+   expectation by hand.
+
+`window.__pen` is unchanged and still what five recog suites read. `window.__db`
+is the richer, lazily-computed API — `get(tab)`, `json(tab)`, `at(f, tab)`,
+`seekT`, `play`, `open`/`close` — and everything on it is a function, so a page
+with the panel shut pays nothing.
 
 **Don't edit `src/` while a sweep is running.** Vite hot-reloads the app under
 the running Chromes, so the suites measure a moving target: a full sweep once

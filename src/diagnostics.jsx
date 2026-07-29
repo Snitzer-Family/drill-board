@@ -179,7 +179,16 @@ function PenTab({ snap, open, toggle, act, flash }) {
 // DOM; the report module stays node-loadable.
 export function layoutProbe(probeEl, drillVersion) {
   const vv = typeof window !== "undefined" ? window.visualViewport : null;
-  const cs = probeEl ? getComputedStyle(probeEl) : null;
+  // env() can only be read off a real element. The panel keeps a persistent
+  // hidden probe (no DOM churn at 5Hz); window.__db has no panel to keep one,
+  // so it borrows a throwaway.
+  const tmp = probeEl ? null : document.createElement("div");
+  if (tmp) {
+    tmp.style.cssText = "position:fixed;visibility:hidden;"
+      + "padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)";
+    document.body.appendChild(tmp);
+  }
+  const cs = getComputedStyle(probeEl || tmp);
   const rootEl = document.querySelector(".hd-root");
   const rs = rootEl ? getComputedStyle(rootEl) : null;
   const rect = sel => {
@@ -193,7 +202,10 @@ export function layoutProbe(probeEl, drillVersion) {
     };
   };
   const cssVar = n => (rs ? rs.getPropertyValue(n).trim() : "");
+  const safe = { top: cs.paddingTop, bottom: cs.paddingBottom };
+  if (tmp) tmp.remove();
   return {
+    tab: "layout",
     v: APP_VERSION, stamp: BUILD_STAMP,
     dsl: { drill: drillVersion ?? null, app: DSL_VERSION },
     standalone: navigator.standalone === true ||
@@ -202,8 +214,7 @@ export function layoutProbe(probeEl, drillVersion) {
     vv: vv ? [Math.round(vv.width), Math.round(vv.height), Math.round(vv.offsetTop)] : null,
     screen: [screen.width, screen.height],
     dpr: window.devicePixelRatio,
-    // the hidden probe is the only way to read env() from JS
-    safe: cs ? { top: cs.paddingTop, bottom: cs.paddingBottom } : null,
+    safe,
     // the `dense` CLASS, not the JS flag behind it: the stylesheet keys off the
     // class, so this is the answer that explains what you are looking at. The
     // roomy tier has no class (it only gates what the Edit bar inlines) and
@@ -222,6 +233,7 @@ export function layoutProbe(probeEl, drillVersion) {
     ua: navigator.userAgent,
   };
 }
+
 
 /* ---------------- small presentational pieces ---------------- */
 
@@ -429,11 +441,17 @@ function DiagView({ diag, setDiag, feedRef, actRef, drillVersion, flash }) {
     return () => clearInterval(id);
   }, [tab, drillVersion, feedRef]);
 
+  // A snapshot is only ever handed to the tab it was built for. Switching tabs
+  // renders once BEFORE the effect re-runs its tick, so without this the new tab
+  // draws against the previous tab's payload — which crashed the app the first
+  // time Layout was opened after Drill, and took the whole board down with it.
+  const cur = snap && snap.tab === tab ? snap : null;
+
   const close = () => setDiag(null);
   const setTab = t => setDiag(d => ({ ...d, tab: t }));
   const swapDock = () => setDiag(d => ({ ...d, dock: d.dock === "full" ? "half" : "full" }));
   const copyJson = () => {
-    const txt = JSON.stringify(snap ?? {}, null, 1);
+    const txt = JSON.stringify(cur ?? {}, null, 1);
     flash(copyText(txt) ? "Diagnostics copied — paste them to Claude"
       : "Copied (if the paste is empty, screenshot this instead)");
   };
@@ -459,9 +477,9 @@ function DiagView({ diag, setDiag, feedRef, actRef, drillVersion, flash }) {
           </button>
         </div>
         <div className="hd-diagbody">
-          {tab === "layout" && <LayoutTab snap={snap} open={open} toggle={toggle} />}
-          {tab === "drill" && <DrillTab snap={snap} open={open} toggle={toggle} act={actRef} />}
-          {tab === "pen" && <PenTab snap={snap} open={open} toggle={toggle} act={actRef} flash={flash} />}
+          {tab === "layout" && <LayoutTab snap={cur} open={open} toggle={toggle} />}
+          {tab === "drill" && <DrillTab snap={cur} open={open} toggle={toggle} act={actRef} />}
+          {tab === "pen" && <PenTab snap={cur} open={open} toggle={toggle} act={actRef} flash={flash} />}
         </div>
         <div className="hd-diagfoot">
           <button className="hd-mini" onClick={copyJson}>Copy JSON</button>
