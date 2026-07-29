@@ -8,7 +8,16 @@ import { useTheme } from "./theme-react.jsx";
 
 /* ---------------- rink markings ---------------- */
 
-export function RinkMarkings({ yFix = 1 }) {
+// clipId names the boards clipPath to cut against. It exists because that
+// reference is document-global: the settings sheet's preview tiles render AFTER
+// the main board, so with one hardcoded "boards" every tile would silently clip
+// against the app's — which carries the fill-mode stretch in its ry.
+// dim fades the MARKINGS and leaves the ice itself alone. It has to be a group
+// inside the clip rather than an opacity on the whole thing, because fading the
+// ice fill too would show the room through the sheet — the rink would go
+// translucent instead of the lines going quiet, which is the opposite of the
+// point. Full-strength lines are right at the bench and shout on a projector.
+export function RinkMarkings({ yFix = 1, clipId = "boards", dim = 1 }) {
   const T = useTheme();
   const red = T["ice-line-red"], blue = T["ice-line-blue"];
   const dots = [];
@@ -36,8 +45,9 @@ export function RinkMarkings({ yFix = 1 }) {
   const cr = 6 / Math.max(0.2, yFix);   // crease arc depth corrected to stay round
   const rr = 10 / Math.max(0.2, yFix);  // referee crease radius, same correction
   return (
-    <g clipPath="url(#boards)">
+    <g clipPath={`url(#${clipId})`}>
       <rect x={0} y={0} width={200} height={85} fill={T.ice} />
+      <g opacity={dim < 1 ? dim : undefined}>
       {/* regulation goalie crease: 8' wide, 4.5' straight sides, 6' arc.
           Its own token, not the blue LINE colour: it's a filled region, so dark
           mode has to hold it back from the lifted line blue or the crease reads
@@ -59,6 +69,7 @@ export function RinkMarkings({ yFix = 1 }) {
       <ellipse cx={100} cy={42.5} rx={1} ry={yFix} fill={blue} />
       {dots}
       <rect x={0.5} y={0.5} width={199} height={84} rx={28} ry={28 * yFix} fill="none" stroke={T["ice-boards"]} strokeWidth={1} />
+      </g>
     </g>
   );
 }

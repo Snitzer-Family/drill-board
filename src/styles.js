@@ -587,6 +587,28 @@ export const STYLES = `
         .hd-prefbody { flex:1; min-height:0; overflow-y:auto; overscroll-behavior:contain;
           display:flex; flex-direction:column; gap:8px;
           width:100%; max-width:560px; margin:0 auto; padding-right:2px; }
+        /* ---- a settings row whose options are pictures ---------------------
+           Several settings describe a picture, and a sentence is the wrong
+           medium for one. Those rows put a small live board under each option
+           and make the board the control, so you pick the one you want to look
+           at rather than reading a sentence and guessing. The label stays under
+           every tile: this is a picture AND a word, never a picture alone.
+           The svg carries the ice as its background, so a scene that letterboxes
+           inside its tile sits on more ice instead of showing a gutter. */
+        .hd-pvrow { display:flex; flex-wrap:wrap; gap:6px; margin-top:7px; }
+        .hd-pvtile { flex:1 1 30%; min-width:82px; display:flex; flex-direction:column; gap:4px;
+          padding:4px; border-radius:8px; cursor:pointer;
+          background:var(--db-surface-sunken); border:1px solid var(--db-border); color:var(--db-text-soft); }
+        .hd-pvtile.on { background:var(--db-accent); border-color:var(--db-accent);
+          color:var(--db-text-on-accent); }
+        /* a single illustrative board next to a stepper or slider: no choice to
+           make, so it spans the row and is not a target */
+        .hd-pvrow.one { padding:4px; border-radius:8px;
+          background:var(--db-surface-sunken); border:1px solid var(--db-border); }
+        .hd-pvrow.one .hd-pvsvg { height:38px; }
+        .hd-pvsvg { display:block; width:100%; height:44px; border-radius:5px;
+          background:var(--db-ice); pointer-events:none; }
+        .hd-pvlbl { font-size:10.5px; font-weight:600; line-height:1.2; text-align:center; }
         .hd-prefwarn { font-size:11.5px; line-height:1.5; color:var(--db-warn);
           padding:7px 9px; border-radius:8px;
           background:var(--db-surface-sunken); border:1px solid var(--db-border); }

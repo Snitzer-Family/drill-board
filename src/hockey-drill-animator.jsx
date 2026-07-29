@@ -1,13 +1,13 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo, Fragment } from "react";
 import { VIEWS, isQuarter, COLORS, vb, APP_VERSION, ICON_SCALE, PLAYER_SCALE, ROUTE_START_GAP, BUILD_STAMP, DEFAULT_TEXT, SPEED,
   SAVE_PROB, MISS_POST, MISS_WIDE, MISS_OVER, SHOT_AIR_PROB, BOUNCE_REST, WB_SYMS, symOf,
-  DSL_VERSION, TYPEFACES, TYPEFACE_KEY, READ_PACES, READ_PACE_DEFAULT, captionHold, GOALIE_COLOR,
-  GOAL_SPOTS, atGoalSpot } from "./constants.js";
+  DSL_VERSION, TYPEFACES, TYPEFACE_KEY, READ_PACES, READ_PACE_DEFAULT, captionHold, ACT_GAP, ACT_R,
+  GOALIE_COLOR, GOAL_SPOTS, atGoalSpot } from "./constants.js";
 import { parseDrill, serializeDrill, extractDrill, deriveInventory, ensureShotNet } from "./drill-format.js";
 import { prepareImage, drillFromImage, ANTHROPIC_KEY_STORE } from "./drill-vision.js";
 import { drillSvg } from "./drill-svg.js";
 import { mdEscape, mdInline, mdBlock } from "./md.js";
-import { clampX, clampY, segEnd, segD, nearestT, splitSeg, zigzagPoints, wigglePoints, wigglePoly, zigzagPoly, convertSeg, fitRoute, evalSeg, rdp, catmullToBezier, alignJoint, mirrorJoint, translateJointHandles, trimSegStart, trimSegEnd, trimPolyStart, trimPolyEnd, gapPolyAt } from "./geometry.js";
+import { clampX, clampY, fitInside, segEnd, segD, nearestT, splitSeg, zigzagPoints, wigglePoints, wigglePoly, zigzagPoly, convertSeg, fitRoute, evalSeg, rdp, catmullToBezier, alignJoint, mirrorJoint, translateJointHandles, trimSegStart, trimSegEnd, trimPolyStart, trimPolyEnd, gapPolyAt } from "./geometry.js";
 import { dirOf, dirAtWaypoint, spreadDir } from "./route-dir.js";
 import * as boards from "./boards.js";
 import { netShapes, bumperShapes, solidShapes, detourRoute, segCrossesNet } from "./net-collide.js";
@@ -21,6 +21,7 @@ import { newGame, stepGame } from "./ai-game.js";
 import { STYLES } from "./styles.js";
 import { THEME_KEY, THEME_ATTR, THEME_ORDER, THEME_LABEL, resolveTheme, tokens, teamInk } from "./theme.js";
 import { ThemeCtx, InkCtx } from "./theme-react.jsx";
+import { PrefPick, PrefSample } from "./pref-preview.jsx";
 import { SAVE_KEY, peekBackup, clearBackup } from "./storage.js";
 
 // Pen inks. These double as PIECE colours — a symbol you draw becomes a player
@@ -95,7 +96,15 @@ const PLAY_SPEEDS = [
    30px one on a bench phone, and the description is part of what you're
    pressing. Rows with a stepper, slider or pills can't be one button (a button
    can't contain buttons), so those put the control beside the title or under
-   the description. */
+   the description.
+
+   A third shape now sits alongside these: the rows whose effect is a PICTURE
+   render each option as a small live board and make the board the control
+   (PrefPick, in pref-preview.jsx). Those give up the whole-row target for the
+   same buttons-in-buttons reason — but each tile is its own target and larger
+   than the switch it replaced, so nothing got harder to hit. What is left here
+   is the settings a picture cannot show: timings, odds, and the ones that
+   change how the SIMULATION behaves rather than how it looks. */
 const PrefToggle = ({ title, desc, on, set, dim }) => (
   <button className={`hd-pref toggle${dim ? " dim" : ""}`} role="switch" aria-checked={on}
     onClick={() => set(v => !v)}>
@@ -442,6 +451,32 @@ const HALFFLIP_KEY = "drillboard:half-flip";  // half-ice net at the far end (le
 const STRETCH_KEY = "drillboard:stretch-fill";  // full ice stretches to fill the screen
 const PRESS_KEY = "drillboard:pencil-pressure";  // Apple Pencil pressure → line weight
 const HAND_KEY = "drillboard:hand";  // which side the chrome's controls sit on
+const LINE_KEY = "drillboard:line-scale";    // route/arrow/mark thickness multiplier
+const MARK_KEY = "drillboard:mark-opacity";  // how solid the drawn markings are
+const RINKDIM_KEY = "drillboard:rink-dim";   // how strongly the rink markings are drawn
+// The icon discs at a pass / shoot / pickup. Whiteboard mode has always dropped
+// them; this is the same look without going full whiteboard. Key name and flag
+// match the unmerged commit on the sibling worktree branch that first added it,
+// so the two converge instead of colliding.
+const ACTC_KEY = "drillboard:action-circles";
+// ...and the range each is allowed, declared ONCE because it is read twice: the
+// control clamps to it and the stored value is validated against it. Two copies
+// and raising a stepper's max would leave the new top of the range unloadable —
+// stored fine, silently reset to the default on the next launch.
+// ...the rink floor is 0.2 rather than 0.1: the markings are what tell you WHICH
+// rink you are looking at, and past about a fifth they stop being faint and
+// start being gone.
+const LINE_RANGE = [0.5, 3], MARK_RANGE = [0.1, 1], RINKDIM_RANGE = [0.2, 1];
+// A stored NUMBER pref. The boolean prefs can treat any junk as false, but junk
+// here is worse than wrong: NaN in the line scale multiplies every route width
+// to nothing and blanks the board. So anything unparseable, or outside the range
+// the control itself offers, falls back to the default rather than being trusted.
+const numPref = (key, dflt, [min, max]) => {
+  try {
+    const n = parseFloat(localStorage.getItem(key));
+    return Number.isFinite(n) && n >= min && n <= max ? n : dflt;
+  } catch { return dflt; }   // private mode throws on access
+};
 // The ONE width breakpoint in the app. Above it the action bar lays its groups
 // out inline and the corner menus centre on the button that opened them; below,
 // the bar collapses groups into popovers and the stylesheet stretches the menus
@@ -508,6 +543,12 @@ export default function DrillAnimator() {
   const [marquee, setMarquee] = useState(null);    // {x0,y0,x1,y1} while dragging a box
   const [groupInput, setGroupInput] = useState(null);   // pending group-name text while naming, or null
   const [popup, setPopup] = useState(null);
+  // what the Edit bar should offer after a DRAG that didn't (re)open the popup —
+  // {type:"point", id, seg, fork?} for a moved waypoint. The bar reads this only
+  // when popup is absent, so a dragged point loads its own actions (Delete hits
+  // just that point) even though no inspector panel appeared. Guarded by id, so a
+  // stale descriptor from one piece never leaks onto another's strip.
+  const [dragSel, setDragSel] = useState(null);
   const [tool, setTool] = useState("select");
   // freehand marker (annotation) settings, remembered between strokes
   const [markColor, setMarkColor] = useState("#111318");   // black ink by default
@@ -857,6 +898,12 @@ export default function DrillAnimator() {
   const [arrowStagger, setArrowStagger] = useState(true); // tidy arrowheads: stagger converging heads + recess off crossing lines (off = marks land exactly where drawn)
   const [realisticShots, setRealisticShots] = useState(true); // random goal/post/wide/over + air; off = always bury flat
   const [detailAnim, setDetailAnim] = useState(true);  // skater stride sway, stick swing, dribble cradle
+  // the icon discs at each pass/shoot/pickup. Persisted, because it is a standing
+  // view preference like whiteboard rather than something you set per drill.
+  const [actionCircles, setActionCircles] = useState(() => {
+    try { return localStorage.getItem(ACTC_KEY) !== "0"; } catch { return true; }
+  });
+  useEffect(() => { try { localStorage.setItem(ACTC_KEY, actionCircles ? "1" : "0"); } catch { /* private mode */ } }, [actionCircles]);
   // whiteboard mode: players draw as classic X/O/letter symbols, action badges
   // collapse to arrow-into-gap, and detail animations shut off. A standing view
   // preference, so unlike the other prefs toggles it persists across refreshes.
@@ -953,8 +1000,28 @@ export default function DrillAnimator() {
   // whiteboard draws the PLANNER's routes only: authored lines, no animation-time
   // detour bends/ghosts (the skater still avoids obstacles either way)
   const effAvoidVis = avoidanceVisuals && !whiteboard;
-  const [lineScale, setLineScale] = useState(1);       // route line-thickness multiplier
-  const [markOpacity, setMarkOpacity] = useState(1);   // opacity of the drawn drill markings only (routes/forks/stops/ink/aim); players, implements + rink stay opaque
+  // whiteboard has never drawn the action discs, so it wins over the pref rather
+  // than fighting it — same shape as the three flags above
+  const effActCircles = actionCircles && !whiteboard;
+  // Both persist. They are the two display prefs you set for a ROOM — thicker
+  // lines to project, lighter ink to annotate over — and a coach who set one at
+  // the rink was made to set it again at the next practice.
+  const [lineScale, setLineScale] = useState(() => numPref(LINE_KEY, 1, LINE_RANGE));  // route line-thickness multiplier
+  useEffect(() => { try { localStorage.setItem(LINE_KEY, String(lineScale)); } catch { /* private mode */ } }, [lineScale]);
+  const [markOpacity, setMarkOpacity] = useState(() => numPref(MARK_KEY, 1, MARK_RANGE));   // opacity of the drawn drill markings only (routes/forks/stops/ink/aim); players, implements + rink stay opaque
+  useEffect(() => { try { localStorage.setItem(MARK_KEY, String(markOpacity)); } catch { /* private mode */ } }, [markOpacity]);
+  // ...and the mirror of it for the SHEET: how strongly the rink's own lines are
+  // drawn. Deliberately a separate knob from Mark opacity — that one quiets what
+  // you drew so the rink reads through it, this one quiets the rink so what you
+  // drew reads over it. Turning both down just fades everything.
+  const [rinkDim, setRinkDim] = useState(() => numPref(RINKDIM_KEY, 1, RINKDIM_RANGE));
+  useEffect(() => { try { localStorage.setItem(RINKDIM_KEY, String(rinkDim)); } catch { /* private mode */ } }, [rinkDim]);
+  // What the settings sheet's preview tiles draw with. Everything a scene can
+  // need, in one object, so a new scene never has to thread another prop through
+  // PrefPick. prefersDark is in here because the Theme row's "Auto" tile has to
+  // resolve the same way the app does.
+  const pvCtx = useMemo(() => ({ T, ink, prefersDark, lineScale, markOpacity, rinkDim }),
+    [T, ink, prefersDark, lineScale, markOpacity, rinkDim]);
   const [defaultSpeed, setDefaultSpeed] = useState(1.5); // speed given to newly-added players
   // tunable shot odds (0..1): goalie save chance; empty-net miss split into
   // post/wide/over (the remainder is a goal); and how often a shot goes airborne
@@ -5036,11 +5103,11 @@ export default function DrillAnimator() {
     const cx = m.pts.reduce((a, q) => a + q.x, 0) / m.pts.length;
     const cy = m.pts.reduce((a, q) => a + q.y, 0) / m.pts.length;
     const r = (deg * Math.PI) / 180, c = Math.cos(r), s = Math.sin(r);
-    const pts = m.pts.map(q => ({
+    const pts = fitInside(m.pts.map(q => ({
       ...q,
-      x: clampX(cx + (q.x - cx) * c - (q.y - cy) * s),
-      y: clampY(cy + (q.x - cx) * s + (q.y - cy) * c),
-    }));
+      x: cx + (q.x - cx) * c - (q.y - cy) * s,
+      y: cy + (q.x - cx) * s + (q.y - cy) * c,
+    })));
     updateById(id, { pts, x: pts[0].x, y: pts[0].y });
   }
   // scale a mark's points about its centroid — sx/sy per axis (size & proportion)
@@ -5049,7 +5116,7 @@ export default function DrillAnimator() {
     if (!m || !m.pts || m.pts.length < 2) return;
     const cx = m.pts.reduce((a, q) => a + q.x, 0) / m.pts.length;
     const cy = m.pts.reduce((a, q) => a + q.y, 0) / m.pts.length;
-    const pts = m.pts.map(q => ({ ...q, x: clampX(cx + (q.x - cx) * sx), y: clampY(cy + (q.y - cy) * sy) }));
+    const pts = fitInside(m.pts.map(q => ({ ...q, x: cx + (q.x - cx) * sx, y: cy + (q.y - cy) * sy })));
     updateById(id, { pts, x: pts[0].x, y: pts[0].y });
   }
 
@@ -5142,6 +5209,12 @@ export default function DrillAnimator() {
       for (const k of ["y", "cy", "c1y", "c2y"]) if (t[k] != null) t[k] = clampY(t[k] + off);
       return t;
     });
+    // a mark's copy has to carry its pts across, or it lands exactly on top of
+    // the original with only its (derived) x/y offset
+    if (Array.isArray(copy.pts) && copy.pts.length) {
+      copy.pts = fitInside(copy.pts.map(q => ({ ...q, x: q.x + off, y: q.y + off })));
+      copy.x = copy.pts[0].x; copy.y = copy.pts[0].y;
+    }
     // a duplicated puck starts loose (avoid two pucks glued to one carrier)
     if (copy.kind === "puck") { copy.carrier = null; copy.transfers = []; copy.terminals = undefined; copy.pickup = null; }
     setPieces(ps => [...ps, copy]);
@@ -5161,6 +5234,13 @@ export default function DrillAnimator() {
     const ci = (x, y) => boards.clampInside(x, y);
     update(p => {
       if (!has(p.id) || p.lock) return p;   // a locked member never slides with its group
+      // a mark's geometry lives in pts (x/y is just a copy of pts[0]), so it
+      // has to move as a rigid body — moving x/y alone left the ink sitting
+      // still while its position desynced from what's drawn
+      if (p.kind === "mark" && p.pts) {
+        const pts = fitInside(p.pts.map(q => ({ ...q, x: q.x + dx, y: q.y + dy })));
+        return { ...p, pts, x: pts[0].x, y: pts[0].y };
+      }
       const np = ci(p.x + dx, p.y + dy);
       const path = (p.path || []).map(s => {
         const q = ci(s.x + dx, s.y + dy), s2 = { ...s, x: q.x, y: q.y };
@@ -5204,6 +5284,16 @@ export default function DrillAnimator() {
     const rot = (x, y) => { const dx = x - C.x, dy = y - C.y; return boards.clampInside(C.x + dx * ca - dy * sa, C.y + dx * sa + dy * ca); };
     update(p => {
       if (!multiSel.has(p.id)) return p;
+      // a mark rotates through its own points, rigidly (rot() clamps per point,
+      // which would squash it) — x/y then follows pts[0] as everywhere else
+      if (p.kind === "mark" && p.pts) {
+        const pts = fitInside(p.pts.map(q => ({
+          ...q,
+          x: C.x + (q.x - C.x) * ca - (q.y - C.y) * sa,
+          y: C.y + (q.x - C.x) * sa + (q.y - C.y) * ca,
+        })));
+        return { ...p, pts, x: pts[0].x, y: pts[0].y };
+      }
       const np = { ...p }, q = rot(p.x, p.y); np.x = q.x; np.y = q.y;
       if (rotatesFacing(p)) np.facing = (p.facing || 0) + deg;
       np.path = (p.path || []).map(s => {
@@ -5235,6 +5325,11 @@ export default function DrillAnimator() {
         for (const k of ["y", "cy", "c1y", "c2y"]) if (t[k] != null) t[k] = clampY(t[k] + off);
         return t;
       });
+      // as in duplicatePiece: a mark's geometry is pts, so offset that too
+      if (Array.isArray(c.pts) && c.pts.length) {
+        c.pts = fitInside(c.pts.map(q => ({ ...q, x: q.x + off, y: q.y + off })));
+        c.x = c.pts[0].x; c.y = c.pts[0].y;
+      }
       if (c.kind === "puck") {
         if (c.carrier) c.carrier = idMap[c.carrier] || null;                       // carrier outside the group → drop (loose)
         if (c.pickup && c.pickup.to) c.pickup = idMap[c.pickup.to] ? { ...c.pickup, to: idMap[c.pickup.to] } : null;
@@ -5347,7 +5442,11 @@ export default function DrillAnimator() {
     // reshows — but only if it was ALREADY being edited; a bare reposition of a
     // piece whose popup was closed should stay closed.
     const popOpen = pinned || (!!popup && popup.id === id);
-    drag.current = { kind: "piece", id, popOpen, start: pt, last: pt, moved: false, touch: e.pointerType !== "mouse", locked };
+    // a mark moves as a rigid body, so it needs its geometry as it was at grab
+    // time: every move re-derives from pts0, never from the last committed
+    // (possibly boundary-shifted) state — see the mark branch in onSvgMove
+    const pts0 = pc && pc.kind === "mark" && pc.pts ? pc.pts.map(q => ({ ...q })) : null;
+    drag.current = { kind: "piece", id, popOpen, pts0, start: pt, last: pt, moved: false, touch: e.pointerType !== "mouse", locked };
     svgRef.current.setPointerCapture?.(e.pointerId);
   }
 
@@ -5529,11 +5628,11 @@ export default function DrillAnimator() {
       d.moved = true;
       const ang = Math.atan2(pt.y - d.cy, pt.x - d.cx) - d.a0;
       const c = Math.cos(ang), s = Math.sin(ang);
-      const pts = d.pts0.map(q => ({
+      const pts = fitInside(d.pts0.map(q => ({
         ...q,
-        x: clampX(d.cx + (q.x - d.cx) * c - (q.y - d.cy) * s),
-        y: clampY(d.cy + (q.x - d.cx) * s + (q.y - d.cy) * c),
-      }));
+        x: d.cx + (q.x - d.cx) * c - (q.y - d.cy) * s,
+        y: d.cy + (q.x - d.cx) * s + (q.y - d.cy) * c,
+      })));
       updateById(d.id, { pts, x: pts[0].x, y: pts[0].y });
       return;
     }
@@ -5543,7 +5642,9 @@ export default function DrillAnimator() {
       d.moved = true;
       const sx = Math.max(0.12, Math.min(8, (pt.x - d.ax) / ((d.x0 - d.ax) || 1e-6)));
       const sy = Math.max(0.12, Math.min(8, (pt.y - d.ay) / ((d.y0 - d.ay) || 1e-6)));
-      const pts = d.pts0.map(q => ({ ...q, x: clampX(d.ax + (q.x - d.ax) * sx), y: clampY(d.ay + (q.y - d.ay) * sy) }));
+      // fitInside, not a per-point clamp: a shape grown against a wall slides
+      // inward whole (the anchor corner gives) instead of flattening on it
+      const pts = fitInside(d.pts0.map(q => ({ ...q, x: d.ax + (q.x - d.ax) * sx, y: d.ay + (q.y - d.ay) * sy })));
       updateById(d.id, { pts, x: pts[0].x, y: pts[0].y });
       return;
     }
@@ -5565,9 +5666,18 @@ export default function DrillAnimator() {
       const ci = (x, y) => boards.clampInside(x, y);    // clamp to the rounded boards
       update(p => {
         if (p.id !== d.id) return p;
-        if (p.kind === "mark") {   // a marker annotation moves all its points together
-          // spread q first so per-point flags (sharp corners) survive the move
-          const pts = p.pts.map(q => ({ ...q, ...ci(q.x + dx, q.y + dy) }));
+        if (p.kind === "mark") {
+          // A marker annotation is a RIGID body: translate the whole thing by
+          // the total drag, then shift it back inside as a unit. Clamping each
+          // point on its own squashed the shape flat against the boards, and
+          // since the clamped result fed the next move it never came back.
+          // Deriving from pts0 + (pt - start) rather than an incremental delta
+          // is what makes it recoverable: push 10ft past the wall, pull back
+          // 5ft, and the shape sits 5ft off the wall, still under the cursor.
+          const src = d.pts0 || p.pts;
+          const tx = pt.x - d.start.x, ty = pt.y - d.start.y;
+          // spread q first so per-point flags (sharp corners, pressure) survive
+          const pts = fitInside(src.map(q => ({ ...q, x: q.x + tx, y: q.y + ty })));
           return { ...p, pts, x: pts[0].x, y: pts[0].y };
         }
         if (d.line == null) {
@@ -5642,7 +5752,7 @@ export default function DrillAnimator() {
     if (d.kind === "drawing") { finishDraw(); return; }
     if (d.kind === "marquee") {
       setMarquee(null);
-      if (!d.moved) { setSelectedId(null); setMultiSel(null); return; }   // a plain tap deselects
+      if (!d.moved) { setSelectedId(null); setMultiSel(null); setDragSel(null); return; }   // a plain tap deselects
       const x0 = Math.min(d.start.x, d.last.x), x1 = Math.max(d.start.x, d.last.x);
       const y0 = Math.min(d.start.y, d.last.y), y1 = Math.max(d.start.y, d.last.y);
       const hit = pieces.filter(p => !p.lock && p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1).map(p => p.id);
@@ -5664,9 +5774,20 @@ export default function DrillAnimator() {
       // when it was already being edited (or a pinned panel): a bare drag of a piece
       // whose popup was closed shouldn't pop the editor open.
       if (pc && pc.path && pc.path.length && d.popOpen) { setSelectedId(d.id); setPopup({ type: "piece", id: d.id }); }
+      setDragSel(null);   // a body move → the bar's piece actions, not a stale point
       return;
     }
-    if (d.moved) return;
+    // a MOVED drag doesn't (re)open the popup, but the bar should still reflect
+    // what was just dragged: a waypoint drag loads that point's actions so Delete
+    // hits the point, not the player. Anything else falls back to piece actions.
+    if (d.moved) {
+      if ((d.kind === "anchor" || d.kind === "wlabel") && d.seg != null)
+        setDragSel({ type: "point", id: d.id, seg: d.seg, ...(d.fork ? { fork: d.fork } : {}) });
+      else
+        setDragSel(null);
+      return;
+    }
+    setDragSel(null);   // a plain tap sets popup below; that becomes the source of truth
     if (d.kind === "wlabel") { setSelectedId(d.id); setPopup({ type: "point", id: d.id, seg: d.seg }); return; }
     if (d.kind === "resize" || d.kind === "markscale" || d.kind === "markrotate") return;
     if (d.kind === "markpt") {
@@ -5698,6 +5819,7 @@ export default function DrillAnimator() {
         // coach hit the leg first, then the dot on a second tap
         const wp = waypointUnderTap(d.id, d.line, d.tapPt, d.fork || null);
         if (wp != null) { setSelectedId(d.id); setPopup({ type: "point", id: d.id, seg: wp, ...(d.fork ? { fork: d.fork } : {}) }); return; }
+        setSelectedId(d.id);
         setPopup({ type: "line", id: d.id, seg: d.line, pt: d.tapPt, ...(d.fork ? { fork: d.fork } : {}) });
         return;
       }
@@ -6023,11 +6145,13 @@ export default function DrillAnimator() {
   }
 
   /* ---- action badges at waypoints ---- */
-  // gap (rink ft) the line leaves around an action badge; badge radius in icon-frame units
-  const ACT_GAP = 3.4, ACT_R = 3.0;
-  // whiteboard mode drops the badge discs, so the line-gap shrinks to a small
-  // central gap the arrows point into (nothing to clear but the waypoint itself)
-  const actGap = whiteboard ? 0.8 : ACT_GAP;
+  // ACT_GAP / ACT_R (the line's gap around a badge, and the disc radius) live in
+  // constants.js: the settings sheet's preview tile draws the same badge.
+  // With no badge discs — whiteboard, or Action badges off — the line-gap shrinks
+  // to a small central gap the arrows point into: there is nothing left to clear
+  // but the waypoint itself, and a 3.4ft hole around nothing reads as a broken
+  // route. This is why the pref cannot just hide the discs with CSS.
+  const actGap = effActCircles ? ACT_GAP : 0.8;
   // route ends converging on one waypoint queue their arrowheads back along their
   // own lines (same idea as the shot stagger in puckPathNodes) instead of clumping
   const ARROW_CLUSTER_R = 2;      // ft: only ends that directly overlap share a stagger group
@@ -6180,7 +6304,7 @@ export default function DrillAnimator() {
             if (Math.hypot(dx, dy) < 1e-4) { dx = s.x - prev.x; dy = s.y - prev.y; }
             els.push(routeMark(`${keyPrefix}am${i}`, { x: fin.x, y: fin.y },
               (Math.atan2(dy, dx) * 180) / Math.PI, s.endStop, color));
-            if (!whiteboard) els.push(iconBadge({ x: s.x, y: s.y }, actionIconName(info.type), color, `${keyPrefix}ab${i}`, 1, info.count));
+            if (effActCircles) els.push(iconBadge({ x: s.x, y: s.y }, actionIconName(info.type), color, `${keyPrefix}ab${i}`, 1, info.count));
             continue;
           }
           const near = evalSeg(prev, s, 0.95); tx = s.x - near.x; ty = s.y - near.y;   // near the end → carat aligns with the incoming run
@@ -6194,8 +6318,8 @@ export default function DrillAnimator() {
       const back = arrivalBack("main", mp0.x, mp0.y);
       const mp = back ? gmMove(s.x, s.y, -tx / tl, -ty / tl, actGap + back) : mp0;
       els.push(routeMark(`${keyPrefix}am${i}`, mp, ang, s.endStop, color));
-      // whiteboard: no icon disc — the arrow just stops, pointing into the gap
-      if (!whiteboard) els.push(iconBadge({ x: s.x, y: s.y }, actionIconName(info.type), color, `${keyPrefix}ab${i}`, 1, info.count));
+      // no disc — the arrow just stops, pointing into the gap
+      if (effActCircles) els.push(iconBadge({ x: s.x, y: s.y }, actionIconName(info.type), color, `${keyPrefix}ab${i}`, 1, info.count));
     }
     return <g>{els}</g>;
   }
@@ -6248,7 +6372,7 @@ export default function DrillAnimator() {
       const back = arrivalBack("main", mp0.x, mp0.y);
       const mp = back ? gmMove(e.x, e.y, -tx / tl, -ty / tl, actGap + back) : mp0;
       els.push(routeMark(`lcm-${p.id}-${k}`, mp, ang, false, ink(p.color), GHOST_OP));
-      if (!whiteboard) els.push(iconBadge({ x: e.x, y: e.y }, "collect", p.color, `lcb-${p.id}-${k}`, GHOST_OP));
+      if (effActCircles) els.push(iconBadge({ x: e.x, y: e.y }, "collect", p.color, `lcb-${p.id}-${k}`, GHOST_OP));
     });
     return els.length ? <g>{els}</g> : null;
   }
@@ -6262,7 +6386,7 @@ export default function DrillAnimator() {
   // → shift the brain up to sit tangent above it, so the action circle (and its count
   // bubble) stays readable instead of hiding underneath.
   function reactionBadge(pt, color, key, lift = false) {
-    if (whiteboard) return null;   // whiteboard: branches just fan out of the gap
+    if (!effActCircles) return null;   // no discs: branches just fan out of the gap
     return iconBadge(pt, "brain", color, key, 1, 0, lift ? -(ACT_R * 2 + 0.7) : 0);
   }
 
@@ -8987,7 +9111,7 @@ export default function DrillAnimator() {
       }}>
         <svg viewBox={`0 0 ${2 * R} ${2 * R}`}>
           <g transform={loupeXf}>
-          <RinkMarkings />
+          <RinkMarkings dim={rinkDim} />
           {pieces.map(p => {
             let prev = { x: p.x, y: p.y };
             return p.path.map((s, i) => {
@@ -9370,6 +9494,36 @@ export default function DrillAnimator() {
       title: `Delete ${p.id}`, on: () => deletePiece(p.id) });
     return a;
   };
+  // ---- what you can do to a selected WAYPOINT / LEG ---------------------
+  // The bar's selection strip switches to these when the thing you picked is a
+  // point or a leg, so Delete removes just that — not the whole player. Same
+  // chip shape as pieceActions; rendered by the same actionChip.
+  const pointActions = (p, seg, fork) => {
+    const a = [];
+    a.push({ key: "lock", icon: "lock", label: "Lock",
+      title: "Pin this waypoint so it can't be moved by accident.",
+      on: () => updateSeg(p.id, seg, { lock: true }, fork) });
+    const panelHas = popup && popup.type === "point" && popup.id === p.id && popup.seg === seg;
+    if (!docked) a.push({ key: "more", icon: "sliders", label: "More",
+      active: panelHas, title: panelHas ? "Hide this point's settings" : "Everything else about this point",
+      on: () => setPopup(panelHas ? null : { type: "point", id: p.id, seg, ...(fork ? { fork } : {}) }) });
+    a.push({ key: "del", icon: "trash", label: "Delete", danger: true,
+      title: "Delete this waypoint", on: () => deleteSeg(p.id, seg, fork) });
+    return a;
+  };
+  const legActions = (p, seg, pt, fork) => {
+    const a = [];
+    if (pt) a.push({ key: "add", icon: "plus", label: "Add point", short: "Add",
+      title: "Add a waypoint on this leg", on: () => addPointAt(p.id, seg, pt, fork) });
+    const panelHas = popup && popup.type === "line" && popup.id === p.id && popup.seg === seg;
+    if (!docked) a.push({ key: "more", icon: "sliders", label: "More",
+      active: panelHas, title: panelHas ? "Hide this leg's settings" : "Everything else about this leg",
+      on: () => setPopup(panelHas ? null : { type: "line", id: p.id, seg, pt, ...(fork ? { fork } : {}) }) });
+    a.push({ key: "del", icon: "trash", label: "Delete", danger: true,
+      title: "Delete this leg",
+      on: () => { deleteSeg(p.id, seg, fork); flash("Leg removed — Undo restores it"); } });
+    return a;
+  };
   const actionChip = a => (
     <button key={a.key} className={`hd-pentool${a.danger ? " danger" : ""}${a.active ? " on" : ""}`}
       title={a.title} onClick={a.on}>
@@ -9452,7 +9606,7 @@ export default function DrillAnimator() {
 
             <g transform={zoomXf}>
             <g ref={sceneRef} transform={sceneTransform} clipPath={rink === "half" ? "url(#halfview)" : undefined}>
-            <RinkMarkings yFix={yFix} />
+            <RinkMarkings yFix={yFix} dim={rinkDim} />
 
             {/* freehand marker annotations sit on the ice, under the drill — they
                 are drill markings, so they honour Mark opacity */}
@@ -9792,7 +9946,7 @@ export default function DrillAnimator() {
                     if (!ea) return null;
                     // legacy branch `action` → its circle, else a plain skate carat / ‖ stop
                     const legacy = f.action && f.action !== "skate" ? forkActionIcon(f.action) : null;
-                    if (legacy && !whiteboard) return { ea, legacy };
+                    if (legacy && effActCircles) return { ea, legacy };
                     // several branches can END at the same spot — queue the carats
                     return { ea, bk: arrivalBack("main", ea.endPt.x, ea.endPt.y) };
                   })();
@@ -10547,17 +10701,31 @@ export default function DrillAnimator() {
           )}
           {/* ---- one piece selected: the four things you reach for without
               opening anything. "More" is the door to the full inspector. ---- */}
-          {selected && !multiSel?.size && (
-            <>
-              <div className="hd-pensep" />
-              <span className="hd-selchip">{selected.id}</span>
-              {pieceActions(selected, true).map(actionChip)}
-              <div className="hd-pensep" />
-              <button className="hd-pentool exit" title="Deselect"
-                onClick={() => { setSelectedId(null); setPopup(null); }}>
-                <Icon name="close" size={17} /><span>Done</span></button>
-            </>
-          )}
+          {selected && !multiSel?.size && (() => {
+            // popup wins when it targets this piece; otherwise a just-dragged
+            // waypoint (dragSel) drives the strip, so a drag with no panel still
+            // loads the point's actions.
+            const active = popup && popup.id === selected.id ? popup
+                         : (dragSel && dragSel.id === selected.id ? dragSel : null);
+            const wp  = active && active.type === "point" ? active : null;
+            const leg = active && active.type === "line"  ? active : null;
+            const label = wp  ? `${selected.id} · pt ${wp.seg + 1}`
+                        : leg ? `${selected.id} · leg ${leg.seg + 1}`
+                        : selected.id;
+            const acts  = wp  ? pointActions(selected, wp.seg, wp.fork || null)
+                        : leg ? legActions(selected, leg.seg, leg.pt, leg.fork || null)
+                        : pieceActions(selected, true);
+            return (
+              <>
+                <span className="hd-selchip">{label}</span>
+                {acts.map(actionChip)}
+                <div className="hd-pensep" />
+                <button className="hd-pentool exit" title="Deselect"
+                  onClick={() => { setSelectedId(null); setPopup(null); setDragSel(null); }}>
+                  <Icon name="close" size={17} /><span>Done</span></button>
+              </>
+            );
+          })()}
           {/* the marker's own ink settings, surfaced only while it's armed —
               they came off the deleted Add sheet, where they appeared under the
               same condition */}
@@ -10935,39 +11103,66 @@ export default function DrillAnimator() {
           <div className="hd-mh">App &amp; drill settings</div>
           <div className="hd-prefbody">
 
+          {/* The rows whose effect is a PICTURE show the picture and let you tap
+              it — see pref-preview.jsx. The rest keep their sentence: a sample
+              that can't show the difference is noise, so timings, odds and the
+              settings that only change how the SIMULATION behaves stay prose. */}
           <div className="hd-mh hd-prefsec">Display</div>
-          <PrefRow title="Theme"
+          <PrefPick title="Theme" scene="theme" ctx={pvCtx} value={themePref} set={setThemePref}
+            opts={THEME_ORDER.map(v => [v, THEME_LABEL[v] || v])}
             desc={themePref === "auto"
               ? `Which palette the board and chrome use. Auto follows your device's appearance — currently ${themeName}.`
-              : `Which palette the board and chrome use. Pinned to ${themePref}, ignoring your device's appearance.`}>
-            <Pills value={themePref} set={setThemePref}
-              opts={THEME_ORDER.map(v => [v, THEME_LABEL[v] || v])} />
-          </PrefRow>
+              : `Which palette the board and chrome use. Pinned to ${themePref}, ignoring your device's appearance.`} />
+          {/* the one visual row with no board in it: a typeface shows itself, so
+              each pill is set in the face it offers */}
           <PrefRow title="Typeface"
             desc="Which face the interface uses. All four are already on the device — nothing is downloaded, so this works with no signal. Rounded is Apple's SF Pro Rounded and only looks different on an iPhone or iPad.">
-            <Pills value={typeface} set={setTypeface}
-              opts={TYPEFACES.map(([v, lab]) => [v, lab])} />
+            <div className="hd-pills">
+              {TYPEFACES.map(([v, lab, stack]) => (
+                <button key={v} className={`hd-mini${typeface === v ? " on" : ""}`} aria-pressed={typeface === v}
+                  style={{ fontFamily: stack }} onClick={() => setTypeface(v)}>{lab}</button>
+              ))}
+            </div>
           </PrefRow>
-          <PrefRow title="Handedness"
-            desc="Which side the bar's controls sit on. Left mirrors the bottom bar and the Draw and Edit palettes, so Menu, Rink and the tools fall under your left thumb instead of reaching across the ice. The rink and everything on it stay exactly where they are.">
-            <Pills value={hand} set={setHand} opts={[["left", "Left"], ["right", "Right"]]} />
-          </PrefRow>
-          <PrefToggle title="Stretch to fill" on={stretchFill} set={setStretchFill}
+          <PrefPick title="Handedness" scene="hand" ctx={pvCtx} value={hand} set={setHand}
+            opts={[["left", "Left"], ["right", "Right"]]}
+            desc="Which side the bar's controls sit on. Left mirrors the bottom bar and the Draw and Edit palettes, so Menu, Rink and the tools fall under your left thumb instead of reaching across the ice. The rink and everything on it stay exactly where they are." />
+          <PrefPick title="Stretch to fill" scene="stretch" ctx={pvCtx} value={stretchFill} set={setStretchFill}
+            opts={[[true, "Stretch"], [false, "True shape"]]}
             desc="Full ice stretches to fill the screen. Off letterboxes it to true 200′ × 85′ proportions, so distances on the board match distances on the rink." />
           <PrefToggle title="Detailed animations" on={detailAnim} set={setDetailAnim}
             desc="Skater stride, stick swing, puck cradle and airborne shots. Turn off for a plainer picture, or if playback stutters on an older device." />
-          <PrefToggle title="Goal splashes" on={showResult} set={setShowResult}
+          <PrefPick title="Goal splashes" scene="splash" ctx={pvCtx} value={showResult} set={setShowResult}
+            opts={[[true, "On"], [false, "Off"]]}
             desc="Call GOAL! / SAVE! / POST! over the net as each shot resolves." />
-          <PrefToggle title="Ice zones" on={showZones} set={setShowZones}
+          <PrefPick title="Ice zones" scene="zones" ctx={pvCtx} value={showZones} set={setShowZones}
+            opts={[[true, "On"], [false, "Off"]]}
             desc="Name the areas of the sheet over the rink — slot, half wall, neutral zone. Useful when writing captions that refer to them." />
-          <PrefRow title="Line thickness"
+          <PrefSample title="Line thickness" scene="thickness" ctx={pvCtx} value={lineScale}
             desc="Scales every route line, arrow and mark. Worth raising when projecting to a room."
-            control={<Stepper value={lineScale} onChange={setLineScale} step={0.25} min={0.5} max={3} suffix="×" />} />
-          <PrefRow title="Mark opacity"
+            control={<Stepper value={lineScale} onChange={setLineScale} step={0.25}
+              min={LINE_RANGE[0]} max={LINE_RANGE[1]} suffix="×" />} />
+          <PrefSample title="Mark opacity" scene="opacity" ctx={pvCtx} value={markOpacity}
             desc={`How solid freehand marker ink and shapes are drawn — ${Math.round(markOpacity * 100)}% now. Lower lets rink markings read through your annotations.`}>
-            <input type="range" min={0.1} max={1} step={0.05} value={markOpacity} style={{ width: "100%" }}
+            <input type="range" min={MARK_RANGE[0]} max={MARK_RANGE[1]} step={0.05} value={markOpacity} style={{ width: "100%" }}
               onChange={e => setMarkOpacity(parseFloat(e.target.value))} />
-          </PrefRow>
+          </PrefSample>
+          {/* The mirror of Mark opacity, and next to it on purpose: that one
+              quiets what you drew so the rink reads through it, this one quiets
+              the rink so what you drew reads over it. */}
+          <PrefSample title="Rink markings" scene="rinkdim" ctx={pvCtx} value={rinkDim}
+            desc={rinkDim < 1
+              ? `How strongly the rink's own lines, circles and creases are drawn — ${Math.round(rinkDim * 100)}% now. The ice itself doesn't change, so the sheet stays solid and only the markings step back.`
+              : "How strongly the rink's own lines, circles and creases are drawn. Turn it down to let a busy drill read over the sheet, or to calm a projector."}>
+            <input type="range" min={RINKDIM_RANGE[0]} max={RINKDIM_RANGE[1]} step={0.05} value={rinkDim} style={{ width: "100%" }}
+              onChange={e => setRinkDim(parseFloat(e.target.value))} />
+          </PrefSample>
+          <PrefPick title="Action badges" scene="badges" ctx={pvCtx} value={actionCircles} set={setActionCircles}
+            opts={[[true, "Show"], [false, "Hide"]]}
+            dim={whiteboard}
+            desc={whiteboard
+              ? "The icon discs marking where a player passes, shoots or picks the puck up. Whiteboard mode never draws them, so this has no effect until you switch back to Graphic in the Rink menu."
+              : "The icon discs marking where a player passes, shoots or picks the puck up. Hidden, the route just runs an arrow into the waypoint — the same look whiteboard mode has always had. What happens where is still listed in the piece's Chain of events."} />
 
           {/* Whiteboard mode itself is a board choice, not a preference — it
               lives in the Rink menu next to full/half/quarter. What stays here
@@ -10975,9 +11170,11 @@ export default function DrillAnimator() {
           {whiteboard && (
             <>
               <div className="hd-mh hd-prefsec">Whiteboard</div>
-              <PrefToggle title="Circled symbols" on={wbCircle} set={setWbCircle}
+              <PrefPick title="Circled symbols" scene="wbcircle" ctx={pvCtx} value={wbCircle} set={setWbCircle}
+                opts={[[true, "Circled"], [false, "Bare"]]}
                 desc="Put each X or O on an opaque disc so it stays readable where it crosses a rink line. Whiteboard mode itself is in the Rink menu." />
-              <PrefToggle title="Player names" on={wbNames} set={setWbNames}
+              <PrefPick title="Player names" scene="wbnames" ctx={pvCtx} value={wbNames} set={setWbNames}
+                opts={[[true, "On"], [false, "Off"]]}
                 desc="Show a name tag under every symbol. Off still names a player while their panel is open." />
             </>
           )}
@@ -11005,22 +11202,27 @@ export default function DrillAnimator() {
           <div className="hd-mh hd-prefsec">Smart pen</div>
           <PrefToggle title="Palm rejection" on={palmReject} set={setPalmReject}
             desc="While an Apple Pencil is in use, ignore fingers on the ice so a resting hand can't draw or drag a piece." />
-          <PrefToggle title="Pencil pressure" on={pencilPress} set={setPencilPress}
+          <PrefPick title="Pencil pressure" scene="pressure" ctx={pvCtx} value={pencilPress} set={setPencilPress}
+            opts={[[true, "Varying"], [false, "Flat"]]}
             desc="Vary line weight with how hard you press. Off draws every stroke at the chosen width, and flattens ink already on the board." />
           <PrefRow title="Won't convert?"
             desc="Copies what the recogniser saw for the last burst of ink. Paste it into a bug report when a stroke refuses to become a piece."
             control={<button className="hd-mini" onClick={copyPenDiag}>Copy diagnostics</button>} />
 
           <div className="hd-mh hd-prefsec">Routes &amp; playback</div>
-          <PrefToggle title="Route avoidance" on={collisions} set={setCollisions}
+          <PrefPick title="Route avoidance" scene="avoid" ctx={pvCtx} value={collisions} set={setCollisions}
+            opts={[[true, "Around"], [false, "Through"]]}
             desc="Skaters curve around nets, the goalie and each other instead of passing through them." />
           {collisions && (
-            <PrefToggle title="Show the detour" on={avoidanceVisuals} set={setAvoidanceVisuals}
+            <PrefPick title="Show the detour" scene="detour" ctx={pvCtx} value={avoidanceVisuals} set={setAvoidanceVisuals}
+              opts={[[true, "Draw it"], [false, "Hide it"]]}
               desc="Draw the curved path around an obstacle, with a ghost of the line you drew. Off keeps the drawn line straight while the skater still avoids." />
           )}
-          <PrefToggle title="Tidy arrowheads" on={arrowStagger} set={setArrowStagger}
+          <PrefPick title="Tidy arrowheads" scene="arrows" ctx={pvCtx} value={arrowStagger} set={setArrowStagger}
+            opts={[[true, "Nudged apart"], [false, "As drawn"]]}
             desc="Nudge arrowheads apart where routes end close together, so each one stays readable. Off lands every arrow exactly where it was drawn." />
-          <PrefToggle title="Preview all branches" on={previewAllBranches} set={setPreviewAllBranches}
+          <PrefPick title="Preview all branches" scene="branches" ctx={pvCtx} value={previewAllBranches} set={setPreviewAllBranches}
+            opts={[[true, "All at once"], [false, "One at random"]]}
             desc="Where a player has reactions to a cue, play ghosts them through every option at once instead of picking one at random." />
           {/* "Lines while playing" is deliberately NOT here — it lives on the
               transport, where you change it mid-presentation. One setting, one
