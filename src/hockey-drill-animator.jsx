@@ -4174,6 +4174,13 @@ export default function DrillAnimator() {
   };
   // ...and for anything that just needs "the piece whose actions this route draws"
   const actOwner = p => (p.kind === "route" ? lineProxy(p) : p);
+  // Does this piece draw a SKATING route? The hockey-diagram rules — the gap that
+  // lifts the line off the icon, the backward zigzag, the carry wiggle, arrowhead
+  // staggering, where a pass or shot leaves an action badge — are all about the
+  // route drawn on the ice, not about who owns it. They were written when only a
+  // player could own one, so they ask `kind === "player"`; a route is the same
+  // thing with the skater factored out, and must read the same on the sheet.
+  const skates = p => !!p && (p.kind === "player" || p.kind === "route");
 
   // "Go to route" — where this line's finishers head when they're done. ONE
   // definition, rendered in two places that are both the right place to look for
@@ -6588,7 +6595,9 @@ export default function DrillAnimator() {
       if (!n) continue;
       // mirror renderArrow's early exits so only ends that DRAW a plain end mark
       // cluster: badge-marked ends and branch-point ends place their own carats
-      if (p.kind === "player" && actionWaypoints(p).has(n - 1)) continue;
+      // a route's end can carry an action too — read it through actOwner, or its
+      // badge-marked end would also queue for a plain end mark it never draws
+      { const ao = actOwner(p); if (ao && ao.kind === "player" && actionWaypoints(ao).has(n - 1)) continue; }
       if ((p.forks || []).some(f => f.path && f.path.length && (f.at != null ? f.at : n - 1) === n - 1)) continue;
       const last = p.path[n - 1];
       const prev = n >= 2 ? segEnd(p, n - 2) : { x: p.x, y: p.y };
@@ -9021,7 +9030,15 @@ export default function DrillAnimator() {
     // action-badge centres: a pass/shot released AT a waypoint (not off a player's
     // stick at their standing spot) begins just outside that badge's edge
     const badges = [];
-    pieces.forEach(p => { if (p.kind === "player" && p.path.length) { const m = actionWaypoints(p); for (const i of m.keys()) badges.push({ x: p.path[i].x, y: p.path[i].y }); } });
+    // Every DRAWN route contributes its badges, routes included — a line's badges
+    // belong to the skater at its head but sit on the route's geometry (actOwner).
+    // Without this a shot released at a route waypoint started at the bare leg
+    // coordinate and ran out from under its own action circle.
+    pieces.forEach(p => {
+      const ao = actOwner(p);
+      if (!ao || ao.kind !== "player" || !(p.path || []).length) return;
+      for (const i of actionWaypoints(ao).keys()) if (p.path[i]) badges.push({ x: p.path[i].x, y: p.path[i].y });
+    });
     const START_OFF = ACT_R * ICON_SCALE + 0.9;   // badge radius (rink ft) + a slight gap
     // a fly leg launches/lands at the player's STICK, ~a stick-length off the
     // waypoint centre where the badge sits — so match within that reach
@@ -9036,6 +9053,13 @@ export default function DrillAnimator() {
     // circle already tallies repeats, instead of a stack of identical lines. Bucketed
     // by release point (~3ft) rather than exact coordinates: the blade shifts a little
     // between shots as the body settles, and they are still visually the same mark.
+    // A LINE is one authored action run by several skaters in turn, so its repeats
+    // bucket by the line rather than by the individual — otherwise three members
+    // shooting the same shot from the same waypoint draw three near-identical
+    // arrows fanned across the net, when what the coach authored was one. Same
+    // reasoning as the pile-of-pucks collapse below; only the identity differs.
+    const lineOfPlayer = new Map(pieces.filter(q => q.kind === "player").map(q => [q.id, q.route || q.id]));
+    const shooterGroup = id => lineOfPlayer.get(id) || id || "?";
     const shotOne = {}, shotN = {};      // `${pk}/${k}` → is the drawn one / how many it stands for
     const shotStagger = {};              // `${pk}/${k}` → extra feet in front of the net
     const groups = {};
@@ -9044,7 +9068,7 @@ export default function DrillAnimator() {
         // keyed on the SHOOTER as well as the spot: two players standing within a
         // yard of each other are still two marks, not one attributed to whoever
         // happened to shoot shortest
-        const g = `${L.by || "?"}|${Math.round(L.x0 / 3)},${Math.round(L.y0 / 3)}|${nearNet(L.x1, L.y1)}`;
+        const g = `${shooterGroup(L.by)}|${Math.round(L.x0 / 3)},${Math.round(L.y0 / 3)}|${nearNet(L.x1, L.y1)}`;
         (groups[g] = groups[g] || []).push({ id: `${q.id}/${k}`, len: Math.hypot(L.x1 - L.x0, L.y1 - L.y0) });
       }
     }));
@@ -10098,12 +10122,12 @@ export default function DrillAnimator() {
                     const style = cas ? caseOf(inkStyle) : inkStyle;
                     // line style: zigzag skating backward · wiggle with the puck ·
                     // straight otherwise (hockey diagram convention)
-                    const bwd = p.kind === "player" && s.dir === "bwd";
+                    const bwd = skates(p) && s.dir === "bwd";
                     const wig = !bwd && carry && carry.has(i);
                     // the VISIBLE line leaves a gap at the player start and around any
                     // action badge (before this waypoint / after the previous one);
                     // the ref path + hit area below still use the full segment
-                    const startGap = i === 0 && p.kind === "player" ? ROUTE_START_GAP : (acts.has(i - 1) || forkAts.has(i - 1)) ? actGap : 0;
+                    const startGap = i === 0 && skates(p) ? ROUTE_START_GAP : (acts.has(i - 1) || forkAts.has(i - 1)) ? actGap : 0;
                     const endGap = (acts.has(i) || forkAts.has(i)) ? actGap : isLast ? (endStagger[p.id] || 0) : 0;
                     let vFrom = from, vSeg = s;
                     if (startGap) { const t = trimSegStart(vFrom, vSeg, startGap, strokeAR); if (t) { vFrom = t.from; vSeg = t.seg; } }
@@ -10167,7 +10191,7 @@ export default function DrillAnimator() {
                     // a detour collapses the route to one polyline — keep the
                     // hockey-diagram styling: wiggle a full carry, zigzag a fully
                     // backward leg, plain otherwise (or when it's mixed)
-                    let line = p.kind === "player" ? trimPolyStart(bent, ROUTE_START_GAP, strokeAR) : bent;
+                    let line = skates(p) ? trimPolyStart(bent, ROUTE_START_GAP, strokeAR) : bent;
                     if (endStagger[p.id]) line = trimPolyEnd(line, endStagger[p.id], strokeAR);
                     // same actGap holes around action/branch waypoints as the
                     // authored trims leave, so the bent line stops short of every
@@ -10182,8 +10206,8 @@ export default function DrillAnimator() {
                     const spans = polyLegSpans(line, p.path);
                     return [caseOf(inkStyle), inkStyle].flatMap((style, ci) => spans.flatMap(({ pts, leg }, si) => {
                       const seg = p.path[leg] || {};
-                      const bwd = p.kind === "player" && seg.dir === "bwd";
-                      const wig = !bwd && p.kind === "player" && carry && carry.has(leg);
+                      const bwd = skates(p) && seg.dir === "bwd";
+                      const wig = !bwd && skates(p) && carry && carry.has(leg);
                       const subs = gapPolyAt(pts, centers, actGap, strokeAR);
                       return subs.map((sub, k) => {
                         const lastBit = si === spans.length - 1 && k === subs.length - 1;
