@@ -20,6 +20,7 @@ import { newGame, stepGame } from "./ai-game.js";
 import { STYLES } from "./styles.js";
 import { THEME_KEY, THEME_ATTR, THEME_ORDER, THEME_LABEL, resolveTheme, tokens, teamInk } from "./theme.js";
 import { ThemeCtx, InkCtx } from "./theme-react.jsx";
+import { PrefPick, PrefSample } from "./pref-preview.jsx";
 import { SAVE_KEY, peekBackup, clearBackup } from "./storage.js";
 
 // Pen inks. These double as PIECE colours — a symbol you draw becomes a player
@@ -94,7 +95,15 @@ const PLAY_SPEEDS = [
    30px one on a bench phone, and the description is part of what you're
    pressing. Rows with a stepper, slider or pills can't be one button (a button
    can't contain buttons), so those put the control beside the title or under
-   the description. */
+   the description.
+
+   A third shape now sits alongside these: the rows whose effect is a PICTURE
+   render each option as a small live board and make the board the control
+   (PrefPick, in pref-preview.jsx). Those give up the whole-row target for the
+   same buttons-in-buttons reason — but each tile is its own target and larger
+   than the switch it replaced, so nothing got harder to hit. What is left here
+   is the settings a picture cannot show: timings, odds, and the ones that
+   change how the SIMULATION behaves rather than how it looks. */
 const PrefToggle = ({ title, desc, on, set, dim }) => (
   <button className={`hd-pref toggle${dim ? " dim" : ""}`} role="switch" aria-checked={on}
     onClick={() => set(v => !v)}>
@@ -954,6 +963,12 @@ export default function DrillAnimator() {
   const effAvoidVis = avoidanceVisuals && !whiteboard;
   const [lineScale, setLineScale] = useState(1);       // route line-thickness multiplier
   const [markOpacity, setMarkOpacity] = useState(1);   // opacity of the drawn drill markings only (routes/forks/stops/ink/aim); players, implements + rink stay opaque
+  // What the settings sheet's preview tiles draw with. Everything a scene can
+  // need, in one object, so a new scene never has to thread another prop through
+  // PrefPick. prefersDark is in here because the Theme row's "Auto" tile has to
+  // resolve the same way the app does.
+  const pvCtx = useMemo(() => ({ T, ink, prefersDark, lineScale, markOpacity }),
+    [T, ink, prefersDark, lineScale, markOpacity]);
   const [defaultSpeed, setDefaultSpeed] = useState(1.5); // speed given to newly-added players
   // tunable shot odds (0..1): goalie save chance; empty-net miss split into
   // post/wide/over (the remainder is a goal); and how often a shot goes airborne
@@ -10882,39 +10897,49 @@ export default function DrillAnimator() {
           <div className="hd-mh">App &amp; drill settings</div>
           <div className="hd-prefbody">
 
+          {/* The rows whose effect is a PICTURE show the picture and let you tap
+              it — see pref-preview.jsx. The rest keep their sentence: a sample
+              that can't show the difference is noise, so timings, odds and the
+              settings that only change how the SIMULATION behaves stay prose. */}
           <div className="hd-mh hd-prefsec">Display</div>
-          <PrefRow title="Theme"
+          <PrefPick title="Theme" scene="theme" ctx={pvCtx} value={themePref} set={setThemePref}
+            opts={THEME_ORDER.map(v => [v, THEME_LABEL[v] || v])}
             desc={themePref === "auto"
               ? `Which palette the board and chrome use. Auto follows your device's appearance — currently ${themeName}.`
-              : `Which palette the board and chrome use. Pinned to ${themePref}, ignoring your device's appearance.`}>
-            <Pills value={themePref} set={setThemePref}
-              opts={THEME_ORDER.map(v => [v, THEME_LABEL[v] || v])} />
-          </PrefRow>
+              : `Which palette the board and chrome use. Pinned to ${themePref}, ignoring your device's appearance.`} />
+          {/* the one visual row with no board in it: a typeface shows itself, so
+              each pill is set in the face it offers */}
           <PrefRow title="Typeface"
             desc="Which face the interface uses. All four are already on the device — nothing is downloaded, so this works with no signal. Rounded is Apple's SF Pro Rounded and only looks different on an iPhone or iPad.">
-            <Pills value={typeface} set={setTypeface}
-              opts={TYPEFACES.map(([v, lab]) => [v, lab])} />
+            <div className="hd-pills">
+              {TYPEFACES.map(([v, lab, stack]) => (
+                <button key={v} className={`hd-mini${typeface === v ? " on" : ""}`} aria-pressed={typeface === v}
+                  style={{ fontFamily: stack }} onClick={() => setTypeface(v)}>{lab}</button>
+              ))}
+            </div>
           </PrefRow>
-          <PrefRow title="Handedness"
-            desc="Which side the bar's controls sit on. Left mirrors the bottom bar and the Draw and Edit palettes, so Menu, Rink and the tools fall under your left thumb instead of reaching across the ice. The rink and everything on it stay exactly where they are.">
-            <Pills value={hand} set={setHand} opts={[["left", "Left"], ["right", "Right"]]} />
-          </PrefRow>
-          <PrefToggle title="Stretch to fill" on={stretchFill} set={setStretchFill}
+          <PrefPick title="Handedness" scene="hand" ctx={pvCtx} value={hand} set={setHand}
+            opts={[["left", "Left"], ["right", "Right"]]}
+            desc="Which side the bar's controls sit on. Left mirrors the bottom bar and the Draw and Edit palettes, so Menu, Rink and the tools fall under your left thumb instead of reaching across the ice. The rink and everything on it stay exactly where they are." />
+          <PrefPick title="Stretch to fill" scene="stretch" ctx={pvCtx} value={stretchFill} set={setStretchFill}
+            opts={[[true, "Stretch"], [false, "True shape"]]}
             desc="Full ice stretches to fill the screen. Off letterboxes it to true 200′ × 85′ proportions, so distances on the board match distances on the rink." />
           <PrefToggle title="Detailed animations" on={detailAnim} set={setDetailAnim}
             desc="Skater stride, stick swing, puck cradle and airborne shots. Turn off for a plainer picture, or if playback stutters on an older device." />
-          <PrefToggle title="Goal splashes" on={showResult} set={setShowResult}
+          <PrefPick title="Goal splashes" scene="splash" ctx={pvCtx} value={showResult} set={setShowResult}
+            opts={[[true, "On"], [false, "Off"]]}
             desc="Call GOAL! / SAVE! / POST! over the net as each shot resolves." />
-          <PrefToggle title="Ice zones" on={showZones} set={setShowZones}
+          <PrefPick title="Ice zones" scene="zones" ctx={pvCtx} value={showZones} set={setShowZones}
+            opts={[[true, "On"], [false, "Off"]]}
             desc="Name the areas of the sheet over the rink — slot, half wall, neutral zone. Useful when writing captions that refer to them." />
-          <PrefRow title="Line thickness"
+          <PrefSample title="Line thickness" scene="thickness" ctx={pvCtx} value={lineScale}
             desc="Scales every route line, arrow and mark. Worth raising when projecting to a room."
             control={<Stepper value={lineScale} onChange={setLineScale} step={0.25} min={0.5} max={3} suffix="×" />} />
-          <PrefRow title="Mark opacity"
+          <PrefSample title="Mark opacity" scene="opacity" ctx={pvCtx} value={markOpacity}
             desc={`How solid freehand marker ink and shapes are drawn — ${Math.round(markOpacity * 100)}% now. Lower lets rink markings read through your annotations.`}>
             <input type="range" min={0.1} max={1} step={0.05} value={markOpacity} style={{ width: "100%" }}
               onChange={e => setMarkOpacity(parseFloat(e.target.value))} />
-          </PrefRow>
+          </PrefSample>
 
           {/* Whiteboard mode itself is a board choice, not a preference — it
               lives in the Rink menu next to full/half/quarter. What stays here
@@ -10922,9 +10947,11 @@ export default function DrillAnimator() {
           {whiteboard && (
             <>
               <div className="hd-mh hd-prefsec">Whiteboard</div>
-              <PrefToggle title="Circled symbols" on={wbCircle} set={setWbCircle}
+              <PrefPick title="Circled symbols" scene="wbcircle" ctx={pvCtx} value={wbCircle} set={setWbCircle}
+                opts={[[true, "Circled"], [false, "Bare"]]}
                 desc="Put each X or O on an opaque disc so it stays readable where it crosses a rink line. Whiteboard mode itself is in the Rink menu." />
-              <PrefToggle title="Player names" on={wbNames} set={setWbNames}
+              <PrefPick title="Player names" scene="wbnames" ctx={pvCtx} value={wbNames} set={setWbNames}
+                opts={[[true, "On"], [false, "Off"]]}
                 desc="Show a name tag under every symbol. Off still names a player while their panel is open." />
             </>
           )}
@@ -10952,22 +10979,27 @@ export default function DrillAnimator() {
           <div className="hd-mh hd-prefsec">Smart pen</div>
           <PrefToggle title="Palm rejection" on={palmReject} set={setPalmReject}
             desc="While an Apple Pencil is in use, ignore fingers on the ice so a resting hand can't draw or drag a piece." />
-          <PrefToggle title="Pencil pressure" on={pencilPress} set={setPencilPress}
+          <PrefPick title="Pencil pressure" scene="pressure" ctx={pvCtx} value={pencilPress} set={setPencilPress}
+            opts={[[true, "Varying"], [false, "Flat"]]}
             desc="Vary line weight with how hard you press. Off draws every stroke at the chosen width, and flattens ink already on the board." />
           <PrefRow title="Won't convert?"
             desc="Copies what the recogniser saw for the last burst of ink. Paste it into a bug report when a stroke refuses to become a piece."
             control={<button className="hd-mini" onClick={copyPenDiag}>Copy diagnostics</button>} />
 
           <div className="hd-mh hd-prefsec">Routes &amp; playback</div>
-          <PrefToggle title="Route avoidance" on={collisions} set={setCollisions}
+          <PrefPick title="Route avoidance" scene="avoid" ctx={pvCtx} value={collisions} set={setCollisions}
+            opts={[[true, "Around"], [false, "Through"]]}
             desc="Skaters curve around nets, the goalie and each other instead of passing through them." />
           {collisions && (
-            <PrefToggle title="Show the detour" on={avoidanceVisuals} set={setAvoidanceVisuals}
+            <PrefPick title="Show the detour" scene="detour" ctx={pvCtx} value={avoidanceVisuals} set={setAvoidanceVisuals}
+              opts={[[true, "Draw it"], [false, "Hide it"]]}
               desc="Draw the curved path around an obstacle, with a ghost of the line you drew. Off keeps the drawn line straight while the skater still avoids." />
           )}
-          <PrefToggle title="Tidy arrowheads" on={arrowStagger} set={setArrowStagger}
+          <PrefPick title="Tidy arrowheads" scene="arrows" ctx={pvCtx} value={arrowStagger} set={setArrowStagger}
+            opts={[[true, "Nudged apart"], [false, "As drawn"]]}
             desc="Nudge arrowheads apart where routes end close together, so each one stays readable. Off lands every arrow exactly where it was drawn." />
-          <PrefToggle title="Preview all branches" on={previewAllBranches} set={setPreviewAllBranches}
+          <PrefPick title="Preview all branches" scene="branches" ctx={pvCtx} value={previewAllBranches} set={setPreviewAllBranches}
+            opts={[[true, "All at once"], [false, "One at random"]]}
             desc="Where a player has reactions to a cue, play ghosts them through every option at once instead of picking one at random." />
           {/* "Lines while playing" is deliberately NOT here — it lives on the
               transport, where you change it mid-presentation. One setting, one

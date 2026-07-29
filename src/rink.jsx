@@ -8,7 +8,11 @@ import { useTheme } from "./theme-react.jsx";
 
 /* ---------------- rink markings ---------------- */
 
-export function RinkMarkings({ yFix = 1 }) {
+// clipId names the boards clipPath to cut against. It exists because that
+// reference is document-global: the settings sheet's preview tiles render AFTER
+// the main board, so with one hardcoded "boards" every tile would silently clip
+// against the app's — which carries the fill-mode stretch in its ry.
+export function RinkMarkings({ yFix = 1, clipId = "boards" }) {
   const T = useTheme();
   const red = T["ice-line-red"], blue = T["ice-line-blue"];
   const dots = [];
@@ -36,7 +40,7 @@ export function RinkMarkings({ yFix = 1 }) {
   const cr = 6 / Math.max(0.2, yFix);   // crease arc depth corrected to stay round
   const rr = 10 / Math.max(0.2, yFix);  // referee crease radius, same correction
   return (
-    <g clipPath="url(#boards)">
+    <g clipPath={`url(#${clipId})`}>
       <rect x={0} y={0} width={200} height={85} fill={T.ice} />
       {/* regulation goalie crease: 8' wide, 4.5' straight sides, 6' arc.
           Its own token, not the blue LINE colour: it's a filled region, so dark
