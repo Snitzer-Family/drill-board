@@ -579,11 +579,25 @@ export default function DrillAnimator() {
     flash(`Erased ${bits.join(" + ")}`);
     return true;
   }
+  // Ink the pen would own in the given state. The two inks are separate
+  // everywhere else — convertInk won't touch sketch ink — so Clear shouldn't
+  // either: sketching and then wiping the board took your smart-pen work with
+  // it. Manual and Auto share one bucket, because their ink IS the same thing,
+  // unread convertible ink, with nothing in the model or the DSL to tell them
+  // apart. Locked ink (imported overlays) is nobody's.
+  const inkMine = (p, sketch) => p.kind === "mark" && !p.lock && !!p.sketch === sketch;
   const clearInk = () => {
-    const n = piecesRef.current.filter(p => p.kind === "mark" && !p.lock).length;
-    if (!n) { flash("No ink to clear"); return; }
-    setPieces(ps => ps.filter(p => !(p.kind === "mark" && !p.lock)));
-    flash(`Cleared ${n} ink mark${n > 1 ? "s" : ""} — Undo restores them`);
+    const sketch = penReadRef.current === "sketch";
+    // buffered strokes count as mine: setPen flushes, so everything still in
+    // the settle window was drawn under the state that's active now
+    const n = piecesRef.current.filter(p => inkMine(p, sketch)).length + penInk.length;
+    if (!n) { flash(`No ${sketch ? "sketch" : "smart-pen"} ink to clear`); return; }
+    // and drop them, or they land a second later on a board you just emptied
+    penBuf.current = [];
+    clearTimeout(penTimer.current);
+    setPenInk([]);
+    setPieces(ps => ps.filter(p => !inkMine(p, sketch)));
+    flash(`Cleared ${n} ${sketch ? "sketch" : "ink"} mark${n > 1 ? "s" : ""} — Undo restores them`);
   };
 
   // what the classifier needs to know about the board it's reading into
@@ -9203,8 +9217,10 @@ export default function DrillAnimator() {
   // own (.hd-preso offsets by --hd-act) and tapping it still advances the hold.
   const actOn = !aiPlay;
   // exactly what clearInk would remove, so the button can't promise something
-  // different from what it does
-  const inkCount = pieces.reduce((n, p) => n + (p.kind === "mark" && !p.lock ? 1 : 0), 0);
+  // different from what it does — same predicate, same buffer
+  const inkCount = pieces.reduce((n, p) => n + (inkMine(p, isSketch) ? 1 : 0), 0) + penInk.length;
+  // the other pen state's ink, so a dead button can say whose it is
+  const inkOther = pieces.reduce((n, p) => n + (inkMine(p, !isSketch) ? 1 : 0), 0);
 
   // Which players should wear waypoint numbers: the receivers of any PASS step
   // shown in the action panel that's currently open. Derived rather than stored,
@@ -10341,15 +10357,20 @@ export default function DrillAnimator() {
           {/* what happens to the BOARD */}
           <div className="hd-pengroup">
             {/* "Clear" beside a trash can, in red, read as "clear the BOARD" —
-                it only ever removes ink. Three things say so now: the label
-                names what goes, the count says how much, and with no ink on
-                the sheet the button is dead, which is the strongest signal of
-                all — a board full of players showing a greyed-out button
-                plainly isn't offering to delete them. */}
+                it only ever removes ink, and only the ink this pen state laid.
+                Three things say so: the label names what goes, the count says
+                how much — of THIS state's ink, so switching states changes the
+                number — and with none of it on the sheet the button is dead,
+                which is the strongest signal of all. A board full of players,
+                or of the other state's ink, showing a greyed-out button plainly
+                isn't offering to delete any of it. The title carries the scope,
+                because the label has no room for it at 320px. */}
             <div className="hd-pensep" />
             <button className="hd-pentool danger" disabled={!inkCount} onClick={clearInk}
               title={inkCount
-                ? `Remove ${inkCount} ink mark${inkCount > 1 ? "s" : ""} — players, routes and props are untouched. Undo restores them.`
+                ? `Remove ${inkCount} ${isSketch ? "sketch" : "ink"} mark${inkCount > 1 ? "s" : ""} — your ${isSketch ? "smart-pen ink" : "sketch ink"}, players, routes and props are untouched. Undo restores them.`
+                : inkOther
+                ? `No ${isSketch ? "sketch" : "smart-pen"} ink to clear — the ${inkOther} mark${inkOther > 1 ? "s" : ""} on the sheet ${inkOther > 1 ? "are" : "is"} ${isSketch ? "smart-pen ink. Switch the pen to Manual or Auto" : "sketch ink. Switch the pen to Sketch"} to clear ${inkOther > 1 ? "those" : "it"}.`
                 : "No ink on the sheet to clear"}>
               <Icon name="trash" size={17} />
               <span>Clear ink{inkCount ? ` ${inkCount}` : ""}</span>
