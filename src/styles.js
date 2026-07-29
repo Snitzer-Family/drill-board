@@ -390,9 +390,52 @@ export const STYLES = `
         /* caption under each bar icon — tooltips don't exist on touch */
         .hd-blbl { font-size:8.5px; font-weight:700; letter-spacing:.05em; line-height:1;
           text-transform:uppercase; opacity:.8; white-space:nowrap; }
-        /* the bar's one flexible child: what you're DOING sits left of it,
-           where things LIVE sits right of it */
+        /* the bar's two flexible children: what you're DOING sits on one side of
+           them, where things LIVE on the other — which side is the handedness */
         .hd-barspacer { flex:1 1 auto; min-width:0; }
+        /* Undo+Redo as ONE element. gap:inherit takes the bar's own 6px (4px
+           when not dense), so wrapping them cost no width and bar-fit is
+           unmoved — the wrapper exists purely so the lefty mirror below can
+           move the pair without turning it into redo-then-undo. */
+        .hd-undogrp { display:flex; align-items:center; gap:inherit; flex:none; }
+
+        /* ---- LEFT-HANDED: the chrome mirrors, the ice never does ----
+           A coach holds the phone in the off hand and taps with the dominant
+           one, so a lefty reaches across the rink to hit Menu. This flips the
+           bottom bar and the two EDITING palettes end-for-end so the controls
+           land under the left thumb.
+           PLAY is deliberately NOT in this list. The transport is a media
+           player: time runs left-to-right, the scrubber fills that way, and
+           Play/Stop belong where every player on the device puts them. Flipping
+           it would fight a stronger habit than handedness. Draw and Edit are
+           where the reaching actually happens.
+           row-reverse reverses DIRECT CHILDREN ONLY, which is exactly what's
+           wanted: .hd-mode, .hd-pengroup and .hd-undogrp are each their own
+           flex container, so DRAW·EDIT·PLAY still reads in order and the knob's
+           translateX maths still lands on the live cell. Groups MOVE; they
+           don't turn around.
+           This does make visual order diverge from DOM (and so tab) order.
+           Deliberate: the bar is touch-only, and reversing the JSX instead
+           would churn every conditional child of both palettes. Don't "fix" it.
+           Everything else is already side-agnostic and must stay that way: the
+           corner menus anchor on their button's measured rect, .hd-penpop
+           centres on its own trigger, and the popout/loupe/caption all clamp
+           symmetrically — so none of them appear here. */
+        .hd-root.lefty .hd-bar,
+        .hd-root.lefty .hd-act.draw,
+        .hd-root.lefty .hd-act.edit { flex-direction:row-reverse; }
+        /* The flexible hint hugs the controls it describes, so it swaps sides
+           with them — same idea in both directions. .hd-pensays has no rule of
+           its own above because left is the default. */
+        .hd-root.lefty .hd-acthint { text-align:left; }
+        .hd-root.lefty .hd-pensays { text-align:right; }
+        /* Clear-ink LEADS with a divider, and a divider's whole job is to sit
+           between things. Mirrored, that group moves to the outboard end and
+           the rule ends up hanging off the edge of the bar dividing nothing
+           (measured: x=15 of 393). Reverse this one group — it is a rule and a
+           button, not a sequence — so the rule falls inboard again. The tool
+           group opposite is a sequence and stays in its order. */
+        .hd-root.lefty .hd-act.draw > .hd-pengroup:last-child { flex-direction:row-reverse; }
         /* The version row at the foot of the menu — the watermark left the
            bottom bar so that bar could be controls only. The build stamp is
            what you check after a deploy, so it keeps its tabular figures and

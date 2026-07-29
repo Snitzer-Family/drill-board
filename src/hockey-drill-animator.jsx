@@ -440,6 +440,7 @@ const HALFNS_KEY = "drillboard:half-ns";  // half-ice shown north-south (vertica
 const HALFFLIP_KEY = "drillboard:half-flip";  // half-ice net at the far end (left / top)
 const STRETCH_KEY = "drillboard:stretch-fill";  // full ice stretches to fill the screen
 const PRESS_KEY = "drillboard:pencil-pressure";  // Apple Pencil pressure → line weight
+const HAND_KEY = "drillboard:hand";  // which side the chrome's controls sit on
 // The ONE width breakpoint in the app. Above it the action bar lays its groups
 // out inline and the corner menus centre on the button that opened them; below,
 // the bar collapses groups into popovers and the stylesheet stretches the menus
@@ -868,6 +869,17 @@ export default function DrillAnimator() {
     try { return localStorage.getItem(STRETCH_KEY) !== "0"; } catch { return true; }
   });
   useEffect(() => { try { localStorage.setItem(STRETCH_KEY, stretchFill ? "1" : "0"); } catch { /* private mode */ } }, [stretchFill]);
+  // Which hand the board is laid out for: "right" (default) | "left". A coach
+  // holds the phone in the off hand and taps with the dominant one, so "left"
+  // mirrors BOTH bars and puts Menu, Rink and the palette under the left thumb.
+  // Chrome only — the ice and everything on it never move. Stored as a word
+  // rather than the "1"/"0" convention its neighbours use because it is a side,
+  // not a switch, and "hand=left" reads right in the debugger.
+  const [hand, setHand] = useState(() => {
+    try { return localStorage.getItem(HAND_KEY) === "left" ? "left" : "right"; }
+    catch { return "right"; }
+  });
+  useEffect(() => { try { localStorage.setItem(HAND_KEY, hand); } catch { /* private mode */ } }, [hand]);
   // Theme: "auto" (follow the phone) | "light" | "dark". The inline boot script
   // in index.html has already applied a saved override before first paint —
   // this just keeps the attribute in sync once React owns the state.
@@ -9330,7 +9342,8 @@ export default function DrillAnimator() {
     // ice ever disagree, a wrong-shade rim shows at the loupe's corners
     <ThemeCtx.Provider value={T}>
     <InkCtx.Provider value={ink}>
-    <div className={`hd-root${actOn ? "" : " act-off"}${dense ? " dense" : ""}${docked ? " dock-open" : ""}${
+    <div className={`hd-root${actOn ? "" : " act-off"}${dense ? " dense" : ""}${
+      hand === "left" ? " lefty" : ""}${docked ? " dock-open" : ""}${
       presoFull ? (barUp ? " preso-full bar-up" : " preso-full") : ""}${cursorIdle ? " cursor-idle" : ""}${
       tool === "pen" || tool === "marker" ? (eraser && tool === "pen" ? " erase-cursor" : " draw-cursor") : ""}`} ref={rootRef}
       style={{ "--hd-font": fontStack }}>
@@ -10633,14 +10646,18 @@ export default function DrillAnimator() {
             </button>
           ))}
         </div>
-        {/* Undo/redo sit in the MIDDLE, between the flows on the left and the
-            menu on the right — a spacer either side. They belong to neither
-            half, and centring them keeps both thumbs' reach uncluttered. */}
+        {/* Undo/redo sit in the MIDDLE, between the flows on one side and the
+            menu on the other — a spacer either side. They belong to neither
+            half, and centring them keeps both thumbs' reach uncluttered.
+            Wrapped as ONE element so the lefty mirror moves the pair without
+            reversing it: undo-then-redo is a direction, not an arrangement. */}
         <div className="hd-barspacer" />
-        <button className="hd-barbtn" title="Undo last change" disabled={!undoCount}
-          onClick={undoLast}><Icon name="undo" size={16} /><span className="hd-blbl">Undo</span></button>
-        <button className="hd-barbtn" title="Redo" disabled={!redoCount}
-          onClick={redoLast}><Icon name="redo" size={16} /><span className="hd-blbl">Redo</span></button>
+        <div className="hd-undogrp">
+          <button className="hd-barbtn" title="Undo last change" disabled={!undoCount}
+            onClick={undoLast}><Icon name="undo" size={16} /><span className="hd-blbl">Undo</span></button>
+          <button className="hd-barbtn" title="Redo" disabled={!redoCount}
+            onClick={redoLast}><Icon name="redo" size={16} /><span className="hd-blbl">Redo</span></button>
+        </div>
         <div className="hd-barspacer" />
         <button ref={barBtnRefs.rinkmenu} className={`hd-barbtn${openMenu === "rinkmenu" ? " on" : ""}`} title="Rink"
           onClick={() => setOpenMenu(m => (m === "rinkmenu" ? null : "rinkmenu"))}>
@@ -10820,6 +10837,10 @@ export default function DrillAnimator() {
             desc="Which face the interface uses. All four are already on the device — nothing is downloaded, so this works with no signal. Rounded is Apple's SF Pro Rounded and only looks different on an iPhone or iPad.">
             <Pills value={typeface} set={setTypeface}
               opts={TYPEFACES.map(([v, lab]) => [v, lab])} />
+          </PrefRow>
+          <PrefRow title="Handedness"
+            desc="Which side the bar's controls sit on. Left mirrors both bars, so Menu, Rink and the palette fall under your left thumb instead of reaching across the ice. The rink and everything on it stay exactly where they are.">
+            <Pills value={hand} set={setHand} opts={[["right", "Right"], ["left", "Left"]]} />
           </PrefRow>
           <PrefToggle title="Whiteboard mode" on={whiteboard} set={setWhiteboard}
             desc="Draw players as classic X and O symbols with plain arrowed routes, the way a coach's board looks. Shots stay flat on the ice, and splashes and detailed animation are suppressed." />
