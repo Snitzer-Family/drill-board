@@ -14,7 +14,7 @@ import { RinkMarkings } from "./rink.jsx";
 import { ZONES, zoneAt } from "./zones.js";
 import { PieceIcon, Stepper, Icon, ICONS } from "./icons.jsx";
 import DiagView, { copyText } from "./diagnostics.jsx";
-import { drillReport, jsonSafe, hashDiag } from "./diag-report.js";
+import { drillReport, penReport, hashDiag } from "./diag-report.js";
 import { createTiming, resolveNearest } from "./timing.js";
 import { buildLedger, mayHoldOn, mayHoldEntering, orderTransfers } from "./possession.js";
 import { classifyPenGroup, SYMBOL_MAX, SYMBOL_MAX_PX } from "./sketch-recognize.js";
@@ -685,13 +685,36 @@ export default function DrillAnimator() {
     flash(copyText(txt) ? "Pen diagnostics copied — paste them to Claude"
       : "Copied (if the paste is empty, screenshot this instead)");
   }
-  // The Pen tab's payload. Fed by the last burst if there is one; the tab's own
-  // "re-run on board ink" swaps in a dry run instead. Filled out in step 4.
+  // The Pen tab's payload: the last burst, or the board's own ink if you asked
+  // for a dry run. The TRACE is not collected during commitPen — recording it
+  // costs a full template sweep on the geometric paths that exist precisely to
+  // skip one, and the pen path runs on a phone between strokes. It is re-run
+  // here on demand instead, and memoized on the source object so an open panel
+  // polling at 5Hz classifies once, not five times a second.
   const penDry = useRef(null);
+  const penRep = useRef({ src: null, out: null });
   function penDiagReport() {
     const d = penDry.current || penLast.current;
     if (!d) return { tab: "pen", empty: true };
-    return jsonSafe({ tab: "pen", source: penDry.current ? "board ink" : "last burst", ...d });
+    if (penRep.current.src !== d) {
+      const trace = {};
+      const ops = classifyPenGroup(d.strokes, d.ctx, trace);
+      penRep.current = { src: d, out: penReport({ ...d, ops, trace }, APP_VERSION) };
+    }
+    return penRep.current.out;
+  }
+  // Read the board's ink WITHOUT materializing anything — the tuning loop is
+  // draw, read, understand, adjust, and having it convert underneath you means
+  // undoing before every re-read. Mirrors convertInk's selection exactly (sketch
+  // and locked ink are off-limits there too) so what you read is what Convert
+  // would do.
+  function penDryRun() {
+    const board = piecesRef.current;
+    const marks = board.filter(p => p.kind === "mark" && !p.lock && !p.sketch && (p.pts || []).length >= 2);
+    if (!marks.length) { flash("No ink on the board to read"); return; }
+    penDry.current = { strokes: marks.map(m => ({ pts: m.pts })), ctx: penCtx(board),
+      source: "board ink", name: "board ink" };
+    flash(`Read ${marks.length} ink mark${marks.length === 1 ? "" : "s"} — nothing changed`);
   }
   const penMarkAge = useRef(new Map());   // pen-fallback mark id → committed-at ms
   // Apple Pencil: once a stylus draws, the ice stops listening to skin —
@@ -1910,6 +1933,8 @@ export default function DrillAnimator() {
     // any manual step stops playback — scrubbing against a running RAF fights it
     seek: f => { setPlaying(false); scrubTo(f); },
     play: on => setPlaying(!!on),
+    penRun: penDryRun,
+    penLive: () => { penDry.current = null; flash(penLast.current ? "Back to the last burst" : "Draw something first"); },
   };
 
   // natural phrase for an area name mid-sentence ("Dot lane" -> "the dot lane")
@@ -4989,6 +5014,7 @@ export default function DrillAnimator() {
     // by the headless harness (window.__pen) or by the user, via the pen
     // popout's "Copy diagnostics" button.
     penLast.current = { strokes, ctx, ops };
+    penDry.current = null;          // a fresh burst outranks a stale board read
     if (typeof window !== "undefined") window.__pen = { strokes, ctx, ops };
     const consumed = new Set();
     const finalOps = ops.filter(o => {

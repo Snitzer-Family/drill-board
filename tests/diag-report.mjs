@@ -8,8 +8,9 @@
 
 import {
   jsonSafe, bladeAgreement, agreementRows, viabilityFaults, planHealth, drillReport, FAULT_WHY,
-  hashDiag,
+  hashDiag, penVerdicts, toFixture,
 } from '../src/diag-report.js';
+import { classifyPenGroup } from '../src/sketch-recognize.js';
 
 let pass = 0, fail = 0;
 const T = (name, got, want) => {
@@ -167,6 +168,87 @@ const T = (name, got, want) => {
   T('the Map in pivots survived', rep.pivots.F1.byIdx['0'].from, 'fwd');
   T('...with its Infinity nulled', rep.pivots.F1.byIdx['0'].t0, null);
   T('the DSL rides along', rep.dsl, 'RINK full\n');
+}
+
+/* ---------------- pen verdicts ---------------- */
+// One line per decision, matched to the ink that produced it. The match is on
+// the exact stroke SET, not on order — a dense board reads the same strokes
+// several times over, and pairing by position would attribute a rejection to
+// the wrong mark.
+{
+  const trace = {
+    syms: [
+      { srcs: [0, 1], why: 'whole-group', path: 'crossesAsX', result: { sym: 'X', score: 0.95, second: null } },
+      { srcs: [3], why: 'whole-group', reject: 'guard', blockedTop: 'D', scored: { D: 0.71, O: 0.4 } },
+      { srcs: [4], why: 'whole-group', reject: 'threshold', accept: 0.55, rankedAllowed: [['O', 0.42]] },
+    ],
+    longs: [{ idx: 5, skater: null, net: null, straight: 0.93 }],
+  };
+  const ops = [
+    { op: 'player', sym: 'X', srcs: [0, 1] },
+    { op: 'mark', srcs: [3] },
+    { op: 'mark', srcs: [4] },
+    { op: 'mark', srcs: [5] },
+  ];
+  const v = penVerdicts(ops, trace);
+  T('a conversion names its branch', v[0].detail, 'crossesAsX 0.95');
+  // the two rejections look identical from outside — the ink just stays ink —
+  // but they need opposite fixes, so they must never read the same
+  T('a guard block says so', v[1].detail, 'top D 0.71, blocked by its guard');
+  T('a near miss shows the gap', v[2].detail, 'best O 0.42 < accept 0.55');
+  T('...and they differ', v[1].detail === v[2].detail, false);
+  T('a long stroke explains itself', v[3].detail,
+    'long stroke: no skater in reach, straightness 0.93');
+  T('stroke labels are readable', v.map(x => x.label), ['s0,s1', 's3', 's4', 's5']);
+  // out-of-order srcs must still match their record
+  T('matching ignores order',
+    penVerdicts([{ op: 'player', sym: 'X', srcs: [1, 0] }], trace)[0].detail, 'crossesAsX 0.95');
+  T('no trace degrades quietly', penVerdicts(ops, null).every(x => x.detail === ''), true);
+}
+
+/* ---------------- the fixture emitter ---------------- */
+// The one place a bug is silently expensive: a fixture that parses and passes
+// for the wrong reason is worse than no fixture. So it is checked for being
+// runnable JS, for round-tripping the ink, and for matching the shape of the
+// REAL blocks already in tests/sketch-recognize.mjs.
+{
+  const d = {
+    strokes: [{ pts: [{ x: 38.04, y: 25.94 }, { x: 46.31, y: 34.42 }] },
+      { pts: [{ x: 47.06, y: 25.91 }, { x: 38.51, y: 34.44 }] }],
+    ctx: { pxFtX: 0.236, pxFtY: 0.236, players: [{ id: 'P1', x: 40.02, y: 30.06 }], nets: [] },
+    ops: [{ op: 'player', sym: 'X', srcs: [0, 1] }],
+  };
+  const out = toFixture(d, 'phone X', '6.99');
+  T('points round to the capture resolution', /\[38,25\.9\]/.test(out), true);
+  T('...and nothing keeps false precision', /\d\.\d\d/.test(out.split('const S')[1]), false);
+  // equal axes collapse to the single-key form the existing fixtures use
+  T('square scale writes pxFt', /\{ pxFt: 0\.236/.test(out), true);
+  T('unequal writes both axes',
+    /pxFtX: 0\.168, pxFtY: 0\.103/.test(toFixture({ ...d, ctx: { pxFtX: 0.168, pxFtY: 0.103 } })), true);
+  T('an empty net list is omitted', /nets:/.test(out), false);
+  T('players ride along', /players: \[\{"id":"P1","x":40,"y":30\.1\}\]/.test(out), true);
+  T('the assertion pins observed behaviour', /kinds\(classifyPenGroup\(S, CTX\)\), \["player"\]/.test(out), true);
+  T('the name reaches the test title', /T\('phone X'/.test(out), true);
+  T('a quote in the name cannot break the string', /T\('its X'/.test(toFixture(d, "it's X")), true);
+  T('no ink, no fixture', toFixture({ strokes: [] }), '');
+  T('no burst at all', toFixture(null), '');
+
+  // it has to be JS. Compiled, not eval'd against the app.
+  const body = `const P=a=>a.map(([x,y])=>({x,y}));const stroke=p=>({pts:p});`
+    + `const kinds=o=>o.map(x=>x.op);const T=(n,g,w)=>[n,g,w];const classifyPenGroup=()=>[];`
+    + out;
+  let parsed = true;
+  try { new Function(body); } catch { parsed = false; }
+  T('the emitted case is valid JS', parsed, true);
+
+  // ...and the ink survives the round trip: 1dp rounding must not change what
+  // the classifier decides, or the fixture would pass for a different reason
+  const back = /const S = \[\n([\s\S]*?)\n  \]/.exec(out)[1]
+    .trim().split('\n').map(l => JSON.parse(l.trim().replace(/,$/, '')))
+    .map(a => ({ pts: a.map(([x, y]) => ({ x, y })) }));
+  T('the rounded ink reads the same',
+    classifyPenGroup(back, { pxFt: 0.236, players: [{ id: 'P1', x: 40, y: 30.1 }] }).map(o => o.op),
+    ['player']);
 }
 
 /* ---------------- the two hash keys ---------------- */

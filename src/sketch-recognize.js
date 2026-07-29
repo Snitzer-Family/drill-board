@@ -381,13 +381,28 @@ function features(strokes) {
 // decimation clips the tail of a small ring on top of that (a real 6ft phone
 // ring measured 0.47). Measured bands: sloppy O 0.40-0.50, true C 0.61-0.69 —
 // so O accepts < 0.52, C needs > 0.50, and the overlap is ranked by $P score.
-const GUARDS = {
+// Exported so a diagnostic can show WHICH guard a symbol failed, not just that
+// it lost. A guard is an eligibility gate, not a score penalty: X, F, W, L and
+// R have none and are always eligible.
+export const GUARDS = {
   O: f => f.closure < 0.52,
   C: f => f.closure > 0.5 && f.tail <= 1,
   G: f => f.tail >= 2,
   D: f => f.leftRMS < 0.07 && f.spineDrift < 0.09,
   "△": f => f.closure < 0.52 && f.corners === 3,
   "□": f => f.closure < 0.52 && f.corners === 4,
+};
+// The same bands in words, for the diagnostic to print beside the measured
+// values. Prose can drift from a predicate, so tests/sketch-recognize.mjs
+// exercises every one of these at its stated boundary — the numbers in the
+// comments above became assertions when this table landed.
+export const GUARD_BANDS = {
+  O: "closure < 0.52",
+  C: "closure > 0.5 and tail <= 1",
+  G: "tail >= 2",
+  D: "leftRMS < 0.07 and spineDrift < 0.09",
+  "△": "closure < 0.52 and corners === 3",
+  "□": "closure < 0.52 and corners === 4",
 };
 
 /* ---------------- public API ---------------- */
@@ -415,35 +430,66 @@ export function puckGate(strokes, dot = 1.8, dense = 4) {
 export const SYMBOL_MAX_PX = 130;
 export const symbolMaxFor = pxFt => Math.max(SYMBOL_MAX, SYMBOL_MAX_PX * (pxFt || 0));
 
-// Tuning window for the node harness: every sym's best score + the guard
-// features, so threshold changes are argued from numbers, not vibes.
+// Tuning window: every sym's best score + the guard features, so threshold
+// changes are argued from numbers, not vibes. Now one call into the recogniser
+// rather than a second template sweep beside it — the two used to be able to
+// disagree, and a tuning window that contradicts the verdict is worse than none.
 export function scoreAll(strokes) {
-  const cloud = normalize(strokes);
-  if (!cloud) return null;
-  const scored = {};
-  TEMPLATES.forEach(t => {
-    const score = Math.max(0, (2 - greedyMatch(cloud, t.cloud)) / 2);
-    if (!(t.sym in scored) || score > scored[t.sym]) scored[t.sym] = score;
-  });
-  return { scored, features: features(strokes) };
+  const o = explainSymbol(strokes);
+  return o.scored ? { scored: o.scored, features: o.features } : null;
 }
+
+// recognizeSymbol with its working shown: which branch decided, every template
+// score, every guard evaluated pass AND fail, and the named reason for a
+// rejection. Nothing here alters a decision — the untraced path below is byte
+// for byte what it always was, which tests/sketch-recognize.mjs pins by
+// deep-equality against the real captured fixtures.
+export const explainSymbol = strokes => {
+  const out = {};
+  out.result = recognizeSymbol(strokes, out);
+  return out;
+};
 
 // strokes: [[{x,y}…]…] in rink feet — one symbol cluster's worth of ink.
 // Returns { sym, score, second } or null (→ keep as plain ink).
-export function recognizeSymbol(strokes) {
+// `out`, if given, collects the decision trace. Observational only.
+export function recognizeSymbol(strokes, out) {
   const cloud = normalize(strokes);
-  if (!cloud) return null;
+  if (!cloud) {
+    if (out) { out.path = "reject"; out.reject = "no-cloud"; }
+    return null;
+  }
   const f = features(strokes);
+  if (out) { out.features = f; out.accept = ACCEPT; }
+  // The $P sweep, hoisted so the geometric branches below can record it too.
+  // On those paths it is pure observation — the verdict is already made — but
+  // it is what makes "$P would have said D 0.56; the ring test overrode it"
+  // readable, and those branches exist precisely BECAUSE $P scores those shapes
+  // badly. Only ever run for a trace on those paths, so untraced cost is nil.
+  const sweep = () => {
+    const scored = {};
+    TEMPLATES.forEach(t => {
+      const score = Math.max(0, (2 - greedyMatch(cloud, t.cloud)) / 2);
+      if (!(t.sym in scored) || score > scored[t.sym]) scored[t.sym] = score;
+    });
+    return scored;
+  };
+  const geom = (path, res) => {
+    if (out) { out.path = path; out.scored = sweep(); out.reject = null; }
+    return res;
+  };
   // A ring is the one symbol worth deciding geometrically. $P scores an open
   // hand-drawn loop poorly (a 310° circle managed only 0.436, losing to D at
   // 0.561) because the template's points spread over the missing arc — but
   // "every point the same distance from the middle" is unambiguous, and it
   // holds however far round the pen got.
-  if (crossesAsX(strokes)) return { sym: "X", score: 0.95, second: null };
+  if (crossesAsX(strokes)) return geom("crossesAsX", { sym: "X", score: 0.95, second: null });
   if (strokes.length === 1) {
     const ring = ringOf(strokes[0]);        // ignores a trailing pen flick
+    if (out) out.ring = !!ring;
     if (ring) {
       const rf = ring.length === strokes[0].length ? f : features([ring]);
+      if (out) out.ringFeatures = rf;
       // Curve, not polygon: enough vertices to need them (a square collapses to
       // 5, a triangle to 4) AND few sharp corners (square 4, triangle 3, real
       // hand circles 1-2). Closure keeps an open C out.
@@ -451,19 +497,30 @@ export function recognizeSymbol(strokes) {
       // leaves behind is too open to pass the closure test anyway. Small tight
       // circles DO put points in the tail cell, so gating on it lost them.)
       if (rf.curveVerts >= 6 && rf.corners <= 2 && rf.closure < 0.52)
-        return { sym: "O", score: Math.min(1, circularity(ring)), second: null };
+        return geom("ring", { sym: "O", score: Math.min(1, circularity(ring)), second: null });
     }
     // tried after the ring, so a closed loop is judged as an O first
-    if (crossesAsOneStrokeX(strokes[0])) return { sym: "X", score: 0.9, second: null };
+    if (crossesAsOneStrokeX(strokes[0])) return geom("oneStrokeX", { sym: "X", score: 0.9, second: null });
   }
-  const scored = {};
-  TEMPLATES.forEach(t => {
-    const score = Math.max(0, (2 - greedyMatch(cloud, t.cloud)) / 2);
-    if (!(t.sym in scored) || score > scored[t.sym]) scored[t.sym] = score;
-  });
+  const scored = sweep();
   const ranked = Object.entries(scored)
     .filter(([sym]) => !GUARDS[sym] || GUARDS[sym](f))
     .sort((a, b) => b[1] - a[1]);
+  if (out) {
+    const all = Object.entries(scored).sort((a, b) => b[1] - a[1]);
+    out.path = "$P";
+    out.scored = scored;
+    out.ranked = all;
+    out.rankedAllowed = ranked;
+    out.guards = {};
+    Object.keys(scored).forEach(s => { out.guards[s] = !GUARDS[s] || GUARDS[s](f); });
+    // The money field. "Top was D 0.71, blocked by leftRMS 0.11 (band: < 0.07)"
+    // is the whole answer to "why didn't my D convert", and until now a symbol
+    // losing to a guard was indistinguishable from one scoring badly.
+    out.blockedTop = all.length && !out.guards[all[0][0]] ? all[0][0] : null;
+    out.reject = ranked.length && ranked[0][1] >= ACCEPT ? null
+      : ranked.length ? "threshold" : "guard";
+  }
   if (!ranked.length || ranked[0][1] < ACCEPT) return null;
   return { sym: ranked[0][0], score: ranked[0][1], second: ranked[1] ? ranked[1][0] : null };
 }
@@ -593,7 +650,13 @@ function splitGlyphs(cluster) {
 // the input strokes it consumed (the app uses this to reclaim previously
 // committed ink that a later stroke completes into a symbol). An op:"drop"
 // consumes strokes without materializing anything (arrowhead flicks).
-export function classifyPenGroup(strokes, ctx = {}) {
+// `trace`, if given, is filled with the intermediate decisions — the resolved
+// threshold table, each stroke's bucket and fate, the dash-group tests, the
+// three-way cluster contest, and one explainSymbol record per internal read.
+// A THIRD POSITIONAL argument rather than a `ctx` key: ctx is the board
+// contract copyPenDiag serialises and every node fixture constructs, and this
+// isn't board data. Observational only — no branch reads it.
+export function classifyPenGroup(strokes, ctx = {}, trace = null) {
   const players = ctx.players || [], nets = ctx.nets || [];
   // Work in SCREEN units whenever the view scale is known (see the note above
   // SYMBOL_MAX_PX): feet ÷ per-axis feet-per-pixel undoes both zoom AND the
@@ -617,6 +680,30 @@ export function classifyPenGroup(strokes, ctx = {}) {
   const dashRms = U(1.5, 8), linkR = U(2, 10);
   const flickMax = U(4, 20), flickR = U(3.5, 18), arrowLeg = U(3.5, 18);
   const puckDot = U(1.8, 11), puckDense = U(4, 26), puckOnR = U(PUCK_ON_R, 15);
+  // dashed-line endpoint reach — far longer than a route's start; see the note
+  // where the dash groups resolve, at the foot of this function
+  const dashEndR = U(16, 130);
+  // Half of "it converts in the node test but not on my phone" is that the view
+  // scale was missing and every threshold silently fell back to its rink-feet
+  // floor. Nothing said so; now the table does.
+  if (trace) {
+    trace.units = { scaled, fx, fy, symMax, overlayMin, coneMax, attachR, passR, netR,
+      dashSpan, dashMax, dashChord, dashRms, linkR, flickMax, flickR, arrowLeg,
+      puckDot, puckDense, puckOnR, dashEndR };
+    trace.strokes = []; trace.dash = []; trace.clusters = []; trace.syms = []; trace.longs = [];
+  }
+  // One wrapper for every internal read, so the four call sites stay identical
+  // and the trace can't miss one. Takes the stroke OBJECTS rather than their
+  // points, so each record carries the indices it read — without that a verdict
+  // line can only guess which rejection belongs to which piece of ink.
+  const readSym = (cs, why) => {
+    const pts = cs.map(s => s.pts);
+    if (!trace) return recognizeSymbol(pts);
+    const o = { srcs: cs.map(s => s.idx), why };
+    o.result = recognizeSymbol(pts, o);
+    trace.syms.push(o);
+    return o.result;
+  };
   const ops = [];
   const leftovers = [];   // strokes that fell through → mark ops, in draw order
 
@@ -675,6 +762,11 @@ export function classifyPenGroup(strokes, ctx = {}) {
   const swing = s => loopsBack(s) && s.diag >= overlayMin && !!skaterAt(s.pts[0]);
   const shorts = S.filter(s => s.diag < symMax && !swing(s));
   const longs = S.filter(s => s.diag >= symMax || swing(s));
+  if (trace) trace.strokes = S.map(s => ({
+    idx: s.idx, n: s.pts.length, diag: s.diag,
+    bucket: shorts.includes(s) ? "short" : "long",
+    swing: swing(s), loopsBack: loopsBack(s),
+  }));
 
   // ---- dash-groups out of the shorts first: a dashed line's dashes sit close
   // together and would otherwise cluster into a bogus "symbol"; collinearity
@@ -707,7 +799,13 @@ export function classifyPenGroup(strokes, ctx = {}) {
           const overlap = Math.min(a.hi, b.hi) - Math.max(a.lo, b.lo);
           return overlap <= 0.4 * Math.min(a.hi - a.lo, b.hi - b.lo);
         });
-        if (rms < dashRms && tMax - tMin > dashSpan && marching) {
+        const ok = rms < dashRms && tMax - tMin > dashSpan && marching;
+        // a dashed pass that silently became ink is one of the commonest "why
+        // didn't that work" reports, and it always comes down to one of these
+        // three numbers missing its bar by a little
+        if (trace) trace.dash.push({ srcs: run.map(s => s.idx), n: run.length,
+          rms, rmsMax: dashRms, span: tMax - tMin, spanMin: dashSpan, marching, accepted: ok });
+        if (ok) {
           let a = { x: L.mx + L.dir.x * tMin, y: L.my + L.dir.y * tMin };
           let b = { x: L.mx + L.dir.x * tMax, y: L.my + L.dir.y * tMax };
           // drawing order sets direction: the first dash sits at the start
@@ -817,7 +915,7 @@ export function classifyPenGroup(strokes, ctx = {}) {
   const readGroupUncached = cs => {
     const glyphs = splitGlyphs(cs);
     if (glyphs.length > 1) {
-      const recs = glyphs.map(g => recognizeSymbol(g.map(s => s.pts)));
+      const recs = glyphs.map(g => readSym(g, "glyph-split"));
       if (recs.every(Boolean)) {
         const join = recs.map(r => r.sym).join("");
         if (glyphs.length === 2 && join.length > 1 && WB_SYMS.includes(join))
@@ -825,7 +923,7 @@ export function classifyPenGroup(strokes, ctx = {}) {
         return glyphs.map((g, i) => ({ rec: recs[i], cs: g }));
       }
     }
-    const rec = recognizeSymbol(cs.map(s => s.pts));
+    const rec = readSym(cs, "whole-group");
     return rec ? [{ rec, cs }] : null;
   };
   const emitRead = r => {
@@ -860,9 +958,15 @@ export function classifyPenGroup(strokes, ctx = {}) {
   // segmented by draw order. Whichever recovers the most symbols wins; only
   // ink that survives all three is written off.
   const takeCluster = (cs, r, depth) => {
+    // the contest's outcome, recorded once per call. Dense-board bugs live in
+    // here — a neighbour's stroke sitting closer than your own — and until now
+    // the only visible evidence was the ops that fell out the far end.
+    const note = (chose, extra) => trace && trace.clusters.push(
+      { srcs: idxOf(cs), depth, r, chose, ...extra });
     if (puckGate(cs.map(s => s.pts), puckDot, puckDense)) {
       const c = centerOf(cs.flatMap(s => s.ptsFt));
       puckOps.push({ op: "puck", x: c.x, y: c.y, on: null, srcs: idxOf(cs) });
+      note("puck");
       return;
     }
     const whole = readGroup(cs);
@@ -873,21 +977,29 @@ export function classifyPenGroup(strokes, ctx = {}) {
         ? subs.reduce((n, sub) => n + ((readGroup(sub) || []).length), 0) : -1;
       const timed = readByTime(cs);
       const timedN = timed ? timed.count : 0;
+      const counts = { wholeN, subN, timedN };
       if (subN >= timedN && subN > wholeN) {
+        note("subs", counts);
         subs.forEach(sub => takeCluster(sub, r / 2, depth + 1));
         return;
       }
       if (timed && timedN > wholeN) {
+        note("timed", counts);
         timed.reads.forEach(t => (t.fail ? clusterFail([t.fail]) : emitRead(t)));
         return;
       }
       if (!whole) {
+        note(subs.length > 1 ? "subs-fallback" : "singles", counts);
         if (subs.length > 1) { subs.forEach(sub => takeCluster(sub, r / 2, depth + 1)); return; }
         cs.forEach(s => takeCluster([s], 0, depth + 1));
         return;
       }
+      note("whole", counts);
+      whole.forEach(emitRead);
+      return;
     }
-    if (whole) { whole.forEach(emitRead); return; }
+    if (whole) { note("whole", { wholeN }); whole.forEach(emitRead); return; }
+    note("fail", { wholeN });
     clusterFail(cs);   // held back: routes, or an arrowhead flick
   };
   // Two-level grouping, like reading handwriting: a loose "word" pass catches
@@ -908,7 +1020,7 @@ export function classifyPenGroup(strokes, ctx = {}) {
   groupStrokes(pool, linkR * 3, Infinity).forEach(word => {
     const glyphs = groupStrokes(word, linkR);
     if (glyphs.length === 2 && sideBySide(glyphs[0], glyphs[1])) {
-      const recs = glyphs.map(g => recognizeSymbol(g.map(s => s.pts)));
+      const recs = glyphs.map(g => readSym(g, "side-by-side"));
       const join = recs.every(Boolean) ? recs.map(r => r.sym).join("") : "";
       if (join.length > 1 && WB_SYMS.includes(join)) {
         const cs = glyphs.flat();
@@ -930,12 +1042,22 @@ export function classifyPenGroup(strokes, ctx = {}) {
   [...longs, ...fallThrough].sort((a, b) => a.idx - b.idx).forEach(s => {
     const pts = s.pts, last = pts[pts.length - 1];
     const skater = skaterAt(pts[0]);
+    // one row per long stroke, so "why did my route become ink" reads as a
+    // sequence of tests rather than a silent fall-through to `mark`
+    const lg = trace && { idx: s.idx, diag: s.diag, loopsBack: loopsBack(s),
+      skater: skater ? String(skater.who.id ?? "new") : null,
+      straight: dist(pts[0], last) / pathLen([pts]),
+      net: (() => { const n = netAt(last); return n ? n.id : null; })(),
+      outcome: "mark" };
+    if (lg) trace.longs.push(lg);
+    const out = o => { if (lg) lg.outcome = o; };
     if (loopsBack(s)) {
-      const rec = recognizeSymbol([pts]);
+      const rec = readSym([s], "closed-loop");
       if (rec && ["O", "□", "△"].includes(rec.sym)) {
         if (rec.sym === "△" && s.diag < coneMax) {
           const c = centerOf(s.ptsFt);
           addOp({ op: "cone", x: c.x, y: c.y, srcs: [s.idx] });
+          out("cone");
           return;
         }
         // …but a closed loop is a zone overlay only if it started nowhere near
@@ -947,6 +1069,7 @@ export function classifyPenGroup(strokes, ctx = {}) {
           const b = bboxOf(s.ptsFt);
           const shape = rec.sym === "O" ? "circle" : rec.sym === "□" ? "square" : "triangle";
           addOp({ op: "shape", shape, cx: b.x + b.w / 2, cy: b.y + b.h / 2, w: b.w, h: b.h, srcs: [s.idx] });
+          out("shape");
           return;
         }
       }
@@ -957,7 +1080,7 @@ export function classifyPenGroup(strokes, ctx = {}) {
       const net = netAt(last);
       if (net && dist(pts[0], last) / pathLen([pts]) > 0.85) {
         const by = sourceAt(pts[0]);
-        if (by) { addOp({ op: "shot", by: by.who, net: net.id, srcs: [s.idx] }); return; }
+        if (by) { addOp({ op: "shot", by: by.who, net: net.id, srcs: [s.idx] }); out("shot"); return; }
       }
     }
     // the stroke skates off whichever anchor skaterAt found for its first point
@@ -968,6 +1091,7 @@ export function classifyPenGroup(strokes, ctx = {}) {
       skater.hasPath = true;
       skater.end = shaped[shaped.length - 1];
       routeEnds.push(skater.end);
+      out(mid ? "zigzag route" : "route");
       return;
     }
     leftovers.push(s);
@@ -1001,7 +1125,6 @@ export function classifyPenGroup(strokes, ctx = {}) {
   // the only question left is WHICH players they run between — and nobody draws
   // the dashes right up to the icons. At the old 55px a line that stopped a
   // comfortable gap short of its players silently fell back to ink.
-  const dashEndR = U(16, 130);
   const reachAt = (pt, skip) => nearest(pt, dashEndR, roster.filter(e => e !== skip),
     e => (e.hasPath ? e.end : { x: e.x, y: e.y }));
   dashGroups.forEach(g => {

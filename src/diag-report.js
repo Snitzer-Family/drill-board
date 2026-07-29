@@ -162,6 +162,97 @@ export function planHealth(h) {
   };
 }
 
+/* ---------------- pen ---------------- */
+
+// One readable line per decision. `ops` and `trace` come from the same
+// classifyPenGroup call, so a stroke's fate and the numbers behind it are the
+// same story — until now the op list was the only output and a symbol that lost
+// to a guard was indistinguishable from one that scored badly.
+export function penVerdicts(ops, trace, longs) {
+  const syms = (trace && trace.syms) || [];
+  const lg = (longs || (trace && trace.longs) || []);
+  const key = a => (a || []).slice().sort((x, y) => x - y).join(",");
+  return (ops || []).map(o => {
+    const srcs = o.srcs || [];
+    const label = srcs.length ? "s" + srcs.join(",s") : "—";
+    // match on the exact stroke set the reader was handed, not on order: a
+    // dense board reads the same strokes several times over
+    const rec = syms.find(s => key(s.srcs) === key(srcs));
+    let detail = "";
+    if (rec && rec.result) {
+      detail = `${rec.path} ${rec.result.score.toFixed(2)}`;
+      if (rec.result.second) detail += ` · 2nd ${rec.result.second}`;
+    } else if (rec && rec.reject === "guard" && rec.blockedTop) {
+      // the answer to "why didn't my D convert" — it wasn't the score
+      detail = `top ${rec.blockedTop} ${(rec.scored[rec.blockedTop] || 0).toFixed(2)}, blocked by its guard`;
+    } else if (rec && rec.reject === "threshold" && (rec.rankedAllowed || []).length) {
+      const [s, v] = rec.rankedAllowed[0];
+      detail = `best ${s} ${v.toFixed(2)} < accept ${rec.accept}`;
+    } else if (rec && rec.reject === "no-cloud") {
+      detail = "zero-length ink";
+    } else if (o.op === "mark" && srcs.length === 1) {
+      // never read as a symbol at all — it went down the long pipeline
+      const L = lg.find(x => x.idx === srcs[0]);
+      if (L) detail = `long stroke: ${L.skater ? "skater " + L.skater : "no skater in reach"}`
+        + `${L.net ? `, net ${L.net}` : ""}, straightness ${L.straight.toFixed(2)}`;
+    }
+    return { op: o.op, sym: o.sym || null, srcs, label, detail };
+  });
+}
+
+// Emit a paste-ready case for tests/sketch-recognize.mjs out of real captured
+// ink. Hand-transcribing a clipboard dump is how every REAL fixture in that
+// file got there, and the [[x,y]] → [{x,y}] adapter got written out ten times
+// doing it. Points round to 1dp, matching those fixtures — that IS the capture
+// resolution, and denser numbers would imply a precision the pen never had.
+//
+// The assertion pins what the classifier does TODAY. If what you just drew was
+// the bug, change the expectation by hand: the point is to make real ink cheap
+// to keep, not to bless the answer.
+export function toFixture(d, name = "capture", v = "") {
+  if (!d || !(d.strokes || []).length) return "";
+  const r1 = n => Math.round(n * 10) / 10;
+  const r4 = n => Math.round(n * 10000) / 10000;
+  const c = d.ctx || {};
+  const fx = r4(c.pxFtX ?? c.pxFt ?? 0), fy = r4(c.pxFtY ?? c.pxFt ?? 0);
+  const parts = [];
+  if (fx > 0 && fy > 0) parts.push(fx === fy ? `pxFt: ${fx}` : `pxFtX: ${fx}, pxFtY: ${fy}`);
+  const pl = (c.players || []).map(p => ({
+    id: p.id, x: r1(p.x), y: r1(p.y),
+    ...(p.hasPath && p.end ? { hasPath: true, end: { x: r1(p.end.x), y: r1(p.end.y) } } : {}),
+  }));
+  if (pl.length) parts.push("players: " + JSON.stringify(pl));
+  const nt = (c.nets || []).map(n => ({ id: n.id, x: r1(n.x), y: r1(n.y) }));
+  if (nt.length) parts.push("nets: " + JSON.stringify(nt));
+  const rows = d.strokes
+    .map(s => "    [" + (s.pts || []).map(p => `[${r1(p.x)},${r1(p.y)}]`).join(",") + "],")
+    .join("\n");
+  const want = JSON.stringify((d.ops || []).map(o => o.op));
+  const safe = String(name).replace(/'/g, "");
+  return `// ${safe}${v ? ` — captured on v${v}` : ""}, ${d.strokes.length} stroke${d.strokes.length === 1 ? "" : "s"}\n`
+    + `{\n  const CTX = { ${parts.join(", ")} };\n  const S = [\n${rows}\n  ].map(a => stroke(P(a)));\n`
+    + `  T('${safe}', kinds(classifyPenGroup(S, CTX)), ${want});\n}\n`;
+}
+
+// The Pen tab's payload. `d` is a burst ({strokes, ctx}) plus the ops and trace
+// from ONE classifyPenGroup call over it.
+export function penReport(d, v = "") {
+  const c = (d && d.ctx) || {};
+  return jsonSafe({
+    tab: "pen",
+    source: d.source || "last burst",
+    strokeCount: (d.strokes || []).length,
+    px: { x: c.pxFtX ?? c.pxFt ?? null, y: c.pxFtY ?? c.pxFt ?? null },
+    board: { players: (c.players || []).length, nets: (c.nets || []).length },
+    units: d.trace ? d.trace.units : null,
+    verdicts: penVerdicts(d.ops, d.trace),
+    ops: (d.ops || []).map(o => ({ op: o.op, sym: o.sym, srcs: o.srcs })),
+    trace: d.trace || null,
+    fixture: toFixture(d, d.name || "captured ink", v),
+    strokes: (d.strokes || []).map(s => (s.pts || []).map(p => [p.x, p.y])),
+  });
+}
+
 /* ---------------- the report ---------------- */
 
 // `input` is everything the app sampled this tick. Nothing here reaches back

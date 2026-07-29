@@ -1,4 +1,7 @@
-import { recognizeSymbol, puckGate, classifyPenGroup, ACCEPT } from '../src/sketch-recognize.js';
+import {
+  recognizeSymbol, puckGate, classifyPenGroup, ACCEPT, explainSymbol, scoreAll,
+  GUARDS, GUARD_BANDS, SYMBOL_MAX, SYMBOL_MAX_PX,
+} from '../src/sketch-recognize.js';
 
 let pass = 0, fail = 0;
 const T = (name, got, want) => {
@@ -362,16 +365,19 @@ const kinds = ops => ops.map(o => o.op);
 //      land ~1.1ft apart, which clips a small ring's tail and inflates its
 //      closure. Synthetic fixtures are too dense to catch that class of bug,
 //      so these stay as the ground truth. ----
-{
-  const P = a => a.map(([x, y]) => ({ x, y }));
-  const CAP = { pxFt: 0.236 };
-  const REAL = {
+// module scope, not block: the trace suites at the foot of this file re-use
+// these as their ground truth, and a real capture is worth more there than
+// another synthetic one
+const P = a => a.map(([x, y]) => ({ x, y }));
+const CAP = { pxFt: 0.236 };
+const REAL = {
     X13: [[[38,25.9],[38.7,26.8],[39.7,27.7],[40.5,28.6],[41.3,29.4],[42.3,30.1],[43,30.9],[43.8,31.8],[44.6,32.7],[45.6,33.6],[46.3,34.4]],[[47.1,25.9],[46.1,26.8],[45.3,27.7],[44.6,28.6],[43.5,29.4],[42.8,30.3],[41.8,31.2],[41,32],[40.3,32.9],[39.2,33.6],[38.5,34.4]]],
     ring6: [[[61.8,57.5],[62.5,58.4],[63,59.5],[62.8,60.8],[62.3,61.9],[61.3,62.8],[60,63],[58.7,62.8],[57.7,62.1],[57.2,61],[57,59.9],[57.2,58.8],[58,58]]],
     ring12: [[[103.5,25.1],[104.3,25.9],[105.1,26.8],[105.6,27.9],[105.8,29],[106.1,30.1],[105.8,31.2],[105.6,32.3],[105.1,33.3],[104.3,34.2],[103.3,34.9],[102.3,35.5],[101.3,36],[100,36],[98.7,36],[97.7,35.5],[96.7,34.9],[95.7,34.2],[94.9,33.3],[94.4,32.3],[94.2,31.2],[93.9,30.1],[94.2,29],[94.4,27.9],[94.9,26.8],[95.7,25.9],[96.5,25.1]]],
     X26: [[[140,20.1],[140.8,20.9],[141.8,21.6],[142.5,22.4],[143.3,23.3],[144.1,24.2],[145.1,24.8],[145.8,25.7],[146.6,26.6],[147.3,27.5],[148.4,28.3],[149.4,29.2],[150.1,30.1],[150.9,30.9],[151.6,31.8],[152.7,32.5],[153.4,33.3],[154.2,34.2],[154.9,35.1],[155.9,36],[157,36.8],[157.7,37.7]],[[158,20.1],[157.2,20.9],[156.2,21.8],[155.4,22.7],[154.4,23.5],[153.4,24.4],[152.7,25.3],[151.9,26.2],[151.1,27],[150.1,27.7],[149.4,28.6],[148.6,29.4],[147.8,30.3],[146.8,31.2],[145.8,32],[145.1,32.9],[144.3,33.8],[143.3,34.7],[142.5,35.5],[141.8,36.4],[140.8,37.3]]],
-  };
-  const real = k => REAL[k].map(s => stroke(P(s)));
+};
+const real = k => REAL[k].map(s => stroke(P(s)));
+{
   T('real 13ft X → player', kinds(classifyPenGroup(real('X13'), CAP)), ['player']);
   T('real 26ft X → player', kinds(classifyPenGroup(real('X26'), CAP)), ['player']);
   T('real 6ft ring → player O', kinds(classifyPenGroup(real('ring6'), CAP)), ['player']);
@@ -724,6 +730,121 @@ const kinds = ops => ops.map(o => o.op);
   const away = line.map(q => ({ x: q.x + 60, y: q.y }));      // same line, mid-ice
   T('short stray away from net stays ink', kinds(classifyPenGroup([stroke(away)],
     { ...CTX, players: [{ id: 'P1', x: 88.5, y: 41 }] })), ['mark']);
+}
+
+// ---- THE OBSERVATION PARAMS ARE OBSERVATIONAL ----
+// recognizeSymbol(s, out) and classifyPenGroup(s, ctx, trace) fill a trace when
+// given one and are otherwise byte-identical. That claim is the entire reason
+// it was safe to instrument shipping recogniser code, so it gets proved rather
+// than asserted — over the REAL captures, which is where the branches that only
+// fire on decimated phone ink actually live.
+{
+  const TRACED = [
+    ['X13', real('X13'), CAP], ['X26', real('X26'), CAP],
+    ['ring6', real('ring6'), CAP], ['ring12', real('ring12'), CAP],
+    ['synthetic O', strokesOf(drawn(GLYPHS.O, 40, 30, 5, 0.15, 601)), {}],
+    ['synthetic D', strokesOf(drawn(GLYPHS.D, 40, 30, 5, 0.15, 602)), {}],
+    ['synthetic G', strokesOf(drawn(GLYPHS.G, 40, 30, 5, 0.15, 603)), {}],
+    ['synthetic C', strokesOf(drawn(GLYPHS.C, 40, 30, 5, 0.15, 604)), {}],
+    ['synthetic W', strokesOf(drawn(GLYPHS.W, 40, 30, 5, 0.15, 605)), {}],
+    ['scribble', [stroke(poly(p(0, 0, 3, 1, 1, 3, 4, 2), 6))], {}],
+  ];
+  for (const [name, ss, ctx] of TRACED) {
+    const pts = ss.map(s => s.pts);
+    T(`${name}: explain matches recognize`, explainSymbol(pts).result, recognizeSymbol(pts));
+    T(`${name}: trace changes no op`, classifyPenGroup(ss, ctx, {}), classifyPenGroup(ss, ctx));
+  }
+  // degenerate ink names its rejection instead of returning a bare null
+  T('zero-length ink is named', explainSymbol([[{ x: 5, y: 5 }]]).reject, 'no-cloud');
+}
+
+// ---- WHICH BRANCH DECIDED ----
+// recognizeSymbol has three geometric overrides that bypass $P entirely, and a
+// score of 0.95 from crossesAsX is not the same kind of number as 0.61 from the
+// template sweep. Until now nothing could tell them apart.
+{
+  T('a real X is decided by the crossing', explainSymbol(real('X13').map(s => s.pts)).path, 'crossesAsX');
+  T('a real ring is decided geometrically', explainSymbol(real('ring6').map(s => s.pts)).path, 'ring');
+  T('a bigger ring too', explainSymbol(real('ring12').map(s => s.pts)).path, 'ring');
+  T('a D goes through $P', explainSymbol(strokesOf(drawn(GLYPHS.D, 40, 30, 5, 0.12, 611)).map(s => s.pts)).path, '$P');
+  // ...and the sweep the override skipped past is still recorded, so "what
+  // would $P have said" is answerable. It matters because a reported `score` is
+  // NOT one scale: 0.95 and 0.9 are constants from the two X paths, the ring
+  // path returns circularity, and only the fallback is a template score. A
+  // diagnostic printing all of those in one column without saying which is
+  // which would be lying, so the trace names the provenance.
+  const x = explainSymbol(real('X13').map(s => s.pts));
+  T('the overridden sweep is kept', typeof x.scored.X, 'number');
+  T('the crossing reports a constant, not the sweep', x.result.score, 0.95);
+  T('...and the sweep does not agree with it', Math.abs(x.scored.X - x.result.score) > 0.2, true);
+  const rg = explainSymbol(real('ring6').map(s => s.pts));
+  T('the ring reports circularity, not the sweep', rg.result.score > rg.scored.O + 0.15, true);
+  T('scoreAll still answers on an override path', !!scoreAll(real('X13').map(s => s.pts)), true);
+  T('scoreAll shape is unchanged',
+    Object.keys(scoreAll(real('ring6').map(s => s.pts))).sort(), ['features', 'scored']);
+}
+
+// ---- WHY IT DIDN'T CONVERT ----
+// The two rejections look identical from outside — the ink just stays ink — but
+// they need opposite fixes: a guard says "it isn't shaped like that", a
+// threshold says "it is, but not clearly enough".
+{
+  const o = explainSymbol([stroke(poly(p(0, 0, 3, 1, 1, 3, 4, 2), 6)).pts]);
+  T('a scribble is rejected', o.result, null);
+  T('...on the score, not a guard', o.reject, 'threshold');
+  T('every guard is reported, pass and fail', Object.keys(o.guards).sort().join(','),
+    Object.keys(o.scored).sort().join(','));
+  // an open C: the O guard blocks it even when O scores well
+  const c = explainSymbol(strokesOf(drawn(GLYPHS.C, 40, 30, 5, 0.1, 621)).map(s => s.pts));
+  T('C fails the O guard', c.guards.O, false);
+  T('...and the closure that did it is on the record', c.features.closure > 0.5, true);
+  T('the runner-up scores are kept, not just its name', Array.isArray(c.ranked[1]), true);
+}
+
+// ---- THE GUARD BANDS ARE THE COMMENTS, ENFORCED ----
+// Every number here was measured by hand and written into a comment. A comment
+// can't fail, so the bands are exercised at their stated boundaries: move one
+// and this says so.
+{
+  const F = o => ({ closure: 0, corners: 0, leftRMS: 0, tail: 0, radialCV: 0, spineDrift: 0, curveVerts: 0, ...o });
+  T('O accepts under 0.52 closure', GUARDS.O(F({ closure: 0.519 })), true);
+  T('O rejects at 0.52', GUARDS.O(F({ closure: 0.52 })), false);
+  T('C needs over 0.50 closure', GUARDS.C(F({ closure: 0.501, tail: 1 })), true);
+  T('C rejects at 0.50', GUARDS.C(F({ closure: 0.5, tail: 1 })), false);
+  T('C rejects a filled middle', GUARDS.C(F({ closure: 0.7, tail: 2 })), false);
+  T('G needs the tail', GUARDS.G(F({ tail: 2 })), true);
+  T('G rejects one stray point', GUARDS.G(F({ tail: 1 })), false);
+  T('D needs a straight spine', GUARDS.D(F({ leftRMS: 0.069, spineDrift: 0.089 })), true);
+  T('D rejects a wobbly band', GUARDS.D(F({ leftRMS: 0.07, spineDrift: 0.0 })), false);
+  T('D rejects a drifting spine', GUARDS.D(F({ leftRMS: 0, spineDrift: 0.09 })), false);
+  T('triangle wants exactly 3 corners', GUARDS['△'](F({ closure: 0.3, corners: 3 })), true);
+  T('...not 4', GUARDS['△'](F({ closure: 0.3, corners: 4 })), false);
+  T('square wants exactly 4', GUARDS['□'](F({ closure: 0.3, corners: 4 })), true);
+  T('...not 3', GUARDS['□'](F({ closure: 0.3, corners: 3 })), false);
+  // the prose the diagnostic prints must cover the predicates it describes
+  T('every guard has a stated band',
+    Object.keys(GUARDS).sort().join(','), Object.keys(GUARD_BANDS).sort().join(','));
+}
+
+// ---- THE UNIT TABLE ----
+// Half of "it converts in the test but not on my phone" is that the classifier
+// fell back to rink feet because it had no view scale. That was invisible; the
+// trace states it outright. This assertion is the one that would have caught the
+// fill-stretch bug that shipped broken through v6.25.
+{
+  const t1 = {};
+  classifyPenGroup(real('ring6'), CAP, t1);
+  T('with a view scale, thresholds are pixels', [t1.units.scaled, t1.units.symMax], [true, SYMBOL_MAX_PX]);
+  const t2 = {};
+  classifyPenGroup(real('ring6'), {}, t2);
+  T('without one, they fall back to feet', [t2.units.scaled, t2.units.symMax], [false, SYMBOL_MAX]);
+  T('the per-axis scale is recorded', t1.units.fx, CAP.pxFt);
+  // every threshold the classifier resolved is on the record, not just the two
+  T('the whole table is reported', ['attachR', 'passR', 'netR', 'dashSpan', 'linkR', 'puckOnR', 'dashEndR']
+    .every(k => typeof t1.units[k] === 'number'), true);
+  // per-stroke fate, so each captured stroke can be coloured by what became of it
+  T('every stroke is accounted for', t1.strokes.length, real('ring6').length);
+  T('a symbol read is traced', t1.syms.length > 0, true);
 }
 
 console.log(`\n${pass} passed, ${fail} failed  (accept threshold ${ACCEPT})`);

@@ -22,6 +22,8 @@ import { Icon } from "./icons.jsx";
 // DIAG_TABS and hashDiag live in the pure module so the node suite can pin the
 // hash regex against the share link's — see the note there.
 import { DIAG_TABS } from "./diag-report.js";
+// the guard bands as prose, so a blocked symbol can say which condition it missed
+import { GUARD_BANDS } from "./sketch-recognize.js";
 
 // Clipboard, both ways round. The async API can hang forever when the document
 // isn't focused, so the synchronous textarea path runs first and the feedback
@@ -39,6 +41,133 @@ export function copyText(txt) {
   ta.remove();
   try { navigator.clipboard?.writeText?.(txt); } catch { /* best effort */ }
   return ok;
+}
+
+/* ---------------- shared formatting ---------------- */
+
+const f2 = n => (typeof n === "number" ? n.toFixed(2) : "\u2014");
+const f3 = n => (typeof n === "number" ? n.toFixed(3) : "\u2014");
+const pid = id => (id == null ? "\u2014" : "#" + id);
+
+/* ---------------- pen ---------------- */
+
+function PenTab({ snap, open, toggle, act, flash }) {
+  const run = k => act.current && act.current[k] && act.current[k]();
+  const buttons = (
+    <div className="hd-diagscrub">
+      <button className="hd-diagstep" onClick={() => run("penRun")}>Read board ink</button>
+      <button className="hd-diagstep" onClick={() => run("penLive")}>Last burst</button>
+      <button className="hd-diagstep" style={{ marginLeft: "auto" }}
+        disabled={!snap || snap.empty || !snap.fixture}
+        onClick={() => {
+          flash(copyText(snap.fixture)
+            ? "Fixture copied — paste it into tests/sketch-recognize.mjs"
+            : "Copied (if the paste is empty, screenshot this instead)");
+        }}>Copy as fixture</button>
+    </div>
+  );
+  if (!snap || snap.empty) {
+    return (
+      <>
+        {buttons}
+        <div className="hd-diagnote">
+          Nothing read yet. Sketch something with the pen, or tap <b>Read board ink</b> to
+          run the recogniser over the ink already on the board — it reports and changes nothing.
+        </div>
+      </>
+    );
+  }
+  const U = snap.units;
+  return (
+    <>
+      {buttons}
+      {/* Half of "it converts in the test but not on my phone" is this line. */}
+      <div className={"hd-diagbanner " + (U && U.scaled ? "ok" : "warn")}>
+        {U && U.scaled
+          ? `screen units — ${snap.strokeCount} strokes at ${f3(snap.px.x)}/${f3(snap.px.y)} ft per px`
+          : "NO VIEW SCALE — every threshold fell back to its rink-feet floor"}
+      </div>
+      <Row k="source" v={`${snap.source} · ${snap.board.players} players, ${snap.board.nets} nets on the board`} />
+
+      <div className="hd-diagsublab">verdicts</div>
+      {snap.verdicts.map((v, i) => (
+        <Row key={i} k={v.label} tone={v.op === "mark" ? "warn" : "ok"}
+          v={`${v.op}${v.sym ? " " + v.sym : ""}${v.detail ? " — " + v.detail : ""}`} />
+      ))}
+
+      <Sec id="units" title="Resolved thresholds" open={open} toggle={toggle}>
+        <Row k="mode" v={U && U.scaled ? "pixels (view scale known)" : "rink feet (fallback)"} />
+        {U && Object.entries(U).filter(([k]) => !["scaled", "fx", "fy"].includes(k))
+          .map(([k, v]) => <Row key={k} k={k} v={typeof v === "number" ? v.toFixed(1) : String(v)} />)}
+      </Sec>
+
+      <Sec id="pstrokes" title="Per stroke" open={open} toggle={toggle} count={snap.strokeCount}>
+        {(snap.trace && snap.trace.strokes || []).map(s => (
+          <div key={s.idx} className="hd-diagleg">
+            s{s.idx} {s.bucket.padEnd(5, " ")} diag {s.diag.toFixed(1)} pts {s.n}
+            {s.loopsBack ? " closed" : ""}{s.swing ? " swing" : ""}
+          </div>
+        ))}
+      </Sec>
+
+      <Sec id="syms" title="Symbol reads" open={open} toggle={toggle}
+        count={(snap.trace && snap.trace.syms || []).length}>
+        {(snap.trace && snap.trace.syms || []).map((s, i) => (
+          <div key={i} className="hd-diagblock">
+            <div className="hd-diagv">
+              s{(s.srcs || []).join(",s")} · {s.why} · {s.result
+                ? `${s.result.sym} ${s.result.score.toFixed(2)} via ${s.path}`
+                : `rejected on ${s.reject}`}
+            </div>
+            {s.blockedTop && (
+              <div className="hd-diagv bad">
+                top was {s.blockedTop} {(s.scored[s.blockedTop] || 0).toFixed(2)} — guard: {GUARD_BANDS[s.blockedTop]}
+              </div>
+            )}
+            {s.features && (
+              <div className="hd-diagwhy">
+                closure {f2(s.features.closure)} · corners {s.features.corners} · verts {s.features.curveVerts}
+                {" "}· tail {s.features.tail} · leftRMS {f2(s.features.leftRMS)} · spine {f2(s.features.spineDrift)}
+              </div>
+            )}
+            {s.scored && (
+              <div className="hd-diagwhy">
+                {Object.entries(s.scored).sort((a, b) => b[1] - a[1]).slice(0, 4)
+                  .map(([k, v]) => `${k} ${v.toFixed(2)}${s.guards && s.guards[k] === false ? "✗" : ""}`)
+                  .join("  ")}
+              </div>
+            )}
+          </div>
+        ))}
+      </Sec>
+
+      {(snap.trace && snap.trace.dash || []).length > 0 && (
+        <Sec id="dash" title="Dash groups" open={open} toggle={toggle}>
+          {snap.trace.dash.map((d, i) => (
+            <Row key={i} k={"s" + d.srcs.join(",s")} tone={d.accepted ? "ok" : "warn"}
+              v={`${d.n} dashes · rms ${f2(d.rms)}<${f2(d.rmsMax)} · span ${f2(d.span)}>${f2(d.spanMin)} · ${d.marching ? "marching" : "NOT marching"} → ${d.accepted ? "pass/shot" : "ink"}`} />
+          ))}
+        </Sec>
+      )}
+
+      <Sec id="clusters" title="Cluster contest" open={open} toggle={toggle}
+        count={(snap.trace && snap.trace.clusters || []).length}>
+        <div className="hd-diagwhy">
+          Three ways to read a group — as one symbol, split tighter by proximity, or
+          segmented by draw order. Most symbols recovered wins.
+        </div>
+        {(snap.trace && snap.trace.clusters || []).map((c, i) => (
+          <div key={i} className="hd-diagleg">
+            s{c.srcs.join(",s")} d{c.depth} whole {c.wholeN ?? "-"} / subs {c.subN ?? "-"} / timed {c.timedN ?? "-"} → {c.chose}
+          </div>
+        ))}
+      </Sec>
+
+      <Sec id="fixture" title="As a test fixture" open={open} toggle={toggle}>
+        <div className="hd-diagpre">{snap.fixture}</div>
+      </Sec>
+    </>
+  );
 }
 
 /* ---------------- layout probe ---------------- */
@@ -120,10 +249,6 @@ function Sec({ id, title, open, toggle, children, count }) {
 }
 
 /* ---------------- drill ---------------- */
-
-const f2 = n => (typeof n === "number" ? n.toFixed(2) : "—");
-const f3 = n => (typeof n === "number" ? n.toFixed(3) : "—");
-const pid = id => (id == null ? "—" : "#" + id);
 
 // A transport of its own, not the player dock's — that one is hidden in some
 // modes, and the frame-step is the point. "The puck leaves the blade at 3.43s
@@ -336,7 +461,7 @@ function DiagView({ diag, setDiag, feedRef, actRef, drillVersion, flash }) {
         <div className="hd-diagbody">
           {tab === "layout" && <LayoutTab snap={snap} open={open} toggle={toggle} />}
           {tab === "drill" && <DrillTab snap={snap} open={open} toggle={toggle} act={actRef} />}
-          {tab === "pen" && <div className="hd-diagnote">The pen report lands here next.</div>}
+          {tab === "pen" && <PenTab snap={snap} open={open} toggle={toggle} act={actRef} flash={flash} />}
         </div>
         <div className="hd-diagfoot">
           <button className="hd-mini" onClick={copyJson}>Copy JSON</button>
