@@ -16,7 +16,7 @@ const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(
 // ---- inline bundle: constants(VIEWS) + boards + drill-format + drill-svg ----
 const strip = c => c.replace(/^\s*import\s.*$/gm, "").replace(/^export\s+/gm, "");
 const bundle = [
-  `const VIEWS = { full:[0,0,200,85], half:[100,0,100,85], quarter:[100,0,100,42.5] };\nconst RINK = { W:200, H:85 };\nconst DSL_VERSION = ${DSL_VERSION};`,
+  `const VIEWS = { full:[0,0,200,85], half:[100,0,100,85], "quarter-tl":[0,0,100,42.5], "quarter-tr":[100,0,100,42.5], "quarter-bl":[0,42.5,100,42.5], "quarter-br":[100,42.5,100,42.5] };\nconst RINK_ALIAS = { quarter:"quarter-tr" };\nconst RINK = { W:200, H:85 };\nconst DSL_VERSION = ${DSL_VERSION};`,
   strip(read("src/boards.js")),
   `const boards = { isInside, clampInside, contain, tangentToward, edgeDist, pointAt, project, rimPath, rimAround, rimTo, slide, slideTo, PERIM };`,
   strip(read("src/geometry.js")),

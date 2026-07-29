@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo, Fragment } from "react";
-import { VIEWS, COLORS, vb, APP_VERSION, ICON_SCALE, PLAYER_SCALE, ROUTE_START_GAP, BUILD_STAMP, DEFAULT_TEXT, SPEED,
+import { VIEWS, isQuarter, COLORS, vb, APP_VERSION, ICON_SCALE, PLAYER_SCALE, ROUTE_START_GAP, BUILD_STAMP, DEFAULT_TEXT, SPEED,
   SAVE_PROB, MISS_POST, MISS_WIDE, MISS_OVER, SHOT_AIR_PROB, BOUNCE_REST, WB_SYMS, symOf,
   DSL_VERSION, TYPEFACES, TYPEFACE_KEY, READ_PACES, READ_PACE_DEFAULT, captionHold } from "./constants.js";
 import { parseDrill, serializeDrill, extractDrill, deriveInventory, ensureShotNet } from "./drill-format.js";
@@ -382,7 +382,7 @@ function DelayTrigger({ value, onChange, sub, players, actorIds, nameOf }) {
    y 0..85 (board to board).
 
    Text format (one command per line, # = comment):
-     RINK full|half|quarter
+     RINK full|half|quarter-tl|quarter-tr|quarter-bl|quarter-br
      PIECE <id> <player|puck|cone> <x> <y> [#color] [label] [speed=1.2] [hand=L] [on=F1]
      PATH  <id> <segments...>
    Segments (rink feet):
@@ -462,6 +462,15 @@ const ROOMY_MIN = 1000;
 // mismatch silently offsets every menu by half the difference. Below
 // MENU_ANCHOR_MIN the stylesheet stretches the panel instead and JS stands down.
 const MENU_W = 230, MENU_PAD = 10, MENU_ANCHOR_MIN = DENSE_MIN;
+// The four quarter sheets, in reading order — which is also the order the 2x2
+// pad lays them out, so the grid mirrors the rink. [rink token, pad label, bar
+// label]. One table: the pad and the bar's label both read it.
+const QUARTERS = [
+  ["quarter-tl", "Top left", "¼ TL"],
+  ["quarter-tr", "Top right", "¼ TR"],
+  ["quarter-bl", "Bottom left", "¼ BL"],
+  ["quarter-br", "Bottom right", "¼ BR"],
+];
 // THEME_KEY ("drillboard:theme") lives in theme.js — the pre-paint boot script
 // in index.html reads the same constant, and they must not drift.
 
@@ -571,11 +580,25 @@ export default function DrillAnimator() {
     flash(`Erased ${bits.join(" + ")}`);
     return true;
   }
+  // Ink the pen would own in the given state. The two inks are separate
+  // everywhere else — convertInk won't touch sketch ink — so Clear shouldn't
+  // either: sketching and then wiping the board took your smart-pen work with
+  // it. Manual and Auto share one bucket, because their ink IS the same thing,
+  // unread convertible ink, with nothing in the model or the DSL to tell them
+  // apart. Locked ink (imported overlays) is nobody's.
+  const inkMine = (p, sketch) => p.kind === "mark" && !p.lock && !!p.sketch === sketch;
   const clearInk = () => {
-    const n = piecesRef.current.filter(p => p.kind === "mark" && !p.lock).length;
-    if (!n) { flash("No ink to clear"); return; }
-    setPieces(ps => ps.filter(p => !(p.kind === "mark" && !p.lock)));
-    flash(`Cleared ${n} ink mark${n > 1 ? "s" : ""} — Undo restores them`);
+    const sketch = penReadRef.current === "sketch";
+    // buffered strokes count as mine: setPen flushes, so everything still in
+    // the settle window was drawn under the state that's active now
+    const n = piecesRef.current.filter(p => inkMine(p, sketch)).length + penInk.length;
+    if (!n) { flash(`No ${sketch ? "sketch" : "smart-pen"} ink to clear`); return; }
+    // and drop them, or they land a second later on a board you just emptied
+    penBuf.current = [];
+    clearTimeout(penTimer.current);
+    setPenInk([]);
+    setPieces(ps => ps.filter(p => !inkMine(p, sketch)));
+    flash(`Cleared ${n} ${sketch ? "sketch" : "ink"} mark${n > 1 ? "s" : ""} — Undo restores them`);
   };
 
   // what the classifier needs to know about the board it's reading into
@@ -1590,7 +1613,7 @@ export default function DrillAnimator() {
   let canvasH = Math.max(20, stageSize.h);
   // Full and half ice fill the stage. Quarter is constrained to its true
   // proportions up to a small over-stretch (the canvas letterboxes).
-  if (rink === "quarter") {
+  if (isQuarter(rink)) {
     const vbW = swapAxes ? vhF : vwF, vbH = swapAxes ? vwF : vhF; // effective viewBox dims
     const CAP = 1.12;                                             // max stretch past true aspect
     canvasH = Math.min(canvasH, Math.round((canvasW * vbH) / vbW * CAP));
@@ -6005,6 +6028,10 @@ export default function DrillAnimator() {
   const ARROW_STAGGER_STEP = 2.5; // ft each queued arrowhead steps back (~one chevron depth)
   const ARROW_MIN_KEEP = 2;       // ft of last leg that must survive the trim
   const ARROW_LINE_CLEAR = 1.2;   // ft a head keeps clear of any foreign route line
+  // ...and the same vocabulary for the grey shot carets in puckPathNodes
+  const SHOT_TIP_GAP = 6;         // ft a shot's caret stands off its landing point
+  const SHOT_CLUSTER_R = 5;       // ft: only shot heads this close queue behind each other
+  const SHOT_STAGGER_STEP = 9;    // ft each queued shot head steps back along its own axis
   // priority for picking the "main" action shown in a badge with several actions
   const ACT_PRI = { shot: 5, pass: 4, rim: 3, chip: 2, receive: 1, collect: 1, pickup: 1 };
   const stepActionType = st => st.role === "pickup" ? "pickup" : st.role === "receive" ? "receive"
@@ -6224,7 +6251,7 @@ export default function DrillAnimator() {
   // Several route ends converging on one waypoint would stamp their end marks on
   // the exact same spot — group ends within ARROW_CLUSTER_R and pull each mark
   // back along its OWN line by a spaced interval so the heads queue up readably
-  // (the same de-confliction puckPathNodes does for shots on one net). Shortest
+  // (the same de-confliction puckPathNodes does for converging shot heads). Shortest
   // last leg keeps the true endpoint; the pull-back is clamped so a short leg
   // never trims past its own start. A second pass then RECESSES any head sitting
   // on a foreign route's line until it clears it. Cosmetic only — ref paths/
@@ -8499,12 +8526,9 @@ export default function DrillAnimator() {
     // a fly leg launches/lands at the player's STICK, ~a stick-length off the
     // waypoint centre where the badge sits — so match within that reach
     const nearBadge = (x, y) => { let best = null, bd = 6; for (const b of badges) { const d = Math.hypot(b.x - x, b.y - y); if (d < bd) { bd = d; best = b; } } return best; };
-    // multiple shots landing on the same net stop at staggered distances so their
-    // arrowheads queue up in front of it instead of piling into one busy clump
-    // group shots by the NET they land on (landings scatter a few feet, so bucket
-    // by nearest net, not exact point), then stagger by LENGTH: the closest
-    // (shortest) shots keep their room right at the net, and the farther (longer)
-    // shots step back — so nothing overlaps and short shots still read accurately
+    // which target a shot lands on — landings scatter a few feet across the mouth,
+    // so bucket by nearest net rather than exact point. Only the repeat-shot dedup
+    // key below uses it; the stagger reads tip positions, not nets.
     const shotTargets = pieces.filter(q => q.kind === "net" || q.kind === "passer" || q.kind === "bumper" || q.kind === "tire");
     const nearNet = (x, y) => { let best = "?", bd = 24; for (const nt of shotTargets) { const d = Math.hypot(nt.x - x, nt.y - y); if (d < bd) { bd = d; best = nt.id; } } return best; };
     // A player firing a pile of pucks from one spot at one net draws the same arrow
@@ -8513,7 +8537,7 @@ export default function DrillAnimator() {
     // by release point (~3ft) rather than exact coordinates: the blade shifts a little
     // between shots as the body settles, and they are still visually the same mark.
     const shotOne = {}, shotN = {};      // `${pk}/${k}` → is the drawn one / how many it stands for
-    const byNet = {}, shotStagger = {};  // `${pk}/${k}` → extra feet in front of the net
+    const shotStagger = {};              // `${pk}/${k}` → extra feet in front of the net
     const groups = {};
     pieces.filter(q => q.kind === "puck" && plans[q.id]).forEach(q => plans[q.id].legs.forEach((L, k, legs) => {
       if (L.type === "fly" && L.shot && (!legs[k + 1] || legs[k + 1].type !== "fly")) {
@@ -8530,14 +8554,39 @@ export default function DrillAnimator() {
       list.forEach(sIt => { shotN[sIt.id] = list.length; });
       shotOne[lead.id] = true;
     });
-    // ...and only the drawn ones queue for room in front of the net
-    pieces.filter(q => q.kind === "puck" && plans[q.id]).forEach(q => plans[q.id].legs.forEach((L, k, legs) => {
-      if (L.type === "fly" && L.shot && (!legs[k + 1] || legs[k + 1].type !== "fly") && shotOne[`${q.id}/${k}`]) {
-        const net = nearNet(L.x1, L.y1);
-        (byNet[net] = byNet[net] || []).push({ id: `${q.id}/${k}`, len: Math.hypot(L.x1 - L.x0, L.y1 - L.y0) });
+    // ...and only the drawn ones queue for room in front of the net. Group by where
+    // the CARET actually lands — the landing point pulled back SHOT_TIP_GAP along the
+    // shot's own axis — and NOT by which net it's aimed at: two shots converging on
+    // one net from clearly different angles have heads yards apart and need no
+    // stagger at all. Same tip rule arrivalBack applies to passes and route carats,
+    // so swinging a shooter round the net dissolves the queue the moment they clear.
+    // Within a cluster the shortest shot keeps the slot at the net and the longer
+    // ones step back, so a close-in shot still reads true against the cage.
+    if (arrowStagger) {
+      const tips = [];
+      pieces.filter(q => q.kind === "puck" && plans[q.id]).forEach(q => plans[q.id].legs.forEach((L, k, legs) => {
+        if (!(L.type === "fly" && L.shot && (!legs[k + 1] || legs[k + 1].type !== "fly") && shotOne[`${q.id}/${k}`])) return;
+        // the same origin and direction the renderer draws with (badge centre when
+        // released at an action circle), so the tip we cluster on is the real one
+        const sb = (k === 0 || legs[k - 1].type !== "fly") ? nearBadge(L.x0, L.y0) : null;
+        const ox = sb ? sb.x : L.x0, oy = sb ? sb.y : L.y0;
+        const len = Math.hypot(L.x1 - ox, L.y1 - oy) || 1;
+        const t = gmMove(L.x1, L.y1, -(L.x1 - ox) / len, -(L.y1 - oy) / len, SHOT_TIP_GAP);
+        // gm space, so the cluster radius reads the same in every direction under
+        // the fill-mode stretch (as the route-end clearance pass does)
+        tips.push({ id: `${q.id}/${k}`, len, x: t.x * gmSar, y: t.y / gmSar });
+      }));
+      const shotClusters = [];
+      for (const t of tips) {
+        let c = shotClusters.find(c2 => Math.hypot(c2.seed.x - t.x, c2.seed.y - t.y) <= SHOT_CLUSTER_R);
+        if (!c) { c = { seed: t, list: [] }; shotClusters.push(c); }
+        c.list.push(t);
       }
-    }));
-    Object.values(byNet).forEach(list => list.sort((a, b) => a.len - b.len).forEach((s, i) => { shotStagger[s.id] = i * 9; }));
+      for (const c of shotClusters) {
+        if (c.list.length < 2) continue;
+        c.list.sort((a, b) => a.len - b.len).forEach((s, i) => { if (i) shotStagger[s.id] = i * SHOT_STAGGER_STEP; });
+      }
+    }
     // a PASS's drawn line comes from the AUTHORED chain (planner geometry:
     // release waypoint → catch waypoint, like renderBranchGhostArrows), NOT the
     // animation plan's fly legs — those launch/land on warped blade positions
@@ -8663,14 +8712,15 @@ export default function DrillAnimator() {
         const len = Math.hypot(L.x1 - ox, L.y1 - oy) || 1, ux = (L.x1 - ox) / len, uy = (L.y1 - oy) / len;
         const sp = sb ? gmMove(sb.x, sb.y, ux, uy, START_OFF) : { x: L.x0, y: L.y0 };
         const sx = sp.x, sy = sp.y;
-        // end: a shot stops just short of the net (+ stagger for several on one net);
-        // a pass/rim/chip into a receiver's badge stops just off its edge. Clamp the
-        // offset so a SHORT leg's arrow never overshoots its own start and reverses.
+        // end: a shot stops just short of the net (+ stagger when another shot's
+        // head lands on top of this one); a pass/rim/chip into a receiver's badge
+        // stops just off its edge. Clamp the offset so a SHORT leg's arrow never
+        // overshoots its own start and reverses.
         const eb = runEnd && !L.shot ? nearBadge(L.x1, L.y1) : null;
         // whiteboard: a chip/rim that lands LOOSE (no collector badge) gets a
         // ghost puck sitting on the landing spot — the line stops just short
         const ghostLand = !flat && whiteboard && runEnd && (L.rim || L.chip) && !eb;
-        let eGap = L.shot && runEnd ? 6 + (shotStagger[`${q.id}/${k}`] || 0) : eb ? START_OFF : ghostLand ? 3.4 : 0;
+        let eGap = L.shot && runEnd ? SHOT_TIP_GAP + (shotStagger[`${q.id}/${k}`] || 0) : eb ? START_OFF : ghostLand ? 3.4 : 0;
         const eCap = Math.max(0, Math.hypot((L.x1 - sx) * gmSar, (L.y1 - sy) / gmSar) - 2);
         if (eGap > 0) eGap = Math.min(eGap, eCap);
         // pass/rim/chip arrivals register their natural TIP so same-direction heads at
@@ -8795,7 +8845,7 @@ export default function DrillAnimator() {
     const arrow = (a, b, shot, key, op = OP_GHOST) => {
       const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1, ux = dx / len, uy = dy / len;
       const sp = gmMove(a.x, a.y, ux, uy, Math.min(START_OFF, len / 2));
-      const base = Math.min(shot ? 6 : START_OFF, Math.max(0, len - 2));
+      const base = Math.min(shot ? SHOT_TIP_GAP : START_OFF, Math.max(0, len - 2));
       const ep0 = gmMove(b.x, b.y, -ux, -uy, base);
       const back = arrivalBack("main", ep0.x, ep0.y);
       const ep = back ? gmMove(b.x, b.y, -ux, -uy, Math.min(base + back, Math.max(0, len - 2))) : ep0;
@@ -9206,8 +9256,10 @@ export default function DrillAnimator() {
   // own (.hd-preso offsets by --hd-act) and tapping it still advances the hold.
   const actOn = !aiPlay;
   // exactly what clearInk would remove, so the button can't promise something
-  // different from what it does
-  const inkCount = pieces.reduce((n, p) => n + (p.kind === "mark" && !p.lock ? 1 : 0), 0);
+  // different from what it does — same predicate, same buffer
+  const inkCount = pieces.reduce((n, p) => n + (inkMine(p, isSketch) ? 1 : 0), 0) + penInk.length;
+  // the other pen state's ink, so a dead button can say whose it is
+  const inkOther = pieces.reduce((n, p) => n + (inkMine(p, !isSketch) ? 1 : 0), 0);
 
   // Which players should wear waypoint numbers: the receivers of any PASS step
   // shown in the action panel that's currently open. Derived rather than stored,
@@ -10345,15 +10397,20 @@ export default function DrillAnimator() {
           {/* what happens to the BOARD */}
           <div className="hd-pengroup">
             {/* "Clear" beside a trash can, in red, read as "clear the BOARD" —
-                it only ever removes ink. Three things say so now: the label
-                names what goes, the count says how much, and with no ink on
-                the sheet the button is dead, which is the strongest signal of
-                all — a board full of players showing a greyed-out button
-                plainly isn't offering to delete them. */}
+                it only ever removes ink, and only the ink this pen state laid.
+                Three things say so: the label names what goes, the count says
+                how much — of THIS state's ink, so switching states changes the
+                number — and with none of it on the sheet the button is dead,
+                which is the strongest signal of all. A board full of players,
+                or of the other state's ink, showing a greyed-out button plainly
+                isn't offering to delete any of it. The title carries the scope,
+                because the label has no room for it at 320px. */}
             <div className="hd-pensep" />
             <button className="hd-pentool danger" disabled={!inkCount} onClick={clearInk}
               title={inkCount
-                ? `Remove ${inkCount} ink mark${inkCount > 1 ? "s" : ""} — players, routes and props are untouched. Undo restores them.`
+                ? `Remove ${inkCount} ${isSketch ? "sketch" : "ink"} mark${inkCount > 1 ? "s" : ""} — your ${isSketch ? "smart-pen ink" : "sketch ink"}, players, routes and props are untouched. Undo restores them.`
+                : inkOther
+                ? `No ${isSketch ? "sketch" : "smart-pen"} ink to clear — the ${inkOther} mark${inkOther > 1 ? "s" : ""} on the sheet ${inkOther > 1 ? "are" : "is"} ${isSketch ? "smart-pen ink. Switch the pen to Manual or Auto" : "sketch ink. Switch the pen to Sketch"} to clear ${inkOther > 1 ? "those" : "it"}.`
                 : "No ink on the sheet to clear"}>
               <Icon name="trash" size={17} />
               <span>Clear ink{inkCount ? ` ${inkCount}` : ""}</span>
@@ -10664,7 +10721,7 @@ export default function DrillAnimator() {
           <Icon name="rink" size={16} />
           <span className="hd-blbl">{rink === "full" ? "Full"
             : rink === "half" ? `Half ${halfNS ? (halfFlip ? "↑" : "↓") : (halfFlip ? "←" : "→")}`
-            : "¼ ice"}</span>
+            : QUARTERS.find(q => q[0] === rink)?.[2] || "¼ ice"}</span>
         </button>
         <button ref={barBtnRefs.settings} className={`hd-barbtn${openMenu === "settings" ? " on" : ""}`} title="Menu"
           onClick={() => setOpenMenu(m => (m === "settings" ? null : "settings"))}>
@@ -10839,19 +10896,9 @@ export default function DrillAnimator() {
               opts={TYPEFACES.map(([v, lab]) => [v, lab])} />
           </PrefRow>
           <PrefRow title="Handedness"
-            desc="Which side the bar's controls sit on. Left mirrors both bars, so Menu, Rink and the palette fall under your left thumb instead of reaching across the ice. The rink and everything on it stay exactly where they are.">
+            desc="Which side the bar's controls sit on. Left mirrors the bottom bar and the Draw and Edit palettes, so Menu, Rink and the tools fall under your left thumb instead of reaching across the ice. The rink and everything on it stay exactly where they are.">
             <Pills value={hand} set={setHand} opts={[["left", "Left"], ["right", "Right"]]} />
           </PrefRow>
-          <PrefToggle title="Whiteboard mode" on={whiteboard} set={setWhiteboard}
-            desc="Draw players as classic X and O symbols with plain arrowed routes, the way a coach's board looks. Shots stay flat on the ice, and splashes and detailed animation are suppressed." />
-          {whiteboard && (
-            <>
-              <PrefToggle title="Circled symbols" on={wbCircle} set={setWbCircle}
-                desc="Put each X or O on an opaque disc so it stays readable where it crosses a rink line." />
-              <PrefToggle title="Player names" on={wbNames} set={setWbNames}
-                desc="Show a name tag under every symbol. Off still names a player while their panel is open." />
-            </>
-          )}
           <PrefToggle title="Stretch to fill" on={stretchFill} set={setStretchFill}
             desc="Full ice stretches to fill the screen. Off letterboxes it to true 200′ × 85′ proportions, so distances on the board match distances on the rink." />
           <PrefToggle title="Detailed animations" on={detailAnim} set={setDetailAnim}
@@ -10868,6 +10915,19 @@ export default function DrillAnimator() {
             <input type="range" min={0.1} max={1} step={0.05} value={markOpacity} style={{ width: "100%" }}
               onChange={e => setMarkOpacity(parseFloat(e.target.value))} />
           </PrefRow>
+
+          {/* Whiteboard mode itself is a board choice, not a preference — it
+              lives in the Rink menu next to full/half/quarter. What stays here
+              is how its symbols are drawn, and only while it is on. */}
+          {whiteboard && (
+            <>
+              <div className="hd-mh hd-prefsec">Whiteboard</div>
+              <PrefToggle title="Circled symbols" on={wbCircle} set={setWbCircle}
+                desc="Put each X or O on an opaque disc so it stays readable where it crosses a rink line. Whiteboard mode itself is in the Rink menu." />
+              <PrefToggle title="Player names" on={wbNames} set={setWbNames}
+                desc="Show a name tag under every symbol. Off still names a player while their panel is open." />
+            </>
+          )}
 
           {/* Smart pen — settings that outlive a sketch, so they belong with the
               standing preferences rather than inside the Draw palette (which is
@@ -11033,7 +11093,16 @@ export default function DrillAnimator() {
       )}
 
       {openMenu === "rinkmenu" && (
+        /* One menu answering "what surface, drawn which way". Style sits on top
+           because it is the same class of choice as full-vs-half — which board
+           you are drawing on — and it deliberately does NOT close the menu, so
+           the coach can see the board flip and change their mind. The surface
+           rows below do close it, as they always have. */
         <div className="hd-menu" style={menuAnchor}>
+          <div className="hd-mh">Board style</div>
+          <Pills value={whiteboard ? "wb" : "graphic"} set={v => setWhiteboard(v === "wb")}
+            opts={[["graphic", "Graphic"], ["wb", "Whiteboard"]]} />
+          <div className="hd-rule" />
           <div className="hd-mh">Ice surface</div>
           <button className={`hd-item${rink === "full" ? " on" : ""}`}
             onClick={() => { setRink("full"); setOpenMenu(null); }}>Full ice</button>
@@ -11045,8 +11114,15 @@ export default function DrillAnimator() {
             onClick={() => { setRink("half"); setHalfNS(true); setHalfFlip(false); setOpenMenu(null); }}>Half ice · net ↓</button>
           <button className={`hd-item${rink === "half" && halfNS && halfFlip ? " on" : ""}`}
             onClick={() => { setRink("half"); setHalfNS(true); setHalfFlip(true); setOpenMenu(null); }}>Half ice · net ↑</button>
-          <button className={`hd-item${rink === "quarter" ? " on" : ""}`}
-            onClick={() => { setRink("quarter"); setOpenMenu(null); }}>Quarter sheet</button>
+          {/* the pad is laid out the way the quadrants sit on the sheet, so
+              picking one is a glance rather than a read */}
+          <div className="hd-mh hd-prefsec">Quarter sheet</div>
+          <div className="hd-quadpad">
+            {QUARTERS.map(([v, label]) => (
+              <button key={v} className={`hd-mini${rink === v ? " on" : ""}`} aria-pressed={rink === v}
+                onClick={() => { setRink(v); setOpenMenu(null); }}>{label}</button>
+            ))}
+          </div>
         </div>
       )}
 
@@ -11151,7 +11227,7 @@ export default function DrillAnimator() {
             <summary style={{ cursor: "pointer", fontSize: 12.5, fontWeight: 700, color: "#93a3b5", padding: "4px 0" }}>
               DSL reference — every command, tap to expand</summary>
           <div className="hd-note">
-            Feet: x 0–200, y 0–85. <b>RINK</b> full|half|quarter ·
+            Feet: x 0–200, y 0–85. <b>RINK</b> full|half|quarter-tl|quarter-tr|quarter-bl|quarter-br ·
             <b> PIECE</b> id player|puck|cone|net|bumper|deker|passer|label|tire x y [#color] [label] [speed=1.2] [hand=L] [sym=LW] [on=F1]
             (<code>sym=</code> is a player&apos;s whiteboard symbol — ≤3 chars, shown instead of the skater when <b>Whiteboard mode</b> is on; <code>△</code>/<code>○</code>/<code>□</code> draw as real shapes; unset falls back to the player&apos;s name, or X if that&apos;s still the auto id like P1)
             (a <b>bumper</b> is a solid barrier — players skate around it and pucks carom off it; a <b>deker</b> a stickhandling gate, a <b>passer</b> a rebounder box — all take <code>face=deg</code>)
