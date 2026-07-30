@@ -250,7 +250,7 @@ export function parseDrill(text) {
         // lines: `route`/`q` bind a PLAYER to the route they queue on; `gap` is the
         // ROUTE's own spacing between stacked skaters
         let pathId = null, qIx = null, gapFt = null, queue = null;
-        let reps = null, regroup = null;   // the circuit's rep count and crossing pace
+        let reps = null, regroup = null, lineDir = null;   // the circuit's rep count, crossing pace, and which way its line stacks
         let feedPucks = false;                               // route: keep the line supplied with pucks
         let connector = false;                               // route: this IS a connector, not a path of its own
         let routeName = null;                                // the whole ROUTE's name, carried by every path in it
@@ -394,6 +394,9 @@ export function parseDrill(text) {
                 if (mq[1].toLowerCase() === "point") { if (n >= 1) queue = { mode: "point", at: n - 1 }; }
                 else if (n > 0) queue = { mode: "lead", lead: n };
               }
+            // line=<deg> — which way the line stacks behind the head. Absent
+            // means "back along the path", which is the usual answer.
+            } else if (key === "line") { const n = parseFloat(v); if (!isNaN(n)) lineDir = n;
             } else if (key === "reps") {
               const n = parseInt(v, 10);   // passes through the whole connected route
               if (!isNaN(n) && n >= 0) reps = n;
@@ -412,7 +415,7 @@ export function parseDrill(text) {
         const mode = lmode || (rand === false ? "sequence" : "reactive");   // legacy rand=off → sequence
         // a bare net= token targets every shot terminal that didn't carry its own >net
         if (net) terminals.forEach(t => { if (t.kind === "shot" && !t.net) t.net = net; });
-        const p = { id, kind, x, y, color, label, text, size, speed, hand, sym, carrier, facing, transfers, pickup, ...(terminals.length ? { terminals } : {}), net, holdLine, goalie, defense, wait, group, crease, lock, cues, mode, alwaysColor, lightId, ...(pathId ? { pathId } : {}), ...(qIx != null ? { q: qIx } : {}), ...(gapFt != null ? { gap: gapFt } : {}), ...(queue ? { queue } : {}), ...(reps != null ? { reps } : {}), ...(regroup != null ? { regroup } : {}), ...(feedPucks ? { feed: true } : {}), ...(connector ? { connector: true } : {}), ...(routeName ? { routeName } : {}), ...(bg ? { bg } : {}), ...(bgOp != null ? { bgOp } : {}), ...(border ? { border } : {}), ...(borderOp != null ? { borderOp } : {}), ...(textOp != null ? { textOp } : {}), forks: [], path: [] };
+        const p = { id, kind, x, y, color, label, text, size, speed, hand, sym, carrier, facing, transfers, pickup, ...(terminals.length ? { terminals } : {}), net, holdLine, goalie, defense, wait, group, crease, lock, cues, mode, alwaysColor, lightId, ...(pathId ? { pathId } : {}), ...(qIx != null ? { q: qIx } : {}), ...(gapFt != null ? { gap: gapFt } : {}), ...(queue ? { queue } : {}), ...(reps != null ? { reps } : {}), ...(lineDir != null ? { lineDir } : {}), ...(regroup != null ? { regroup } : {}), ...(feedPucks ? { feed: true } : {}), ...(connector ? { connector: true } : {}), ...(routeName ? { routeName } : {}), ...(bg ? { bg } : {}), ...(bgOp != null ? { bgOp } : {}), ...(border ? { border } : {}), ...(borderOp != null ? { borderOp } : {}), ...(textOp != null ? { textOp } : {}), forks: [], path: [] };
         pieces.push(p); byId[id] = p;
       } else if (cmd === "PATH") {
         const id = tok[1];
@@ -716,6 +719,7 @@ export function serializeDrill(rink, pieces, title = "", desc = "", steps = [], 
     const lnx = p.kind === "path"
       ? `${p.reps != null && p.reps !== 1 ? " reps=" + p.reps : ""}${p.regroup > 0 && p.regroup !== TRANSIT_RATE ? " regroup=" + f2(p.regroup) : ""}`
       : "";
+    const lline = p.kind === "path" && p.lineDir != null ? ` line=${f1(p.lineDir)}` : "";
     const lfeed = p.kind === "path" && p.feed ? " feed" : "";
     const lconn = p.kind === "path" && p.connector ? " connector" : "";
     // the ROUTE's name, written on every path of the circuit that carries it
@@ -730,7 +734,7 @@ export function serializeDrill(rink, pieces, title = "", desc = "", steps = [], 
           ? ` mode=always${p.alwaysColor || (p.cues && p.cues[0] && p.cues[0].color) ? ":" + String(p.alwaysColor || p.cues[0].color).replace("#", "") : ""}`
           : ` mode=${lm}`)
       : "";
-    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${sm}${car}${gp}${pas}${terms}${hld}${wt}${fac}${gl}${crs}${df}${lck}${siz}${grp}${lgt}${lin}${lgap}${lq}${lnx}${lfeed}${lconn}${lrn}${cue}${rnd}${spd}`);
+    out.push(`PIECE ${p.id} ${p.kind} ${f1(p.x)} ${f1(p.y)} ${p.color}${lbl}${hnd}${sm}${car}${gp}${pas}${terms}${hld}${wt}${fac}${gl}${crs}${df}${lck}${siz}${grp}${lgt}${lin}${lgap}${lq}${lline}${lnx}${lfeed}${lconn}${lrn}${cue}${rnd}${spd}`);
     if (p.path.length) out.push(`PATH ${p.id} ${p.path.map(segToStr).join(" ")}`);
     // route branches (players): one conditional continuation per cue colour, with
     // the action the player performs at its end (skate default → omitted). Branches

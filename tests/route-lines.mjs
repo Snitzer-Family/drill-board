@@ -1,4 +1,4 @@
-import { QUEUE_GAP, QUEUE_LEAD, queueOf, isMobile, headHeading, stackSpot, queueRelease, transitObstacles, chainOf as chainOfRaw, lowerRoutes as lowerRaw, exitOf, nextOf } from '../src/route-lines.js';
+import { QUEUE_GAP, QUEUE_LEAD, queueOf, isMobile, headHeading, lineDirDeg, stackSpot, queueRelease, transitObstacles, chainOf as chainOfRaw, lowerRoutes as lowerRaw, exitOf, nextOf } from '../src/route-lines.js';
 import { TRANSIT_RATE, REPS_MAX, LINE_LEG_CAP, CROSSING_DASH } from '../src/constants.js';
 import { readFileSync } from 'node:fs';
 const src = f => readFileSync(new URL('../src/' + f, import.meta.url), 'utf8');
@@ -163,6 +163,27 @@ T('isMobile: null is not', isMobile(null), false);
 { // a line with no rule still lowers cleanly — everyone goes at once, as before
   const out = lowerRoutes([path(), skater('P1', 1), skater('P2', 2)]);
   T('no rule leaves every member unheld', out.filter(p => p.kind === 'player').every(p => p.wait === null), true);
+}
+
+// ---- lineDir: which way the line stacks ----
+{
+  // lineDir is where the SECOND skater stands, not a heading stacked backwards
+  // along. The path below leaves its head due east, so its line runs due west.
+  const east = path();                                   // head 60,40, leg 0 runs east
+  T('with no angle set, the line runs back along the path', lineDirDeg(east), 180);
+  T('...so the stack sits behind the start', stackSpot(east, 1, 5), { x: 55, y: 40 });
+  const south = path({ lineDir: 90 });
+  T('an angle overrides it', lineDirDeg(south), 90);
+  const sp = stackSpot(south, 1, 5);
+  T('...and 90 means the line runs SOUTH, the way it reads', [Math.round(sp.x), Math.round(sp.y)], [60, 45]);
+  T('the head is never moved by it', stackSpot(south, 0, 5), { x: 60, y: 40 });
+  // 0 is a real angle, not "unset" — the difference matters for a line aimed east
+  const zero = path({ lineDir: 0 });
+  T('a zero angle is honoured, not treated as absent', lineDirDeg(zero), 0);
+  T('...and runs east, opposite the default for this path',
+    [Math.round(stackSpot(zero, 1, 5).x), Math.round(stackSpot(zero, 1, 5).y)], [65, 40]);
+  // the drawn direction of travel is the PATH's business and must not follow
+  T('the head marker still points along the path', headHeading(south).x > 0.99, true);
 }
 
 // ---- exitOf: where a path hands off ----

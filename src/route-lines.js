@@ -66,10 +66,28 @@ export function headHeadingDeg(route) {
     : ((route && route.facing) || 0);
 }
 
-// ...the same thing as a unit vector. The line stacks backwards along it, so
-// skaters queue behind the start rather than beside it.
+// ...the same thing as a unit vector.
 export function headHeading(route) {
   const a = (headHeadingDeg(route) * Math.PI) / 180;
+  return { x: Math.cos(a), y: Math.sin(a) };
+}
+
+// WHICH WAY THE LINE RUNS from the head, in degrees. Note the direction: this is
+// where the SECOND skater stands relative to the first, not a heading the stack
+// runs backwards along. Storing it the other way round is possible and reads
+// wrong everywhere it surfaces — `line=90` would put the line north, and dragging
+// the knob down would send the skaters up.
+//
+// By default it is back along the path's entry heading, so they queue behind the
+// start rather than beside it. That is only a default: real lines stand where
+// there is room — along the boards, out of the shooting lane, angled so the next
+// group can see — so a path may name its own angle, and the drawn direction of
+// travel is left alone.
+export function lineDirDeg(route) {
+  return route && route.lineDir != null ? route.lineDir : headHeadingDeg(route) + 180;
+}
+export function lineHeading(route) {
+  const a = (lineDirDeg(route) * Math.PI) / 180;
   return { x: Math.cos(a), y: Math.sin(a) };
 }
 
@@ -79,9 +97,9 @@ export function headHeading(route) {
 // — the coach moves the route. Sliding the whole stack instead would take the head
 // skater off the route's start, which is worse.
 export function stackSpot(route, k, gap = QUEUE_GAP) {
-  const h = headHeading(route);
+  const h = lineHeading(route);
   const d = Math.max(0, k) * (gap > 0 ? gap : QUEUE_GAP);
-  return { x: clampX(route.x - h.x * d), y: clampY(route.y - h.y * d) };
+  return { x: clampX(route.x + h.x * d), y: clampY(route.y + h.y * d) };
 }
 
 // How a line releases: what holds skater k on their mark until it is their turn.

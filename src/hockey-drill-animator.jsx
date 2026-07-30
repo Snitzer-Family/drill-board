@@ -9,7 +9,7 @@ import { mdEscape, mdInline, mdBlock } from "./md.js";
 import { clampX, clampY, fitInside, segEnd, segD, nearestT, splitSeg, zigzagPoints, wigglePoints, wigglePoly, zigzagPoly, convertSeg, fitRoute, evalSeg, rdp, catmullToBezier, alignJoint, mirrorJoint, translateJointHandles, trimSegStart, trimSegEnd, trimPolyStart, trimPolyEnd, gapPolyAt } from "./geometry.js";
 import { dirOf, dirAtWaypoint, spreadDir } from "./route-dir.js";
 import { lowerRoutes, queueOf, stackSpot, isMobile, unbindLine, transitPoly, transitObstacles, chainOf, crossRate,
-  exitOf, nextOf, headHeadingDeg as routeHeadDeg, QUEUE_GAP, QUEUE_LEAD } from "./route-lines.js";
+  exitOf, nextOf, headHeadingDeg as routeHeadDeg, lineDirDeg, QUEUE_GAP, QUEUE_LEAD } from "./route-lines.js";
 import { PLAYER_R, TRANSIT_RATE, CROSSING_DASH } from "./constants.js";
 import * as boards from "./boards.js";
 import { netShapes, bumperShapes, solidShapes, detourRoute, segCrossesNet } from "./net-collide.js";
@@ -4541,6 +4541,19 @@ export default function DrillAnimator() {
             onChange={v => updateById(R.id, { gap: v })} />
           <span className="hd-sechint">apart</span>
         </div>
+        {/* Which way they stack. Set by dragging the knob at the end of the line
+            on the ice — this is the way back to the default, and the only place
+            that says an angle has been set at all. */}
+        <div className="hd-poprow">
+          <span className="hd-sechint">
+            {R.lineDir != null
+              ? `Stacked at ${Math.round(R.lineDir)}° — drag the knob on the ice to swing them.`
+              : "Stacked back along the path — drag the knob on the ice to swing them."}
+          </span>
+          {R.lineDir != null && (
+            <button className="hd-mini" onClick={() => updateById(R.id, { lineDir: undefined })}>Follow the path</button>
+          )}
+        </div>
         <div className="hd-sechint">
           {R.feed
             ? "Every skater collects one here, on every lap back through — the line never runs dry."
@@ -6404,6 +6417,13 @@ export default function DrillAnimator() {
     // named-group move: slide the whole formation by dragging one member
     if (d.kind === "gmove") { const dx = pt.x - d.last.x, dy = pt.y - d.last.y; d.last = pt; moveMembersBy(id => d.members.has(id), dx, dy); if (d.touch) setLoupe(pt); return; }
     if (d.touch) setLoupe(pt);
+    if (d.kind === "linedir") {
+      // swing the LINE about the head. Whole degrees: a stack of skaters can't
+      // show a fraction of one, and it keeps the DSL readable.
+      const a = (Math.atan2(pt.y - d.cy, pt.x - d.cx) * 180) / Math.PI;
+      updateById(d.id, { lineDir: Math.round(a) });
+      return;
+    }
     if (d.kind === "rotate") {
       update(p => {
         if (p.id !== d.id) return p;
@@ -6623,6 +6643,7 @@ export default function DrillAnimator() {
     }
     if (d.kind === "aim") { setAim(d.pkId, d.target, null); return; }  // tap to clear the aim
     if (d.kind === "release") { setAim(d.pkId, { term: d.term }, null); return; }  // tap clears direction back to auto
+    if (d.kind === "linedir") { setPopup({ type: "point", id: d.id, seg: 0 }); return; }
     if (d.kind === "rotate") { setPopup({ type: "piece", id: d.id }); return; }
     if (d.kind === "piece") {
       if (d.line != null) {
@@ -7460,6 +7481,35 @@ export default function DrillAnimator() {
     else if (s0 && s0.type === "Q" && originActive && activeWp !== 0)
       ctrlPt(`sq0`, s0.cx, s0.cy, "q", 0, 0, rp.x, rp.y);
     return <g>{els}</g>;
+  }
+
+  // WHICH WAY THE LINE STANDS. The stack runs back along the path by default, but
+  // a coach puts a line where there is room — along the boards, out of the
+  // shooting lane — so this is a real thing to set, and setting it by dragging
+  // where the skaters go is the only way to see the answer while you choose it.
+  //
+  // The knob sits past the LAST skater, so the leash you drag is the line itself.
+  // With nobody on it yet the leash is one spacing long, which still says which
+  // way the line will grow.
+  function renderLineHandle(p, yf = yFix) {
+    if (!editing || tool === "draw" || !p || p.kind !== "path" || p.connector) return null;
+    if (p.id !== selectedId || p.lock) return null;
+    const gap = p.gap > 0 ? p.gap : QUEUE_GAP;
+    const n = queueOf(pieces, p.id).length;
+    const R = Math.max(1, n) * gap + gap * 0.9;
+    const a = (lineDirDeg(p) * Math.PI) / 180;
+    // along the line's own direction — the knob is where the line ends
+    const kx = clampX(p.x + Math.cos(a) * R), ky = clampY(p.y + Math.sin(a) * R * yf);
+    const hd = (cx, cy, r, props) => hdot(cx, cy, r, props, yf);
+    return (
+      <g>
+        <line x1={p.x} y1={p.y} x2={kx} y2={ky} stroke={T["ice-select"]} strokeWidth={sw(0.3)}
+          strokeDasharray={sdash("1.4 1.2")} vectorEffect="non-scaling-stroke" opacity={0.7} pointerEvents="none" />
+        {hd(kx, ky, 1.5, { fill: "#14202b", stroke: T["ice-select"], strokeWidth: 0.35, pointerEvents: "none" })}
+        {hd(kx, ky, 4.2, { fill: "transparent", style: { cursor: "grab" },
+          onPointerDown: e => handleDown(e, { kind: "linedir", id: p.id, cx: p.x, cy: p.y }) })}
+      </g>
+    );
   }
 
   // rotation ring + knob for a selected stationary player (touch-friendly);
@@ -10251,6 +10301,7 @@ export default function DrillAnimator() {
           {selected && renderHandles(selected, 1)}
           {renderMarkHandles(1)}
           {selected && renderRotateHandle(selected, 1)}
+          {selected && renderLineHandle(selected, 1)}
           {pieces.map(p => <g key={`ca-${p.id}`}>{renderAim(p, true, 1)}</g>)}
           {drawPieces.filter(p => p.kind !== "label" && p.kind !== "mark").map(p => {
             const dp = displayPos(p);
@@ -11590,6 +11641,7 @@ export default function DrillAnimator() {
             {renderMarkHandles()}
             {renderMarkResize()}
             {selected && renderRotateHandle(selected)}
+            {selected && renderLineHandle(selected)}
           <g opacity={markMO}>{pieces.map(p => <g key={`ca-${p.id}`}>{renderAim(p)}</g>)}</g>
             {!aiPlay && renderLabels()}
             {renderResultSplash()}

@@ -155,6 +155,7 @@ Places a piece. `id` is any unique token (e.g. `F1`, `PK1`, `N2`).
 | `gap=<ft>` | path | Feet between stacked skaters (default `5`, omitted then). |
 | `queue=point:<pt>` | path | Each skater holds until the one **ahead of them** reaches point `<pt>` of the route (1-based). |
 | `queue=lead:<ft>` | path | Each skater holds until the one ahead is `<ft>` **clear of them** — the separation, not the distance travelled (they already start `gap` apart). Omit `queue=` entirely and they all go at once. |
+| `line=<deg>` | path | Which way the line RUNS from the head — where the second skater stands relative to the first — in degrees (0 = east, 90 = south). Absent means straight back along the path, which is the usual answer. Set on the ice by dragging the knob at the end of the line. |
 | `reps=<n>` | path | How many times the whole **route** (the connected circuit of paths) is run. A -> B and back is ONE rep. Every path in a route carries the same number; the app writes it to all of them. With nothing connected, a rep above 1 sends them back to this path's own start. |
 | `route=<name>` | path | The **route's** name — the whole circuit. Carried by every path in it (underscores read as spaces). |
 | `regroup=<n>` | path | Pace multiplier for the skate between routes (default `0.65` — a glide, not another rep). |
