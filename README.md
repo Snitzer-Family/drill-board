@@ -193,7 +193,31 @@ double-tap grammar as adding a point on a line.
 npm install
 npm run dev      # local dev server
 npm run build    # production build to dist/
+npm test         # every tests/*.mjs, auto-discovered
 ```
+
+### App icon
+
+`public/` is generated, not hand-written. The artwork lives in
+`src/app-icon.js`; `node scripts/build-icons.mjs` renders it to `icon.svg` plus
+the three PNGs using the system Chrome (override with `CHROME=`), and those are
+committed — CI has no browser to rasterise with. `tests/app-icon.mjs` fails if
+they fall out of sync.
+
+The icon is **two renditions**, switched by a size media query inside the SVG:
+above 40px a drill plan (an end zone with a route driving at the net), at 40px
+and below the same sheet holding nothing but the blue goalie crease — which
+doubles as a monogram, since a flat-backed crease reads as a "D". A diagram
+can't be a favicon: at 16px a rink foot is a fifth of a pixel, so the fine
+markings smear rather than shrink.
+
+`favicon.ico` (16/32/48, holding the crease rendition) ships alongside the SVG
+because **iOS Safari doesn't support SVG favicons** — without it, Safari has no
+candidate and shows no tab icon at all.
+
+**iOS caches icons hard.** An icon already on the home screen will not update
+until you delete it and re-add; a stale tab favicon needs Settings → Safari →
+Clear History and Website Data.
 
 The component (`src/hockey-drill-animator.jsx`) default-exports `DrillAnimator`
 and expects nothing — it drops into any React 18+ setup, or runs directly as a

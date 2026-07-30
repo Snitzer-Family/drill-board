@@ -81,6 +81,8 @@ restart so the settings watcher reloads it.
   — intentionally NOT regulation; yFix prop counter-corrects fill-stretch so
   circles render round)
 - `icons.jsx` — PieceIcon (screen-true matrix frames), Stepper, DiagPanel
+- `app-icon.js` — the app icon artwork (an end zone with a route driving at the
+  net), the sole source for everything in `public/`. Not imported at runtime
 - `styles.js` — ALL CSS, including the hard-won safe-area layout rules. Colours
   are `var(--db-*)` tokens only — a raw hex here fails `tests/theme-contrast.mjs`
 - `theme.js` — the colour system: semantic tokens per theme, the CSS emitter,
@@ -100,6 +102,64 @@ restart so the settings watcher reloads it.
   receiver time-warps, warp-aware positions
 - `hockey-drill-animator.jsx` — App shell: state, pointer interaction, popouts,
   loupe, menus
+
+## App icon (`public/`, generated — never hand-edit)
+
+- The art lives in `src/app-icon.js`; `node scripts/build-icons.mjs` renders it
+  to `public/icon.svg` + the three PNGs, and those are **committed**. CI runs on
+  ubuntu with no browser, so they can't be built there — the script rasterises
+  with the system Chrome (via `CHROME=`) so the no-dependencies rule holds.
+- **Two renditions, switched by size.** Above 40px it's the drill plan (an end
+  zone, a route driving at the net). At 40px and below it's the SAME sheet —
+  same `TILE`, same `BOARDS_W`, same ice — holding nothing but the blue crease.
+  Not a second picture: one set of silhouette numbers, one place to change them.
+  A diagram cannot be a favicon: at 16px one rink foot is 0.19 device px, so the
+  goal line lands on half a pixel and the detail tier doesn't shrink, it smears.
+  Shrinking the plan was tried three ways (fewer marks, thicker strokes, a
+  scaled crease) and all three were indistinct.
+- **No classes inside the `.tiny` group, and that's load-bearing.** Reusing
+  `.ice` / `.boards` / `.crease` would drag the dark-mode block onto it and flip
+  the sheet dark, which puts the crease at **2.2:1** on dark ice (measured). A
+  white sheet already reads on a dark tab strip, so this rendition wants no dark
+  variant. Blue on ice is 7.5:1; the slate ring is what keeps the tile from
+  dissolving into a light browser chrome, which is nearly the same colour as ice.
+- **The small crease reads as a letter D, and that is accepted** — it doubles as
+  a monogram for the app's initial. A flat-backed D is a D, and the context that
+  would disambiguate it is exactly what has to go at 16px. Adding the goal line
+  back makes it read as a lowercase "b", which is worse; that was tried. Don't
+  "fix" it toward rink accuracy — accuracy is what makes it illegible here.
+- The small group is hidden by a `display="none"` **presentation attribute** and
+  revealed by the media query, never the reverse: CSS beats presentation
+  attributes, so anywhere `<style>` is stripped it falls back to the plan
+  instead of painting a red tile over it. Pinned by a test.
+- Two file variants. `tab` is the favicon: both renditions, transparent corners,
+  and an embedded `prefers-color-scheme` block, because a favicon gets no host
+  cascade and `var(--db-*)` would resolve to nothing. `bleed` is the PNG source:
+  the plan ONLY (those are 180px up, and a PNG can't evaluate a media query),
+  **opaque** and full-bleed with the art inset 7.5%, because iOS composites a
+  transparent apple-touch-icon against black and then applies its own mask.
+- Geometry is in rink feet but **the stroke weights are icon weights**, and the
+  goal line is at x=20, not the regulation 11. Don't reconcile them with
+  `rink.jsx`.
+- `tests/app-icon.mjs` is the drift guard. It byte-matches `icon.svg` and
+  compares a sha256 of the `bleed` variant that the script stamps into that
+  file's first line — without that hash, changing only the PNG-side geometry
+  would ship stale bitmaps invisibly. It can't check pixels; nothing can,
+  without a rasteriser in CI.
+- **iOS Safari does not support SVG favicons.** With only `icon.svg` linked it
+  has no candidate at all and shows a blank tab icon — this bit once. So
+  `favicon.ico` ships too, holding 16/32/48 of the *crease* rendition (a raster
+  can't evaluate the media query, so the plan would be the wrong picture). The
+  `.ico` is listed first and the SVG carries `sizes="any"`, which is what keeps
+  Chrome/Firefox on the scalable one. The container is hand-built in
+  `build-icons.mjs` — PNG payloads inside an `.ico` are legal and need no bitmap
+  encoder — and `tests/app-icon.mjs` parses it, because a malformed `.ico` fails
+  silently and looks exactly like the bug it's there to fix.
+- **An installed iOS home-screen icon does not update**, and Safari caches
+  favicons hard. After deploying, the phone keeps the old one until the
+  home-screen icon is deleted and re-added; a stale tab favicon needs
+  Settings → Safari → Clear History and Website Data. Expect to debug this as a
+  non-bug at least once.
 
 ## Domain model (don't break these invariants)
 
