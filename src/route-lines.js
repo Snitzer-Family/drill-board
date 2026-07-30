@@ -532,6 +532,7 @@ export function lowerRoutes(pieces) {
     fed.push(...share.add);
     line.forEach((P, k) => {
       const spot = spots[k];
+      const arrivals = [];                 // marks this skater has to queue at
       // the head of the line goes on the whistle; everyone behind waits their turn.
       // A member's OWN wait= is overwritten, not merged: the line owns the release.
       const wait = k > 0 ? queueRelease(R, line[k - 1].id) : null;
@@ -552,15 +553,39 @@ export function lowerRoutes(pieces) {
         // a copy per member: the unfold is shared work, but no two skaters should
         // ever hand each other the same leg objects — and the queue holds below are
         // per-member, so they could not be shared even if we wanted to
+        _arrivals: arrivals,
         path: (() => {
           const mine = legs.map(s => ({ ...s }));
           // Every lap after the first begins by ARRIVING somewhere. Queue there.
           // Only for members with someone ahead of them: the head of the line has
           // nobody in front, so they skate in and carry on.
-          if (k > 0) for (const lp of laps) {
+          for (const lp of laps) {
             if (!lp.base || !mine[lp.base]) continue;
-            const rule = arriveRelease(routes.get(lp.route) || R, line[k - 1].id, lp.base);
+            const dest = routes.get(lp.route) || R;
+            let rule = null;
+            if (k > 0) {
+              // behind my own line-mate: we left in order, so we arrive in order,
+              // and `base` means the same leg to both of us
+              rule = arriveRelease(dest, line[k - 1].id, lp.base);
+            } else if (dest.id !== R.id) {
+              // The HEAD of an arriving group has nobody in front of them from
+              // their own line — but the path they are skating into may already
+              // have a line stood on it, and ploughing through it is exactly what
+              // a coach never wants. So they queue behind the LAST of that line,
+              // by that path's own rule.
+              //
+              // Keyed in the TRIGGER's frame, which is what made this look
+              // impossible: `waitOn.at` indexes the piece being waited ON, not the
+              // one waiting, so a destination member's own leg numbers are the
+              // right ones to use and queueRelease already produces them.
+              const theirs = queueOf(list, dest.id);
+              const last = theirs.length ? theirs[theirs.length - 1] : null;
+              if (last && last.id !== P.id) rule = queueRelease(dest, last.id);
+            }
             if (rule) mine[lp.base] = { ...mine[lp.base], waitOn: rule };
+            // ...and remember WHERE they queue, so the board can stand them behind
+            // the line rather than on top of it
+            if (rule) arrivals.push({ base: lp.base, path: dest.id });
           }
           return mine;
         })(),

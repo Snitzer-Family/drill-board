@@ -3939,6 +3939,52 @@ export default function DrillAnimator() {
     return { x: clampX(R.x + h.x * d), y: clampY(R.y + h.y * d) };
   }
 
+  // ...and the same rule for a skater who has SKATED IN to a path and is holding
+  // at its head for their turn. They were parked exactly on the mark, on top of
+  // whoever was already stood there — queued in time, stacked in space. This
+  // walks them back down the line by however many people are still in front.
+  //
+  // "In front" is the wait chain the lowering pass built: I hold on someone, who
+  // may hold on someone else, all the way back to whoever is on the mark. Walking
+  // it costs nothing and needs no arrival times.
+  function arrivalShift(p, t) {
+    const list = p && p._arrivals;
+    if (!list || !list.length) return null;
+    for (const ar of list) {
+      const R = pieces.find(q => q.id === ar.path && q.kind === "path");
+      if (!R) continue;
+      const leg = (p.path || [])[ar.base];
+      if (!leg || !leg.waitOn || !leg.waitOn.on) continue;
+      const held = ((getPlan().trigPause || {})[p.id + "/" + ar.base] || 0);
+      if (held <= 1e-3) continue;                       // nothing to wait for here
+      const arrive = waypointTime(p, ar.base - 1);
+      if (!(t >= arrive - 1e-6 && t < arrive + held)) continue;   // not standing there now
+      // how many are still ahead of me on this mark
+      const gap0 = R.gap > 0 ? R.gap : QUEUE_GAP;
+      let n = 0, on = leg.waitOn.on;
+      for (let hop = 0; hop < 12 && on; hop++) {
+        const q = effOf(pieces.find(w => w.id === on));
+        if (!q) break;
+        const d = displayPosAt(q, t);
+        if (!d) break;
+        // step into the space as it opens, exactly as the standing line does —
+        // counting them as simply "gone" the moment they moved snapped everyone
+        // behind them a whole spacing forward
+        const u = Math.min(1, Math.hypot(d.x - R.x, d.y - R.y) / gap0);
+        const w = 1 - u * u * (3 - 2 * u);
+        if (w <= 1e-3) break;
+        n += w;
+        const theirLeg = (q._arrivals || []).find(a => a.path === R.id);
+        const wl = theirLeg && (q.path || [])[theirLeg.base];
+        on = wl && wl.waitOn ? wl.waitOn.on : (q.wait && q.wait.on) || null;
+      }
+      if (n <= 1e-3) return null;
+      const h = lineHeading(R);
+      return { x: clampX(R.x + h.x * n * gap0), y: clampY(R.y + h.y * n * gap0) };
+    }
+    return null;
+  }
+
   function displayPosRaw(p) {
     p = effOf(p);
     // A route is a place, not a skater. It owns a path, so the generic sampler
@@ -3950,7 +3996,7 @@ export default function DrillAnimator() {
     const dp = displayPosAt(p, tNow);
     // still in the queue: stand where the line has shuffled to, facing the way it
     // will set off. At t=0 nobody has gone, so this is the stack as authored.
-    const qs = queueShift(p, tNow);
+    const qs = queueShift(p, tNow) || arrivalShift(p, tNow);
     if (qs) return { ...dp, x: qs.x, y: qs.y };
     if (!effDetail || p.kind !== "player" || animT <= 0) return dp; // detail off / editing board: still frame
     const r = dp.smul || 0;                               // effective speed multiple

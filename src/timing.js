@@ -476,7 +476,10 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
             // measured to a distance, so it chains backwards the same way.
             const trig = pieces.find(q => q.id === s.waitOn.on && q.kind === "player");
             if (!trig || trig.id === p.id) return;
-            const at = Math.max(-1, Math.min(s.waitOn.at == null ? 0 : s.waitOn.at, trig.path.length - 1));
+            // no `at` means "from their start", the same as the start-wait span —
+            // which is what a plain queue rule says when the trigger is standing on
+            // their own mark rather than somewhere down a shared path
+            const at = Math.max(-1, Math.min(s.waitOn.at == null ? -1 : s.waitOn.at, trig.path.length - 1));
             trigT = (at < 0 ? (sw[trig.id] || 0) : rawArr(trig, at))
               + rawSpanFrom(trig, at, Math.max(0, s.waitOn.dist || 0));
           } else {
