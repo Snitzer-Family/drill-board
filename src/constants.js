@@ -51,7 +51,7 @@ export const TYPEFACES = [
 ];
 export const TYPEFACE_KEY = "drillboard:typeface";
 
-export const APP_VERSION = "7.25";
+export const APP_VERSION = "7.26";
 // DSL schema version, stamped into every serialized drill (`DSL <n>` header) so
 // production builds can eventually render a drill per the version that wrote it.
 // Bump ONLY on a breaking DSL change (new kinds/modifiers that older builds would
@@ -69,7 +69,14 @@ export const PLAYER_SCALE = 0.93;
 export const ROUTE_START_GAP = 3;
 // feet between skaters stacked in a line behind a route's start. Out here because
 // the DSL serializer omits the token at this value and route-lines.js applies it.
-export const QUEUE_GAP = 5;
+// The narrowest a line may stand. Measured, not derived: a drawn player icon is
+// 6.4 rink feet wide (getBBox on the rendered <g> — the STICK makes it wider than
+// PLAYER_R * 2 = 5.8 suggests), so anything under that overlaps on the ice.
+export const LINE_MIN_GAP = 6.6;
+// ...and the default leaves a little air on top. The old default was 5, narrower
+// than a player, so every line that didn't set its own gap drew as one smear — a
+// queue of seven read as a blob rather than seven people.
+export const QUEUE_GAP = 8;
 // ...and how far clear of you the skater ahead gets before you go. Measured as
 // the SEPARATION between the two, so it reads the way a coach says it — they
 // already stand QUEUE_GAP apart, and the gap grows to this before the next one

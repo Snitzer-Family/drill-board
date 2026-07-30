@@ -10,6 +10,7 @@ import { clampX, clampY, fitInside, segEnd, segD, nearestT, splitSeg, zigzagPoin
 import { dirOf, dirAtWaypoint, spreadDir } from "./route-dir.js";
 import { lowerRoutes, queueOf, stackSpot, isMobile, unbindLine, transitPoly, transitObstacles, chainOf, crossRate,
   exitOf, nextOf, headHeadingDeg as routeHeadDeg, lineDirDeg, lineHeading, QUEUE_GAP, QUEUE_LEAD } from "./route-lines.js";
+import { LINE_MIN_GAP } from "./constants.js";
 import { PLAYER_R, TRANSIT_RATE, CROSSING_DASH } from "./constants.js";
 import * as boards from "./boards.js";
 import { netShapes, bumperShapes, solidShapes, detourRoute, segCrossesNet } from "./net-collide.js";
@@ -4640,7 +4641,7 @@ export default function DrillAnimator() {
           <button className={`hd-mini${R.feed ? " on" : ""}`} onClick={() => toggleFeed(R.id)}>
             {R.feed ? "✓ Feed pucks" : "Feed pucks"}
           </button>
-          <Stepper value={gap} min={2} max={20} step={1} suffix=" ft"
+          <Stepper value={gap} min={Math.ceil(LINE_MIN_GAP)} max={20} step={1} suffix=" ft"
             onChange={v => updateById(R.id, { gap: v })} />
           <span className="hd-sechint">apart</span>
         </div>

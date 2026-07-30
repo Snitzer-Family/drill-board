@@ -24,7 +24,7 @@
 
 import { segTangentAngle, clampX, clampY, rdp } from "./geometry.js";
 import { netShapes, bumperShapes, detourRoute } from "./net-collide.js";
-import { QUEUE_GAP, QUEUE_LEAD, ICON_SCALE, PLAYER_R, TRANSIT_RATE, REPS_MAX, LINE_LEG_CAP } from "./constants.js";
+import { QUEUE_GAP, QUEUE_LEAD, LINE_MIN_GAP, ICON_SCALE, PLAYER_R, TRANSIT_RATE, REPS_MAX, LINE_LEG_CAP } from "./constants.js";
 
 // feet between stacked skaters, measured back along the route's entry heading,
 // and how far clear of you the skater ahead gets before you go
@@ -98,7 +98,11 @@ export function lineHeading(route) {
 // skater off the route's start, which is worse.
 export function stackSpot(route, k, gap = QUEUE_GAP) {
   const h = lineHeading(route);
-  const d = Math.max(0, k) * (gap > 0 ? gap : QUEUE_GAP);
+  // A line cannot stand tighter than the people in it. Whatever the drill asks
+  // for, hold them clear of each other — anything less draws a queue as one
+  // smear, which is not "tight", it is unreadable.
+  const step = Math.max(LINE_MIN_GAP, gap > 0 ? gap : QUEUE_GAP);
+  const d = Math.max(0, k) * step;
   return { x: clampX(route.x + h.x * d), y: clampY(route.y + h.y * d) };
 }
 

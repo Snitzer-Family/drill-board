@@ -23,7 +23,7 @@ const trip = text => {
 
 const LINE = [
   'RINK full',
-  'PIECE R1 path 60 40 #3f7f8c Left_lane gap=6 queue=lead:18',
+  'PIECE R1 path 60 40 #3f7f8c Left_lane gap=10 queue=lead:18',
   'PATH R1 L 100,40 Q 130,25 150,40',
   'PIECE P1 player 60 40 #d7263d F1 path=R1 q=1',
   'PIECE P2 player 54 40 #2ea043 F2 path=R1 q=2',
@@ -39,7 +39,7 @@ const LINE = [
 { // every new field survives the trip with its value, not just its presence
   const { b } = trip(LINE);
   const R = b.pieces.find(p => p.id === 'R1');
-  T('the path kind survives', [R.kind, R.gap, R.label], ['path', 6, 'Left_lane']);
+  T('the path kind survives', [R.kind, R.gap, R.label], ['path', 10, 'Left_lane']);
   T('the path keeps its legs', R.path.map(s => s.type), ['L', 'Q']);
   T('bindings survive', b.pieces.filter(p => p.pathId).map(p => [p.id, p.pathId, p.q]),
     [['P1', 'R1', 0], ['P2', 'R1', 1], ['P3', 'R1', 2]]);
@@ -98,7 +98,7 @@ const LINE = [
   T('a parsed line lowers to three skaters', out.filter(p => p.kind === 'player').length, 3);
   T('no path piece survives lowering', out.some(p => p.kind === 'path'), false);
   // every member departs from the head; the gap is where they WAIT
-  T('the parsed gap drives the stack', Math.round(out.find(p => p.id === 'P2')._line.spot.x), 54);
+  T('the parsed gap drives the stack', Math.round(out.find(p => p.id === 'P2')._line.spot.x), 50);
 }
 
 // ---- the legacy guard: a pre-route drill must be untouched by any of this ----
@@ -113,7 +113,7 @@ const LINE = [
 }
 
 { // the ROUTE's name — the whole circuit, carried by every path in it
-  const rn = LINE.replace('gap=6', 'gap=6 route=Full_ice_regroup');
+  const rn = LINE.replace('gap=10', 'gap=10 route=Full_ice_regroup');
   const d = parseDrill(rn);
   T('the route name parses, underscores as spaces', d.pieces[0].routeName, 'Full ice regroup');
   T('it round-trips', / route=Full_ice_regroup\b/.test(ser(d)), true);

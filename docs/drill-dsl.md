@@ -152,7 +152,7 @@ Places a piece. `id` is any unique token (e.g. `F1`, `PK1`, `N2`).
 | `face=<deg>` | route-less player, net, bumper, deker, passer, path-less route | Facing angle (0 = +x / toward the right). On a `route` with no `PATH` yet it is the direction the line stacks along. |
 | `path=<pathId>` | player | Stand this player on that **path**. The path owns the geometry; the player's own `PATH` line is ignored. |
 | `q=<n>` | player | Place in the queue, **1-based** (`q=1` is the head of the line). Missing = the back. |
-| `gap=<ft>` | path | Feet between stacked skaters (default `5`, omitted then). |
+| `gap=<ft>` | path | Feet between stacked skaters (default `8`, omitted then). Floored at 6.6 — a drawn player is 6.4 ft across, so a tighter line would overlap into one smear. |
 | `queue=point:<pt>` | path | Each skater holds until the one **ahead of them** reaches point `<pt>` of the route (1-based). |
 | `queue=lead:<ft>` | path | Each skater holds until the one ahead has gone `<ft>`. Everyone leaves from the head — the line shuffles up as it empties — so that distance **is** the gap between them. Omit `queue=` and this is the rule, at the default distance: a line takes turns, and there is no "all at once". |
 | `line=<deg>` | path | Which way the line RUNS from the head — where the second skater stands relative to the first — in degrees (0 = east, 90 = south). Absent means straight back along the path, which is the usual answer. Set on the ice by dragging the knob at the end of the line. |

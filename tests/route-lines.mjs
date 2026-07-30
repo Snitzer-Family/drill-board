@@ -1,3 +1,4 @@
+import { PLAYER_R, LINE_MIN_GAP } from '../src/constants.js';
 import { QUEUE_GAP, QUEUE_LEAD, queueOf, isMobile, headHeading, lineDirDeg, stackSpot, queueRelease, transitObstacles, chainOf as chainOfRaw, lowerRoutes as lowerRaw, exitOf, nextOf } from '../src/route-lines.js';
 import { TRANSIT_RATE, REPS_MAX, LINE_LEG_CAP, CROSSING_DASH } from '../src/constants.js';
 import { readFileSync } from 'node:fs';
@@ -33,7 +34,7 @@ const chainOf = (ps, id) => chainOfRaw(wireAll(ps), id);
 
 // a path running due east from (60,40): head at 60,40 then two straight legs
 const path = (over = {}) => ({
-  id: 'R1', kind: 'path', x: 60, y: 40, color: '#2f9e57', gap: 5, forks: [],
+  id: 'R1', kind: 'path', x: 60, y: 40, color: '#2f9e57', gap: 8, forks: [],
   path: [{ type: 'L', x: 100, y: 40 }, { type: 'L', x: 140, y: 60 }],
   ...over,
 });
@@ -71,9 +72,9 @@ T('isMobile: null is not', isMobile(null), false);
 // ---- stackSpot ----
 {
   const R = path();
-  const spots = [0, 1, 2, 3].map(k => stackSpot(R, k, 5));
+  const spots = [0, 1, 2, 3].map(k => stackSpot(R, k, 8));
   T('head stands on the path start', [spots[0].x, spots[0].y], [60, 40]);
-  T('the line stacks backwards, evenly', spots.map(s => Math.round(s.x)), [60, 55, 50, 45]);
+  T('the line stacks backwards, evenly', spots.map(s => Math.round(s.x)), [60, 52, 44, 36]);
   T('the line stays on one row', spots.every(s => near(s.y, 40)), true);
   T('gap defaults when absent', Math.round(stackSpot(R, 1).x), 60 - QUEUE_GAP);
   T('a zero gap falls back rather than piling up', Math.round(stackSpot(R, 2, 0).x), 60 - 2 * QUEUE_GAP);
@@ -109,10 +110,10 @@ T('isMobile: null is not', isMobile(null), false);
   T('every member departs from the head',
     [p1.x, p1.y, p2.x, p2.y, p3.x, p3.y], [60, 40, 60, 40, 60, 40]);
   T('...and where they WAIT is recorded, in order',
-    [Math.round(p2._line.spot.x), Math.round(p3._line.spot.x)], [55, 50]);
+    [Math.round(p2._line.spot.x), Math.round(p3._line.spot.x)], [52, 44]);
   T('_line records the binding', [p1._line, p3._line],
-    [{ path: 'R1', q: 0, spot: { x: 60, y: 40 }, gap: 5 },
-     { path: 'R1', q: 2, spot: { x: 50, y: 40 }, gap: 5 }]);
+    [{ path: 'R1', q: 0, spot: { x: 60, y: 40 }, gap: 8 },
+     { path: 'R1', q: 2, spot: { x: 44, y: 40 }, gap: 8 }]);
   T('legs are copies, not shared with the route', p1.path[0] !== R.path[0] && p1.path[0] !== p2.path[0], true);
 }
 { // a binding that points at nothing leaves the player alone
@@ -181,23 +182,35 @@ T('isMobile: null is not', isMobile(null), false);
     out.find(p => p.id === 'P2').wait, { on: 'P1', dist: QUEUE_LEAD, mode: 'span' });
 }
 
+// ---- a line cannot stand tighter than the people in it ----
+// The default spacing used to be 5 ft against a 5.8 ft player, so every line that
+// didn't set its own gap drew as one smear. A queue of seven read as a blob.
+T('the default spacing clears a drawn player', QUEUE_GAP > LINE_MIN_GAP, true);
+T('...and the floor itself does', LINE_MIN_GAP >= 6.4, true);
+{
+  const R0 = path();
+  const step = g => Math.hypot(stackSpot(R0, 1, g).x - 60, stackSpot(R0, 1, g).y - 40);
+  T('...and asking for tighter still clears one', step(2) >= LINE_MIN_GAP - 1e-6, true);
+  T('...while a roomier ask is honoured as asked', Math.round(step(12)), 12);
+}
+
 // ---- lineDir: which way the line stacks ----
 {
   // lineDir is where the SECOND skater stands, not a heading stacked backwards
   // along. The path below leaves its head due east, so its line runs due west.
   const east = path();                                   // head 60,40, leg 0 runs east
   T('with no angle set, the line runs back along the path', lineDirDeg(east), 180);
-  T('...so the stack sits behind the start', stackSpot(east, 1, 5), { x: 55, y: 40 });
+  T('...so the stack sits behind the start', stackSpot(east, 1, 8), { x: 52, y: 40 });
   const south = path({ lineDir: 90 });
   T('an angle overrides it', lineDirDeg(south), 90);
-  const sp = stackSpot(south, 1, 5);
-  T('...and 90 means the line runs SOUTH, the way it reads', [Math.round(sp.x), Math.round(sp.y)], [60, 45]);
-  T('the head is never moved by it', stackSpot(south, 0, 5), { x: 60, y: 40 });
+  const sp = stackSpot(south, 1, 8);
+  T('...and 90 means the line runs SOUTH, the way it reads', [Math.round(sp.x), Math.round(sp.y)], [60, 48]);
+  T('the head is never moved by it', stackSpot(south, 0, 8), { x: 60, y: 40 });
   // 0 is a real angle, not "unset" — the difference matters for a line aimed east
   const zero = path({ lineDir: 0 });
   T('a zero angle is honoured, not treated as absent', lineDirDeg(zero), 0);
   T('...and runs east, opposite the default for this path',
-    [Math.round(stackSpot(zero, 1, 5).x), Math.round(stackSpot(zero, 1, 5).y)], [65, 40]);
+    [Math.round(stackSpot(zero, 1, 8).x), Math.round(stackSpot(zero, 1, 8).y)], [68, 40]);
   // the drawn direction of travel is the PATH's business and must not follow
   T('the head marker still points along the path', headHeading(south).x > 0.99, true);
 }
