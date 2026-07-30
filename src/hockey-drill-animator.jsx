@@ -228,6 +228,9 @@ function polyLegSpans(poly, path) {
 }
 
 // swatch palette for on-ice text labels (dark ink first — labels sit on light ice)
+// A path is born teal (#3f7f8c, see defaultColor) and that isn't one of COLORS,
+// so a palette of COLORS alone would never show the current colour as chosen.
+const PATH_COLORS = ["#3f7f8c", ...COLORS];
 const LABEL_COLORS = ["#14202b", "#d7263d", "#1f4fa3", "#1f8a4c", "#e0731d", "#7a3fa8"];
 // label background / border palettes (default first: paper for bg, faint ink for border)
 const LABEL_BG_COLORS = ["#f6fbfd", "#ffd447", "#d7263d", "#1f8a4c", "#3a8dff", "#e0731d", "#14202b"];
@@ -4424,6 +4427,73 @@ export default function DrillAnimator() {
 
   // 1. Where they go. One definition, rendered both in the route's own settings
   //    and at its last waypoint — the two places you'd look for it.
+  // ── a path is a SHAPE ──────────────────────────────────────────────────────
+  // Flipping it, turning it and colouring it are things you do to the shape, so
+  // they belong to the path itself rather than to a multi-selection you have to
+  // build first. The LINE follows for free: a bound skater's position is derived
+  // from the head by lowerRoutes, so moving the geometry moves everyone on it.
+  const PT_KEYS = [["x", "y"], ["cx", "cy"], ["c1x", "c1y"], ["c2x", "c2y"]];
+  const pathPoints = q => {
+    const out = [{ x: q.x, y: q.y }];
+    for (const s of q.path || []) for (const [xk, yk] of PT_KEYS)
+      if (s[xk] != null && s[yk] != null) out.push({ x: s[xk], y: s[yk] });
+    return out;
+  };
+  // the shape's own middle — the same rule rotateGroup uses for a selection, so
+  // "turn this path" and "turn these pieces" pivot the same way
+  const pathCentre = q => {
+    const pts = pathPoints(q);
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (const w of pts) { if (w.x < x0) x0 = w.x; if (w.x > x1) x1 = w.x; if (w.y < y0) y0 = w.y; if (w.y > y1) y1 = w.y; }
+    return { x: (x0 + x1) / 2, y: (y0 + y1) / 2 };
+  };
+  const mapPts = (q, f) => {
+    const head = f(q.x, q.y);
+    return { x: head.x, y: head.y, path: (q.path || []).map(seg => {
+      const t = { ...seg };
+      for (const [xk, yk] of PT_KEYS)
+        if (t[xk] != null && t[yk] != null) { const w = f(t[xk], t[yk]); t[xk] = w.x; t[yk] = w.y; }
+      return t;
+    }) };
+  };
+  // Move a path rigidly. Anything that leaves the ice is shifted back whole
+  // rather than clamped point by point, which would squash the shape — the same
+  // rule a drawn mark follows when it rotates.
+  const transformPath = (id, f) => setPieces(ps => ps.map(q => {
+    if (q.id !== id || q.kind !== "path") return q;
+    const m = mapPts(q, f);
+    const pts = pathPoints({ ...q, ...m });
+    const fit = fitInside(pts);
+    const dx = fit === pts ? 0 : fit[0].x - pts[0].x;
+    const dy = fit === pts ? 0 : fit[0].y - pts[0].y;
+    return (dx || dy) ? { ...q, ...mapPts({ ...q, ...m }, (x, y) => ({ x: x + dx, y: y + dy })) } : { ...q, ...m };
+  }));
+  const mirrorPath = (id, axis) => {
+    const q = pieces.find(w => w.id === id); if (!q) return;
+    const C = pathCentre(q);
+    transformPath(id, axis === "h" ? (x, y) => ({ x: 2 * C.x - x, y }) : (x, y) => ({ x, y: 2 * C.y - y }));
+    // a leg's label offset is in the same feet as the shape, so it flips with it
+    setPieces(ps => ps.map(w => (w.id !== id ? w : { ...w, path: (w.path || []).map(seg => (
+      seg.dox == null ? seg : { ...seg, dox: axis === "h" ? -seg.dox : seg.dox, doy: axis === "v" ? -seg.doy : seg.doy })) })));
+  };
+  const rotatePath = (id, deg) => {
+    const q = pieces.find(w => w.id === id); if (!q) return;
+    const C = pathCentre(q), r = (deg * Math.PI) / 180, ca = Math.cos(r), sa = Math.sin(r);
+    transformPath(id, (x, y) => ({
+      x: C.x + (x - C.x) * ca - (y - C.y) * sa,
+      y: C.y + (x - C.x) * sa + (y - C.y) * ca,
+    }));
+  };
+  // "the entire path" = the path, everyone queued on it, and the connectors it
+  // feeds — the whole thing you'd point at on the ice and call one lane. Handing
+  // it to multiSel means every group tool (drag, rotate, duplicate, delete)
+  // already works on it.
+  const selectWholePath = q => {
+    const ids = new Set([q.id, ...queueOf(pieces, q.id).map(w => w.id), ...linksFrom(pieces, q).map(w => w.id)]);
+    setPopup(null); setSelectedId(null); setMultiSel(ids);
+    flash(`${ids.size} piece${ids.size > 1 ? "s" : ""} selected`);
+  };
+
   // A CONNECTOR IS AN ACTION ON A WAYPOINT. Everything else in the Actions list
   // moves a puck; this one moves the skater. But it is the same kind of statement —
   // "at this point, do X" — so it lives in that list rather than in a section of
@@ -8876,6 +8946,43 @@ export default function DrillAnimator() {
                   </div>
                 )}
                 {routeField()}
+                {/* The shape as ONE thing. Everything above edits a point at a
+                    time; this turns, flips and colours the lot. A connector gets
+                    the geometry half only — it is plumbing, and its colour is the
+                    path it leaves. */}
+                {p.path.length > 0 && (
+                  <div className="hd-field">
+                    <div className="hd-sectitle">Whole {p.connector ? "connector" : "path"}</div>
+                    <div className="hd-poprow">
+                      <button className="hd-mini" title="Flip left to right"
+                        onClick={() => mirrorPath(p.id, "h")}>⇄ Flip</button>
+                      <button className="hd-mini" title="Flip top to bottom"
+                        onClick={() => mirrorPath(p.id, "v")}>⇅ Flip</button>
+                      <button className="hd-mini" title="Rotate 15° anticlockwise"
+                        onClick={() => rotatePath(p.id, -15)}>↺ 15°</button>
+                      <button className="hd-mini" title="Rotate 15° clockwise"
+                        onClick={() => rotatePath(p.id, 15)}>↻ 15°</button>
+                      <button className="hd-mini" title="Rotate a quarter turn"
+                        onClick={() => rotatePath(p.id, 90)}>↻ 90°</button>
+                    </div>
+                    <div className="hd-sechint">
+                      Turns and flips about the shape&rsquo;s own middle, so it stays where it is.
+                      {!p.connector && " The line on it comes along."}
+                    </div>
+                    {!p.connector && (<>
+                      <div className="hd-poprow">
+                        {PATH_COLORS.map(c => (
+                          <div key={c} className={`hd-swatch${sameColor(p.color, c) ? " on" : ""}`} style={{ background: c }}
+                            title="Path colour" onClick={() => updateById(p.id, { color: c })} />
+                        ))}
+                      </div>
+                      <div className="hd-poprow">
+                        <button className="hd-mini" onClick={() => selectWholePath(p)}>Select the whole path ›</button>
+                        <span className="hd-sechint">path, line and connectors — to drag or duplicate together</span>
+                      </div>
+                    </>)}
+                  </div>
+                )}
                 {/* A CONNECTOR is the skate between two paths, shaped by hand. It
                     has no line of its own, so everything below about queueing and
                     puck work would be answering a question nobody asked — only its
