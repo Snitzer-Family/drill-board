@@ -4415,6 +4415,38 @@ export default function DrillAnimator() {
     return [...out, { ...makePiece("puck", { x: clampX(at.x + 1.6), y: clampY(at.y + 3.4) }, out),
       pickup: { to: head.id, at: -1 } }];
   });
+  // ONE pace for the whole crossing. It is a single movement between two lines,
+  // not four legs with opinions — so the per-waypoint pace is hidden on a
+  // crossing and this is the only way to set it. Rendered both in the crossing's
+  // settings and on each of its waypoints, from one definition, so wherever you
+  // happen to be it is the same control showing the same number.
+  const crossingPaceField = p => {
+    const rates = p.path.map(s => s.rate || 1);
+    const same = rates.every(r => Math.abs(r - rates[0]) < 1e-6);
+    const from = pieces.find(q => q.kind === "route" && q.next === p.id);
+    const inherit = from && from.path.length ? crossRate(from, from.path[from.path.length - 1]) : 1;
+    const cur = same && rates.length ? rates[0] : inherit;
+    const setAll = v => updateById(p.id, { path: p.path.map(s => ({ ...s, rate: v })) });
+    return (
+      <div className="hd-field">
+        <div className="hd-sectitle">Pace to the next route</div>
+        <div className="hd-poprow">
+          <Stepper value={+cur.toFixed(2)} min={0.2} max={2} step={0.05} suffix="×" onChange={setAll} />
+          <button className="hd-mini" onClick={() => setAll(inherit)}>
+            Match {from ? nameOf(from.id) : "the route"}
+          </button>
+          <button className="hd-mini" onClick={() => setAll(TRANSIT_RATE)}>Glide</button>
+        </div>
+        <div className="hd-sechint">
+          {!same ? "Legs differ — set a pace here to make the whole crossing match."
+            : Math.abs(cur - inherit) < 1e-6 ? `Carrying the speed they came off ${from ? nameOf(from.id) : "the route"} at.`
+            : cur < 0.95 ? "A regroup glide — slower than the route itself."
+            : "Skated at one speed the whole way across."}
+        </div>
+      </div>
+    );
+  };
+
   // A rep counts a pass through the whole connected chain, so the number is the
   // CHAIN's, not one route's. Write it to every route joined to this one, or two
   // ends of the same loop could disagree about how many times it runs.
@@ -8556,43 +8588,7 @@ export default function DrillAnimator() {
                 {/* A crossing is the skate BETWEEN two lines, shaped by hand. It
                     has no line of its own, so everything below about queueing and
                     puck work would be answering a question nobody asked. */}
-                {p.connector && (() => {
-                  // One pace for the whole crossing. Per-leg RATE still works from
-                  // each waypoint, but a crossing is one movement — you want to say
-                  // "amble back" once, not four times. Shows mixed when the legs
-                  // disagree, so a hand-tuned leg isn't silently flattened.
-                  const rates = p.path.map(s => s.rate || 1);
-                  const same = rates.every(r => Math.abs(r - rates[0]) < 1e-6);
-                  const from = pieces.find(q => q.kind === "route" && q.next === p.id);
-                  const inherit = from && from.path.length ? crossRate(from, from.path[from.path.length - 1]) : 1;
-                  const cur = same && rates.length ? rates[0] : inherit;
-                  const setAll = v => updateById(p.id, { path: p.path.map(s => ({ ...s, rate: v })) });
-                  return (
-                    <div className="hd-field">
-                      <div className="hd-sectitle">Crossing</div>
-                      <div className="hd-sechint">
-                        The skate from one line into the next. Drag its points, add more, or
-                        curve them to send skaters round the traffic. It doesn&rsquo;t count as a
-                        lap.
-                      </div>
-                      <div className="hd-poprow">
-                        <span>Pace</span>
-                        <Stepper value={+cur.toFixed(2)} min={0.2} max={2} step={0.05} suffix="×"
-                          onChange={setAll} />
-                        <button className="hd-mini" onClick={() => setAll(inherit)}>
-                          Match {from ? nameOf(from.id) : "the route"}
-                        </button>
-                        <button className="hd-mini" onClick={() => setAll(TRANSIT_RATE)}>Glide</button>
-                      </div>
-                      <div className="hd-sechint">
-                        {!same ? "Legs differ — set a pace here to make the whole crossing match."
-                          : Math.abs(cur - inherit) < 1e-6 ? `Carrying the speed they came off ${from ? nameOf(from.id) : "the route"} at.`
-                          : cur < 0.95 ? "A regroup glide — slower than the route itself."
-                          : "Skated at full pace."}
-                      </div>
-                    </div>
-                  );
-                })()}
+                {crossingPaceField(p)}
                 {/* Point 0's actions, in the same slot the pager's other points
                     put them — "collect a puck before you go" is how most shooting
                     lines start, and it had nowhere visible to live. */}
@@ -8938,13 +8934,15 @@ export default function DrillAnimator() {
                   <div className="hd-sechint">Hops as they pass this spot.</div>
                 </div>
               )}
-              <div className="hd-field">
-                <div className="hd-sectitle">Pace to the next point ×{(next.rate || 1).toFixed(2)}</div>
-                <div className="hd-poprow">
-                  <input type="range" min={0.5} max={2} step={0.05} value={next.rate || 1} style={{ flex: 1, minWidth: 70 }}
-                    onChange={e => uSeg(i + 1, { rate: parseFloat(e.target.value) })} />
+              {p.kind === "route" && p.connector ? crossingPaceField(p) : (
+                <div className="hd-field">
+                  <div className="hd-sectitle">Pace to the next point ×{(next.rate || 1).toFixed(2)}</div>
+                  <div className="hd-poprow">
+                    <input type="range" min={0.5} max={2} step={0.05} value={next.rate || 1} style={{ flex: 1, minWidth: 70 }}
+                      onChange={e => uSeg(i + 1, { rate: parseFloat(e.target.value) })} />
+                  </div>
                 </div>
-              </div>
+              )}
               <div className="hd-field">
                 <div className="hd-sectitle">Shape of the next leg</div>
                 <div className="hd-poprow">
