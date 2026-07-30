@@ -3927,7 +3927,11 @@ export default function DrillAnimator() {
       // however slowly they were going — which crowded a dawdling leader to three
       // feet. Measured against their travel it self-corrects: one spacing gone,
       // one spot up, so the follower is never closer than the line's own gap.
-      const u = t <= go ? 0 : Math.min(1, ((displayPosAt(m, t) || {}).dist || 0) / gap);
+      // effOf: a bound member's RAW path is empty — the legs live on the lowered
+      // piece — so asking the authored one how far it has gone answers 0 forever,
+      // and the line stands still until each skater's release snaps them onto the
+      // mark. That is the bug this whole helper existed to fix.
+      const u = t <= go ? 0 : Math.min(1, ((displayPosAt(effOf(m), t) || {}).dist || 0) / gap);
       n += 1 - u * u * (3 - 2 * u);
     }
     if (n <= 1e-4) return { x: R.x, y: R.y };
