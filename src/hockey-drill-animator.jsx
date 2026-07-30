@@ -3724,7 +3724,37 @@ export default function DrillAnimator() {
         // them as parked would leave the line to pass through itself.
         if (collisions && p.path.length && (isMobile(q) || q.defense)) {
           const dx = x - rq.x, dy = y - rq.y, d = Math.hypot(dx, dy), MIN = PLAYER_R * 2;
-          if (d < MIN && d > 1e-3) { const push = (MIN - d) * 0.5; x += (dx / d) * push; y += (dy / d) * push; }
+          // Which way am I actually travelling? `a` carries the body flip, so a
+          // backward skater's body points against their motion — take it off, or
+          // "who is ahead" comes out inverted exactly for them.
+          const ta = ((a - (res.flip || 0)) * Math.PI) / 180;
+          const hx = Math.cos(ta), hy = Math.sin(ta);
+          const ahead = -(dx * hx + dy * hy);          // >0 when they are in front of me
+          const moving = (res.smul || 0) > 0.05;
+          // OVERTAKING. Pushing two skaters radially apart is right for a glancing
+          // meeting, but for a follower directly behind someone it points straight
+          // backwards — they get shoved down their own line instead of stepping off
+          // it, which is why a fast skater used to bump a slow one along rather than
+          // pass. So the one BEHIND yields, and yields SIDEWAYS: the skater in front
+          // holds their line, as they would on the ice. It starts before contact and
+          // eases in, so the move reads as going around rather than as a bounce.
+          const NEAR = MIN * 1.7;
+          if (moving && ahead > 0 && d < NEAR && d > 1e-3) {
+            let px = -hy, py = hx;                     // left of my travel
+            const lat = dx * px + dy * py;             // the side I am already drifting
+            const sgn = Math.abs(lat) > 0.25 ? Math.sign(lat) : 1;
+            const t = 1 - d / NEAR;
+            const room = PLAYER_R * 2.1 * t * t;       // eased, so it opens smoothly
+            x += px * sgn * room; y += py * sgn * room;
+          } else if (moving && ahead < -0.35 * d && isMobile(q)) {
+            // they are clearly BEHIND me and under their own steam: it is their
+            // pass to make, so I hold my line. Without this the overtaker's own
+            // approach shoved the leader off course — both skaters swerving for
+            // one pass, which is not what happens on the ice.
+          } else if (d < MIN && d > 1e-3) {
+            // a glancing or head-on meeting, or the other is parked: share the gap
+            const push = (MIN - d) * 0.5; x += (dx / d) * push; y += (dy / d) * push;
+          }
         }
       }
       // the goalie is fused into the net's route detour (see detourNetDiscs) so
