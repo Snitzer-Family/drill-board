@@ -258,18 +258,27 @@ export function zigzagPoly(pts, ar = 1, trimEnd = false) {
 
 export function convertSeg(seg, prev) {
   const { x, y, mode = "carry", dir = "fwd", stop = 0, rate = 1 } = seg;
+  // Changing a leg from straight to curved changes its SHAPE. Everything else on
+  // it describes the waypoint it arrives at — its name and label, its delay
+  // trigger, its lock, and the connector it hands off on — and none of that has
+  // an opinion about béziers. This used to rebuild the segment from scratch,
+  // keeping only the four scalars above, so converting a leg quietly deleted the
+  // lot. On a connector that meant smoothing a corner stopped it feeding the path
+  // it was drawn to reach, and the skaters simply didn't use it.
+  const { type: _ty, x: _x, y: _y, cx: _cx, cy: _cy, c1x: _c1x, c1y: _c1y, c2x: _c2x, c2y: _c2y,
+    mode: _m, dir: _d, stop: _s, rate: _r, ...keep } = seg;
   const nx = -(y - prev.y), ny = x - prev.x;
   const len = Math.hypot(nx, ny) || 1;
   const off = 12;
-  if (seg.type === "L") return { type: "L", mode, dir, stop, rate, x, y };
+  if (seg.type === "L") return { ...keep, type: "L", mode, dir, stop, rate, x, y };
   if (seg.type === "Q")
     return {
-      type: "Q", mode, dir, stop, rate,
+      ...keep, type: "Q", mode, dir, stop, rate,
       cx: clampX((prev.x + x) / 2 + (nx / len) * off),
       cy: clampY((prev.y + y) / 2 + (ny / len) * off), x, y,
     };
   return {
-    type: "C", mode, dir, stop, rate,
+    ...keep, type: "C", mode, dir, stop, rate,
     c1x: clampX(prev.x + (x - prev.x) / 3 + (nx / len) * off),
     c1y: clampY(prev.y + (y - prev.y) / 3 + (ny / len) * off),
     c2x: clampX(prev.x + (2 * (x - prev.x)) / 3 - (nx / len) * off),
