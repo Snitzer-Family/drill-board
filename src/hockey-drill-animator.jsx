@@ -9,7 +9,7 @@ import { mdEscape, mdInline, mdBlock } from "./md.js";
 import { clampX, clampY, fitInside, segEnd, segD, nearestT, splitSeg, zigzagPoints, wigglePoints, wigglePoly, zigzagPoly, convertSeg, fitRoute, evalSeg, rdp, catmullToBezier, alignJoint, mirrorJoint, translateJointHandles, trimSegStart, trimSegEnd, trimPolyStart, trimPolyEnd, gapPolyAt } from "./geometry.js";
 import { dirOf, dirAtWaypoint, spreadDir } from "./route-dir.js";
 import { lowerRoutes, queueOf, stackSpot, isMobile, unbindLine, transitPoly, transitObstacles, chainOf, crossRate,
-  exitOf, nextOf, headHeadingDeg as routeHeadDeg, lineDirDeg, lineHeading, QUEUE_GAP, QUEUE_LEAD } from "./route-lines.js";
+  exitOf, nextOf, headHeadingDeg as routeHeadDeg, lineDirDeg, lineHeading, lineStep, QUEUE_GAP, QUEUE_LEAD } from "./route-lines.js";
 import { LINE_MIN_GAP } from "./constants.js";
 import { PLAYER_R, TRANSIT_RATE, CROSSING_DASH } from "./constants.js";
 import * as boards from "./boards.js";
@@ -3726,7 +3726,7 @@ export default function DrillAnimator() {
         // follow the detour's own tangent, but keep whatever the route says the body
         // is doing — backwards, or partway through a pivot (a per-route "any leg is
         // bwd" boolean can't express the middle of a turn)
-        x = s.x; y = s.y; a = s.a + (res.flip || 0);
+        x = s.x + (res.qdx || 0); y = s.y + (res.qdy || 0); a = s.a + (res.flip || 0);
       }
       const side = p.hand === "L" ? -1 : 1;
       const others = [];                                   // other skaters (for shield + push)
@@ -3919,7 +3919,7 @@ export default function DrillAnimator() {
     const sw = (getPlan().startWait) || {};
     if (t >= (sw[p.id] || 0)) return null;                  // under way: the route has them
     const ahead = queueOf(pieces, L.path).slice(0, L.q);
-    const gap = L.gap > 0 ? L.gap : QUEUE_GAP;
+    const gap = lineStep(L.gap);
     let n = 0;
     for (const m of ahead) {
       const go = sw[m.id] || 0;
@@ -3948,7 +3948,12 @@ export default function DrillAnimator() {
   // "In front" is the wait chain the lowering pass built: I hold on someone, who
   // may hold on someone else, all the way back to whoever is on the mark. Walking
   // it costs nothing and needs no arrival times.
-  function arrivalShift(p, t) {
+  // Seconds of approach over which an arriving skater peels into the back of the
+  // queue. Without it they drove all the way to the waypoint and were yanked
+  // backwards the length of the line in a single frame — the longer the line, the
+  // further the flick.
+  const JOIN_LEAD = 2.4;
+  function arrivalShift(p, t, dp) {
     const list = p && p._arrivals;
     if (!list || !list.length) return null;
     for (const ar of list) {
@@ -3959,9 +3964,13 @@ export default function DrillAnimator() {
       const held = ((getPlan().trigPause || {})[p.id + "/" + ar.base] || 0);
       if (held <= 1e-3) continue;                       // nothing to wait for here
       const arrive = waypointTime(p, ar.base - 1);
-      if (!(t >= arrive - 1e-6 && t < arrive + held)) continue;   // not standing there now
+      if (t >= arrive + held || t < arrive - JOIN_LEAD) continue;  // gone, or not near yet
+      // ease the offset in over the last stretch of the run-in, so the queue's
+      // tail is what they skate TO rather than somewhere they are teleported after
+      const k = t >= arrive ? 1
+        : (() => { const u = (t - (arrive - JOIN_LEAD)) / JOIN_LEAD; return u * u * (3 - 2 * u); })();
       // how many are still ahead of me on this mark
-      const gap0 = R.gap > 0 ? R.gap : QUEUE_GAP;
+      const gap0 = lineStep(R.gap);
       let n = 0, on = leg.waitOn.on;
       for (let hop = 0; hop < 12 && on; hop++) {
         const q = effOf(pieces.find(w => w.id === on));
@@ -3981,7 +3990,23 @@ export default function DrillAnimator() {
       }
       if (n <= 1e-3) return null;
       const h = lineHeading(R);
-      return { x: clampX(R.x + h.x * n * gap0), y: clampY(R.y + h.y * n * gap0) };
+      // STEER AT THE TAIL. Not a displacement along the line's own direction:
+      // that pushed them sideways from wherever they happened to be, which swept
+      // them straight through the people already standing there. Aiming at the
+      // spot they are going to stop on keeps the run-in outside the queue.
+      //
+      // There is no separate "arrived" case, and that matters: once they are held
+      // at the mark their own route position IS the mark, so this lands exactly
+      // on the tail as k reaches 1. Special-casing it put a step at the seam, the
+      // size of however far short of the mark they happened to be that frame.
+      // Aim BEYOND the tail while still closing, converging onto it as they
+      // arrive. A straight steer at the tail cuts the corner and walks the
+      // arrival through the people already standing there; swinging wide brings
+      // them in from outside the queue, the way you would actually join one.
+      const out = n * gap0 + (1 - k) * gap0 * 3.5;
+      const tx = clampX(R.x + h.x * out), ty = clampY(R.y + h.y * out);
+      const base = dp || { x: R.x, y: R.y };
+      return { x: base.x + (tx - base.x) * k, y: base.y + (ty - base.y) * k };
     }
     return null;
   }
@@ -3997,8 +4022,12 @@ export default function DrillAnimator() {
     const dp = displayPosAt(p, tNow);
     // still in the queue: stand where the line has shuffled to, facing the way it
     // will set off. At t=0 nobody has gone, so this is the stack as authored.
-    const qs = queueShift(p, tNow) || arrivalShift(p, tNow);
-    if (qs) return { ...dp, x: qs.x, y: qs.y };
+    // ...and carry it as a delta too. displayPos bends a skater onto their route
+    // DETOUR by overwriting x/y from a sampled polyline, which threw the queue
+    // offset away entirely — the peel was computed correctly every frame and then
+    // discarded, so an arrival still drove at the mark and jumped.
+    const qs = queueShift(p, tNow) || arrivalShift(p, tNow, dp);
+    if (qs) return { ...dp, x: qs.x, y: qs.y, qdx: qs.x - dp.x, qdy: qs.y - dp.y };
     if (!effDetail || p.kind !== "player" || animT <= 0) return dp; // detail off / editing board: still frame
     const r = dp.smul || 0;                               // effective speed multiple
     let lat = 0, fore = 0, lean = 0;                      // lateral / fore-aft ft, deg — vs facing

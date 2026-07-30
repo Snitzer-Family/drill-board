@@ -96,13 +96,18 @@ export function lineHeading(route) {
 // boards rather than stand off them, which is visibly wrong and so self-correcting
 // — the coach moves the route. Sliding the whole stack instead would take the head
 // skater off the route's start, which is worse.
+// How far apart a line actually stands. A line cannot stand tighter than the
+// people in it, so whatever the drill asks for is floored at a body's width —
+// anything less draws a queue as one smear, which is not "tight", it is
+// unreadable. Everything that places a queued skater goes through this: the
+// stack, the shuffle up, and an arrival steering into the back. They disagreed
+// once, and two skaters ended up on the same spot.
+export function lineStep(gap) {
+  return Math.max(LINE_MIN_GAP, gap > 0 ? gap : QUEUE_GAP);
+}
 export function stackSpot(route, k, gap = QUEUE_GAP) {
   const h = lineHeading(route);
-  // A line cannot stand tighter than the people in it. Whatever the drill asks
-  // for, hold them clear of each other — anything less draws a queue as one
-  // smear, which is not "tight", it is unreadable.
-  const step = Math.max(LINE_MIN_GAP, gap > 0 ? gap : QUEUE_GAP);
-  const d = Math.max(0, k) * step;
+  const d = Math.max(0, k) * lineStep(gap);
   return { x: clampX(route.x + h.x * d), y: clampY(route.y + h.y * d) };
 }
 
