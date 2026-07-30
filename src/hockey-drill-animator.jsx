@@ -4484,6 +4484,42 @@ export default function DrillAnimator() {
       y: C.y + (x - C.x) * sa + (y - C.y) * ca,
     }));
   };
+  // The shape as ONE thing, at the foot of every leg and waypoint. Everything
+  // above it in those panels edits a single point; this turns, flips and colours
+  // the lot — and it sits at the bottom of wherever you happen to be, so you
+  // never have to go back to the path's own settings to reach for it.
+  //
+  // A connector gets the geometry half only: flipping and turning are shape,
+  // which is all a connector is allowed to be, and its colour is the path it
+  // leaves. It has no line to take, either.
+  const wholePathField = q => (!q || q.kind !== "path" || !(q.path || []).length ? null : (
+    <div className="hd-field">
+      <div className="hd-sectitle">Whole {q.connector ? "connector" : "path"}</div>
+      <div className="hd-poprow">
+        <button className="hd-mini" title="Flip left to right" onClick={() => mirrorPath(q.id, "h")}>⇄ Flip</button>
+        <button className="hd-mini" title="Flip top to bottom" onClick={() => mirrorPath(q.id, "v")}>⇅ Flip</button>
+        <button className="hd-mini" title="Rotate 15° anticlockwise" onClick={() => rotatePath(q.id, -15)}>↺ 15°</button>
+        <button className="hd-mini" title="Rotate 15° clockwise" onClick={() => rotatePath(q.id, 15)}>↻ 15°</button>
+        <button className="hd-mini" title="Rotate a quarter turn" onClick={() => rotatePath(q.id, 90)}>↻ 90°</button>
+      </div>
+      <div className="hd-sechint">
+        Turns and flips about the shape&rsquo;s own middle, so it stays where it is.
+        {!q.connector && " The line on it comes along."}
+      </div>
+      {!q.connector && (<>
+        <div className="hd-poprow">
+          {PATH_COLORS.map(c => (
+            <div key={c} className={`hd-swatch${sameColor(q.color, c) ? " on" : ""}`} style={{ background: c }}
+              title="Path colour" onClick={() => updateById(q.id, { color: c })} />
+          ))}
+        </div>
+        <div className="hd-poprow">
+          <button className="hd-mini" onClick={() => selectWholePath(q)}>Select the whole path ›</button>
+          <span className="hd-sechint">path, line and connectors — to drag or duplicate together</span>
+        </div>
+      </>)}
+    </div>
+  ));
   // "the entire path" = the path, everyone queued on it, and the connectors it
   // feeds — the whole thing you'd point at on the ice and call one lane. Handing
   // it to multiSel means every group tool (drag, rotate, duplicate, delete)
@@ -8946,43 +8982,6 @@ export default function DrillAnimator() {
                   </div>
                 )}
                 {routeField()}
-                {/* The shape as ONE thing. Everything above edits a point at a
-                    time; this turns, flips and colours the lot. A connector gets
-                    the geometry half only — it is plumbing, and its colour is the
-                    path it leaves. */}
-                {p.path.length > 0 && (
-                  <div className="hd-field">
-                    <div className="hd-sectitle">Whole {p.connector ? "connector" : "path"}</div>
-                    <div className="hd-poprow">
-                      <button className="hd-mini" title="Flip left to right"
-                        onClick={() => mirrorPath(p.id, "h")}>⇄ Flip</button>
-                      <button className="hd-mini" title="Flip top to bottom"
-                        onClick={() => mirrorPath(p.id, "v")}>⇅ Flip</button>
-                      <button className="hd-mini" title="Rotate 15° anticlockwise"
-                        onClick={() => rotatePath(p.id, -15)}>↺ 15°</button>
-                      <button className="hd-mini" title="Rotate 15° clockwise"
-                        onClick={() => rotatePath(p.id, 15)}>↻ 15°</button>
-                      <button className="hd-mini" title="Rotate a quarter turn"
-                        onClick={() => rotatePath(p.id, 90)}>↻ 90°</button>
-                    </div>
-                    <div className="hd-sechint">
-                      Turns and flips about the shape&rsquo;s own middle, so it stays where it is.
-                      {!p.connector && " The line on it comes along."}
-                    </div>
-                    {!p.connector && (<>
-                      <div className="hd-poprow">
-                        {PATH_COLORS.map(c => (
-                          <div key={c} className={`hd-swatch${sameColor(p.color, c) ? " on" : ""}`} style={{ background: c }}
-                            title="Path colour" onClick={() => updateById(p.id, { color: c })} />
-                        ))}
-                      </div>
-                      <div className="hd-poprow">
-                        <button className="hd-mini" onClick={() => selectWholePath(p)}>Select the whole path ›</button>
-                        <span className="hd-sechint">path, line and connectors — to drag or duplicate together</span>
-                      </div>
-                    </>)}
-                  </div>
-                )}
                 {/* A CONNECTOR is the skate between two paths, shaped by hand. It
                     has no line of its own, so everything below about queueing and
                     puck work would be answering a question nobody asked — only its
@@ -9235,6 +9234,7 @@ export default function DrillAnimator() {
             </button>
           </div>
           {p.kind === "path" && !fork && routeCommonField(p)}
+          {p.kind === "path" && !fork && wholePathField(p)}
         </>
       );
     } else {
@@ -9555,6 +9555,7 @@ export default function DrillAnimator() {
           </>)}
           {/* ...and what is true of the whole ROUTE, from wherever you are in it */}
           {p.kind === "path" && !fork && routeCommonField(p)}
+          {p.kind === "path" && !fork && wholePathField(p)}
           <div className="hd-poprow" style={{ marginTop: 2 }}>
             <button className="hd-mini" title="Pin this waypoint in place so it can't be moved or edited by accident."
               onClick={() => uSeg(i, { lock: true })}>🔒 Lock point</button>
