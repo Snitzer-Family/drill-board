@@ -7447,6 +7447,17 @@ export default function DrillAnimator() {
     return els;
   }
 
+  // Walking a drill end to end means stepping off the end of one route straight
+  // into the crossing that follows it, and on into the next line — the chain is
+  // one journey, and paging it should feel like one. A crossing's head sits on the
+  // route's end and its tail on the next route's head, so the boundary step skips
+  // the duplicate spot: forward lands on the next piece's first WAYPOINT, and back
+  // lands on the previous piece's last one.
+  const chainNext = p => (p && p.kind === "route" && p.next
+    ? pieces.find(q => q.id === p.next && q.kind === "route" && q.path.length) || null : null);
+  const chainPrev = p => (p && p.kind === "route"
+    ? pieces.find(q => q.kind === "route" && q.next === p.id && q.path.length) || null : null);
+
   function renderLabels() {
     const canEdit = editing && tool !== "draw";
     const els = [];
@@ -8066,7 +8077,7 @@ export default function DrillAnimator() {
         : p.kind === "deker" ? `Deker ${p.id}` : p.kind === "passer" ? `Passer ${p.id}`
         : p.kind === "label" ? `Label ${p.id}` : p.kind === "tire" ? `Tire ${p.id}` : p.kind === "stick" ? `Stick ${p.id}`
         : p.kind === "light" ? `Light ${p.id}` : p.kind === "mark" ? `Mark ${p.id}`
-        : p.kind === "route" ? `${p.connector ? "Crossing" : "Route"} ${p.label || p.id}` : `Cone ${p.id}`;
+        : p.kind === "route" ? (p.connector ? "Crossing" : `Route ${p.label || p.id}`) : `Cone ${p.id}`;
       body = (
         <>
           {p.kind === "label" && (
@@ -8597,7 +8608,15 @@ export default function DrillAnimator() {
                   <div className="hd-field">
                     <div className="hd-sectitle">Route points</div>
                     <div className="hd-poprow">
-                      <button className="hd-mini" disabled>‹ Prev</button>
+                      {(() => {
+                        const pv = chainPrev(p);
+                        return (
+                          <button className="hd-mini" disabled={!pv}
+                            onClick={() => pv && navPopup({ type: "point", id: pv.id, seg: pv.path.length - 1 })}>
+                            ‹ {pv ? (pv.connector ? "Crossing" : nameOf(pv.id)) : "Prev"}
+                          </button>
+                        );
+                      })()}
                       <span className="hd-sechint">Start · {p.path.length} point{p.path.length > 1 ? "s" : ""} follow</span>
                       <button className="hd-mini" onClick={() => navPopup({ type: "point", id: p.id, seg: 0 })}>Next ›</button>
                     </div>
@@ -8809,7 +8828,8 @@ export default function DrillAnimator() {
       const s = route[popup.seg];
       if (!s || !popup.pt) return null;
       anchorPt = popup.pt;
-      title = fork ? `Reaction · leg ${popup.seg + 1}` : `${nameOf(p.id)} · leg ${popup.seg + 1}`;
+      title = fork ? `Reaction · leg ${popup.seg + 1}`
+        : `${p.kind === "route" && p.connector ? "Crossing" : nameOf(p.id)} · leg ${popup.seg + 1}`;
       // A leg runs BETWEEN two points, and everything you'd want to set — an
       // action, a pause, the pace, a name — lives on one of them. Tapping the line
       // is how most people reach for a route, so hand them the two points it joins
@@ -8858,7 +8878,8 @@ export default function DrillAnimator() {
       // ONE numbering everywhere: the standing start is point 0 (matching the
       // DSL — "pass=2" fires at point 2), so route[i] is point i+1 of
       // route.length. Title, pager, and DSL references all agree.
-      title = fork ? `Reaction · point ${i + 1}/${route.length}` : `${nameOf(p.id)} · point ${i + 1}/${route.length}`;
+      title = fork ? `Reaction · point ${i + 1}/${route.length}`
+        : `${p.kind === "route" && p.connector ? "Crossing" : nameOf(p.id)} · point ${i + 1}/${route.length}`;
       // Prev at waypoint 0: a fork steps back to its branch (the base route's end);
       // a base route steps back to the player/start popup.
       const branchNav = () => p.path.length ? { type: "point", id: p.id, seg: p.path.length - 1 } : { type: "piece", id: p.id };
@@ -8878,8 +8899,15 @@ export default function DrillAnimator() {
                   ‹ {fork && i === 0 ? "Branch" : i === 0 ? "Start" : "Prev"}
                 </button>
                 <span className="hd-sechint">Point {i + 1} of {route.length}</span>
-                <button className="hd-mini" disabled={i >= route.length - 1}
-                  onClick={() => goSeg(i + 1)}>Next ›</button>
+                {(() => {
+                  const nx = !fork && i >= route.length - 1 ? chainNext(p) : null;
+                  return (
+                    <button className="hd-mini" disabled={i >= route.length - 1 && !nx}
+                      onClick={() => (nx ? navPopup({ type: "point", id: nx.id, seg: 0 }) : goSeg(i + 1))}>
+                      {nx ? `${nx.connector ? "Crossing" : nameOf(nx.id)} ›` : "Next ›"}
+                    </button>
+                  );
+                })()}
               </div>
             </div>
           )}
@@ -8887,12 +8915,12 @@ export default function DrillAnimator() {
               into that piece's own editor (position preserved when pinned) */}
           <div className="hd-field">
             <div className="hd-sectitle">
-              {p.kind === "route" && p.connector ? "Part of the crossing"
+              {p.kind === "route" && p.connector ? "Crossing"
                 : `${p.kind === "player" ? "Player" : p.kind === "route" ? "Line" : "Puck"} on this ${fork ? "reaction" : "route"}`}
             </div>
             <div className="hd-poprow">
               <span className="hd-swatch" style={{ background: p.color, width: 16, height: 16, cursor: "default" }} />
-              <span style={{ fontWeight: 700 }}>{nameOf(p.id)}</span>
+              <span style={{ fontWeight: 700 }}>{p.kind === "route" && p.connector ? "Crossing" : nameOf(p.id)}</span>
               <button className="hd-mini" onClick={() => navPopup({ type: "piece", id: p.id })}>
                 {p.kind === "route" ? (p.connector ? "Crossing settings ›" : "Line settings ›") : "Open ›"}
               </button>
