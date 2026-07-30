@@ -8790,9 +8790,26 @@ export default function DrillAnimator() {
       const s = route[popup.seg];
       if (!s || !popup.pt) return null;
       anchorPt = popup.pt;
-      title = fork ? `Reaction · leg ${popup.seg + 1}` : `${p.id} · leg ${popup.seg + 1}`;
+      title = fork ? `Reaction · leg ${popup.seg + 1}` : `${nameOf(p.id)} · leg ${popup.seg + 1}`;
+      // A leg runs BETWEEN two points, and everything you'd want to set — an
+      // action, a pause, the pace, a name — lives on one of them. Tapping the line
+      // is how most people reach for a route, so hand them the two points it joins
+      // rather than making them find the dots. Point 0 is the start spot, as
+      // everywhere else.
+      const legGo = j => navPopup(j < 0 ? { type: "piece", id: p.id }
+        : { type: "point", id: p.id, seg: j, ...(fork ? { fork } : {}) });
       body = (
         <>
+          <div className="hd-field">
+            <div className="hd-sectitle">Route points</div>
+            <div className="hd-poprow">
+              <button className="hd-mini" onClick={() => legGo(popup.seg - 1)}>
+                ‹ {popup.seg === 0 ? (fork ? "Branch" : "Start") : `Point ${popup.seg}`}
+              </button>
+              <span className="hd-sechint">Leg {popup.seg + 1} of {route.length}</span>
+              <button className="hd-mini" onClick={() => legGo(popup.seg)}>Point {popup.seg + 1} ›</button>
+            </div>
+          </div>
           <div className="hd-field">
             <div className="hd-sectitle">Leg shape</div>
             <div className="hd-poprow">
