@@ -132,6 +132,23 @@ export function queueRelease(route, prevId) {
   return null;
 }
 
+// JOINING A LINE YOU SKATE INTO. Arriving at another path's head is arriving at
+// the back of ITS line — you queue there like anyone else, by that path's own
+// rule, rather than carrying straight on through it at speed. Indexes into the
+// arriving skater's own unfolded path, and the trigger shares that path (it is
+// the skater ahead of them in the same line), so `base` means the same thing to
+// both of them.
+export function arriveRelease(route, prevId, base) {
+  if (!prevId) return null;
+  const q = (route && route.queue) || { mode: "lead" };
+  // `base` is the first LEG of the arrived-at path, so its head — where the queue
+  // forms — is the end of leg base-1. A point rule counts waypoints from there
+  // (its point 1 is leg `base`); a lead rule measures feet from there.
+  if (q.mode === "point") return { on: prevId, at: base + Math.max(0, q.at || 0), mode: "waypoint" };
+  const lead = q.lead > 0 ? q.lead : QUEUE_LEAD;
+  return { on: prevId, at: base - 1, dist: lead, mode: "span" };
+}
+
 // WHERE A PATH HANDS OFF. A connector is authored as an action ON A WAYPOINT —
 // "when you reach here, go to Lane B" — not as a property of the path's end. So
 // the departure can sit anywhere along the path, and the legs past it simply
@@ -533,8 +550,20 @@ export function lowerRoutes(pieces) {
         // this route's legs verbatim — see the header on why nothing is prepended
         // — then, if it recycles, the transit and the next route's legs after them
         // a copy per member: the unfold is shared work, but no two skaters should
-        // ever hand each other the same leg objects
-        path: legs.map(s => ({ ...s })),
+        // ever hand each other the same leg objects — and the queue holds below are
+        // per-member, so they could not be shared even if we wanted to
+        path: (() => {
+          const mine = legs.map(s => ({ ...s }));
+          // Every lap after the first begins by ARRIVING somewhere. Queue there.
+          // Only for members with someone ahead of them: the head of the line has
+          // nobody in front, so they skate in and carry on.
+          if (k > 0) for (const lp of laps) {
+            if (!lp.base || !mine[lp.base]) continue;
+            const rule = arriveRelease(routes.get(lp.route) || R, line[k - 1].id, lp.base);
+            if (rule) mine[lp.base] = { ...mine[lp.base], waitOn: rule };
+          }
+          return mine;
+        })(),
         // shared by reference: forks are immutable here, and resolveForks picks a
         // branch per PLAYER, so three skaters on one reactive route read the light
         // independently — which is exactly what a read-and-react drill wants

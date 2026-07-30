@@ -438,6 +438,20 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
     // = max(0, trigger-time − our-arrival at that waypoint). rawArr includes
     // start-waits + fixed stops + already-resolved trig pauses.
     const tpNew = {};
+    // Time for `p` to travel `dist` feet BEYOND waypoint `from`, measured the same
+    // way every other leg time is (arc length ÷ pace). This is what "wait until
+    // the one ahead is N feet clear of this point" resolves to — the mid-route
+    // twin of rawSpan, which only ever measures from a route's start.
+    const rawSpanFrom = (p, from, dist) => {
+      let t = 0, acc = 0;
+      for (let i = from + 1; i < p.path.length; i++) {
+        const L = segLen(p.id, i), mt = effMove(p, p.path[i], i, warp);
+        t += (p.path[i].stop || 0) + (tpNew[p.id + "/" + i] || 0);
+        if (acc + L >= dist) return t + (L > 0 ? (mt * (dist - acc)) / L : 0);
+        acc += L; t += mt;
+      }
+      return t;                    // never gets that far clear — go when they finish
+    };
     const rawArr = (p, at) => {
       let t = (sw[p.id] || 0);
       for (let i = 0; i < p.path.length; i++) { if (i > at) break; t += (p.path[i].stop || 0) + (tpNew[p.id + "/" + i] || 0) + effMove(p, p.path[i], i, warp); }
@@ -456,6 +470,15 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
             const t = actionTimeOf(s.waitOn.on, s.waitOn.at);
             if (t == null) { if (tpNew[key]) { tpNew[key] = 0; changed = true; } return; }
             trigT = t;
+          } else if (s.waitOn.mode === "span") {
+            // a queue release at a point mid-route: hold here until the one ahead
+            // is `dist` feet past the same point. Same shape as the waypoint case,
+            // measured to a distance, so it chains backwards the same way.
+            const trig = pieces.find(q => q.id === s.waitOn.on && q.kind === "player");
+            if (!trig || trig.id === p.id) return;
+            const at = Math.max(-1, Math.min(s.waitOn.at == null ? 0 : s.waitOn.at, trig.path.length - 1));
+            trigT = (at < 0 ? (sw[trig.id] || 0) : rawArr(trig, at))
+              + rawSpanFrom(trig, at, Math.max(0, s.waitOn.dist || 0));
           } else {
             const trig = pieces.find(q => q.id === s.waitOn.on && q.kind === "player");
             if (!trig || trig.id === p.id) return;
