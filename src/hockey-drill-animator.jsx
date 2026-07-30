@@ -3696,6 +3696,17 @@ export default function DrillAnimator() {
     return set;
   }
 
+  // Which side one skater passes another on. Decided ONCE per pair from their ids
+  // rather than per frame from the geometry: when two skaters are nearly collinear
+  // any geometric tiebreak hovers at zero and flips sign frame to frame, which
+  // reads as the overtaker jittering side to side. Deterministic, so a replay is
+  // identical, and different followers don't all swing the same way.
+  const passSide = (aId, bId) => {
+    let h = 0; const k = `${aId}|${bId}`;
+    for (let i = 0; i < k.length; i++) h = (h * 31 + k.charCodeAt(i)) | 0;
+    return (h & 1) ? 1 : -1;
+  };
+
   function displayPos(p) {
     p = effOf(p);
     const res = displayPosRaw(p);
@@ -3723,36 +3734,61 @@ export default function DrillAnimator() {
         // isMobile, not path.length: a queue member's raw path is empty, and reading
         // them as parked would leave the line to pass through itself.
         if (collisions && p.path.length && (isMobile(q) || q.defense)) {
-          const dx = x - rq.x, dy = y - rq.y, d = Math.hypot(dx, dy), MIN = PLAYER_R * 2;
-          // Which way am I actually travelling? `a` carries the body flip, so a
-          // backward skater's body points against their motion — take it off, or
-          // "who is ahead" comes out inverted exactly for them.
+          // Geometry is measured from the UNDEVIATED poses on both sides. Reading
+          // the running x,y here feeds the deviation back into its own input:
+          // stepping out shrinks the very offset that asked for it, so the skater
+          // gets pulled back in and oscillates. That was half the flicker.
+          const dx = res.x - rq.x, dy = res.y - rq.y, d = Math.hypot(dx, dy), MIN = PLAYER_R * 2;
+          // travel direction, with the body flip removed — a backward skater's body
+          // points against their motion, which would inverse "who is ahead"
           const ta = ((a - (res.flip || 0)) * Math.PI) / 180;
           const hx = Math.cos(ta), hy = Math.sin(ta);
-          const ahead = -(dx * hx + dy * hy);          // >0 when they are in front of me
-          const moving = (res.smul || 0) > 0.05;
-          // OVERTAKING. Pushing two skaters radially apart is right for a glancing
-          // meeting, but for a follower directly behind someone it points straight
-          // backwards — they get shoved down their own line instead of stepping off
-          // it, which is why a fast skater used to bump a slow one along rather than
-          // pass. So the one BEHIND yields, and yields SIDEWAYS: the skater in front
-          // holds their line, as they would on the ice. It starts before contact and
-          // eases in, so the move reads as going around rather than as a bounce.
-          const NEAR = MIN * 1.7;
-          if (moving && ahead > 0 && d < NEAR && d > 1e-3) {
-            let px = -hy, py = hx;                     // left of my travel
-            const lat = dx * px + dy * py;             // the side I am already drifting
-            const sgn = Math.abs(lat) > 0.25 ? Math.sign(lat) : 1;
-            const t = 1 - d / NEAR;
-            const room = PLAYER_R * 2.1 * t * t;       // eased, so it opens smoothly
-            x += px * sgn * room; y += py * sgn * room;
-          } else if (moving && ahead < -0.35 * d && isMobile(q)) {
-            // they are clearly BEHIND me and under their own steam: it is their
-            // pass to make, so I hold my line. Without this the overtaker's own
-            // approach shoved the leader off course — both skaters swerving for
-            // one pass, which is not what happens on the ice.
+          const lx = -hy, ly = hx;                       // left of my travel
+          const along = -(dx * hx + dy * hy);            // >0 they are in front of me
+          const cross = dx * lx + dy * ly;               // my sideways offset from them
+          const mySp = res.smul || 0, theirSp = rq.smul || 0;
+
+          // WHO yields is decided by speed, not by who happens to be in front this
+          // frame. As one skater draws level, "in front" flips — and with it the
+          // branch, which snapped the offset away and jumped them across. Speed
+          // does not flip mid-pass, so the same skater does the whole move.
+          const overtaking = mySp > theirSp + 0.05;
+          const yielded = theirSp > mySp + 0.05;
+
+          // Opens this far ahead of them, and is fully shut this far past — the
+          // arc is deliberately LOPSIDED. A symmetric bump also swerves you around
+          // someone standing BEHIND you, which is how the skater still waiting at
+          // the head of the line was shoving the one already under way.
+          const AHEAD = PLAYER_R * 3.2, PAST = PLAYER_R * 4.2;
+          // The arc peaks just PAST level, not level: closing it the moment they
+          // draw even cut them back in while still barely a body ahead, which is
+          // where the two came closest. And the tail only holds for a leader who
+          // is MOVING — otherwise the skater still waiting at the head of a line
+          // counts as someone you just passed, and the one under way swerves for
+          // nobody.
+          const c = along + PLAYER_R * 1.1;
+          const tailOK = along >= 0 || theirSp > 0.05;
+          if (overtaking && tailOK && c > -PAST && along < AHEAD * 2.5 && Math.abs(cross) < PLAYER_R * 3.2) {
+            // ONE smooth arc past them: full strength alongside, easing in as they
+            // come up and out again once clear, so there is no edge to cross and
+            // nothing to snap. Passing close is the point — about a body's width.
+            const u = c >= 0 ? 0 : Math.min(1, -c / PAST);
+            const g = c >= 0 ? Math.exp(-(c * c) / (AHEAD * AHEAD))
+              : 1 - u * u * (3 - 2 * u);      // smoothstep to exactly nothing at the gate
+            const room = PLAYER_R * 2.0 * g;
+            // ...and the SIDE is fixed for the whole pass. Re-deriving it from the
+            // lateral offset flipped its sign frame to frame whenever the two were
+            // nearly collinear, which is what threw them side to side. Keyed on the
+            // pair so it never wavers, and so two followers don't all swing alike.
+            let sgn = passSide(p.id, q.id);
+            // unless that side is into the boards, in which case take the other
+            if (clampY(res.y + ly * sgn * room) !== res.y + ly * sgn * room
+              || clampX(res.x + lx * sgn * room) !== res.x + lx * sgn * room) sgn = -sgn;
+            x += lx * sgn * room; y += ly * sgn * room;
+          } else if (yielded) {
+            // they are the quicker one: it is their pass to make, so I hold my line
           } else if (d < MIN && d > 1e-3) {
-            // a glancing or head-on meeting, or the other is parked: share the gap
+            // matched speeds, a head-on, or the other is parked: share the gap
             const push = (MIN - d) * 0.5; x += (dx / d) * push; y += (dy / d) * push;
           }
         }
