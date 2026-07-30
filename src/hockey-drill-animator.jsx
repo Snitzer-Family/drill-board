@@ -8855,18 +8855,21 @@ export default function DrillAnimator() {
               into that piece's own editor (position preserved when pinned) */}
           <div className="hd-field">
             <div className="hd-sectitle">
-              {p.kind === "player" ? "Player" : p.kind === "route" ? "Line" : "Puck"} on this {fork ? "reaction" : "route"}
+              {p.kind === "route" && p.connector ? "Part of the crossing"
+                : `${p.kind === "player" ? "Player" : p.kind === "route" ? "Line" : "Puck"} on this ${fork ? "reaction" : "route"}`}
             </div>
             <div className="hd-poprow">
               <span className="hd-swatch" style={{ background: p.color, width: 16, height: 16, cursor: "default" }} />
               <span style={{ fontWeight: 700 }}>{nameOf(p.id)}</span>
               <button className="hd-mini" onClick={() => navPopup({ type: "piece", id: p.id })}>
-                {p.kind === "route" ? "Line settings ›" : "Open ›"}
+                {p.kind === "route" ? (p.connector ? "Crossing settings ›" : "Line settings ›") : "Open ›"}
               </button>
             </div>
             {p.kind === "route" && (
               <div className="hd-sechint">
-                {queueOf(pieces, p.id).length
+                {p.connector
+                  ? `The skate from ${nameOf((pieces.find(q => q.kind === "route" && q.next === p.id) || {}).id || "?")} into ${nameOf(p.next || "?")}. Shape it here; the drill's work lives on the routes it joins.`
+                  : queueOf(pieces, p.id).length
                   ? `${queueOf(pieces, p.id).length} on this line — spacing and turn-taking live in its settings.`
                   : "Nobody is on this line yet."}
               </div>
@@ -8878,7 +8881,7 @@ export default function DrillAnimator() {
           {p.kind === "player" && ActionSteps(p, i, fork)}
           {/* A route's waypoints carry the same Actions the skater's would — see
               lineProxy. Authored on the head of the line and handed to the rest. */}
-          {p.kind === "route" && (lineProxy(p)
+          {p.kind === "route" && !p.connector && (lineProxy(p)
             ? (
               <>
                 {ActionSteps(lineProxy(p), i, fork)}
@@ -8915,7 +8918,7 @@ export default function DrillAnimator() {
                     else uSeg(i + 1, { waitOn: null });
                   }}
                 />
-              ) : (
+              ) : p.kind === "route" && p.connector ? null : (
                 <div className="hd-field">
                   <div className="hd-sectitle">Pause here</div>
                   <div className="hd-poprow">
@@ -9039,10 +9042,13 @@ export default function DrillAnimator() {
           })()}
           {/* ...and the route's own action: where they go when they finish it.
               Offered at the END, because that is when it happens. */}
-          {p.kind === "route" && !fork && i === route.length - 1 && (<>{routeNextField(p)}{routeRepsField(p)}</>)}
+          {p.kind === "route" && !p.connector && !fork && i === route.length - 1 && (<>{routeNextField(p)}{routeRepsField(p)}</>)}
           {/* Cosmetics last. This is a note pinned to a spot, not something the
               drill DOES, and it was sitting between the actions and the leg
               controls — splitting "what happens here" from "how they leave". */}
+          {/* A crossing is travel between two lines, not a place — so it gets
+              no name and nothing to say. Shape and pace only. */}
+          {!(p.kind === "route" && p.connector) && (<>
           <div className="hd-field">
             <div className="hd-sectitle">Label on the ice</div>
             <div className="hd-poprow">
@@ -9078,6 +9084,7 @@ export default function DrillAnimator() {
               </div>
             </div>
           )}
+          </>)}
           <div className="hd-poprow" style={{ marginTop: 2 }}>
             <button className="hd-mini" title="Pin this waypoint in place so it can't be moved or edited by accident."
               onClick={() => uSeg(i, { lock: true })}>🔒 Lock point</button>
