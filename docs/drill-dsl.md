@@ -252,7 +252,7 @@ is the piece's starting spot (so `shoot=0` / `chip=0` releases before skating).
 | `ENDSTOP` | On a player route's **last** leg: the player stops here, so the route ends in a `‖` **stop mark** instead of a direction arrowhead (skating-diagram convention). Toggle *Stops here* on the last waypoint's popup. |
 | `LOCK` | Pin this waypoint — its handle can't be dragged or edited until unlocked (locking the whole piece locks every waypoint too). Toggle *🔒 Lock point* on the waypoint popup. |
 | `RATE <n>` | Speed multiplier for this leg |
-| `GOTO <pathId>` | **Connect to another path.** On reaching this waypoint they leave, skate to that path's head — around nets, props and anyone standing still — and run it. One per path: a skater only leaves once. Any points after it aren't skated. In the app: *Connect to another path* on the waypoint popup. |
+| `GOTO <pathId>` | **Connect to another path.** On reaching this waypoint they leave, skate to that path's head — around nets, props and anyone standing still — and run it. One per path: a skater only leaves once. Any points after it aren't skated. In the app: the **Go to Path** action in the waypoint's Actions list. |
 | `NAME <word>` | Name this waypoint (underscores → spaces) for presentation text |
 | `DESC "<text>"` | A free-text description for this waypoint |
 | `SHOW auto\|preso\|label` | How the description is used (see below) — defaults to `auto` |

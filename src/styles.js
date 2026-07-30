@@ -944,6 +944,9 @@ export const STYLES = `
         .hd-step.pass  { border-left-color:var(--db-act-pass); }
         .hd-step.shoot { border-left-color:var(--db-act-shot); }
         .hd-step.chip, .hd-step.rim { border-left-color:var(--db-act-loose); }
+        /* the connector: the one step that moves the SKATER rather than the puck,
+           so it wears the accent rather than a puck-action colour */
+        .hd-step.goto { border-left-color:var(--db-accent); }
         .hd-step.warn { opacity:.7; }
         .hd-steplbl { flex:none; min-width:46px; font-size:11.5px; font-weight:700; color:var(--db-text-muted); }
         /* a step's own ✕ sits tight to it rather than wearing full button padding */

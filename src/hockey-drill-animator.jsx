@@ -4285,7 +4285,10 @@ export default function DrillAnimator() {
   const lineHead = route => (route && route.kind === "path" ? queueOf(pieces, route.id)[0] || null : null);
   const lineProxy = route => {
     const head = lineHead(route);
-    return head ? { ...head, path: route.path || [], forks: route.forks || [] } : null;
+    // `_pathId` is the one thing the proxy adds that isn't the head skater's: it
+    // lets the Actions list offer the connector, which belongs to the PATH even
+    // though every puck action in that list belongs to the skater.
+    return head ? { ...head, path: route.path || [], forks: route.forks || [], _pathId: route.id } : null;
   };
   // ...and for anything that just needs "the piece whose actions this route draws"
   const actOwner = p => (p.kind === "path" ? lineProxy(p) : p);
@@ -4421,55 +4424,57 @@ export default function DrillAnimator() {
 
   // 1. Where they go. One definition, rendered both in the route's own settings
   //    and at its last waypoint — the two places you'd look for it.
-  // A CONNECTOR IS A WAYPOINT ACTION. "Reach this point, then cross to Lane B" —
-  // authored where it happens, like every other thing a waypoint does, and not as
-  // a property of the path's end. Put it halfway down a path and the legs past it
-  // simply don't run: leaving early IS the drill you drew.
+  // A CONNECTOR IS AN ACTION ON A WAYPOINT. Everything else in the Actions list
+  // moves a puck; this one moves the skater. But it is the same kind of statement —
+  // "at this point, do X" — so it lives in that list rather than in a section of
+  // its own, which is where nobody looked for it.
   //
-  // Only one waypoint on a path can carry it, so choosing it here moves it off
-  // whichever one had it. The picker offers paths only — a crossing is the road,
-  // not the place.
-  const routeNextField = (p, at) => {
-    const others = pieces.filter(q => q.kind === "path" && !q.connector && q.id !== p.id);
-    const branchy = (p.forks || []).length > 0;
-    const ex = exitOf(p);
-    const here = ex && ex.at === at;
-    const dest = destOf(p);
-    const links = linksFrom(pieces, p);
+  // Only one waypoint on a path can carry it: a skater leaves once. Choosing a
+  // destination on a second point moves it off the first.
+  const connectorAt = (owner, i) => {
+    if (!owner || owner.kind !== "path" || owner.connector || i < 0) return null;
+    const ex = exitOf(owner);
+    return ex && ex.at === i ? ex : null;
+  };
+  // a crossing is the road, not the place, so it is never a destination
+  const connectorTargets = owner => pieces.filter(q => q.kind === "path" && !q.connector && q.id !== owner.id);
+  const connectorStep = (owner, i) => {
+    const ex = connectorAt(owner, i);
+    if (!ex) return null;
+    const dest = destOf(owner), links = linksFrom(pieces, owner);
+    const rest = (owner.path || []).length - 1 - ex.at;
     return (
-      <div className="hd-field">
-        <div className="hd-sectitle">Connect to another path</div>
-        {others.length ? (
-          <>
-            <div className="hd-poprow">
-              <span>from here, go to</span>
-              <select className="hd-select on" value={here && dest ? dest.id : ""}
-                onChange={e => setDestination(p.id, at, e.target.value || null)}>
-                <option value="">— nothing —</option>
-                {others.map(q => <option key={q.id} value={q.id}>{nameOf(q.id)}</option>)}
-              </select>
-            </div>
-            <div className="hd-sechint">
-              {here && dest
-                ? (links.length
-                  ? "They leave the path here and cross on the connector you shaped."
-                  : "They leave the path here and cross to that path's start, going around nets, props and anyone standing still.")
-                : ex && dest
-                  ? `This path already connects at point ${ex.at + 1} — choosing one here moves it.`
-                  : "Nothing happens here; they carry on along the path."}
-            </div>
-            {here && dest && ex.at < p.path.length - 1 && (
-              <div className="hd-sechint">The {p.path.length - 1 - ex.at} point{p.path.length - ex.at > 2 ? "s" : ""} after this one won&rsquo;t be skated.</div>
-            )}
-            {here && dest && branchy && <div className="hd-sechint">This path branches, so only the first leg runs — branches and connectors don&rsquo;t combine yet.</div>}
-            {here && dest && !links.length && (
-              <div className="hd-poprow">
-                <button className="hd-mini" onClick={() => shapeCrossing(p.id)}>Shape the connector ›</button>
-                <span className="hd-sechint">to steer the skate across</span>
-              </div>
-            )}
-          </>
-        ) : <div className="hd-sechint">Add another path to connect to.</div>}
+      <div className="hd-step goto">
+        <div className="hd-poprow">
+          <span className="hd-steplbl">Go to</span>
+          <select className="hd-select on" value={(dest && dest.id) || ""}
+            onChange={e => setDestination(owner.id, i, e.target.value || null)}>
+            {connectorTargets(owner).map(q => <option key={q.id} value={q.id}>{nameOf(q.id)}</option>)}
+          </select>
+          <button className="hd-mini danger hd-stepx" title="Remove step"
+            onClick={() => setDestination(owner.id, i, null)}>✕</button>
+        </div>
+        <div className="hd-poprow"><span className="hd-stephint">
+          {links.length
+            ? "They leave the path here and cross on the connector you shaped."
+            : "They leave the path here and cross to that path\u2019s start, going around nets, props and anyone standing still."}
+        </span></div>
+        {rest > 0 && (
+          <div className="hd-poprow"><span className="hd-stephint">
+            The {rest} point{rest > 1 ? "s" : ""} after this one won&rsquo;t be skated.
+          </span></div>
+        )}
+        {(owner.forks || []).length > 0 && (
+          <div className="hd-poprow"><span className="hd-stepwarn">
+            ⚠ This path branches, so only the first leg runs — branches and connectors don&rsquo;t combine yet.
+          </span></div>
+        )}
+        {!links.length && (
+          <div className="hd-poprow">
+            <button className="hd-mini" onClick={() => shapeCrossing(owner.id)}>Shape the connector ›</button>
+            <span className="hd-stephint">to steer the skate across</span>
+          </div>
+        )}
       </div>
     );
   };
@@ -8015,6 +8020,12 @@ export default function DrillAnimator() {
       });
       // this spot's route: puck actions authored here carry the branch ref so
       // resolveForks can lower them to the chosen run's flat index (base = no ref)
+      // the PATH this waypoint belongs to, when the Actions list is a line's rather
+      // than a lone skater's. The connector is the one entry here that is the
+      // path's business, not the head skater's.
+      const owner = p._pathId ? pieces.find(q => q.id === p._pathId) : null;
+      const gotoHere = owner ? connectorAt(owner, i) : null;
+      const canGoto = !!owner && i >= 0 && !gotoHere && connectorTargets(owner).length > 0;
       const relRef = fork ? { atRef: fork } : {};
       const recRef = fork ? { recvRef: fork } : {};
       const others = pieces.filter(q => q.kind === "player" && q.id !== p.id);
@@ -8074,6 +8085,7 @@ export default function DrillAnimator() {
         else if (t === "shoot") addTerminal("shot", null);
         else if (t === "chip") addTerminal("chip");
         else if (t === "rim") addTerminal("rim");
+        else if (t === "goto") setDestination(owner.id, i, connectorTargets(owner)[0].id);
       };
       const changeType = (st, t) => {
         if (t === "none") { st.del(); return; }
@@ -8212,7 +8224,9 @@ export default function DrillAnimator() {
       // green reaction) is PROVED absent, so a pickup route correctly leads with
       // Collect instead of assuming a hold from base-route lineage math.
       const holdingHere = mayHoldOn(posLedger, pieces, p.id, fork || "");
-      const addOpts = holdingHere ? [...RELEASE_TYPES, ...GAIN_TYPES] : [...GAIN_TYPES, ...RELEASE_TYPES];
+      // the connector goes last: leaving the path is what you do after the work
+      const addOpts = [...(holdingHere ? [...RELEASE_TYPES, ...GAIN_TYPES] : [...GAIN_TYPES, ...RELEASE_TYPES]),
+        ...(canGoto ? [["goto", "Go to Path"]] : [])];
       const typeSelect = (value, options, onChange, key) => (
         <select key={key} className={`hd-select${value !== "none" ? " on" : ""}`} style={{ flex: "0 1 auto", minWidth: 96 }} value={value} onChange={e => onChange(e.target.value)}>
           <option value="none">No Action</option>
@@ -8252,7 +8266,8 @@ export default function DrillAnimator() {
               </div>
             );
           })}
-          {rows.length === 0
+          {owner && connectorStep(owner, i)}
+          {rows.length === 0 && !gotoHere
             ? <div className="hd-poprow"><span className="hd-steplbl">Step 1</span>{typeSelect("none", addOpts, t => t !== "none" && createType(t), "s1")}</div>
             : addRow("addbot")}
         </div>
@@ -9218,7 +9233,26 @@ export default function DrillAnimator() {
                 </div>
               </>
             )
-            : <div className="hd-poprow hd-stephint">Add a skater to this line to give it puck actions.</div>)}
+            /* No line yet, so no puck actions — but the connector is the PATH's,
+               not the head skater's, and a coach laying out a circuit before
+               staffing it still needs to join the paths up. */
+            : (
+              <div className="hd-actions">
+                <div className="hd-mh" style={{ marginBottom: 5 }}>Actions</div>
+                {connectorStep(p, i)}
+                {i >= 0 && !connectorAt(p, i) && connectorTargets(p).length > 0 && (
+                  <div className="hd-poprow">
+                    <span className="hd-steplbl">Step 1</span>
+                    <select className="hd-select" style={{ flex: "0 1 auto", minWidth: 96 }} value="none"
+                      onChange={e => e.target.value !== "none" && setDestination(p.id, i, connectorTargets(p)[0].id)}>
+                      <option value="none">No Action</option>
+                      <option value="goto">Go to Path</option>
+                    </select>
+                  </div>
+                )}
+                <div className="hd-poprow hd-stephint">Add a skater to this line to give it puck actions.</div>
+              </div>
+            ))}
           {/* the branch waypoint carries the reaction controls: the base route's end
               (light reactions), or a SKATE reaction's end (chain another reaction) */}
           {p.kind === "player" && i === route.length - 1 && (!fork
@@ -9369,9 +9403,7 @@ export default function DrillAnimator() {
               </div>
             );
           })()}
-          {/* ...and the connector: an action at THIS point, offered at every one of
-              them, because leaving a path halfway down is a real thing to draw. */}
-          {p.kind === "path" && !p.connector && !fork && routeNextField(p, i)}
+
           {/* Cosmetics last. This is a note pinned to a spot, not something the
               drill DOES, and it was sitting between the actions and the leg
               controls — splitting "what happens here" from "how they leave". */}
