@@ -7184,8 +7184,12 @@ export default function DrillAnimator() {
           <text textAnchor="middle" fontSize={fs} fontWeight={800} fill={st.color || "#14202b"}
             opacity={st.textOp != null ? st.textOp : undefined}
             pointerEvents="none" style={{ fontFamily: "system-ui, sans-serif", userSelect: "none",
-              paintOrder: "stroke", stroke: bgCol || "rgba(246,251,253,0.9)", strokeWidth: fs * 0.06,
-              strokeOpacity: bgCol ? 0.9 : undefined }}>
+              // `halo` lets a BOXLESS label separate itself from what it sits on
+              // without looking outlined: a painted-on name halos in the ice colour,
+              // so it reads as carved into the sheet rather than stickered over it.
+              paintOrder: "stroke", stroke: st.halo || bgCol || "rgba(246,251,253,0.9)",
+              strokeWidth: fs * (st.halo ? 0.11 : 0.06),
+              strokeOpacity: st.halo ? 0.85 : bgCol ? 0.9 : undefined }}>
             {lines.map((l, k) => (
               <tspan key={k} x={0} y={(k - (lines.length - 1) / 2) * lh + fs * 0.34}>{l || " "}</tspan>
             ))}
@@ -7415,6 +7419,34 @@ export default function DrillAnimator() {
       </g>
     );
   }
+  // The names pieces wear — a line's name, a prop's, a whiteboard player's. These
+  // are NOT annotations the coach placed; they identify a thing that is already
+  // on the ice. So they belong painted onto the ice UNDER everything, not on a
+  // card over the top: a "Lane_A" plaque sitting across the skaters queued on
+  // Lane_A hid the very thing it was naming. Boxless, so it reads as a marking
+  // rather than a sticker; the text keeps its halo (paintOrder in labelNode) so
+  // it stays legible over rink lines in either theme.
+  function renderNameTags() {
+    const els = [];
+    pieces.forEach(p => {
+      if (p.kind === "label" || p.kind === "mark") return;
+      if (!p.label || (p.kind === "player" && !(wbTags && symOf(p) !== p.label))) return;
+      // Players normally wear the name on their jersey, but the whiteboard X/O
+      // symbols don't — tag them when the pref is on, or while a player popup is
+      // open (pass-target picking), so "pass to P3" is findable on the ice.
+      // Skipped when the symbol already IS the name — no point saying it twice.
+      // Player tags rotate around the symbol to the clearest spot (never on a
+      // route/pass line) and read slightly larger, in the player's own colour.
+      const off = p.kind === "net" ? 6.5 : p.kind === "player" ? 4.6 : 5;
+      const spot = p.kind === "player" ? tagSpotFor(p, off) : { x: p.x, y: p.y + off };
+      const painted = { bg: "none", border: "none", textOp: 0.82, halo: T.ice };
+      els.push(p.kind === "player"
+        ? labelNode(`nm-${p.id}`, spot.x, spot.y, p.label, 0.62, { ...painted, color: ink(p.color) }, false, null, null)
+        : labelNode(`nm-${p.id}`, spot.x, spot.y, p.label, 0.5, { ...painted, color: ink(p.color) }, false, null, null));
+    });
+    return els;
+  }
+
   function renderLabels() {
     const canEdit = editing && tool !== "draw";
     const els = [];
@@ -7425,19 +7457,6 @@ export default function DrillAnimator() {
           e => pieceDown(e, p.id),
           canEdit && !p.lock ? e => handleDown(e, { kind: "resize", id: p.id, seg: null, cx: p.x, cy: p.y, size0: p.size || 1 }) : null,
           p.lock && !lockedSelectable));
-      } else if (p.label && (p.kind !== "player" || (wbTags && symOf(p) !== p.label))) {
-        // a name tag under any named prop/piece. Players normally wear the name
-        // on their jersey, but the whiteboard X/O symbols don't — tag them when
-        // the pref is on, or while a player popup is open (pass-target picking),
-        // so "pass to P3" is findable on the ice. Skipped when the symbol already
-        // IS the name (a player named LW draws as LW) — no point saying it twice.
-        // Player tags rotate around the symbol to the clearest spot (never on a
-        // route/pass line) and read slightly larger, in the player's own colour.
-        const off = p.kind === "net" ? 6.5 : p.kind === "player" ? 4.6 : 5;
-        const spot = p.kind === "player" ? tagSpotFor(p, off) : { x: p.x, y: p.y + off };
-        els.push(p.kind === "player"
-          ? labelNode(`nm-${p.id}`, spot.x, spot.y, p.label, 0.62, { color: ink(p.color) }, false, null, null)
-          : labelNode(`nm-${p.id}`, spot.x, spot.y, p.label, 0.5, { color: "#33414f" }, false, null, null));
       }
       (p.path || []).forEach((s, i) => {
         if (s.dmode !== "label" || !s.desc) return;
@@ -10309,6 +10328,10 @@ export default function DrillAnimator() {
             )}
 
 
+            {/* Names go on the ice FIRST, under the routes and the pieces they name.
+                See renderNameTags: they identify what is already there, so they are
+                painted on rather than laid over. */}
+            {!aiPlay && <g opacity={markMO}>{renderNameTags()}</g>}
             {/* route lines, fork/branch visuals + their ref paths — drill markings,
                 dimmed by Mark opacity (players/implements below stay opaque) */}
             <g opacity={markMO}>
