@@ -9057,7 +9057,12 @@ export default function DrillAnimator() {
                   const nx = !fork && i >= route.length - 1 ? chainNext(p) : null;
                   return (
                     <button className="hd-mini" disabled={i >= route.length - 1 && !nx}
-                      onClick={() => (nx ? navPopup({ type: "point", id: nx.id, seg: 0 }) : goSeg(i + 1))}>
+                      // Step into the next piece at its START, not at its first
+                      // waypoint. A path's start is where its line stands and where
+                      // a collect-before-you-go is authored — skipping it walked
+                      // straight past the most important point on the path. Every
+                      // piece's start is a stop now, so forward and back agree.
+                      onClick={() => (nx ? navPopup({ type: "piece", id: nx.id }) : goSeg(i + 1))}>
                       {nx ? `${nx.connector ? "Connector" : nameOf(nx.id)} ›` : "Next ›"}
                     </button>
                   );
