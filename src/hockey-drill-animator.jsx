@@ -1081,6 +1081,13 @@ export default function DrillAnimator() {
   // pinned panel: keep the editor open and re-target it to whatever's tapped next.
   //   null | "float" (mobile-style floating, any screen) | "dock" (right sidebar, wide only)
   const [pinMode, setPinMode] = useState(null);
+  // PHONE CHROME. Below DENSE_MIN a waypoint's settings do not float over the ice
+  // in a panel you then have to move out of your own way — the bar becomes the
+  // editor. It fills with a swipeable strip of section buttons, and the section
+  // you pick opens as a sheet sitting on top of the bar. `barSec` is which one.
+  const [barSec, setBarSec] = useState(0);
+  const [barSecs, setBarSecs] = useState([]);      // the section headings actually rendered
+  const popBodyRef = useRef(null);
   const [isWide, setIsWide] = useState(() =>
     typeof matchMedia === "function" &&
     matchMedia("(pointer: fine) and (min-width: 760px)").matches);
@@ -1090,6 +1097,8 @@ export default function DrillAnimator() {
   // flag, not a media query. It's also written onto .hd-root as `.dense`, which
   // is what the compact CSS keys off: one source of truth, so the stylesheet and
   // the render tree can't disagree about which layout is live.
+  // Below the dense tier is a PHONE, and a phone edits from the bar rather than
+  // from a panel floating over the ice.
   const [dense, setDense] = useState(() =>
     typeof matchMedia === "function" && matchMedia(`(min-width: ${DENSE_MIN}px)`).matches);
   const [roomy, setRoomy] = useState(() =>
@@ -1311,6 +1320,38 @@ export default function DrillAnimator() {
   // card against its container and pull it back in with a corrective margin
   // (margins compose with the anchor transform without fighting it)
   const popRef = useRef(null);
+  const phoneChrome = !dense;
+  // WHAT THE STRIP OFFERS is read back off the rendered sheet, not kept as a
+  // second list beside the panel. The panel's top-level children ARE its
+  // sections, and half of them are conditional — a hand-written table of what
+  // "should" be there would drift from what is, and the drift would be silent.
+  useEffect(() => {
+    if (!phoneChrome || !popup) {
+      if (barSecs.length) setBarSecs([]);
+      return;
+    }
+    const el = popBodyRef.current;
+    if (!el) return;
+    const found = [...el.children].map(c => {
+      const h = c.querySelector(".hd-sectitle, .hd-mh");
+      const t = (h ? h.textContent : c.textContent || "").trim();
+      return t.split("\n")[0].slice(0, 18) || "More";
+    });
+    // identity-preserving: this effect runs on every render of the sheet, and
+    // handing back a fresh array when nothing changed would re-trigger it forever
+    if (found.length !== barSecs.length || found.some((t, i) => t !== barSecs[i])) setBarSecs(found);
+  });
+  // a fresh selection starts at the first section rather than wherever you were
+  useEffect(() => { setBarSec(0); }, [popup && popup.id, popup && popup.seg, popup && popup.type]);
+  // ...and mark which child is showing. A class rather than React state on each
+  // section, because the sections are whatever the panel happened to render —
+  // there is no component boundary to hang a prop on.
+  useEffect(() => {
+    const el = popBodyRef.current;
+    if (!el) return;
+    [...el.children].forEach((c, k) => c.classList.toggle("hd-secon", k === barSec));
+  });
+
   const sbThumbRef = useRef(null);
   // draw a real, always-visible scrollbar thumb (iOS ignores ::-webkit-scrollbar
   // for touch overflow, so this is the only reliable "it scrolls" cue there).
@@ -9902,6 +9943,10 @@ export default function DrillAnimator() {
       finalStyle.width = `${popDim.w}px`;
       if (!collapsed && popDim.h != null) { finalStyle.height = `${popDim.h}px`; finalStyle.maxHeight = "none"; }
     }
+    // PHONE: a waypoint's settings are not a window you drag out of your own way.
+    // They sit on the bar as a sheet, and the bar carries the section strip that
+    // says which part of them you are looking at.
+    const sheet = phoneChrome;
     const boxed = !collapsed && (popPos || popDim);
     const usePreset = () => { setPopPos(null); setPopDim(null); };   // presets re-anchor at default size
     // Collapsing must not MOVE the panel — only shorten it. Pin it to where it
@@ -9915,7 +9960,8 @@ export default function DrillAnimator() {
       if (r) setPopPos({ left: Math.round(r.left), top: Math.round(r.top) });
     };
     return (
-      <div className={`hd-pop pinned${docked ? " dock" : ""}`} style={docked ? undefined : finalStyle} ref={popRef}
+      <div className={`hd-pop pinned${docked ? " dock" : ""}${sheet ? " sheet" : ""}`}
+        style={docked || sheet ? undefined : finalStyle} ref={popRef}
         onScroll={syncPopScroll} onPointerDown={e => e.stopPropagation()}>
         {/* always-visible scrollbar thumb: sticky rail pinned to the viewport
             top, thumb positioned/sized imperatively in syncPopScroll */}
@@ -9954,7 +10000,7 @@ export default function DrillAnimator() {
           <button className="hd-x" onPointerDown={e => e.stopPropagation()}
             onClick={() => { setPopup(null); setPinMode(null); }}><Icon name="close" size={15} /></button>
         </div>
-        {!collapsed && body}
+        {!collapsed && <div className="hd-popbody" ref={popBodyRef}>{body}</div>}
         {!collapsed && !docked && (
           // resize: a bottom bar (height) + a bottom-right corner (both). Sticky
           // so they ride the popup's visible bottom edge even while it scrolls.
@@ -10920,9 +10966,10 @@ export default function DrillAnimator() {
     <InkCtx.Provider value={ink}>
     <div className={`hd-root${actOn ? "" : " act-off"}${dense ? " dense" : ""}${
       hand === "left" ? " lefty" : ""}${docked ? " dock-open" : ""}${
+      phoneChrome && popup ? " sheet-open" : ""}${
       presoFull ? (barUp ? " preso-full bar-up" : " preso-full") : ""}${cursorIdle ? " cursor-idle" : ""}${
       tool === "pen" || tool === "marker" ? (eraser && tool === "pen" ? " erase-cursor" : " draw-cursor") : ""}`} ref={rootRef}
-      style={{ "--hd-font": fontStack }}>
+      style={{ "--hd-font": fontStack, "--hd-sheet": phoneChrome && popup ? "clamp(180px, 42vh, 380px)" : "0px" }}>
       <style>{STYLES}</style>
 
       {/* ---------- the ice, filling the screen ---------- */}
@@ -12056,13 +12103,26 @@ export default function DrillAnimator() {
           than a rule. */}
       {actOn && mode === "edit" && (
         <div className="hd-act edit">
+          {/* THE PHONE'S EDITOR. A selected waypoint's settings arrive here as a
+              strip of sections you swipe through, and the one you pick opens as a
+              sheet on top of the bar. The strip is its own scroll container — NOT
+              .hd-act, which must never take overflow:hidden because the line
+              popovers are its children and spring upward out of its box. */}
+          {phoneChrome && barSecs.length > 0 && (
+            <div className="hd-secstrip">
+              {barSecs.map((t, k) => (
+                <button key={k} className={`hd-secbtn${barSec === k ? " on" : ""}`}
+                  onClick={() => setBarSec(k)} aria-pressed={barSec === k}>{t}</button>
+              ))}
+            </div>
+          )}
           {/* A selection takes the bar over completely — what you want next is
               something to DO with the thing you just picked, not another piece.
               There is deliberately no collapsed [+ Add] here: it assumed you'd
               add from a selection, when the way back to the palette is to tap
               the ice, which deselects. That's one tap either way, and it's the
               tap you were going to make anyway. */}
-          {!selected && !multiSel?.size && (
+          {!selected && !multiSel?.size && !(phoneChrome && barSecs.length) && (
             <>
               {ADD_GROUPS[0].kinds.map(addChip)}
               <div className="hd-pensep" />

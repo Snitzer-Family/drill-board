@@ -47,7 +47,12 @@ export const STYLES = `
              (--hd-barh2, "measured 102px") and reading either height off the CSS
              by hand was wrong twice; .hd-act's flex-wrap:nowrap now makes a
              second row impossible, so one variable is enough. */
-          --hd-act: calc(4px + var(--hd-barh) + var(--hd-icegap));
+          /* the bar's own band, and the band the stage reserves. They are the
+             same until a phone sheet opens, when the stage reserves the sheet
+             too — the sheet itself must still sit above the BAR, or it floats a
+             whole sheet-height clear of the screen. */
+          --hd-actbar: calc(4px + var(--hd-barh) + var(--hd-icegap));
+          --hd-act: var(--hd-actbar);
           /* corner-menu width. The anchoring JS needs this number too, so it is
              asserted against MENU_W in hockey-drill-animator.jsx by the tests —
              if they disagree the menus centre on the wrong spot. */
@@ -946,6 +951,33 @@ export const STYLES = `
         .hd-step.chip, .hd-step.rim { border-left-color:var(--db-act-loose); }
         /* the connector: the one step that moves the SKATER rather than the puck,
            so it wears the accent rather than a puck-action colour */
+        /* ── the phone's editor ─────────────────────────────────────────────
+           A waypoint's settings sit ON the bar rather than floating over the
+           ice: full width, above the bar, and showing one section at a time.
+           The strip in the bar says which. */
+        .hd-pop.sheet { position:fixed; left:0; right:0; width:auto; max-width:none;
+          bottom:calc(var(--hd-menubar) + var(--hd-b) + var(--hd-actbar)); top:auto;
+          transform:none; height:var(--hd-sheet); max-height:var(--hd-sheet);
+          border-radius:12px 12px 0 0; }
+        /* The point of the phone chrome: the settings must not sit ON the ice.
+           The sheet's height joins the band the stage already reserves for the
+           bar, so the rink SHRINKS to make room instead of being covered — the
+           same trick, and the same variable, that keeps the bar off the ice. */
+        .hd-root { --hd-sheet: 0px; }
+        .hd-root.sheet-open { --hd-act: calc(var(--hd-actbar) + var(--hd-sheet)); }
+        .hd-pop.sheet .hd-popbody > * { display:none; }
+        .hd-pop.sheet .hd-popbody > *.hd-secon { display:block; }
+        /* Its OWN scroll container. .hd-act must never take overflow:hidden —
+           the line-settings popovers are its children and spring out of its box
+           — so the swipe lives on this strip instead. */
+        .hd-secstrip { flex:1 1 auto; min-width:0; display:flex; gap:6px; align-items:center;
+          overflow-x:auto; overflow-y:hidden; scrollbar-width:none;
+          -webkit-overflow-scrolling:touch; overscroll-behavior-x:contain; }
+        .hd-secstrip::-webkit-scrollbar { display:none; }
+        .hd-secbtn { flex:0 0 auto; height:34px; padding:0 11px; border-radius:9px;
+          border:1px solid var(--db-border); background:var(--db-surface-panel);
+          color:var(--db-text-muted); font:700 12px/1 system-ui,sans-serif; white-space:nowrap; }
+        .hd-secbtn.on { background:var(--db-accent); border-color:var(--db-accent); color:var(--db-text-on-accent); }
         .hd-step.goto { border-left-color:var(--db-accent); }
         .hd-step.warn { opacity:.7; }
         .hd-steplbl { flex:none; min-width:46px; font-size:11.5px; font-weight:700; color:var(--db-text-muted); }
