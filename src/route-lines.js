@@ -108,7 +108,22 @@ export function queueRelease(route, prevId) {
   return null;
 }
 
-// Every route joined to this one by `next=`, in either direction. A rep counts a
+// WHERE A PATH HANDS OFF. A connector is authored as an action ON A WAYPOINT —
+// "when you reach here, go to Lane B" — not as a property of the path's end. So
+// the departure can sit anywhere along the path, and the legs past it simply
+// don't run for a skater who leaves there.
+//
+// One per path: a second would be a fork, and a skater can only go one way. The
+// first one wins, and the editor clears the others when it writes a new one.
+export function exitOf(p) {
+  const legs = (p && p.path) || [];
+  for (let i = 0; i < legs.length; i++) if (legs[i].goTo) return { at: i, to: legs[i].goTo };
+  return null;
+}
+// just the id, for the many places that only ask "and then where?"
+export function nextOf(p) { const e = exitOf(p); return e ? e.to : null; }
+
+// Every route joined to this one by a waypoint's `goTo`, in either direction. A rep counts a
 // pass through the whole chain, so the count belongs to the chain rather than to
 // any one route in it — Lane A and Lane B feeding each other share one number,
 // and the editor writes it to all of them at once.
@@ -116,9 +131,10 @@ export function chainOf(pieces, pathId) {
   const routes = (pieces || []).filter(p => p.kind === "path");
   const adj = new Map(routes.map(r => [r.id, new Set()]));
   for (const r of routes) {
-    if (!adj.has(r.id) || !adj.has(r.next)) continue;
-    adj.get(r.id).add(r.next);
-    adj.get(r.next).add(r.id);
+    const nx = nextOf(r);
+    if (!adj.has(r.id) || !adj.has(nx)) continue;
+    adj.get(r.id).add(nx);
+    adj.get(nx).add(r.id);
   }
   const out = new Set(), stack = [pathId];
   while (stack.length) {
@@ -191,7 +207,8 @@ export function transitLegs(from, to, obstacles, rate = TRANSIT_RATE) {
 export function transitPoly(routeA, routeB, obstacles) {
   const legs = (routeA.path || []).length;
   if (!legs || !routeB) return null;
-  const end = routeA.path[legs - 1];
+  const ex = exitOf(routeA);
+  const end = routeA.path[ex ? ex.at : legs - 1];
   const pts = transitLegs({ x: end.x, y: end.y }, { x: routeB.x, y: routeB.y }, obstacles);
   return pts.length ? [{ x: end.x, y: end.y }, ...pts.map(s => ({ x: s.x, y: s.y }))] : null;
 }
@@ -430,9 +447,14 @@ export function lowerRoutes(pieces) {
           legs.push(...transitLegs({ x: end.x, y: end.y }, { x: cur.x, y: cur.y }, obstacles, crossRate(prev, end)));
         }
         laps.push({ base: legs.length, x: cur.x, y: cur.y, route: cur.id });
-        legs.push(...(cur.path || []).map(s => ({ ...s })));
+        // Only as far as the departure waypoint. If the coach put the connector
+        // halfway down the path, a skater who takes it never skates the rest —
+        // that is what makes it a waypoint action rather than an end-of-path one.
+        const ex = exitOf(cur);
+        const own = cur.path || [];
+        legs.push(...(ex ? own.slice(0, ex.at + 1) : own).map(s => ({ ...s })));
         seen.add(cur.id);
-        const nxt = routes.get(cur.next);
+        const nxt = ex ? routes.get(ex.to) : null;
         // the rep ends when the chain closes back on itself, runs out, or would
         // repeat a route it has already covered this time round
         if (!nxt || nxt.id === R.id || seen.has(nxt.id)) break;

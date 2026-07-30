@@ -1,4 +1,4 @@
-import { QUEUE_GAP, QUEUE_LEAD, queueOf, isMobile, headHeading, stackSpot, queueRelease, transitObstacles, chainOf, lowerRoutes } from '../src/route-lines.js';
+import { QUEUE_GAP, QUEUE_LEAD, queueOf, isMobile, headHeading, stackSpot, queueRelease, transitObstacles, chainOf as chainOfRaw, lowerRoutes as lowerRaw, exitOf, nextOf } from '../src/route-lines.js';
 import { TRANSIT_RATE, REPS_MAX, LINE_LEG_CAP, CROSSING_DASH } from '../src/constants.js';
 import { readFileSync } from 'node:fs';
 const src = f => readFileSync(new URL('../src/' + f, import.meta.url), 'utf8');
@@ -10,6 +10,23 @@ const T = (name, got, want) => {
   console.log((ok ? 'PASS' : 'FAIL').padEnd(5), name, ok ? '' : `→ got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
 };
 const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
+
+// A connection is authored ON A WAYPOINT — reach this point, cross to that path.
+// The fixtures below say `next: 'R2'` because that is how the link READS, so wire
+// it onto the departing waypoint here rather than restating it thirty times. A
+// fixture that wants to leave mid-path writes `goTo` on the leg itself, and this
+// leaves it alone.
+const wire = p => {
+  if (!p || !p.next) return p;
+  const { next, ...rest } = p;
+  const legs = rest.path || [];
+  return { ...rest, path: legs.map((s, i) => (i === legs.length - 1 ? { ...s, goTo: next } : s)) };
+};
+// hand the same array back when nothing needed wiring, so the identity-preserving
+// contract of lowerRoutes is still what these tests measure
+const wireAll = ps => { if (!Array.isArray(ps)) return ps; const w = ps.map(wire); return w.some((q, i) => q !== ps[i]) ? w : ps; };
+const lowerRoutes = ps => lowerRaw(wireAll(ps));
+const chainOf = (ps, id) => chainOfRaw(wireAll(ps), id);
 
 // a path running due east from (60,40): head at 60,40 then two straight legs
 const path = (over = {}) => ({
@@ -148,7 +165,27 @@ T('isMobile: null is not', isMobile(null), false);
   T('no rule leaves every member unheld', out.filter(p => p.kind === 'player').every(p => p.wait === null), true);
 }
 
-// ---- recycling: next= / hops= ----
+// ---- exitOf: where a path hands off ----
+T('exitOf: no goTo is no exit', exitOf({ path: [{ type: 'L' }, { type: 'L' }] }), null);
+T('exitOf: finds the waypoint carrying it',
+  exitOf({ path: [{ type: 'L' }, { type: 'L', goTo: 'R2' }, { type: 'L' }] }), { at: 1, to: 'R2' });
+T('exitOf: the first one wins — a skater leaves once',
+  exitOf({ path: [{ goTo: 'R2' }, { goTo: 'R3' }] }).to, 'R2');
+T('exitOf: an empty path has no exit', exitOf({ path: [] }), null);
+T('exitOf: tolerates nothing at all', exitOf(null), null);
+T('nextOf is just the id', nextOf({ path: [{ goTo: 'R7' }] }), 'R7');
+{ // leaving HALFWAY: the points past the departure are not skated
+  const A = { id: 'R1', kind: 'path', x: 30, y: 22, color: '#2f9e57', forks: [],
+    path: [{ type: 'L', x: 60, y: 22, goTo: 'R2' }, { type: 'L', x: 90, y: 22 }, { type: 'L', x: 120, y: 22 }] };
+  const B = { id: 'R2', kind: 'path', x: 150, y: 66, color: '#3f7f8c', forks: [], path: [{ type: 'L', x: 190, y: 70 }] };
+  const legs = lowerRoutes([A, B, { id: 'P1', kind: 'player', x: 30, y: 22, pathId: 'R1', q: 1, path: [], forks: [] }])
+    .find(p => p.id === 'P1').path;
+  T('a mid-path connector skates only as far as its waypoint',
+    legs.filter(s => !s.transit).map(s => s.x), [60, 190]);
+  T('...and it still crosses to the other path', legs.some(s => s.transit), true);
+}
+
+// ---- recycling: a waypoint's connection ----
 // one "lap" = one maximal run of transit legs, since a single crossing may be
 // simplified into several
 const laps = legs => legs.reduce((n, s, i) => n + (s.transit && !(legs[i - 1] || {}).transit ? 1 : 0), 0);
@@ -405,8 +442,8 @@ const chainSig = (out, id) => { const p = out.find(q => q.id === id); return [p.
 }
 { // the count belongs to the CHAIN, so every path in it reports the same one
   const ps = [
-    { id: 'R1', kind: 'path', x: 30, y: 22, forks: [], next: 'R2' },
-    { id: 'R2', kind: 'path', x: 90, y: 22, forks: [], next: 'R1' },
+    { id: 'R1', kind: 'path', x: 30, y: 22, forks: [], next: 'R2', path: [{ type: 'L', x: 60, y: 22 }] },
+    { id: 'R2', kind: 'path', x: 90, y: 22, forks: [], next: 'R1', path: [{ type: 'L', x: 70, y: 22 }] },
     { id: 'R9', kind: 'path', x: 10, y: 70, forks: [] },
   ];
   T('a loop is one chain', [...chainOf(ps, 'R1')].sort(), ['R1', 'R2']);

@@ -120,12 +120,13 @@ const LINE = [
   T('an unnamed route writes no token', / route=/.test(ser(parseDrill(LINE))), false);
 }
 { // recycling tokens
-  const rc = 'RINK full\nPIECE R1 path 30 22 #3f7f8c A next=R2 reps=2 regroup=0.8\nPATH R1 L 90,22\nPIECE R2 path 170 66 #b06a2e B next=R1\nPATH R2 L 110,66\nPIECE P1 player 30 22 #d7263d F1 path=R1 q=1';
+  const rc = 'RINK full\nPIECE R1 path 30 22 #3f7f8c A reps=2 regroup=0.8\nPATH R1 GOTO R2 L 90,22\nPIECE R2 path 170 66 #b06a2e B\nPATH R2 GOTO R1 L 110,66\nPIECE P1 player 30 22 #d7263d F1 path=R1 q=1';
   const { a, b, t1, t2 } = trip(rc);
   T('recycling round-trips identically', JSON.stringify(a) === JSON.stringify(b), true);
   T('recycling is a byte-stable fixed point', t1 === t2, true);
   const R = b.pieces.find(p => p.id === 'R1');
-  T('next/reps/regroup survive', [R.next, R.reps, R.regroup], ['R2', 2, 0.8]);
+  T('the connection rides the waypoint, reps/regroup the path',
+    [R.path[0].goTo, R.reps, R.regroup], ['R2', 2, 0.8]);
   T('a default reps emits no token', / reps=/.test(ser(parseDrill(rc.replace(' reps=2', '')))), false);
   // fresh start: `hops` is gone, not aliased
   T('the retired hops spelling is simply ignored', parseDrill(rc.replace('reps=2', 'hops=4')).pieces[0].reps, undefined);

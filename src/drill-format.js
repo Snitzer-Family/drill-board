@@ -62,14 +62,14 @@ export function extractDrill(text) {
 function parseSegments(tok, j, unq) {
   const segs = [];
   let mode = "carry", dir = "fwd", stop = 0, rate = 1, name = null, waitOn = null, jump = false, join = null, endStop = false, lock = false;
-  let dsc = null, dmode = null, dsize = null, dox = null, doy = null, turn = null;
+  let dsc = null, dmode = null, dsize = null, dox = null, doy = null, turn = null, goTo = null;
   const num = () => { const v = parseFloat(tok[j++]); if (isNaN(v)) throw new Error("bad number in PATH"); return v; };
   const push = seg => {
     segs.push({ ...seg, mode, dir, stop, rate, ...(name ? { name } : {}), ...(waitOn ? { waitOn } : {}), ...(jump ? { jump: true } : {}),
       ...(join ? { join } : {}), ...(endStop ? { endStop: true } : {}), ...(lock ? { lock: true } : {}), ...(dsc ? { desc: dsc } : {}), ...(dmode ? { dmode } : {}), ...(dsize != null ? { dsize } : {}),
-      ...(dox != null ? { dox, doy } : {}), ...(turn ? { turn } : {}) });
+      ...(dox != null ? { dox, doy } : {}), ...(turn ? { turn } : {}), ...(goTo ? { goTo } : {}) });
     mode = "carry"; dir = "fwd"; stop = 0; rate = 1; name = null; waitOn = null; jump = false; join = null; endStop = false; lock = false;
-    dsc = null; dmode = null; dsize = null; dox = null; doy = null; turn = null;
+    dsc = null; dmode = null; dsize = null; dox = null; doy = null; turn = null; goTo = null;
   };
   while (j < tok.length) {
     const t = tok[j++].toUpperCase();
@@ -83,6 +83,9 @@ function parseSegments(tok, j, unq) {
     if (t === "WAIT") { const on = tok[j++]; const at = parseInt(tok[j++], 10); waitOn = { on, at: (isNaN(at) ? 1 : at) - 1, mode: "waypoint" }; continue; }
     // WACT <player> <pt> — pause until that player releases the puck at <pt> (0 = any action)
     if (t === "WACT") { const on = tok[j++]; const at = parseInt(tok[j++], 10); waitOn = { on, at: (isNaN(at) || at === 0) ? null : at - 1, mode: "action" }; continue; }
+    // GOTO <path> — the connector, authored ON THIS WAYPOINT: reach here and cross
+    // to that path's head. Legs past it don't run for a skater who takes it.
+    if (t === "GOTO") { goTo = tok[j++] || null; continue; }
     if (t === "RATE") { rate = Math.max(0.1, num()); continue; }
     if (t === "NAME") { name = (tok[j++] || "").replace(/_/g, " ").trim() || null; continue; }
     if (t === "DESC") { dsc = unq(tok[j++]) || null; continue; }        // "free text" description
@@ -247,7 +250,7 @@ export function parseDrill(text) {
         // lines: `route`/`q` bind a PLAYER to the route they queue on; `gap` is the
         // ROUTE's own spacing between stacked skaters
         let pathId = null, qIx = null, gapFt = null, queue = null;
-        let nextRoute = null, reps = null, regroup = null;   // route: where finishers go next
+        let reps = null, regroup = null;   // the circuit's rep count and crossing pace
         let feedPucks = false;                               // route: keep the line supplied with pucks
         let connector = false;                               // route: this IS a connector, not a path of its own
         let routeName = null;                                // the whole ROUTE's name, carried by every path in it
@@ -391,8 +394,7 @@ export function parseDrill(text) {
                 if (mq[1].toLowerCase() === "point") { if (n >= 1) queue = { mode: "point", at: n - 1 }; }
                 else if (n > 0) queue = { mode: "lead", lead: n };
               }
-            } else if (key === "next") nextRoute = v;       // route: finishers cross to this route's head
-            else if (key === "reps") {
+            } else if (key === "reps") {
               const n = parseInt(v, 10);   // passes through the whole connected route
               if (!isNaN(n) && n >= 0) reps = n;
             } else if (key === "regroup") {
@@ -410,7 +412,7 @@ export function parseDrill(text) {
         const mode = lmode || (rand === false ? "sequence" : "reactive");   // legacy rand=off → sequence
         // a bare net= token targets every shot terminal that didn't carry its own >net
         if (net) terminals.forEach(t => { if (t.kind === "shot" && !t.net) t.net = net; });
-        const p = { id, kind, x, y, color, label, text, size, speed, hand, sym, carrier, facing, transfers, pickup, ...(terminals.length ? { terminals } : {}), net, holdLine, goalie, defense, wait, group, crease, lock, cues, mode, alwaysColor, lightId, ...(pathId ? { pathId } : {}), ...(qIx != null ? { q: qIx } : {}), ...(gapFt != null ? { gap: gapFt } : {}), ...(queue ? { queue } : {}), ...(nextRoute ? { next: nextRoute } : {}), ...(reps != null ? { reps } : {}), ...(regroup != null ? { regroup } : {}), ...(feedPucks ? { feed: true } : {}), ...(connector ? { connector: true } : {}), ...(routeName ? { routeName } : {}), ...(bg ? { bg } : {}), ...(bgOp != null ? { bgOp } : {}), ...(border ? { border } : {}), ...(borderOp != null ? { borderOp } : {}), ...(textOp != null ? { textOp } : {}), forks: [], path: [] };
+        const p = { id, kind, x, y, color, label, text, size, speed, hand, sym, carrier, facing, transfers, pickup, ...(terminals.length ? { terminals } : {}), net, holdLine, goalie, defense, wait, group, crease, lock, cues, mode, alwaysColor, lightId, ...(pathId ? { pathId } : {}), ...(qIx != null ? { q: qIx } : {}), ...(gapFt != null ? { gap: gapFt } : {}), ...(queue ? { queue } : {}), ...(reps != null ? { reps } : {}), ...(regroup != null ? { regroup } : {}), ...(feedPucks ? { feed: true } : {}), ...(connector ? { connector: true } : {}), ...(routeName ? { routeName } : {}), ...(bg ? { bg } : {}), ...(bgOp != null ? { bgOp } : {}), ...(border ? { border } : {}), ...(borderOp != null ? { borderOp } : {}), ...(textOp != null ? { textOp } : {}), forks: [], path: [] };
         pieces.push(p); byId[id] = p;
       } else if (cmd === "PATH") {
         const id = tok[1];
@@ -580,6 +582,7 @@ function segToStr(s) {
   if (s.waitOn && s.waitOn.on) pre += s.waitOn.mode === "action"
     ? `WACT ${s.waitOn.on} ${s.waitOn.at != null ? s.waitOn.at + 1 : 0} `
     : `WAIT ${s.waitOn.on} ${(s.waitOn.at ?? 0) + 1} `;
+  if (s.goTo) pre += `GOTO ${s.goTo} `;
   if (s.rate && s.rate !== 1) pre += `RATE ${f2(s.rate)} `;
   if (s.dir === "bwd") pre += "BWD ";
   if (s.turn && s.turn !== "puck") pre += `TURN ${s.turn} `;   // "puck" is the default sweep
@@ -706,11 +709,12 @@ export function serializeDrill(rink, pieces, title = "", desc = "", steps = [], 
       ? (p.queue.mode === "point" ? ` queue=point:${(p.queue.at ?? 0) + 1}`
         : p.queue.mode === "lead" ? ` queue=lead:${f1(p.queue.lead ?? QUEUE_LEAD)}` : "")
       : "";
-    // recycling: where this line's finishers go, how many links they follow, and
-    // the pace they cross at. `hops` is written whenever it isn't the default 1,
-    // including 0 (which means "draw the link but don't run it").
-    const lnx = p.kind === "path" && p.next
-      ? ` next=${p.next}${p.reps != null && p.reps !== 1 ? " reps=" + p.reps : ""}${p.regroup > 0 && p.regroup !== TRANSIT_RATE ? " regroup=" + f2(p.regroup) : ""}`
+    // Recycling. WHERE they go is a waypoint's `GOTO` on the PATH line, not a
+    // piece modifier — the connector is an action at a point, so it is written
+    // where that point is. What stays here belongs to the whole circuit: how many
+    // times round, and the pace they cross at.
+    const lnx = p.kind === "path"
+      ? `${p.reps != null && p.reps !== 1 ? " reps=" + p.reps : ""}${p.regroup > 0 && p.regroup !== TRANSIT_RATE ? " regroup=" + f2(p.regroup) : ""}`
       : "";
     const lfeed = p.kind === "path" && p.feed ? " feed" : "";
     const lconn = p.kind === "path" && p.connector ? " connector" : "";

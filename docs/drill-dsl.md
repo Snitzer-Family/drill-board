@@ -155,7 +155,6 @@ Places a piece. `id` is any unique token (e.g. `F1`, `PK1`, `N2`).
 | `gap=<ft>` | path | Feet between stacked skaters (default `5`, omitted then). |
 | `queue=point:<pt>` | path | Each skater holds until the one **ahead of them** reaches point `<pt>` of the route (1-based). |
 | `queue=lead:<ft>` | path | Each skater holds until the one ahead is `<ft>` **clear of them** — the separation, not the distance travelled (they already start `gap` apart). Omit `queue=` entirely and they all go at once. |
-| `next=<pathId>` | path | When they finish, they skate to that route's head and run it — going around nets, props and anyone standing still. |
 | `reps=<n>` | path | How many times the whole **route** (the connected circuit of paths) is run. A -> B and back is ONE rep. Every path in a route carries the same number; the app writes it to all of them. With nothing connected, a rep above 1 sends them back to this path's own start. |
 | `route=<name>` | path | The **route's** name — the whole circuit. Carried by every path in it (underscores read as spaces). |
 | `regroup=<n>` | path | Pace multiplier for the skate between routes (default `0.65` — a glide, not another rep). |
@@ -253,6 +252,7 @@ is the piece's starting spot (so `shoot=0` / `chip=0` releases before skating).
 | `ENDSTOP` | On a player route's **last** leg: the player stops here, so the route ends in a `‖` **stop mark** instead of a direction arrowhead (skating-diagram convention). Toggle *Stops here* on the last waypoint's popup. |
 | `LOCK` | Pin this waypoint — its handle can't be dragged or edited until unlocked (locking the whole piece locks every waypoint too). Toggle *🔒 Lock point* on the waypoint popup. |
 | `RATE <n>` | Speed multiplier for this leg |
+| `GOTO <pathId>` | **Connect to another path.** On reaching this waypoint they leave, skate to that path's head — around nets, props and anyone standing still — and run it. One per path: a skater only leaves once. Any points after it aren't skated. In the app: *Connect to another path* on the waypoint popup. |
 | `NAME <word>` | Name this waypoint (underscores → spaces) for presentation text |
 | `DESC "<text>"` | A free-text description for this waypoint |
 | `SHOW auto\|preso\|label` | How the description is used (see below) — defaults to `auto` |
@@ -338,15 +338,21 @@ legs (the collect landing as they rejoin the line, which is where the pile is).
 That eats a puck per rep, so a looping drill wants either a deep pile or `feed`,
 which lets the route supply them itself.
 
-**Recirculating.** `next=` sends a line's finishers to another line's head, which
-is how a full-ice drill actually runs:
+**Recirculating.** A **connector** sends a line on to another line's head, which is
+how a full-ice drill actually runs. It is an action **on a waypoint** — `GOTO`,
+written as a prefix on the leg that arrives there — not a property of the path, so
+the coach chooses where they peel off:
 
 ```drill
-PIECE R1 path 30 22 #3f7f8c Lane_A queue=lead:18 next=R2 reps=2
-PATH  R1 L 90,22 Q 130,22 165,45
-PIECE R2 path 170 66 #b06a2e Lane_B queue=lead:18 next=R1 reps=2
-PATH  R2 L 110,66 Q 70,66 35,45
+PIECE R1 path 30 22 #3f7f8c Lane_A queue=lead:18 reps=2
+PATH  R1 L 90,22 GOTO R2 Q 130,22 165,45
+PIECE R2 path 170 66 #b06a2e Lane_B queue=lead:18 reps=2
+PATH  R2 GOTO R1 L 110,66 Q 70,66 35,45
 ```
+
+Lane A hands off at its **last** point and Lane B at its **first** — so B's
+skaters cross back the moment they reach `110,66`, and the leg out to `35,45` is
+drawn but never skated. Put the `GOTO` anywhere you want them to leave.
 
 Each skater's whole recirculation becomes one long path at load time: route A,
 then the crossing, then route B, and so on. The crossing is real route geometry —
@@ -359,10 +365,10 @@ across — round the back of a net, along the boards, through a regroup — mark
 route `connector` and put it in the middle:
 
 ```drill
-PIECE R1 path 30 22 #3f7f8c Shooters next=RC
-PATH  R1 L 90,22 Q 130,24 160,40
-PIECE RC path 160 40 #3f7f8c next=R2 connector
-PATH  RC RATE 0.65 L 120,50 L 80,60 L 40,70
+PIECE R1 path 30 22 #3f7f8c Shooters
+PATH  R1 L 90,22 GOTO RC Q 130,24 160,40
+PIECE RC path 160 40 #3f7f8c connector
+PATH  RC RATE 0.65 L 120,50 L 80,60 GOTO R2 L 40,70
 PIECE R2 path 40 70 #b06a2e Regroup
 PATH  R2 L 100,70
 ```
