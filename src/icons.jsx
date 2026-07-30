@@ -273,12 +273,12 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
         <rect x={-1.42} y={-2.25} width={2.84} height={1.5} rx={0.32} fill="#ffffff" opacity={0.16} />
       </g>
     );
-  } else if (p.kind === "route" && p.connector) {
+  } else if (p.kind === "path" && p.connector) {
     // A crossing has no gate of its own: it begins at the end of the route that
     // feeds it, where that route's own end mark already sits. Drawing a second
     // marker there was the doubled-up graphic at the head of the line.
     body = <g pointerEvents="none" />;
-  } else if (p.kind === "route") {
+  } else if (p.kind === "path") {
     // The head of a line: a gate the skaters set off through. Deliberately NOT a
     // body — a route is a place, and drawing one as a figure would read as a
     // player who never moves. The open ring marks the start point, the chevron
@@ -457,7 +457,7 @@ export function PieceIcon({ p, pos, onDown, selected, dim, xf, thDeg = 0, onStic
     ? <rect x={-1.9} y={-2.9} width={3.8} height={5.8} fill="transparent" onPointerDown={onDown} pointerEvents={hPE} style={{ cursor: "grab" }} />
     : p.kind === "light"
     ? <rect x={-2.4} y={-3.1} width={4.8} height={6.2} fill="transparent" onPointerDown={onDown} pointerEvents={hPE} style={{ cursor: "grab" }} />
-    : p.kind === "route"
+    : p.kind === "path"
     ? (p.connector ? null
       : <circle cx={0} cy={0} r={3.2} fill="transparent" onPointerDown={onDown} pointerEvents={hPE} style={{ cursor: "grab" }} />)
     : <circle cx={0} cy={0} r={grabR || (p.kind === "puck" ? 3.4 : 6.8)} fill="transparent" onPointerDown={onDown} pointerEvents={hPE} style={{ cursor: "grab" }} />;
