@@ -890,6 +890,13 @@ export const STYLES = `
           border-right:2px solid var(--db-text-muted); border-bottom:2px solid var(--db-text-muted); }
         .hd-grip { color:var(--db-text-faint); font-size:13px; letter-spacing:0; }
         .hd-poprow { display:flex; align-items:center; gap:7px; flex-wrap:wrap; font-size:12.5px; color:var(--db-text-soft); }
+        /* The route navigator: Prev pinned left, Next pinned right, the count
+           centred between them across the panel's full width. As a plain poprow
+           the three bunched at the left and the count read as a caption on the
+           Prev button rather than as the position you are at. */
+        .hd-navrow { flex-wrap:nowrap; width:100%; }
+        .hd-navrow > .hd-sechint { flex:1 1 auto; text-align:center; min-width:0; }
+        .hd-navrow > .hd-mini { flex:0 0 auto; }
         /* labeled field — the one consistent shape for every popup setting:
            an uppercase title, an optional instruction under it, then the control
            row. Adjacent fields get a hairline divider so groups read distinctly. */

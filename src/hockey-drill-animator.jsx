@@ -4248,6 +4248,45 @@ export default function DrillAnimator() {
   // definition, rendered in two places that are both the right place to look for
   // it: the route's own settings, and the last waypoint, which is where it
   // actually happens and where a coach who just authored a shot expects it.
+  // A crossing is plumbing between two lines, not a destination in its own right.
+  // So "when they finish" talks in LINES: it reads through any crossings to the
+  // line skaters actually end up on, and writes through them too.
+  const linksFrom = (ps, p) => {
+    const out = [];
+    for (let cur = p, n = 0; cur && cur.next && n < 8; n++) {
+      const nx = ps.find(q => q.id === cur.next && q.kind === "route");
+      if (!nx || !nx.connector) break;
+      out.push(nx); cur = nx;
+    }
+    return out;
+  };
+  const destOf = p => {
+    for (let cur = p, n = 0; cur && cur.next && n < 8; n++) {
+      const nx = pieces.find(q => q.id === cur.next && q.kind === "route");
+      if (!nx) return null;
+      if (!nx.connector) return nx;
+      cur = nx;
+    }
+    return null;
+  };
+  // Retarget the END of the crossing chain rather than the route itself, so a
+  // crossing the coach shaped survives being pointed at a different line.
+  // Choosing "stop there" drops those crossings: they existed only to reach a
+  // destination that no longer exists.
+  const setDestination = (routeId, destId) => setPieces(ps => {
+    const p = ps.find(q => q.id === routeId && q.kind === "route");
+    if (!p) return ps;
+    const links = linksFrom(ps, p);
+    if (!destId) {
+      const gone = new Set(links.map(l => l.id));
+      if (gone.size) flash("Crossing removed with the link");
+      return ps.filter(q => !gone.has(q.id))
+        .map(q => (q.id === routeId ? { ...q, next: null } : q));
+    }
+    const tail = links.length ? links[links.length - 1].id : routeId;
+    return ps.map(q => (q.id === tail ? { ...q, next: destId } : q));
+  });
+
   // The two end-of-route questions, kept apart because they are different
   // questions: WHERE they go when this route ends, and HOW MANY TIMES the whole
   // thing runs. They used to share one box titled "When they finish", which made
@@ -4257,9 +4296,10 @@ export default function DrillAnimator() {
   // 1. Where they go. One definition, rendered both in the route's own settings
   //    and at its last waypoint — the two places you'd look for it.
   const routeNextField = p => {
-    const others = pieces.filter(q => q.kind === "route" && q.id !== p.id);
+    // crossings are excluded: they are the road, not the place
+    const others = pieces.filter(q => q.kind === "route" && !q.connector && q.id !== p.id);
     const branchy = (p.forks || []).length > 0;
-    const dest = pieces.find(q => q.id === p.next);
+    const dest = destOf(p);
     return (
       <div className="hd-field">
         <div className="hd-sectitle">When they finish</div>
@@ -4267,19 +4307,21 @@ export default function DrillAnimator() {
           <>
             <div className="hd-poprow">
               <span>go to</span>
-              <select className="hd-select on" value={p.next || ""}
-                onChange={e => updateById(p.id, { next: e.target.value || null })}>
+              <select className="hd-select on" value={(dest && dest.id) || ""}
+                onChange={e => setDestination(p.id, e.target.value || null)}>
                 <option value="">— stop there —</option>
                 {others.map(q => <option key={q.id} value={q.id}>{nameOf(q.id)}</option>)}
               </select>
             </div>
             <div className="hd-sechint">
-              {p.next
-                ? "They cross the ice to that line's start, going around nets, props and anyone standing still."
+              {dest
+                ? (linksFrom(pieces, p).length
+                  ? "They cross the ice on the crossing you shaped."
+                  : "They cross the ice to that line's start, going around nets, props and anyone standing still.")
                 : "They stop at the last point of this route."}
             </div>
-            {p.next && branchy && <div className="hd-sechint">This route branches, so only the first leg runs — branches and recycling don&rsquo;t combine yet.</div>}
-            {p.next && !(dest || {}).connector && (
+            {dest && branchy && <div className="hd-sechint">This route branches, so only the first leg runs — branches and recycling don&rsquo;t combine yet.</div>}
+            {dest && !linksFrom(pieces, p).length && (
               <div className="hd-poprow">
                 <button className="hd-mini" onClick={() => shapeCrossing(p.id)}>Shape the crossing ›</button>
                 <span className="hd-sechint">to steer the skate across</span>
@@ -4304,7 +4346,8 @@ export default function DrillAnimator() {
       if (!nxt || nxt.id === p.id || order.includes(nxt.id)) break;
       cur = nxt;
     }
-    const loop = order.map(id => nameOf(id)).join(" → ");
+    const loop = order.map(id => pieces.find(q => q.id === id))
+      .filter(q => q && !q.connector).map(q => nameOf(q.id)).join(" → ");
     return (
       <div className="hd-field">
         <div className="hd-sectitle">Reps</div>
@@ -7458,6 +7501,36 @@ export default function DrillAnimator() {
   const chainPrev = p => (p && p.kind === "route"
     ? pieces.find(q => q.kind === "route" && q.next === p.id && q.path.length) || null : null);
 
+  // The chain in the order it is skated. A drill is one journey, so its points
+  // are numbered across the whole thing — Lane_A's 3, the crossing's 2 and
+  // Lane_B's 3 read as points 1..8, not as three separate 1..n. Starts at the
+  // route nothing feeds; a closed loop has no such route, so it falls back to the
+  // lowest id, which keeps the numbering the same wherever you happen to be
+  // standing when you open the panel.
+  const chainOrder = p => {
+    if (!p || p.kind !== "route") return null;
+    const members = [...chainOf(pieces, p.id)]
+      .map(id => pieces.find(q => q.id === id && q.kind === "route"))
+      .filter(q => q && q.path.length);
+    if (members.length < 2) return null;
+    const start = members.find(m => !members.some(o => o.next === m.id))
+      || members.slice().sort((a, b) => (a.id < b.id ? -1 : 1))[0];
+    const order = [];
+    for (let cur = start; cur && !order.includes(cur); cur = members.find(m => m.id === cur.next)) order.push(cur);
+    // a member unreachable from the start (an odd fork in the links) still counts
+    for (const m of members) if (!order.includes(m)) order.push(m);
+    return order;
+  };
+  // { at, total } — this piece's local point `i` numbered across the whole chain
+  const chainCount = (p, i) => {
+    const order = chainOrder(p);
+    const local = { at: i + 1, total: (p.path || []).length };
+    if (!order) return local;
+    let before = 0;
+    for (const m of order) { if (m.id === p.id) break; before += m.path.length; }
+    return { at: before + i + 1, total: order.reduce((n, m) => n + m.path.length, 0) };
+  };
+
   function renderLabels() {
     const canEdit = editing && tool !== "draw";
     const els = [];
@@ -8607,7 +8680,7 @@ export default function DrillAnimator() {
                 {p.path.length > 0 && (
                   <div className="hd-field">
                     <div className="hd-sectitle">Route points</div>
-                    <div className="hd-poprow">
+                    <div className="hd-poprow hd-navrow">
                       {(() => {
                         const pv = chainPrev(p);
                         return (
@@ -8617,7 +8690,12 @@ export default function DrillAnimator() {
                           </button>
                         );
                       })()}
-                      <span className="hd-sechint">Start · {p.path.length} point{p.path.length > 1 ? "s" : ""} follow</span>
+                      {(() => {
+                        // how much of the CHAIN is still ahead, not just this route
+                        const c = chainCount(p, 0);
+                        const left = c.total - c.at + 1;
+                        return <span className="hd-sechint">Start · {left} point{left > 1 ? "s" : ""} follow</span>;
+                      })()}
                       <button className="hd-mini" onClick={() => navPopup({ type: "point", id: p.id, seg: 0 })}>Next ›</button>
                     </div>
                   </div>
@@ -8735,8 +8813,8 @@ export default function DrillAnimator() {
                     </div>
                   );
                 })()}
-                {routeNextField(p)}
-                {routeRepsField(p)}
+                {!p.connector && routeNextField(p)}
+                {!p.connector && routeRepsField(p)}
               </>
             );
           })()}
@@ -8841,7 +8919,7 @@ export default function DrillAnimator() {
         <>
           <div className="hd-field">
             <div className="hd-sectitle">Route points</div>
-            <div className="hd-poprow">
+            <div className="hd-poprow hd-navrow">
               <button className="hd-mini" onClick={() => legGo(popup.seg - 1)}>
                 ‹ {popup.seg === 0 ? (fork ? "Branch" : "Start") : `Point ${popup.seg}`}
               </button>
@@ -8878,8 +8956,11 @@ export default function DrillAnimator() {
       // ONE numbering everywhere: the standing start is point 0 (matching the
       // DSL — "pass=2" fires at point 2), so route[i] is point i+1 of
       // route.length. Title, pager, and DSL references all agree.
-      title = fork ? `Reaction · point ${i + 1}/${route.length}`
-        : `${p.kind === "route" && p.connector ? "Crossing" : nameOf(p.id)} · point ${i + 1}/${route.length}`;
+      // the heading counts across the whole chain too, so "point 5/8" means the
+      // same thing here as it does in the navigator below it
+      const tc = fork ? { at: i + 1, total: route.length } : chainCount(p, i);
+      title = fork ? `Reaction · point ${tc.at}/${tc.total}`
+        : `${p.kind === "route" && p.connector ? "Crossing" : nameOf(p.id)} · point ${tc.at}/${tc.total}`;
       // Prev at waypoint 0: a fork steps back to its branch (the base route's end);
       // a base route steps back to the player/start popup.
       const branchNav = () => p.path.length ? { type: "point", id: p.id, seg: p.path.length - 1 } : { type: "piece", id: p.id };
@@ -8890,7 +8971,7 @@ export default function DrillAnimator() {
           {route.length > 0 && (
             <div className="hd-field">
               <div className="hd-sectitle">Route points</div>
-              <div className="hd-poprow">
+              <div className="hd-poprow hd-navrow">
                 {/* Stepping back off point 1 lands on the START spot — point 0 in
                     the DSL's own numbering, and where a collect/receive before the
                     skater moves is authored. It used to say "Prev", which gave no
@@ -8898,7 +8979,10 @@ export default function DrillAnimator() {
                 <button className="hd-mini" onClick={() => goSeg(i - 1)}>
                   ‹ {fork && i === 0 ? "Branch" : i === 0 ? "Start" : "Prev"}
                 </button>
-                <span className="hd-sechint">Point {i + 1} of {route.length}</span>
+                {(() => {
+                  const c = fork ? { at: i + 1, total: route.length } : chainCount(p, i);
+                  return <span className="hd-sechint">Point {c.at} of {c.total}</span>;
+                })()}
                 {(() => {
                   const nx = !fork && i >= route.length - 1 ? chainNext(p) : null;
                   return (
@@ -8912,7 +8996,10 @@ export default function DrillAnimator() {
             </div>
           )}
           {/* whose route this waypoint belongs to — quick facts + a click-through
-              into that piece's own editor (position preserved when pinned) */}
+              into that piece's own editor (position preserved when pinned).
+              Skipped on a crossing: the heading already reads "Crossing · point
+              4/8", and its settings are one tap away on the handle. */}
+          {!(p.kind === "route" && p.connector) && (
           <div className="hd-field">
             <div className="hd-sectitle">
               {p.kind === "route" && p.connector ? "Crossing"
@@ -8935,6 +9022,7 @@ export default function DrillAnimator() {
               </div>
             )}
           </div>
+          )}
           {/* WHAT HAPPENS HERE comes first. A waypoint is a place where the drill
               does something — a pass, a shot, a collect, a pause — and that was
               buried under the cosmetics and the leg-shape controls. */}
@@ -8998,7 +9086,7 @@ export default function DrillAnimator() {
                   <div className="hd-sechint">Hops as they pass this spot.</div>
                 </div>
               )}
-              {p.kind === "route" && p.connector ? crossingPaceField(p) : (
+              {p.kind === "route" && p.connector ? null : (
                 <div className="hd-field">
                   <div className="hd-sectitle">Pace to the next point ×{(next.rate || 1).toFixed(2)}</div>
                   <div className="hd-poprow">
