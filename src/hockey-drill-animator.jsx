@@ -4082,6 +4082,24 @@ export default function DrillAnimator() {
     setPieces(ps => {
       let out = ps;
       for (const R of ps) if (R.kind === "route") out = settleLine(out, R.id);
+      // A crossing STARTS where the route feeding it ends — that is what makes the
+      // automatic crossings either side of it collapse to nothing. Nudging its head
+      // loose left a stray gate ring mid-ice and a phantom crossing to reach it,
+      // so it is pinned here rather than left as something to drag by mistake.
+      // identity-preserving, like settleLine: this effect runs on every `pieces`
+      // change, so handing back a fresh array when nothing moved re-triggers it
+      // forever. (It did — the board locked up until this bailed out.)
+      let pinned = false;
+      const withPins = out.map(c => {
+        if (c.kind !== "route" || !c.connector) return c;
+        const src = out.find(q => q.kind === "route" && q.next === c.id && q.path.length);
+        if (!src) return c;
+        const e = src.path[src.path.length - 1];
+        if (Math.abs(c.x - e.x) < 1e-6 && Math.abs(c.y - e.y) < 1e-6) return c;
+        pinned = true;
+        return { ...c, x: e.x, y: e.y };
+      });
+      if (pinned) out = withPins;
       return out;
     });
   }, [pieces, aiPlay]);
@@ -10432,7 +10450,10 @@ export default function DrillAnimator() {
                     }));
                   })()}
                   {/* arrow + action badges last so they sit ON TOP of the line */}
-                  {showRoutes && p.path.length > 0 && renderArrow(p, bent, acts, endStagger[p.id] || 0)}
+                  {/* A crossing gets no arrowhead: it lands ON the next line's gate
+                      ring, so the two drew over each other. The dotted trail and the
+                      ring it ends at already say which way it goes. */}
+                  {showRoutes && p.path.length > 0 && !p.connector && renderArrow(p, bent, acts, endStagger[p.id] || 0)}
                   {showRoutes && renderActionMarks(p, bent, acts)}
                   {showRoutes && renderLedCatchMarks(p, ledCs)}
                 </g>
@@ -10994,17 +11015,31 @@ export default function DrillAnimator() {
                 the waypoint handles use. */}
             {editing && tool !== "draw" && !aiPlay && pieces.map(p => {
               if (p.kind !== "route" || (p.lock && !lockedSelectable)) return null;
-              const fx = iconXf({ x: p.x, y: p.y, a: 0 });
+              // A crossing's head is not its own place — it is wherever the route
+              // before it ended, and a ring there sat on top of that route's end
+              // mark. Grab it by the middle of its own line, where nothing else is.
+              const at = p.connector
+                ? (p.path[Math.floor((p.path.length - 1) / 2)] || { x: p.x, y: p.y })
+                : { x: p.x, y: p.y };
+              const fx = iconXf({ x: at.x, y: at.y, a: 0 });
               const G = coarsePtr ? 1.4 : 1;
               return (
                 <g key={`rgrab-${p.id}`} transform={fx.t}>
-                  {/* the ring re-drawn on top, so the thing you aim at is the thing
-                      you can see — the copy inside PieceIcon is behind the skater */}
-                  <circle cx={0} cy={0} r={3.05} fill="none" stroke={ink(p.color)} strokeWidth={0.42}
-                    strokeDasharray="1.5 1.05" opacity={p.id === selectedId ? 0.95 : 0.6}
-                    pointerEvents="none" />
-                  <circle cx={0} cy={0} r={3.05} fill="none" stroke="transparent" strokeWidth={2.8 * G}
-                    pointerEvents="stroke" style={{ cursor: "grab" }}
+                  {p.connector ? (
+                    // a HANDLE, not a gate: a crossing has no line standing on it, and
+                    // a second dashed ring would read as one more place skaters wait
+                    <circle cx={0} cy={0} r={1.5} fill={ink(p.color)}
+                      opacity={p.id === selectedId ? 0.95 : 0.5} pointerEvents="none" />
+                  ) : (
+                    // the gate ring re-drawn on top, so the thing you aim at is the
+                    // thing you can see — the copy inside PieceIcon is behind the skater
+                    <circle cx={0} cy={0} r={3.05} fill="none" stroke={ink(p.color)} strokeWidth={0.42}
+                      strokeDasharray="1.5 1.05" opacity={p.id === selectedId ? 0.95 : 0.6}
+                      pointerEvents="none" />
+                  )}
+                  <circle cx={0} cy={0} r={p.connector ? 1.5 : 3.05} fill={p.connector ? "transparent" : "none"}
+                    stroke="transparent" strokeWidth={2.8 * G}
+                    pointerEvents={p.connector ? "all" : "stroke"} style={{ cursor: "grab" }}
                     onPointerDown={e => pieceDown(e, p.id)} />
                 </g>
               );
