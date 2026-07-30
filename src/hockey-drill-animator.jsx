@@ -4484,6 +4484,106 @@ export default function DrillAnimator() {
       y: C.y + (x - C.x) * sa + (y - C.y) * ca,
     }));
   };
+  // WHERE THE LINE STANDS. Who is on it, how far apart, when each one goes, and
+  // whether the path feeds them a puck — all of it is true at the START, so it
+  // belongs on the first waypoint rather than in a settings panel one tap away.
+  // WHERE THE LINE STANDS. Who is on it, how far apart, when each one goes, and
+  // whether the path feeds them a puck — all of it is true at the START of the
+  // path, so it belongs on the first waypoint rather than in a settings panel a
+  // tap away. `R` is the PATH throughout: the inner callbacks below iterate
+  // skaters, and naming both of them the same thing is how you get a reorder
+  // that quietly addresses the wrong piece.
+  const startFields = R => {
+    const line = queueOf(pieces, R.id);
+    const free = pieces.filter(w => w.kind === "player" && !w.pathId);
+    const qr = R.queue, mode = qr ? qr.mode : "none";
+    const setQ = v => updateById(R.id, { queue: v });
+    const gap = R.gap > 0 ? R.gap : QUEUE_GAP;
+    return (<>
+      <div className="hd-field">
+        <div className="hd-sectitle">Line ({line.length})</div>
+        <div className="hd-sechint">
+          {line.length
+            ? "They run this path in turn. Drag one out to take it off the line."
+            : "Add skaters to stack them behind this point."}
+        </div>
+        {line.map((m, k) => (
+          <div className="hd-poprow" key={m.id}>
+            <span className="hd-sechint" style={{ minWidth: 18 }}>{k + 1}.</span>
+            <button className="hd-mini" onClick={() => { setSelectedId(m.id); setPopup({ type: "piece", id: m.id }); }}>{nameOf(m.id)}</button>
+            <button className="hd-mini" title="Move up" disabled={k === 0} onClick={() => reorderLine(R.id, k, k - 1)}>↑</button>
+            <button className="hd-mini" title="Move down" disabled={k === line.length - 1} onClick={() => reorderLine(R.id, k, k + 1)}>↓</button>
+            <button className="hd-mini" title="Take off the line" onClick={() => leaveLine(m.id)}>✕</button>
+          </div>
+        ))}
+        <div className="hd-poprow">
+          <button className="hd-mini" onClick={() => addSkater(R.id)}>+ Add skater</button>
+          {line.length > 1 && <button className="hd-mini" onClick={() => addLinePucks(R.id)}>+ Pucks</button>}
+          {free.length > 0 && (
+            <select className="hd-select" value="" onChange={e => e.target.value && joinLine(e.target.value, R.id)}>
+              <option value="">— add existing —</option>
+              {free.map(m => <option key={m.id} value={m.id}>{nameOf(m.id)}</option>)}
+            </select>
+          )}
+        </div>
+        {line.length > 1 && (
+          <div className="hd-sechint">
+            Whatever {nameOf(line[0].id)} does with a puck, the rest do, and again on
+            every lap back through — as long as there&rsquo;s one for them. Anyone who
+            can&rsquo;t get one just skates the path.
+          </div>
+        )}
+        <div className="hd-poprow">
+          <button className={`hd-mini${R.feed ? " on" : ""}`} onClick={() => toggleFeed(R.id)}>
+            {R.feed ? "✓ Feed pucks" : "Feed pucks"}
+          </button>
+          <Stepper value={gap} min={2} max={20} step={1} suffix=" ft"
+            onChange={v => updateById(R.id, { gap: v })} />
+          <span className="hd-sechint">apart</span>
+        </div>
+        <div className="hd-sechint">
+          {R.feed
+            ? "Every skater collects one here, on every lap back through — the line never runs dry."
+            : "Off: the line uses only the loose pucks on the ice, and skates empty-handed once they run out."}
+        </div>
+      </div>
+      {/* How the line takes its turns. The trigger is positional — "the one ahead
+          of me" — so unlike DelayTrigger there is no player to pick; the rule is
+          authored once and resolved per member. */}
+      <div className="hd-field">
+        <div className="hd-sectitle">Send them</div>
+        <div className="hd-sechint">What holds each skater until it&rsquo;s their turn.</div>
+        <div className="hd-poprow">
+          {[["none", "All at once"], ["lead", "When clear"], ["point", "At a point"]].map(([m, lab]) => (
+            <button key={m} className={`hd-mini${mode === m ? " on" : ""}`}
+              onClick={() => setQ(m === "none" ? null
+                : m === "lead" ? { mode: "lead", lead: (qr && qr.lead) || QUEUE_LEAD }
+                : { mode: "point", at: (qr && qr.at) || 0 })}>{lab}</button>
+          ))}
+        </div>
+        {mode === "lead" && (
+          <div className="hd-poprow">
+            <span>go once the one ahead is</span>
+            <Stepper value={qr.lead || QUEUE_LEAD} min={gap} max={120} step={5} suffix=" ft"
+              onChange={v => setQ({ mode: "lead", lead: v })} />
+            <span className="hd-sechint">clear</span>
+          </div>
+        )}
+        {mode === "point" && (R.path.length ? (
+          <div className="hd-poprow">
+            <span>go once the one ahead reaches</span>
+            <select className="hd-select on" value={qr.at || 0}
+              onChange={e => setQ({ mode: "point", at: parseInt(e.target.value, 10) })}>
+              {R.path.map((_, wi) => <option key={wi} value={wi}>{wi + 1}</option>)}
+            </select>
+          </div>
+        ) : (
+          <div className="hd-poprow"><span className="hd-sechint">Draw the path first — there are no points to wait on yet.</span></div>
+        ))}
+      </div>
+    </>);
+  };
+
   // The shape as ONE thing, at the foot of every leg and waypoint. Everything
   // above it in those panels edits a single point; this turns, flips and colours
   // the lot — and it sits at the bottom of wherever you happen to be, so you
@@ -9025,100 +9125,26 @@ export default function DrillAnimator() {
                     </>
                   )
                   : <div className="hd-poprow hd-stephint">Add a skater to this line to give it puck actions.</div>)}
-                {!p.connector && (<div className="hd-field">
-                  <div className="hd-sectitle">Line ({line.length})</div>
-                  <div className="hd-sechint">
-                    {line.length
-                      ? "They run this route in turn. Drag one out to take it off the line."
-                      : "Add skaters to stack them behind the start."}
-                  </div>
-                  {line.map((q, k) => (
-                    <div className="hd-poprow" key={q.id}>
-                      <span className="hd-sechint" style={{ minWidth: 18 }}>{k + 1}.</span>
-                      <button className="hd-mini" onClick={() => { setSelectedId(q.id); setPopup({ type: "piece", id: q.id }); }}>{nameOf(q.id)}</button>
-                      <button className="hd-mini" title="Move up" disabled={k === 0} onClick={() => reorderLine(p.id, k, k - 1)}>↑</button>
-                      <button className="hd-mini" title="Move down" disabled={k === line.length - 1} onClick={() => reorderLine(p.id, k, k + 1)}>↓</button>
-                      <button className="hd-mini" title="Take off the line" onClick={() => leaveLine(q.id)}>✕</button>
-                    </div>
-                  ))}
-                  <div className="hd-poprow">
-                    <button className="hd-mini" onClick={() => addSkater(p.id)}>+ Add skater</button>
-                    {line.length > 1 && <button className="hd-mini" onClick={() => addLinePucks(p.id)}>+ Pucks</button>}
-                    {free.length > 0 && (
-                      <select className="hd-select" value="" onChange={e => e.target.value && joinLine(e.target.value, p.id)}>
-                        <option value="">— add existing —</option>
-                        {free.map(q => <option key={q.id} value={q.id}>{nameOf(q.id)}</option>)}
-                      </select>
-                    )}
-                  </div>
-                  {line.length > 1 && (
-                    <div className="hd-sechint">
-                      Whatever {nameOf(line[0].id)} does with a puck, the rest do, and again on
-                      every lap back through — as long as there&rsquo;s one for them. Anyone who
-                      can&rsquo;t get one just skates the route.
-                    </div>
-                  )}
-                  <div className="hd-poprow">
-                    <button className={`hd-mini${p.feed ? " on" : ""}`}
-                      onClick={() => toggleFeed(p.id)}>
-                      {p.feed ? "✓ Feed pucks" : "Feed pucks"}
-                    </button>
-                  </div>
-                  <div className="hd-sechint">
-                    {p.feed
-                      ? "Every skater collects one at the start, on every lap back through — the line never runs dry."
-                      : "Off: the line uses only the loose pucks on the ice, and skates empty-handed once they run out."}
-                  </div>
-                </div>)}
-                {!p.connector && (<div className="hd-field">
-                  <div className="hd-sectitle">Spacing</div>
-                  <div className="hd-poprow">
-                    <Stepper value={p.gap > 0 ? p.gap : QUEUE_GAP} min={2} max={20} step={1} suffix=" ft"
-                      onChange={v => updateById(p.id, { gap: v })} />
-                    <span className="hd-sechint">between skaters</span>
-                  </div>
-                </div>)}
-                {/* How the line takes its turns. The trigger is positional — "the
-                    one ahead of me" — so unlike DelayTrigger there is no player to
-                    pick; the rule is authored once and resolved per member. */}
-                {!p.connector && (() => {
-                  const q = p.queue, mode = q ? q.mode : "none";
-                  const set = v => updateById(p.id, { queue: v });
-                  return (
+                {/* The line lives on point 1, where the skaters actually stand. With
+                    no legs drawn there is no such dot yet, so they stay here until
+                    there is one — and once there is, this says where they went
+                    rather than leaving you hunting. */}
+                {!p.connector && (p.path.length
+                  ? (
                     <div className="hd-field">
-                      <div className="hd-sectitle">Send them</div>
-                      <div className="hd-sechint">What holds each skater until it&rsquo;s their turn.</div>
+                      <div className="hd-sectitle">Line ({queueOf(pieces, p.id).length})</div>
                       <div className="hd-poprow">
-                        {[["none", "All at once"], ["lead", "When clear"], ["point", "At a point"]].map(([m, lab]) => (
-                          <button key={m} className={`hd-mini${mode === m ? " on" : ""}`}
-                            onClick={() => set(m === "none" ? null
-                              : m === "lead" ? { mode: "lead", lead: (q && q.lead) || QUEUE_LEAD }
-                              : { mode: "point", at: (q && q.at) || 0 })}>{lab}</button>
-                        ))}
+                        <button className="hd-mini" onClick={() => navPopup({ type: "point", id: p.id, seg: 0 })}>
+                          Set it on point 1 ›
+                        </button>
                       </div>
-                      {mode === "lead" && (
-                        <div className="hd-poprow">
-                          <span>go once the one ahead is</span>
-                          <Stepper value={q.lead || QUEUE_LEAD} min={p.gap > 0 ? p.gap : QUEUE_GAP} max={120} step={5} suffix=" ft"
-                            onChange={v => set({ mode: "lead", lead: v })} />
-                          <span className="hd-sechint">clear</span>
-                        </div>
-                      )}
-                      {mode === "point" && (p.path.length ? (
-                        <div className="hd-poprow">
-                          <span>go once the one ahead reaches</span>
-                          <select className="hd-select on" value={q.at || 0}
-                            onChange={e => set({ mode: "point", at: parseInt(e.target.value, 10) })}>
-                            {p.path.map((s, wi) => <option key={wi} value={wi}>{wi + 1}</option>)}
-                          </select>
-                        </div>
-                      ) : (
-                        <div className="hd-poprow"><span className="hd-sechint">Draw the route first — there are no points to wait on yet.</span></div>
-                      ))}
+                      <div className="hd-sechint">
+                        Who&rsquo;s on it, how far apart, when they go and whether the path feeds
+                        them a puck — all set where they stand.
+                      </div>
                     </div>
-                  );
-                })()}
-
+                  )
+                  : startFields(p))}
                 {routeCommonField(p)}
               </>
             );
@@ -9331,13 +9357,20 @@ export default function DrillAnimator() {
                 {p.connector
                   ? `The skate from ${nameOf((pieces.find(q => q.kind === "path" && nextOf(q) === p.id) || {}).id || "?")} into ${nameOf(nextOf(p) || "?")}. Shape it here; the drill's work lives on the routes it joins.`
                   : queueOf(pieces, p.id).length
-                  ? `${queueOf(pieces, p.id).length} on this line — spacing and turn-taking live in its settings.`
+                  // no point sending you to point 1 when you are stood on it
+                  ? `${queueOf(pieces, p.id).length} on this line${i === 0 ? ", stacked behind this point." : " — the line itself is set on point 1, where they stand."}`
                   : "Nobody is on this line yet."}
               </div>
             )}
           </div>
           )}
-          {/* WHAT HAPPENS HERE comes first. A waypoint is a place where the drill
+          {/* THE FIRST POINT is where the line stands, so it is where the line is
+              set: who is on it, how far apart, when each one goes, and whether the
+              path hands them a puck. It used to live one tap away in the path's
+              own settings, which is the last place you look when you are stood on
+              the dot the skaters are queued behind. */}
+          {p.kind === "path" && !p.connector && !fork && i === 0 && startFields(p)}
+          {/* WHAT HAPPENS HERE comes next. A waypoint is a place where the drill
               does something — a pass, a shot, a collect, a pause — and that was
               buried under the cosmetics and the leg-shape controls. */}
           {p.kind === "player" && ActionSteps(p, i, fork)}
