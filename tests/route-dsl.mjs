@@ -97,7 +97,8 @@ const LINE = [
   const out = lowerRoutes(parseDrill(LINE).pieces);
   T('a parsed line lowers to three skaters', out.filter(p => p.kind === 'player').length, 3);
   T('no path piece survives lowering', out.some(p => p.kind === 'path'), false);
-  T('the parsed gap drives the stack', Math.round(out.find(p => p.id === 'P2').x), 54);
+  // every member departs from the head; the gap is where they WAIT
+  T('the parsed gap drives the stack', Math.round(out.find(p => p.id === 'P2')._line.spot.x), 54);
 }
 
 // ---- the legacy guard: a pre-route drill must be untouched by any of this ----

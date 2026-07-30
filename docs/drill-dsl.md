@@ -154,7 +154,7 @@ Places a piece. `id` is any unique token (e.g. `F1`, `PK1`, `N2`).
 | `q=<n>` | player | Place in the queue, **1-based** (`q=1` is the head of the line). Missing = the back. |
 | `gap=<ft>` | path | Feet between stacked skaters (default `5`, omitted then). |
 | `queue=point:<pt>` | path | Each skater holds until the one **ahead of them** reaches point `<pt>` of the route (1-based). |
-| `queue=lead:<ft>` | path | Each skater holds until the one ahead is `<ft>` **clear of them** — the separation, not the distance travelled (they already start `gap` apart). Omit `queue=` entirely and they all go at once. |
+| `queue=lead:<ft>` | path | Each skater holds until the one ahead has gone `<ft>`. Everyone leaves from the head — the line shuffles up as it empties — so that distance **is** the gap between them. Omit `queue=` and this is the rule, at the default distance: a line takes turns, and there is no "all at once". |
 | `line=<deg>` | path | Which way the line RUNS from the head — where the second skater stands relative to the first — in degrees (0 = east, 90 = south). Absent means straight back along the path, which is the usual answer. Set on the ice by dragging the knob at the end of the line. |
 | `reps=<n>` | path | How many times the whole **route** (the connected circuit of paths) is run. A -> B and back is ONE rep. Every path in a route carries the same number; the app writes it to all of them. With nothing connected, a rep above 1 sends them back to this path's own start. |
 | `route=<name>` | path | The **route's** name — the whole circuit. Carried by every path in it (underscores read as spaces). |
@@ -301,7 +301,8 @@ PIECE P3 player 18 20 #d7263d F3 path=R1 q=3
   hand-written line does not have to get them right.
 - `queue=` is the turn-taking rule and is authored **once on the route**, because
   the trigger is positional ("the one ahead of me"). The head of the line is never
-  held. No `queue=` at all means they all leave together.
+  held. No `queue=` at all means the default `lead` — a line takes turns by
+  definition, so there is no way to say "all at once". Draw a wave if you want one.
 - Waypoint numbering is **unchanged** for a line member: leg *i* of the skater is
   waypoint *i* of the route, so `shoot=3` or `pass=2:F2` on a queued player means
   the point you can see on the route line.

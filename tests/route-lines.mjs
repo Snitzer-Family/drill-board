@@ -101,9 +101,15 @@ T('isMobile: null is not', isMobile(null), false);
   // the index-preservation invariant the whole design rests on
   T('waypoint i of the path is leg i of every member',
     out.filter(p => p.kind === 'player').every(p => p.path.every((s, i) => s.x === R.path[i].x && s.y === R.path[i].y)), true);
-  T('the head departs from the path start', [p1.x, p1.y], [60, 40]);
-  T('the rest stand back in order', [Math.round(p2.x), Math.round(p3.x)], [55, 50]);
-  T('_line records the binding', [p1._line, p3._line], [{ path: 'R1', q: 0 }, { path: 'R1', q: 2 }]);
+  // The line shuffles up, so everyone leaves from the mark and every first leg is
+  // the same length — the third skater's is not 10 ft longer than the first's.
+  T('every member departs from the head',
+    [p1.x, p1.y, p2.x, p2.y, p3.x, p3.y], [60, 40, 60, 40, 60, 40]);
+  T('...and where they WAIT is recorded, in order',
+    [Math.round(p2._line.spot.x), Math.round(p3._line.spot.x)], [55, 50]);
+  T('_line records the binding', [p1._line, p3._line],
+    [{ path: 'R1', q: 0, spot: { x: 60, y: 40 }, gap: 5 },
+     { path: 'R1', q: 2, spot: { x: 50, y: 40 }, gap: 5 }]);
   T('legs are copies, not shared with the route', p1.path[0] !== R.path[0] && p1.path[0] !== p2.path[0], true);
 }
 { // a binding that points at nothing leaves the player alone
@@ -127,18 +133,22 @@ T('isMobile: null is not', isMobile(null), false);
 
 // ---- queueRelease: how the line takes its turns ----
 {
-  T('no rule → nobody is held', queueRelease(path(), 'P1'), null);
+  // there is no "all at once": an absent rule is the default lead
+  T('no rule → the default lead, not a free-for-all',
+    queueRelease(path(), 'P1'), { on: 'P1', dist: QUEUE_LEAD, mode: 'span' });
   T('the head is never held', queueRelease(path({ queue: { mode: 'lead', lead: 15 } }), null), null);
   T('a point rule lowers to the waypoint trigger timing.js already has',
     queueRelease(path({ queue: { mode: 'point', at: 1 } }), 'P1'), { on: 'P1', at: 1, mode: 'waypoint' });
-  // the two already stand `gap` apart, so what the one ahead must TRAVEL to open a
-  // 15 ft separation is 15 − 6. Getting this backwards is a silent 2× on the gap.
-  T('a lead rule converts separation to travel',
-    queueRelease(path({ gap: 6, queue: { mode: 'lead', lead: 15 } }), 'P1'), { on: 'P1', dist: 9, mode: 'span' });
-  T('a lead already covered by the spacing releases at once',
-    queueRelease(path({ gap: 6, queue: { mode: 'lead', lead: 4 } }), 'P1').dist, 0);
+  // Both leave from the head, so "15 ft clear" is 15 ft travelled — the spacing
+  // is where they WAIT and has nothing to do with it.
+  T('a lead rule is a travel distance',
+    queueRelease(path({ gap: 6, queue: { mode: 'lead', lead: 15 } }), 'P1'), { on: 'P1', dist: 15, mode: 'span' });
+  T('...and the spacing does not discount it',
+    queueRelease(path({ gap: 12, queue: { mode: 'lead', lead: 15 } }), 'P1').dist, 15);
+  T('a lead shorter than the spacing is still a real wait',
+    queueRelease(path({ gap: 6, queue: { mode: 'lead', lead: 4 } }), 'P1').dist, 4);
   T('a lead rule defaults its distance',
-    queueRelease(path({ gap: 5, queue: { mode: 'lead' } }), 'P1').dist, QUEUE_LEAD - 5);
+    queueRelease(path({ gap: 5, queue: { mode: 'lead' } }), 'P1').dist, QUEUE_LEAD);
   T('an unknown rule holds nobody', queueRelease(path({ queue: { mode: 'wat' } }), 'P1'), null);
 }
 { // lowering wires each member to the one directly ahead — a strict chain to the head
@@ -153,16 +163,19 @@ T('isMobile: null is not', isMobile(null), false);
     while (by[id] && hops < 10) { id = by[id]; hops++; }
     return !by[id] && hops === 2;
   })(), true);
-  T('every member gets the same travel distance', [w('P2').dist, w('P3').dist], [10, 10]);
+  T('every member gets the same travel distance', [w('P2').dist, w('P3').dist], [QUEUE_LEAD, QUEUE_LEAD]);
 }
 { // a member's own hand-authored wait= loses to the line's rule
   const R = path({ queue: { mode: 'point', at: 0 } });
   const out = lowerRoutes([R, skater('P1', 1), skater('P2', 2, { wait: { on: 'PX', at: 3, mode: 'waypoint' } })]);
   T('the line owns the release, not the member', out.find(p => p.id === 'P2').wait, { on: 'P1', at: 0, mode: 'waypoint' });
 }
-{ // a line with no rule still lowers cleanly — everyone goes at once, as before
+{ // a line that names no rule still takes turns — the default lead applies, and
+  // only the head of the line is ever unheld
   const out = lowerRoutes([path(), skater('P1', 1), skater('P2', 2)]);
-  T('no rule leaves every member unheld', out.filter(p => p.kind === 'player').every(p => p.wait === null), true);
+  T('the head is unheld', out.find(p => p.id === 'P1').wait, null);
+  T('...and everyone behind waits on the one ahead by default',
+    out.find(p => p.id === 'P2').wait, { on: 'P1', dist: QUEUE_LEAD, mode: 'span' });
 }
 
 // ---- lineDir: which way the line stacks ----

@@ -109,19 +109,25 @@ export function stackSpot(route, k, gap = QUEUE_GAP) {
 //
 //   { mode: "point", at }  → hold until they reach waypoint `at` of the route.
 //                            Lowers to the waypoint trigger timing.js already has.
-//   { mode: "lead", lead } → hold until they are `lead` FEET clear of me. The two
-//                            already start `spacing` apart, so what the skater
-//                            ahead has to TRAVEL is lead − spacing; converting it
-//                            here keeps timing.js measuring distance and knowing
-//                            nothing about why.
+//   { mode: "lead", lead } → hold until they are `lead` FEET clear of me. Both of
+//                            us leave from the head, so that is simply how far
+//                            they have travelled; converting it here keeps
+//                            timing.js measuring distance and knowing nothing
+//                            about why.
 export function queueRelease(route, prevId) {
-  const q = route && route.queue;
+  // A line takes turns — that is what makes it a line. An absent rule is the
+  // default lead, not "everyone at once": a whole line leaving on one whistle
+  // from one mark is a wave, and if you want that you draw a wave.
+  const q = (route && route.queue) || { mode: "lead" };
   if (!q || !prevId) return null;
   if (q.mode === "point") return { on: prevId, at: Math.max(0, q.at || 0), mode: "waypoint" };
   if (q.mode === "lead") {
-    const spacing = route.gap > 0 ? route.gap : QUEUE_GAP;
     const lead = q.lead > 0 ? q.lead : QUEUE_LEAD;
-    return { on: prevId, dist: Math.max(0, lead - spacing), mode: "span" };
+    // Both of us leave from the head — the line shuffles up — so the gap between
+    // us IS what the one ahead has travelled. (While each skater set off from
+    // their own spot in the stack we were already `spacing` apart, and this
+    // subtracted it.)
+    return { on: prevId, dist: Math.max(0, lead), mode: "span" };
   }
   return null;
 }
@@ -508,8 +514,15 @@ export function lowerRoutes(pieces) {
       const wait = k > 0 ? queueRelease(R, line[k - 1].id) : null;
       lowered.set(P.id, {
         ...P,
-        x: spot.x,
-        y: spot.y,
+        // EVERYONE LEAVES FROM THE HEAD. The stack is where they wait, not where
+        // they set off — a line shuffles up as it goes, so by the time it is your
+        // turn you are standing on the mark. Starting each skater from their own
+        // spot instead made the third one's first leg 12 ft longer than the
+        // first one's, for the same drawn leg, and left the line standing still
+        // while it emptied. Where they WAIT is `_line.spot`, and the display
+        // walks them up it.
+        x: R.x,
+        y: R.y,
         wait,
         // this route's legs verbatim — see the header on why nothing is prepended
         // — then, if it recycles, the transit and the next route's legs after them
@@ -520,7 +533,7 @@ export function lowerRoutes(pieces) {
         // branch per PLAYER, so three skaters on one reactive route read the light
         // independently — which is exactly what a read-and-react drill wants
         forks: R.forks || [],
-        _line: { path: id, q: k },
+        _line: { path: id, q: k, spot, gap },
       });
     });
   }

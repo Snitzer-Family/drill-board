@@ -9,7 +9,7 @@ import { mdEscape, mdInline, mdBlock } from "./md.js";
 import { clampX, clampY, fitInside, segEnd, segD, nearestT, splitSeg, zigzagPoints, wigglePoints, wigglePoly, zigzagPoly, convertSeg, fitRoute, evalSeg, rdp, catmullToBezier, alignJoint, mirrorJoint, translateJointHandles, trimSegStart, trimSegEnd, trimPolyStart, trimPolyEnd, gapPolyAt } from "./geometry.js";
 import { dirOf, dirAtWaypoint, spreadDir } from "./route-dir.js";
 import { lowerRoutes, queueOf, stackSpot, isMobile, unbindLine, transitPoly, transitObstacles, chainOf, crossRate,
-  exitOf, nextOf, headHeadingDeg as routeHeadDeg, lineDirDeg, QUEUE_GAP, QUEUE_LEAD } from "./route-lines.js";
+  exitOf, nextOf, headHeadingDeg as routeHeadDeg, lineDirDeg, lineHeading, QUEUE_GAP, QUEUE_LEAD } from "./route-lines.js";
 import { PLAYER_R, TRANSIT_RATE, CROSSING_DASH } from "./constants.js";
 import * as boards from "./boards.js";
 import { netShapes, bumperShapes, solidShapes, detourRoute, segCrossesNet } from "./net-collide.js";
@@ -3901,6 +3901,40 @@ export default function DrillAnimator() {
     }
     return res;
   }
+  // THE LINE SHUFFLES UP. A skater waiting their turn stands `n` spots back,
+  // where n is how many of the people ahead of them are still waiting — so as
+  // each one goes, everyone behind steps forward and the line advances onto the
+  // mark instead of standing in place while it empties.
+  //
+  // Position only, and only BEFORE they set off: every member's route starts at
+  // the head (see lowerRoutes), so this walks them to where they were always
+  // going to leave from. Nothing here reaches timing — the shuffle is what the
+  // wait looks like, not something the drill is waiting on.
+  function queueShift(p, t) {
+    const L = p && p._line;
+    if (!L || !L.spot) return null;
+    const R = pieces.find(q => q.id === L.path && q.kind === "path");
+    if (!R) return null;
+    const sw = (getPlan().startWait) || {};
+    if (t >= (sw[p.id] || 0)) return null;                  // under way: the route has them
+    const ahead = queueOf(pieces, L.path).slice(0, L.q);
+    const gap = L.gap > 0 ? L.gap : QUEUE_GAP;
+    let n = 0;
+    for (const m of ahead) {
+      const go = sw[m.id] || 0;
+      // You step into the space as it opens, not on a stopwatch. Timing it made
+      // the next skater arrive on the mark half a second after the last one left
+      // however slowly they were going — which crowded a dawdling leader to three
+      // feet. Measured against their travel it self-corrects: one spacing gone,
+      // one spot up, so the follower is never closer than the line's own gap.
+      const u = t <= go ? 0 : Math.min(1, ((displayPosAt(m, t) || {}).dist || 0) / gap);
+      n += 1 - u * u * (3 - 2 * u);
+    }
+    if (n <= 1e-4) return { x: R.x, y: R.y };
+    const h = lineHeading(R), d = n * gap;
+    return { x: clampX(R.x + h.x * d), y: clampY(R.y + h.y * d) };
+  }
+
   function displayPosRaw(p) {
     p = effOf(p);
     // A route is a place, not a skater. It owns a path, so the generic sampler
@@ -3908,7 +3942,12 @@ export default function DrillAnimator() {
     // pin it to its start, aimed the way the line sets off.
     if (p.kind === "path") return { x: p.x, y: p.y, a: routeHeadDeg(p) };
     if (p.kind === "player" && p.defense) return animT > 0 ? dmanPos(p) : { x: p.x, y: p.y, a: p.facing || 0 };
-    const dp = displayPosAt(p, animT <= 0 ? 0 : animT * totalTime);
+    const tNow = animT <= 0 ? 0 : animT * totalTime;
+    const dp = displayPosAt(p, tNow);
+    // still in the queue: stand where the line has shuffled to, facing the way it
+    // will set off. At t=0 nobody has gone, so this is the stack as authored.
+    const qs = queueShift(p, tNow);
+    if (qs) return { ...dp, x: qs.x, y: qs.y };
     if (!effDetail || p.kind !== "player" || animT <= 0) return dp; // detail off / editing board: still frame
     const r = dp.smul || 0;                               // effective speed multiple
     let lat = 0, fore = 0, lean = 0;                      // lateral / fore-aft ft, deg — vs facing
@@ -4496,7 +4535,7 @@ export default function DrillAnimator() {
   const startFields = R => {
     const line = queueOf(pieces, R.id);
     const free = pieces.filter(w => w.kind === "player" && !w.pathId);
-    const qr = R.queue, mode = qr ? qr.mode : "none";
+    const qr = R.queue, mode = (qr && qr.mode) || "lead";   // absent = the default lead
     const setQ = v => updateById(R.id, { queue: v });
     const gap = R.gap > 0 ? R.gap : QUEUE_GAP;
     return (<>
@@ -4567,17 +4606,18 @@ export default function DrillAnimator() {
         <div className="hd-sectitle">Send them</div>
         <div className="hd-sechint">What holds each skater until it&rsquo;s their turn.</div>
         <div className="hd-poprow">
-          {[["none", "All at once"], ["lead", "When clear"], ["point", "At a point"]].map(([m, lab]) => (
+          {/* No "all at once": a line takes turns, and a whole line leaving on one
+              whistle from one mark is a wave, not a line. */}
+          {[["lead", "When clear"], ["point", "At a point"]].map(([m, lab]) => (
             <button key={m} className={`hd-mini${mode === m ? " on" : ""}`}
-              onClick={() => setQ(m === "none" ? null
-                : m === "lead" ? { mode: "lead", lead: (qr && qr.lead) || QUEUE_LEAD }
+              onClick={() => setQ(m === "lead" ? { mode: "lead", lead: (qr && qr.lead) || QUEUE_LEAD }
                 : { mode: "point", at: (qr && qr.at) || 0 })}>{lab}</button>
           ))}
         </div>
         {mode === "lead" && (
           <div className="hd-poprow">
             <span>go once the one ahead is</span>
-            <Stepper value={qr.lead || QUEUE_LEAD} min={gap} max={120} step={5} suffix=" ft"
+            <Stepper value={(qr && qr.lead) || QUEUE_LEAD} min={gap} max={120} step={5} suffix=" ft"
               onChange={v => setQ({ mode: "lead", lead: v })} />
             <span className="hd-sechint">clear</span>
           </div>
@@ -4585,7 +4625,7 @@ export default function DrillAnimator() {
         {mode === "point" && (R.path.length ? (
           <div className="hd-poprow">
             <span>go once the one ahead reaches</span>
-            <select className="hd-select on" value={qr.at || 0}
+            <select className="hd-select on" value={(qr && qr.at) || 0}
               onChange={e => setQ({ mode: "point", at: parseInt(e.target.value, 10) })}>
               {R.path.map((_, wi) => <option key={wi} value={wi}>{wi + 1}</option>)}
             </select>
