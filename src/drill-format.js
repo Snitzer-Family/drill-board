@@ -252,7 +252,7 @@ export function parseDrill(text) {
         let pathId = null, qIx = null, gapFt = null, queue = null;
         let reps = null, regroup = null, lineDir = null;   // the circuit's rep count, crossing pace, and which way its line stacks
         let feedPucks = false;                               // route: keep the line supplied with pucks
-        let connector = false;                               // route: this IS a connector, not a path of its own
+        let connector = false, connTo = null;                // route: this IS a connector, and where it leads
         let routeName = null;                                // the whole ROUTE's name, carried by every path in it
         const transfers = [];
         rest.forEach(r => {
@@ -396,6 +396,7 @@ export function parseDrill(text) {
               }
             // line=<deg> — which way the line stacks behind the head. Absent
             // means "back along the path", which is the usual answer.
+            } else if (key === "connector") { connector = true; connTo = v;
             } else if (key === "line") { const n = parseFloat(v); if (!isNaN(n)) lineDir = n;
             } else if (key === "reps") {
               const n = parseInt(v, 10);   // passes through the whole connected route
@@ -415,7 +416,7 @@ export function parseDrill(text) {
         const mode = lmode || (rand === false ? "sequence" : "reactive");   // legacy rand=off → sequence
         // a bare net= token targets every shot terminal that didn't carry its own >net
         if (net) terminals.forEach(t => { if (t.kind === "shot" && !t.net) t.net = net; });
-        const p = { id, kind, x, y, color, label, text, size, speed, hand, sym, carrier, facing, transfers, pickup, ...(terminals.length ? { terminals } : {}), net, holdLine, goalie, defense, wait, group, crease, lock, cues, mode, alwaysColor, lightId, ...(pathId ? { pathId } : {}), ...(qIx != null ? { q: qIx } : {}), ...(gapFt != null ? { gap: gapFt } : {}), ...(queue ? { queue } : {}), ...(reps != null ? { reps } : {}), ...(lineDir != null ? { lineDir } : {}), ...(regroup != null ? { regroup } : {}), ...(feedPucks ? { feed: true } : {}), ...(connector ? { connector: true } : {}), ...(routeName ? { routeName } : {}), ...(bg ? { bg } : {}), ...(bgOp != null ? { bgOp } : {}), ...(border ? { border } : {}), ...(borderOp != null ? { borderOp } : {}), ...(textOp != null ? { textOp } : {}), forks: [], path: [] };
+        const p = { id, kind, x, y, color, label, text, size, speed, hand, sym, carrier, facing, transfers, pickup, ...(terminals.length ? { terminals } : {}), net, holdLine, goalie, defense, wait, group, crease, lock, cues, mode, alwaysColor, lightId, ...(pathId ? { pathId } : {}), ...(qIx != null ? { q: qIx } : {}), ...(gapFt != null ? { gap: gapFt } : {}), ...(queue ? { queue } : {}), ...(reps != null ? { reps } : {}), ...(lineDir != null ? { lineDir } : {}), ...(regroup != null ? { regroup } : {}), ...(feedPucks ? { feed: true } : {}), ...(connector ? { connector: true } : {}), ...(connTo ? { to: connTo } : {}), ...(routeName ? { routeName } : {}), ...(bg ? { bg } : {}), ...(bgOp != null ? { bgOp } : {}), ...(border ? { border } : {}), ...(borderOp != null ? { borderOp } : {}), ...(textOp != null ? { textOp } : {}), forks: [], path: [] };
         pieces.push(p); byId[id] = p;
       } else if (cmd === "PATH") {
         const id = tok[1];
@@ -721,7 +722,10 @@ export function serializeDrill(rink, pieces, title = "", desc = "", steps = [], 
       : "";
     const lline = p.kind === "path" && p.lineDir != null ? ` line=${f1(p.lineDir)}` : "";
     const lfeed = p.kind === "path" && p.feed ? " feed" : "";
-    const lconn = p.kind === "path" && p.connector ? " connector" : "";
+    // `connector` alone is a crossing that reaches nothing (mid-edit); with a
+    // destination it is the road between two paths, and that lives on the PIECE
+    // so trimming a waypoint can't sever it.
+    const lconn = p.kind === "path" && p.connector ? (p.to ? ` connector=${p.to}` : " connector") : "";
     // the ROUTE's name, written on every path of the circuit that carries it
     const lrn = p.kind === "path" && p.routeName ? ` route=${String(p.routeName).trim().replace(/\s+/g, "_")}` : "";
     const cue = p.kind === "light" && (p.cues || []).length

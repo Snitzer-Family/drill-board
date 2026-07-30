@@ -4201,15 +4201,29 @@ export default function DrillAnimator() {
       // identity-preserving, like settleLine: this effect runs on every `pieces`
       // change, so handing back a fresh array when nothing moved re-triggers it
       // forever. (It did — the board locked up until this bailed out.)
+      // BOTH ENDS OF A CROSSING BELONG TO ITS NEIGHBOURS. It starts on the
+      // waypoint that hands off to it and finishes on the head of the path it
+      // feeds; only the points in between are the coach's to shape. Pinning just
+      // the head left the far end behind whenever the destination moved, so the
+      // crossing pointed at where that line used to be and the skater made a
+      // second, unasked-for hop to catch up.
       let pinned = false;
+      const near = (a, b) => Math.abs(a.x - b.x) < 1e-6 && Math.abs(a.y - b.y) < 1e-6;
       const withPins = out.map(c => {
-        if (c.kind !== "path" || !c.connector) return c;
+        if (c.kind !== "path" || !c.connector || !c.path.length) return c;
         const src = out.find(q => q.kind === "path" && nextOf(q) === c.id && q.path.length);
-        if (!src) return c;
-        const e = src.path[exitOf(src).at];
-        if (Math.abs(c.x - e.x) < 1e-6 && Math.abs(c.y - e.y) < 1e-6) return c;
+        const dst = c.to ? out.find(q => q.id === c.to && q.kind === "path") : null;
+        const head = src ? src.path[exitOf(src).at] : null;
+        const tailIx = c.path.length - 1;
+        const headOk = !head || near(c, head);
+        const tailOk = !dst || near(c.path[tailIx], dst);
+        if (headOk && tailOk) return c;
         pinned = true;
-        return { ...c, x: e.x, y: e.y };
+        return {
+          ...c,
+          ...(head ? { x: head.x, y: head.y } : {}),
+          ...(dst ? { path: c.path.map((sg, i) => (i === tailIx ? { ...sg, x: dst.x, y: dst.y } : sg)) } : {}),
+        };
       });
       if (pinned) out = withPins;
       return out;
@@ -4415,7 +4429,7 @@ export default function DrillAnimator() {
     if (links.length) {
       const tail = links[links.length - 1];
       return ps.map(q => (q.id === routeId ? withLink(q, point, links[0].id)
-        : q.id === tail.id ? withLink(q, q.path.length - 1, destId) : q));
+        : q.id === tail.id ? { ...q, to: destId } : q));
     }
     return ps.map(q => (q.id === routeId ? withLink(q, point, destId) : q));
   });
@@ -4945,12 +4959,13 @@ export default function DrillAnimator() {
     const { queue: _q, gap: _g, ...base } = makePiece("path", { x: end.x, y: end.y }, ps);
     const C = {
       ...base,                                  // no queue rule, no spacing: it has no line
-      color: A.color, connector: true, label: "",
+      color: A.color, connector: true, to: B.id, label: "",
       // it starts at whatever pace they were skating as they left the route — the
       // skater carries their speed across rather than dropping to a fixed glide
-      // a connector always hands off at its own last point: it IS the handoff
-      path: pts.map((q, k) => ({ type: "L", x: q.x, y: q.y, mode: "carry", dir: "fwd", stop: 0,
-        rate: crossRate(A, end), ...(k === pts.length - 1 ? { goTo: B.id } : {}) })),
+      // a connector always hands off at its own last point: it IS the handoff, so
+      // the destination is on the piece and no waypoint edit can lose it
+      path: pts.map(q => ({ type: "L", x: q.x, y: q.y, mode: "carry", dir: "fwd", stop: 0,
+        rate: crossRate(A, end) })),
     };
     flash("Connector added — drag its points to shape it");
     return [...ps.map(q => (q.id === A.id ? withLink(q, ex.at, C.id) : q)), C];
@@ -5055,7 +5070,22 @@ export default function DrillAnimator() {
       return { ...p, path: conv(p.path) };
     });
   }
+  // A CROSSING'S ENDS ARE NOT ITS OWN. Its first point is the waypoint that hands
+  // off to it and its last is the head of the path it feeds — both pinned, both
+  // belonging to the neighbour. Only the points between them are the coach's, so
+  // those are the only ones that can be dragged or deleted. Letting the last one
+  // go was how a connector got severed by trimming a corner.
+  const pinnedSeg = (p, i, fork = null) =>
+    !fork && !!p && p.kind === "path" && !!p.connector && (p.path || []).length > 0 && i === p.path.length - 1;
+
   function deleteSeg(id, i, fork = null) {
+    {
+      const owner = pieces.find(q => q.id === id);
+      if (pinnedSeg(owner, i, fork)) {
+        flash("That end belongs to the path it joins — shape the points between");
+        return;
+      }
+    }
     if (fork) {
       setPieces(ps => shiftActionWaypoints(ps, id, i + 1, -1, fork).map(p => p.id === id
         ? { ...p, forks: mapForkAt(p.forks, fork, f => ({ ...f, path: f.path.filter((_, j) => j !== i) })) } : p));
@@ -7462,8 +7492,11 @@ export default function DrillAnimator() {
       // a locked waypoint (or a waypoint of a locked piece) reads in a muted
       // "locked" colour and — unless locked items are selectable — is click-through
       const lk = !!(p.lock || s.lock);
-      const wFill = lk ? "#8792a0" : dotFill, wStroke = lk ? "#2b333d" : dotStroke;
-      const lkOff = lk && !lockedSelectable;
+      // a crossing's far end belongs to the path it feeds — visible, so you can see
+      // where it lands, but never draggable: it goes where its parent goes
+      const pin = pinnedSeg(p, i, fork);
+      const wFill = (lk || pin) ? "#8792a0" : dotFill, wStroke = (lk || pin) ? "#2b333d" : dotStroke;
+      const lkOff = (lk && !lockedSelectable) || pin;
       if (i === activeWp) {
         // full anchor grab: a circle for a linked (smooth/sym) point, a square for
         // a corner — the vector-editor convention, so the point type reads on-ice
@@ -7497,7 +7530,7 @@ export default function DrillAnimator() {
     // stagger), grabbing/tapping the visual you see still edits that endpoint
     if (!fork && route.length && endStagger[p.id]) {
       const li = route.length - 1, ls = route[li];
-      const lkOffA = (p.lock || ls.lock) && !lockedSelectable;
+      const lkOffA = ((p.lock || ls.lock) && !lockedSelectable) || pinnedSeg(p, li);
       const hp = staggeredEndPt(p, endStagger[p.id]);
       if (hp && !lkOffA) els.push(hd(hp.x, hp.y, DOT_R, { key: "arwgrab", fill: "transparent", style: { cursor: "grab" },
         onPointerDown: e => handleDown(e, { kind: "anchor", id: p.id, seg: li, wp: li }) }));
@@ -9362,9 +9395,13 @@ export default function DrillAnimator() {
             <button className="hd-mini" onClick={() => addPointAt(p.id, popup.seg, popup.pt, fork)}>
               ＋ Add point here
             </button>
-            <button className="hd-mini danger" onClick={() => { deleteSeg(p.id, popup.seg, fork); flash("Leg removed — Undo restores it"); }}>
-              Delete leg
-            </button>
+            {/* the last leg of a crossing ARRIVES at the next path — deleting it is
+                deleting the arrival, so it isn't on offer */}
+            {!pinnedSeg(p, popup.seg, fork) && (
+              <button className="hd-mini danger" onClick={() => { deleteSeg(p.id, popup.seg, fork); flash("Leg removed — Undo restores it"); }}>
+                Delete leg
+              </button>
+            )}
           </div>
           {p.kind === "path" && !fork && routeCommonField(p)}
           {p.kind === "path" && !fork && wholePathField(p)}
@@ -9700,7 +9737,11 @@ export default function DrillAnimator() {
           <div className="hd-poprow" style={{ marginTop: 2 }}>
             <button className="hd-mini" title="Pin this waypoint in place so it can't be moved or edited by accident."
               onClick={() => uSeg(i, { lock: true })}>🔒 Lock point</button>
-            <button className="hd-mini danger" onClick={() => deleteSeg(p.id, i, fork)}>Delete point</button>
+            {/* the far end of a crossing is the next path's head — nothing to delete
+                here, and offering it only invites severing the drill */}
+            {!pinnedSeg(p, i, fork) && (
+              <button className="hd-mini danger" onClick={() => deleteSeg(p.id, i, fork)}>Delete point</button>
+            )}
           </div>
         </>
       );

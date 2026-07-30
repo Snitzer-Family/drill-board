@@ -369,11 +369,21 @@ route `connector` and put it in the middle:
 ```drill
 PIECE R1 path 30 22 #3f7f8c Shooters
 PATH  R1 L 90,22 GOTO RC Q 130,24 160,40
-PIECE RC path 160 40 #3f7f8c connector
-PATH  RC RATE 0.65 L 120,50 L 80,60 GOTO R2 L 40,70
+PIECE RC path 160 40 #3f7f8c connector=R2
+PATH  RC RATE 0.65 L 120,50 L 80,60 L 40,70
 PIECE R2 path 40 70 #b06a2e Regroup
 PATH  R2 L 100,70
 ```
+
+Note `connector=<path>` on the PIECE line, not a `GOTO` on a leg. A crossing
+always hands off at its far end, so where it goes is a property of the crossing
+itself — hanging it off the last waypoint meant deleting that waypoint deleted
+the connection.
+
+**Its two ends are not yours to move.** The first point is the waypoint that hands
+off to it and the last is the head of the path it feeds; both are pinned to their
+parents and follow them around the ice. Only the points in between can be
+dragged, added or deleted — which is the whole job of a crossing.
 
 A connector is an ordinary route in every other way, so every route tool works on
 it: drag its points, add more, curve them, set the pace per leg. Starting it on

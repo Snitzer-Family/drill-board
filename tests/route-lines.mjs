@@ -19,6 +19,9 @@ const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
 const wire = p => {
   if (!p || !p.next) return p;
   const { next, ...rest } = p;
+  // a CONNECTOR carries its destination on the piece — it always hands off at its
+  // far end, and hanging that off a leg let a waypoint edit sever it
+  if (rest.connector) return { ...rest, to: next };
   const legs = rest.path || [];
   return { ...rest, path: legs.map((s, i) => (i === legs.length - 1 ? { ...s, goTo: next } : s)) };
 };

@@ -141,6 +141,12 @@ export function queueRelease(route, prevId) {
 // first one wins, and the editor clears the others when it writes a new one.
 export function exitOf(p) {
   const legs = (p && p.path) || [];
+  // A CONNECTOR's handoff is structural, not authored: it exists to reach the
+  // path it was drawn to reach, and it always hands off at its far end. So it
+  // carries the destination on the PIECE. Hanging it off the last leg — the way
+  // a real path does — meant deleting that waypoint deleted the connection, and
+  // the coach got a severed drill for trimming a corner.
+  if (p && p.connector) return p.to && legs.length ? { at: legs.length - 1, to: p.to } : null;
   for (let i = 0; i < legs.length; i++) if (legs[i].goTo) return { at: i, to: legs[i].goTo };
   return null;
 }
