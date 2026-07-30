@@ -48,7 +48,7 @@ const TOOL_GLYPH = {
   tire: { vb: "-3.3 -3.3 6.6 6.6", color: "#1c1c1e" },
   stick: { vb: "-6.4 -2.4 13.4 4.8", color: "#8a929c" },
   light: { vb: "-3.7 -3.7 7.4 7.4", color: "#2ea043" },
-  route: { vb: "-3.6 -3.6 7.2 7.2", color: "#3f7f8c" },
+  path: { vb: "-3.6 -3.6 7.2 7.2", color: "#3f7f8c" },
 };
 // What stays drawn on the ice once the drill is running. Two independent
 // things — the skaters' routes and the puck's passes/shots — so the four modes
@@ -149,8 +149,8 @@ const TOOL_KINDS = ["cone", "tire", "bumper", "deker", "passer", "stick", "light
 //   marks — annotation, not equipment
 // `k` is the tool/kind name; a `glyph` renders an Icon instead of a piece sprite.
 const ADD_GROUPS = [
-  { key: "main", label: "Players", tip: "Players, pucks, nets and routes", icon: "player", kinds: [
-    ["player", "Player"], ["playerpuck", "+ Puck"], ["puck", "Puck"], ["net", "Net"], ["route", "Route"]] },
+  { key: "main", label: "Players", tip: "Players, pucks, nets and paths", icon: "player", kinds: [
+    ["player", "Player"], ["playerpuck", "+ Puck"], ["puck", "Puck"], ["net", "Net"], ["path", "Path"]] },
   { key: "props", label: "Props", tip: "Cones, tires and training gear", icon: "grid", kinds: [
     ["cone", "Cone"], ["tire", "Tire"], ["bumper", "Bumper"], ["deker", "Deker"],
     ["passer", "Passer"], ["stick", "Stick"], ["light", "Light"]] },
@@ -170,7 +170,7 @@ const defaultColor = (kind, playerColor) =>
     // its own copy of this table and defaults a stick to #20242a, so the two
     // silently disagreed depending on whether a board was placed or loaded.
     // tests/theme-contrast.mjs now pins the two tables together.
-    : kind === "stick" ? "#20242a" : kind === "route" ? "#3f7f8c" : "#14171a";
+    : kind === "stick" ? "#20242a" : kind === "path" ? "#3f7f8c" : "#14171a";
 const toolImg = (kind, wb = false, wbCircle = false) => {
   const k = kind === "playerpuck" ? "player" : kind;
   const g = TOOL_GLYPH[k];
@@ -1857,9 +1857,9 @@ export default function DrillAnimator() {
   // → effective piece so position sampling follows the reaction, not the base end
   const effById = new Map(effPieces.map(p => [p.id, p]));
   // ...and a route-bound player has NO path of their own until lowering, so they
-  // need the effective piece for the same reason. Without `p.route` here every
+  // need the effective piece for the same reason. Without `p.pathId` here every
   // queue member samples an empty route and stands still on their mark.
-  const effOf = p => p && p.kind === "player" && ((p.forks || []).length || p.route) ? (effById.get(p.id) || p) : p;
+  const effOf = p => p && p.kind === "player" && ((p.forks || []).length || p.pathId) ? (effById.get(p.id) || p) : p;
   // Pucks a route fed itself exist ONLY in the lowered model — they are not on the
   // authored board, which is the point (they never touch the drill text). But the
   // renderers all enumerate the raw `pieces`, so without this they were planned,
@@ -2590,7 +2590,7 @@ export default function DrillAnimator() {
     if (!collisions) return null;                    // avoidance off — draw routes exactly as authored
     // routes bend too: the line a coach SEES has to arc around the same net the
     // skaters standing on it will, or the drawing and the animation disagree
-    if (!p.path.length || (p.kind !== "player" && p.kind !== "puck" && p.kind !== "route")) return null;
+    if (!p.path.length || (p.kind !== "player" && p.kind !== "puck" && p.kind !== "path")) return null;
     // Key by path LENGTH too: the drawn line passes the base piece while the
     // animation passes the fork-inclusive `effOf` piece (longer path). Sharing by
     // id alone let a base-only detour (ending at the branch point) drive the
@@ -3837,7 +3837,7 @@ export default function DrillAnimator() {
     // A route is a place, not a skater. It owns a path, so the generic sampler
     // would happily walk its head marker along its own line during playback —
     // pin it to its start, aimed the way the line sets off.
-    if (p.kind === "route") return { x: p.x, y: p.y, a: routeHeadDeg(p) };
+    if (p.kind === "path") return { x: p.x, y: p.y, a: routeHeadDeg(p) };
     if (p.kind === "player" && p.defense) return animT > 0 ? dmanPos(p) : { x: p.x, y: p.y, a: p.facing || 0 };
     const dp = displayPosAt(p, animT <= 0 ? 0 : animT * totalTime);
     if (!effDetail || p.kind !== "player" || animT <= 0) return dp; // detail off / editing board: still frame
@@ -4023,7 +4023,7 @@ export default function DrillAnimator() {
       let nq = q;
       // ...and a line whose route was deleted disbands, rather than leaving every
       // member pointing at nothing and silently standing still
-      if (q.route === goneId) nq = unbindLine(nq);
+      if (q.pathId === goneId) nq = unbindLine(nq);
       if (q.wait && q.wait.on === goneId) nq = { ...nq, wait: null };
       if ((q.path || []).some(s => s.waitOn && s.waitOn.on === goneId))
         nq = { ...nq, path: q.path.map(s => (s.waitOn && s.waitOn.on === goneId ? { ...s, waitOn: null } : s)) };
@@ -4081,7 +4081,7 @@ export default function DrillAnimator() {
     if (aiPlay) return;                 // AI play mutates pieces transiently, not as edits
     setPieces(ps => {
       let out = ps;
-      for (const R of ps) if (R.kind === "route") out = settleLine(out, R.id);
+      for (const R of ps) if (R.kind === "path") out = settleLine(out, R.id);
       // A crossing STARTS where the route feeding it ends — that is what makes the
       // automatic crossings either side of it collapse to nothing. Nudging its head
       // loose left a stray gate ring mid-ice and a phantom crossing to reach it,
@@ -4091,8 +4091,8 @@ export default function DrillAnimator() {
       // forever. (It did — the board locked up until this bailed out.)
       let pinned = false;
       const withPins = out.map(c => {
-        if (c.kind !== "route" || !c.connector) return c;
-        const src = out.find(q => q.kind === "route" && q.next === c.id && q.path.length);
+        if (c.kind !== "path" || !c.connector) return c;
+        const src = out.find(q => q.kind === "path" && q.next === c.id && q.path.length);
         if (!src) return c;
         const e = src.path[src.path.length - 1];
         if (Math.abs(c.x - e.x) < 1e-6 && Math.abs(c.y - e.y) < 1e-6) return c;
@@ -4178,7 +4178,7 @@ export default function DrillAnimator() {
     const prefix = kind === "player" ? "P" : kind === "puck" ? "PK" : kind === "net" ? "N"
       : kind === "bumper" ? "B" : kind === "deker" ? "DK" : kind === "passer" ? "PS"
       : kind === "label" ? "L" : kind === "tire" ? "T" : kind === "stick" ? "ST" : kind === "light" ? "LT" : kind === "mark" ? "MK"
-      : kind === "route" ? "R" : "C";
+      : kind === "path" ? "R" : "C";
     let n = 1;
     while (arr.some(p => p.id === prefix + n)) n++;
     return prefix + n;
@@ -4196,7 +4196,7 @@ export default function DrillAnimator() {
       // A new line takes turns by default — a line where everyone leaves at once
       // is a wave, not a line. Drills authored before this carry no queue= token
       // and keep the old all-at-once behaviour.
-      ...(kind === "route" ? { gap: QUEUE_GAP, queue: { mode: "lead", lead: QUEUE_LEAD }, forks: [] } : {}),
+      ...(kind === "path" ? { gap: QUEUE_GAP, queue: { mode: "lead", lead: QUEUE_LEAD }, forks: [] } : {}),
     };
   }
 
@@ -4216,20 +4216,20 @@ export default function DrillAnimator() {
   // resolve against the route's points, writes land on the head skater's chain,
   // and lowering then hands that same work to everyone else on the line.
   // Null when nothing is standing on the route yet — there is no one to act.
-  const lineHead = route => (route && route.kind === "route" ? queueOf(pieces, route.id)[0] || null : null);
+  const lineHead = route => (route && route.kind === "path" ? queueOf(pieces, route.id)[0] || null : null);
   const lineProxy = route => {
     const head = lineHead(route);
     return head ? { ...head, path: route.path || [], forks: route.forks || [] } : null;
   };
   // ...and for anything that just needs "the piece whose actions this route draws"
-  const actOwner = p => (p.kind === "route" ? lineProxy(p) : p);
+  const actOwner = p => (p.kind === "path" ? lineProxy(p) : p);
   // Does this piece draw a SKATING route? The hockey-diagram rules — the gap that
   // lifts the line off the icon, the backward zigzag, the carry wiggle, arrowhead
   // staggering, where a pass or shot leaves an action badge — are all about the
   // route drawn on the ice, not about who owns it. They were written when only a
   // player could own one, so they ask `kind === "player"`; a route is the same
   // thing with the skater factored out, and must read the same on the sheet.
-  const skates = p => !!p && (p.kind === "player" || p.kind === "route");
+  const skates = p => !!p && (p.kind === "player" || p.kind === "path");
   // A queued skater's grab disc must not reach its neighbours'. The default is
   // wider than a typical 6 ft spacing, so every member's target overlapped the
   // next and whichever drew last swallowed the taps meant for all of them — the
@@ -4237,8 +4237,8 @@ export default function DrillAnimator() {
   // never shrinks below the body you can see. Returns 0 (= use the default) for
   // anyone not standing in a line.
   const grabRadiusOf = p => {
-    if (!p || p.kind !== "player" || !p.route) return 0;
-    const R = pieces.find(q => q.id === p.route && q.kind === "route");
+    if (!p || p.kind !== "player" || !p.pathId) return 0;
+    const R = pieces.find(q => q.id === p.pathId && q.kind === "path");
     if (!R) return 0;
     const gap = R.gap > 0 ? R.gap : QUEUE_GAP;
     return Math.max(2.4, Math.min(6.8, gap * 0.45));
@@ -4254,7 +4254,7 @@ export default function DrillAnimator() {
   const linksFrom = (ps, p) => {
     const out = [];
     for (let cur = p, n = 0; cur && cur.next && n < 8; n++) {
-      const nx = ps.find(q => q.id === cur.next && q.kind === "route");
+      const nx = ps.find(q => q.id === cur.next && q.kind === "path");
       if (!nx || !nx.connector) break;
       out.push(nx); cur = nx;
     }
@@ -4262,7 +4262,7 @@ export default function DrillAnimator() {
   };
   const destOf = p => {
     for (let cur = p, n = 0; cur && cur.next && n < 8; n++) {
-      const nx = pieces.find(q => q.id === cur.next && q.kind === "route");
+      const nx = pieces.find(q => q.id === cur.next && q.kind === "path");
       if (!nx) return null;
       if (!nx.connector) return nx;
       cur = nx;
@@ -4274,18 +4274,60 @@ export default function DrillAnimator() {
   // Choosing "stop there" drops those crossings: they existed only to reach a
   // destination that no longer exists.
   const setDestination = (routeId, destId) => setPieces(ps => {
-    const p = ps.find(q => q.id === routeId && q.kind === "route");
+    const p = ps.find(q => q.id === routeId && q.kind === "path");
     if (!p) return ps;
     const links = linksFrom(ps, p);
     if (!destId) {
       const gone = new Set(links.map(l => l.id));
-      if (gone.size) flash("Crossing removed with the link");
+      if (gone.size) flash("Connector removed with the link");
       return ps.filter(q => !gone.has(q.id))
         .map(q => (q.id === routeId ? { ...q, next: null } : q));
     }
     const tail = links.length ? links[links.length - 1].id : routeId;
     return ps.map(q => (q.id === tail ? { ...q, next: destId } : q));
   });
+
+  // THE ROUTE: what is true of the whole circuit, wherever you happen to be
+  // standing in it. Rendered on the path, on a connector, on a leg and on a
+  // waypoint — same section, same values, so changing reps or the name from any
+  // part changes it for all of them.
+  const routeCommonField = p => {
+    const order = chainOrder(p);
+    const members = order || [p];
+    const paths = members.filter(m => !m.connector);
+    const label = p.routeName || "";
+    const c = chainCount(p, 0);
+    return (
+      <div className="hd-field">
+        <div className="hd-sectitle">The route</div>
+        <div className="hd-sechint">
+          {paths.length > 1
+            ? `${paths.map(m => nameOf(m.id)).join(" → ")} · ${c.total} points`
+            : `${nameOf(p.id)} · ${c.total} point${c.total === 1 ? "" : "s"}`}
+        </div>
+        <div className="hd-poprow">
+          <span>Called</span>
+          <input className="hd-input" style={{ flex: 1, minWidth: 80 }} value={label}
+            placeholder={paths.map(m => nameOf(m.id)).join(" → ") || "this route"}
+            onChange={e => setRouteField(p.id, { routeName: e.target.value || undefined })} />
+        </div>
+        <div className="hd-poprow">
+          <span>Run it</span>
+          <Stepper value={p.reps == null ? 1 : p.reps} min={1} max={8} step={1}
+            fmt={v => `${v}\u00d7`} onChange={v => setChainReps(p.id, v)} />
+          <span className="hd-sechint">
+            {paths.length > 1 ? "one rep is a full lap of the circuit" : "each rep returns to the start"}
+          </span>
+        </div>
+        <div className="hd-poprow" style={{ marginTop: 2 }}>
+          <button className="hd-mini" onClick={() => lockRoute(p.id, !p.lock)}>
+            {p.lock ? "Unlock route" : "Lock route"}
+          </button>
+          <button className="hd-mini danger" onClick={() => deleteRoute(p.id)}>Delete route</button>
+        </div>
+      </div>
+    );
+  };
 
   // The two end-of-route questions, kept apart because they are different
   // questions: WHERE they go when this route ends, and HOW MANY TIMES the whole
@@ -4297,7 +4339,7 @@ export default function DrillAnimator() {
   //    and at its last waypoint — the two places you'd look for it.
   const routeNextField = p => {
     // crossings are excluded: they are the road, not the place
-    const others = pieces.filter(q => q.kind === "route" && !q.connector && q.id !== p.id);
+    const others = pieces.filter(q => q.kind === "path" && !q.connector && q.id !== p.id);
     const branchy = (p.forks || []).length > 0;
     const dest = destOf(p);
     return (
@@ -4323,7 +4365,7 @@ export default function DrillAnimator() {
             {dest && branchy && <div className="hd-sechint">This route branches, so only the first leg runs — branches and recycling don&rsquo;t combine yet.</div>}
             {dest && !linksFrom(pieces, p).length && (
               <div className="hd-poprow">
-                <button className="hd-mini" onClick={() => shapeCrossing(p.id)}>Shape the crossing ›</button>
+                <button className="hd-mini" onClick={() => shapeCrossing(p.id)}>Shape the connector ›</button>
                 <span className="hd-sechint">to steer the skate across</span>
               </div>
             )}
@@ -4342,7 +4384,7 @@ export default function DrillAnimator() {
     const order = [];
     for (let cur = p, n = 0; cur && n <= chained.size; n++) {
       order.push(cur.id);
-      const nxt = pieces.find(q => q.id === cur.next && q.kind === "route");
+      const nxt = pieces.find(q => q.id === cur.next && q.kind === "path");
       if (!nxt || nxt.id === p.id || order.includes(nxt.id)) break;
       cur = nxt;
     }
@@ -4366,7 +4408,7 @@ export default function DrillAnimator() {
   };
 
   const restack = (ps, routeId) => {
-    const R = ps.find(q => q.id === routeId && q.kind === "route");
+    const R = ps.find(q => q.id === routeId && q.kind === "path");
     if (!R) return ps;
     const gap = R.gap > 0 ? R.gap : QUEUE_GAP;
     const spots = new Map(queueOf(ps, routeId).map((q, k) => [q.id, stackSpot(R, k, gap)]));
@@ -4395,11 +4437,11 @@ export default function DrillAnimator() {
 
   // a player joining a line gives up their own route — the route owns it now
   const joinLine = (playerId, routeId) => setPieces(ps => settleLine(
-    ps.map(q => (q.id === playerId ? { ...q, route: routeId, q: queueOf(ps, routeId).length, path: [], forks: [] } : q)), routeId));
+    ps.map(q => (q.id === playerId ? { ...q, pathId: routeId, q: queueOf(ps, routeId).length, path: [], forks: [] } : q)), routeId));
   const leaveLine = playerId => setPieces(ps => {
     const P = ps.find(q => q.id === playerId);
-    if (!P || !P.route) return ps;
-    return settleLine(ps.map(q => (q.id === playerId ? unbindLine(q) : q)), P.route);
+    if (!P || !P.pathId) return ps;
+    return settleLine(ps.map(q => (q.id === playerId ? unbindLine(q) : q)), P.pathId);
   });
   const reorderLine = (routeId, from, to) => setPieces(ps => {
     const order = queueOf(ps, routeId).map(q => q.id);
@@ -4409,17 +4451,17 @@ export default function DrillAnimator() {
     return settleLine(ps.map(q => (ix.has(q.id) ? { ...q, q: ix.get(q.id) } : q)), routeId);
   });
   const addSkater = routeId => setPieces(ps => {
-    const R = ps.find(q => q.id === routeId && q.kind === "route");
+    const R = ps.find(q => q.id === routeId && q.kind === "path");
     if (!R) return ps;
     const k = queueOf(ps, routeId).length;
     const spot = stackSpot(R, k, R.gap > 0 ? R.gap : QUEUE_GAP);
-    return settleLine([...ps, { ...makePiece("player", spot, ps), route: routeId, q: k }], routeId);
+    return settleLine([...ps, { ...makePiece("player", spot, ps), pathId: routeId, q: k }], routeId);
   });
   // Drop a pile of loose pucks beside the line — one per skater who hasn't got
   // one. They are ordinary pucks: lowering hands them out nearest-first, and a
   // skater who doesn't get one simply skates the route.
   const addLinePucks = routeId => setPieces(ps => {
-    const R = ps.find(q => q.id === routeId && q.kind === "route");
+    const R = ps.find(q => q.id === routeId && q.kind === "path");
     if (!R) return ps;
     const gap = R.gap > 0 ? R.gap : QUEUE_GAP;
     const line = queueOf(ps, routeId);
@@ -4444,7 +4486,7 @@ export default function DrillAnimator() {
   // first frame. A REAL piece, deliberately: fed pucks are lowering-only and
   // invisible to the editor, and this one has to be something you can build on.
   const toggleFeed = routeId => setPieces(ps => {
-    const R = ps.find(q => q.id === routeId && q.kind === "route");
+    const R = ps.find(q => q.id === routeId && q.kind === "path");
     if (!R) return ps;
     const on = !R.feed;
     const out = ps.map(q => (q.id === routeId ? { ...q, feed: on } : q));
@@ -4466,13 +4508,13 @@ export default function DrillAnimator() {
   const crossingPaceField = p => {
     const rates = p.path.map(s => s.rate || 1);
     const same = rates.every(r => Math.abs(r - rates[0]) < 1e-6);
-    const from = pieces.find(q => q.kind === "route" && q.next === p.id);
+    const from = pieces.find(q => q.kind === "path" && q.next === p.id);
     const inherit = from && from.path.length ? crossRate(from, from.path[from.path.length - 1]) : 1;
     const cur = same && rates.length ? rates[0] : inherit;
     const setAll = v => updateById(p.id, { path: p.path.map(s => ({ ...s, rate: v })) });
     return (
       <div className="hd-field">
-        <div className="hd-sectitle">Pace to the next route</div>
+        <div className="hd-sectitle">Pace to the next path</div>
         <div className="hd-poprow">
           <Stepper value={+cur.toFixed(2)} min={0.2} max={2} step={0.05} suffix="×" onChange={setAll} />
           <button className="hd-mini" onClick={() => setAll(inherit)}>
@@ -4493,10 +4535,25 @@ export default function DrillAnimator() {
   // A rep counts a pass through the whole connected chain, so the number is the
   // CHAIN's, not one route's. Write it to every route joined to this one, or two
   // ends of the same loop could disagree about how many times it runs.
-  const setChainReps = (routeId, v) => setPieces(ps => {
+  // A ROUTE is the whole circuit of connected paths, so its settings belong to
+  // every piece of it. Writing them to each member is what keeps two ends of the
+  // same loop from disagreeing about how many reps it runs or what it is called.
+  const setRouteField = (routeId, patch) => setPieces(ps => {
     const ids = chainOf(ps, routeId);
-    return ps.map(q => (ids.has(q.id) && q.kind === "route" ? { ...q, reps: v } : q));
+    return ps.map(q => (ids.has(q.id) && q.kind === "path" ? { ...q, ...patch } : q));
   });
+  const setChainReps = (routeId, v) => setRouteField(routeId, { reps: v });
+  // ...and deleting or locking one acts on the circuit, not on the piece you
+  // happen to have open. Players standing on a deleted path are unbound, not
+  // deleted — they are people, the path was scenery.
+  const deleteRoute = routeId => setPieces(ps => {
+    const ids = chainOf(ps, routeId);
+    setSelectedId(null); setPopup(null);
+    flash("Route deleted — Undo restores it");
+    return ps.filter(q => !ids.has(q.id))
+      .map(q => (q.kind === "player" && ids.has(q.pathId) ? unbindLine(q) : q));
+  });
+  const lockRoute = (routeId, on) => setRouteField(routeId, { lock: on || undefined });
   // Turn the automatic crossing into a route you can shape. It becomes a real
   // route piece seeded with the path the app was already drawing, so every route
   // tool works on it — drag its points, add more, curve them, send it the long way
@@ -4504,8 +4561,8 @@ export default function DrillAnimator() {
   // of the source route's hops; sitting exactly on both ends means the automatic
   // crossings either side of it collapse to nothing.
   const shapeCrossing = routeId => setPieces(ps => {
-    const A = ps.find(q => q.id === routeId && q.kind === "route");
-    const B = A && ps.find(q => q.id === A.next && q.kind === "route");
+    const A = ps.find(q => q.id === routeId && q.kind === "path");
+    const B = A && ps.find(q => q.id === A.next && q.kind === "path");
     if (!A || !B || !A.path.length) return ps;
     const end = A.path[A.path.length - 1];
     const poly = transitPoly(A, B, collisions ? transitObstacles(ps) : []) || [{ x: end.x, y: end.y }, { x: B.x, y: B.y }];
@@ -4517,7 +4574,7 @@ export default function DrillAnimator() {
       const a = poly[0], z = pts[pts.length - 1] || { x: B.x, y: B.y };
       pts = [1, 2, 3].map(i => ({ x: a.x + (z.x - a.x) * (i / 3), y: a.y + (z.y - a.y) * (i / 3) }));
     }
-    const { queue: _q, gap: _g, ...base } = makePiece("route", { x: end.x, y: end.y }, ps);
+    const { queue: _q, gap: _g, ...base } = makePiece("path", { x: end.x, y: end.y }, ps);
     const C = {
       ...base,                                  // no queue rule, no spacing: it has no line
       color: A.color, connector: true, next: B.id, label: "",
@@ -4525,7 +4582,7 @@ export default function DrillAnimator() {
       // skater carries their speed across rather than dropping to a fixed glide
       path: pts.map(q => ({ type: "L", x: q.x, y: q.y, mode: "carry", dir: "fwd", stop: 0, rate: crossRate(A, end) })),
     };
-    flash("Crossing is now a route — drag its points to shape it");
+    flash("Connector added — drag its points to shape it");
     return [...ps.map(q => (q.id === A.id ? { ...q, next: C.id } : q)), C];
   });
   // promote a hand-drawn route into a route object, with its author at the head.
@@ -4534,9 +4591,9 @@ export default function DrillAnimator() {
   const makeLine = playerId => setPieces(ps => {
     const P = ps.find(q => q.id === playerId);
     if (!P || !P.path.length) return ps;
-    const R = { ...makePiece("route", { x: P.x, y: P.y }, ps), path: P.path, forks: P.forks || [], label: "" };
+    const R = { ...makePiece("path", { x: P.x, y: P.y }, ps), path: P.path, forks: P.forks || [], label: "" };
     return settleLine(
-      [R, ...ps.map(q => (q.id === playerId ? { ...q, route: R.id, q: 0, path: [], forks: [] } : q))], R.id);
+      [R, ...ps.map(q => (q.id === playerId ? { ...q, pathId: R.id, q: 0, path: [], forks: [] } : q))], R.id);
   });
 
   // a shot authored on a netless board conjures its target: an empty net in
@@ -6574,7 +6631,7 @@ export default function DrillAnimator() {
   // whole piece is a hand-shaped crossing, or the lowering pass baked this leg as
   // one. Both must look the same — the coach shaping a crossing shouldn't change
   // what it means.
-  const isCrossing = (p, s) => !!((p && p.kind === "route" && p.connector) || (s && s.transit));
+  const isCrossing = (p, s) => !!((p && p.kind === "path" && p.connector) || (s && s.transit));
 
   function segStroke(p, s, isLast, flat) {
     const W = w => (flat ? w : sw(w)) * lineScale;   // global route line-thickness scale
@@ -7496,10 +7553,10 @@ export default function DrillAnimator() {
   // route's end and its tail on the next route's head, so the boundary step skips
   // the duplicate spot: forward lands on the next piece's first WAYPOINT, and back
   // lands on the previous piece's last one.
-  const chainNext = p => (p && p.kind === "route" && p.next
-    ? pieces.find(q => q.id === p.next && q.kind === "route" && q.path.length) || null : null);
-  const chainPrev = p => (p && p.kind === "route"
-    ? pieces.find(q => q.kind === "route" && q.next === p.id && q.path.length) || null : null);
+  const chainNext = p => (p && p.kind === "path" && p.next
+    ? pieces.find(q => q.id === p.next && q.kind === "path" && q.path.length) || null : null);
+  const chainPrev = p => (p && p.kind === "path"
+    ? pieces.find(q => q.kind === "path" && q.next === p.id && q.path.length) || null : null);
 
   // The chain in the order it is skated. A drill is one journey, so its points
   // are numbered across the whole thing — Lane_A's 3, the crossing's 2 and
@@ -7508,9 +7565,9 @@ export default function DrillAnimator() {
   // lowest id, which keeps the numbering the same wherever you happen to be
   // standing when you open the panel.
   const chainOrder = p => {
-    if (!p || p.kind !== "route") return null;
+    if (!p || p.kind !== "path") return null;
     const members = [...chainOf(pieces, p.id)]
-      .map(id => pieces.find(q => q.id === id && q.kind === "route"))
+      .map(id => pieces.find(q => q.id === id && q.kind === "path"))
       .filter(q => q && q.path.length);
     if (members.length < 2) return null;
     const start = members.find(m => !members.some(o => o.next === m.id))
@@ -8138,9 +8195,10 @@ export default function DrillAnimator() {
       // used at the top of the player menu and in the puck editor
       const routeField = () => (
         <div className="hd-field">
-          <div className="hd-sectitle">Route</div>
+          <div className="hd-sectitle">{p.kind === "path" ? (p.connector ? "Shape the connector" : "Shape this path") : "Route"}</div>
           <div className="hd-sechint">
-            {p.path.length ? "Tap a shape to extend the route, or draw freehand." : "Tap a shape to start a route, or draw freehand."}
+            {p.path.length ? `Tap a shape to extend the ${p.kind === "path" ? "path" : "route"}, or draw freehand.`
+              : `Tap a shape to start a ${p.kind === "path" ? "path" : "route"}, or draw freehand.`}
           </div>
           <div className="hd-poprow">{curveButtons(t => addSegment(p.id, t), () => drawRouteMode(p.id))}</div>
         </div>
@@ -8150,7 +8208,7 @@ export default function DrillAnimator() {
         : p.kind === "deker" ? `Deker ${p.id}` : p.kind === "passer" ? `Passer ${p.id}`
         : p.kind === "label" ? `Label ${p.id}` : p.kind === "tire" ? `Tire ${p.id}` : p.kind === "stick" ? `Stick ${p.id}`
         : p.kind === "light" ? `Light ${p.id}` : p.kind === "mark" ? `Mark ${p.id}`
-        : p.kind === "route" ? (p.connector ? "Crossing" : `Route ${p.label || p.id}`) : `Cone ${p.id}`;
+        : p.kind === "path" ? (p.connector ? "Connector" : `Path ${p.label || p.id}`) : `Cone ${p.id}`;
       body = (
         <>
           {p.kind === "label" && (
@@ -8667,9 +8725,9 @@ export default function DrillAnimator() {
           {p.kind === "puck" && !p.defense && routeField()}
           {/* A route: the line that stands on it, and how far apart they stack.
               The route owns the geometry; the skaters bound to it just run it. */}
-          {p.kind === "route" && (() => {
+          {p.kind === "path" && (() => {
             const line = queueOf(pieces, p.id);
-            const free = pieces.filter(q => q.kind === "player" && !q.route);
+            const free = pieces.filter(q => q.kind === "player" && !q.pathId);
             return (
               <>
                 {/* The same navigator a player's popup has. It matters more here:
@@ -8686,7 +8744,7 @@ export default function DrillAnimator() {
                         return (
                           <button className="hd-mini" disabled={!pv}
                             onClick={() => pv && navPopup({ type: "point", id: pv.id, seg: pv.path.length - 1 })}>
-                            ‹ {pv ? (pv.connector ? "Crossing" : nameOf(pv.id)) : "Prev"}
+                            ‹ {pv ? (pv.connector ? "Connector" : nameOf(pv.id)) : "Prev"}
                           </button>
                         );
                       })()}
@@ -8701,10 +8759,21 @@ export default function DrillAnimator() {
                   </div>
                 )}
                 {routeField()}
-                {/* A crossing is the skate BETWEEN two lines, shaped by hand. It
+                {/* A CONNECTOR is the skate between two paths, shaped by hand. It
                     has no line of its own, so everything below about queueing and
-                    puck work would be answering a question nobody asked. */}
-                {crossingPaceField(p)}
+                    puck work would be answering a question nobody asked — only its
+                    shape and the pace across it. */}
+                {p.connector && (
+                  <div className="hd-field">
+                    <div className="hd-sectitle">Connector</div>
+                    <div className="hd-sechint">
+                      The skate from {nameOf((pieces.find(q => q.kind === "path" && q.next === p.id) || {}).id || "?")} into{" "}
+                      {nameOf(p.next || "?")}. Drag its points, add more, or curve them to send
+                      skaters round the traffic.
+                    </div>
+                  </div>
+                )}
+                {p.connector && crossingPaceField(p)}
                 {/* Point 0's actions, in the same slot the pager's other points
                     put them — "collect a puck before you go" is how most shooting
                     lines start, and it had nowhere visible to live. */}
@@ -8814,14 +8883,14 @@ export default function DrillAnimator() {
                   );
                 })()}
                 {!p.connector && routeNextField(p)}
-                {!p.connector && routeRepsField(p)}
+                {routeCommonField(p)}
               </>
             );
           })()}
           {/* A player standing on a route: which line, and the way off it */}
-          {p.kind === "player" && p.route && (() => {
-            const R = pieces.find(q => q.id === p.route && q.kind === "route");
-            const k = queueOf(pieces, p.route).findIndex(q => q.id === p.id);
+          {p.kind === "player" && p.pathId && (() => {
+            const R = pieces.find(q => q.id === p.pathId && q.kind === "path");
+            const k = queueOf(pieces, p.pathId).findIndex(q => q.id === p.id);
             return (
               <div className="hd-field">
                 <div className="hd-sectitle">On a line</div>
@@ -8907,7 +8976,7 @@ export default function DrillAnimator() {
       if (!s || !popup.pt) return null;
       anchorPt = popup.pt;
       title = fork ? `Reaction · leg ${popup.seg + 1}`
-        : `${p.kind === "route" && p.connector ? "Crossing" : nameOf(p.id)} · leg ${popup.seg + 1}`;
+        : `${p.kind === "path" && p.connector ? "Connector" : nameOf(p.id)} · leg ${popup.seg + 1}`;
       // A leg runs BETWEEN two points, and everything you'd want to set — an
       // action, a pause, the pace, a name — lives on one of them. Tapping the line
       // is how most people reach for a route, so hand them the two points it joins
@@ -8941,6 +9010,7 @@ export default function DrillAnimator() {
               Delete leg
             </button>
           </div>
+          {p.kind === "path" && !fork && routeCommonField(p)}
         </>
       );
     } else {
@@ -8960,7 +9030,7 @@ export default function DrillAnimator() {
       // same thing here as it does in the navigator below it
       const tc = fork ? { at: i + 1, total: route.length } : chainCount(p, i);
       title = fork ? `Reaction · point ${tc.at}/${tc.total}`
-        : `${p.kind === "route" && p.connector ? "Crossing" : nameOf(p.id)} · point ${tc.at}/${tc.total}`;
+        : `${p.kind === "path" && p.connector ? "Connector" : nameOf(p.id)} · point ${tc.at}/${tc.total}`;
       // Prev at waypoint 0: a fork steps back to its branch (the base route's end);
       // a base route steps back to the player/start popup.
       const branchNav = () => p.path.length ? { type: "point", id: p.id, seg: p.path.length - 1 } : { type: "piece", id: p.id };
@@ -8988,7 +9058,7 @@ export default function DrillAnimator() {
                   return (
                     <button className="hd-mini" disabled={i >= route.length - 1 && !nx}
                       onClick={() => (nx ? navPopup({ type: "point", id: nx.id, seg: 0 }) : goSeg(i + 1))}>
-                      {nx ? `${nx.connector ? "Crossing" : nameOf(nx.id)} ›` : "Next ›"}
+                      {nx ? `${nx.connector ? "Connector" : nameOf(nx.id)} ›` : "Next ›"}
                     </button>
                   );
                 })()}
@@ -8999,23 +9069,23 @@ export default function DrillAnimator() {
               into that piece's own editor (position preserved when pinned).
               Skipped on a crossing: the heading already reads "Crossing · point
               4/8", and its settings are one tap away on the handle. */}
-          {!(p.kind === "route" && p.connector) && (
+          {!(p.kind === "path" && p.connector) && (
           <div className="hd-field">
             <div className="hd-sectitle">
-              {p.kind === "route" && p.connector ? "Crossing"
-                : `${p.kind === "player" ? "Player" : p.kind === "route" ? "Line" : "Puck"} on this ${fork ? "reaction" : "route"}`}
+              {p.kind === "path" && p.connector ? "Connector"
+                : `${p.kind === "player" ? "Player" : p.kind === "path" ? "Path" : "Puck"} on this ${fork ? "reaction" : "path"}`}
             </div>
             <div className="hd-poprow">
               <span className="hd-swatch" style={{ background: p.color, width: 16, height: 16, cursor: "default" }} />
-              <span style={{ fontWeight: 700 }}>{p.kind === "route" && p.connector ? "Crossing" : nameOf(p.id)}</span>
+              <span style={{ fontWeight: 700 }}>{p.kind === "path" && p.connector ? "Connector" : nameOf(p.id)}</span>
               <button className="hd-mini" onClick={() => navPopup({ type: "piece", id: p.id })}>
-                {p.kind === "route" ? (p.connector ? "Crossing settings ›" : "Line settings ›") : "Open ›"}
+                {p.kind === "path" ? (p.connector ? "Connector settings ›" : "Path settings ›") : "Open ›"}
               </button>
             </div>
-            {p.kind === "route" && (
+            {p.kind === "path" && (
               <div className="hd-sechint">
                 {p.connector
-                  ? `The skate from ${nameOf((pieces.find(q => q.kind === "route" && q.next === p.id) || {}).id || "?")} into ${nameOf(p.next || "?")}. Shape it here; the drill's work lives on the routes it joins.`
+                  ? `The skate from ${nameOf((pieces.find(q => q.kind === "path" && q.next === p.id) || {}).id || "?")} into ${nameOf(p.next || "?")}. Shape it here; the drill's work lives on the routes it joins.`
                   : queueOf(pieces, p.id).length
                   ? `${queueOf(pieces, p.id).length} on this line — spacing and turn-taking live in its settings.`
                   : "Nobody is on this line yet."}
@@ -9029,7 +9099,7 @@ export default function DrillAnimator() {
           {p.kind === "player" && ActionSteps(p, i, fork)}
           {/* A route's waypoints carry the same Actions the skater's would — see
               lineProxy. Authored on the head of the line and handed to the rest. */}
-          {p.kind === "route" && !p.connector && (lineProxy(p)
+          {p.kind === "path" && !p.connector && (lineProxy(p)
             ? (
               <>
                 {ActionSteps(lineProxy(p), i, fork)}
@@ -9066,7 +9136,7 @@ export default function DrillAnimator() {
                     else uSeg(i + 1, { waitOn: null });
                   }}
                 />
-              ) : p.kind === "route" && p.connector ? null : (
+              ) : p.kind === "path" && p.connector ? null : (
                 <div className="hd-field">
                   <div className="hd-sectitle">Pause here</div>
                   <div className="hd-poprow">
@@ -9086,7 +9156,7 @@ export default function DrillAnimator() {
                   <div className="hd-sechint">Hops as they pass this spot.</div>
                 </div>
               )}
-              {p.kind === "route" && p.connector ? null : (
+              {p.kind === "path" && p.connector ? null : (
                 <div className="hd-field">
                   <div className="hd-sectitle">Pace to the next point ×{(next.rate || 1).toFixed(2)}</div>
                   <div className="hd-poprow">
@@ -9192,13 +9262,13 @@ export default function DrillAnimator() {
           })()}
           {/* ...and the route's own action: where they go when they finish it.
               Offered at the END, because that is when it happens. */}
-          {p.kind === "route" && !p.connector && !fork && i === route.length - 1 && (<>{routeNextField(p)}{routeRepsField(p)}</>)}
+          {p.kind === "path" && !p.connector && !fork && i === route.length - 1 && routeNextField(p)}
           {/* Cosmetics last. This is a note pinned to a spot, not something the
               drill DOES, and it was sitting between the actions and the leg
               controls — splitting "what happens here" from "how they leave". */}
           {/* A crossing is travel between two lines, not a place — so it gets
               no name and nothing to say. Shape and pace only. */}
-          {!(p.kind === "route" && p.connector) && (<>
+          {!(p.kind === "path" && p.connector) && (<>
           <div className="hd-field">
             <div className="hd-sectitle">Label on the ice</div>
             <div className="hd-poprow">
@@ -9235,6 +9305,8 @@ export default function DrillAnimator() {
             </div>
           )}
           </>)}
+          {/* ...and what is true of the whole ROUTE, from wherever you are in it */}
+          {p.kind === "path" && !fork && routeCommonField(p)}
           <div className="hd-poprow" style={{ marginTop: 2 }}>
             <button className="hd-mini" title="Pin this waypoint in place so it can't be moved or edited by accident."
               onClick={() => uSeg(i, { lock: true })}>🔒 Lock point</button>
@@ -9443,7 +9515,7 @@ export default function DrillAnimator() {
     // shooting the same shot from the same waypoint draw three near-identical
     // arrows fanned across the net, when what the coach authored was one. Same
     // reasoning as the pile-of-pucks collapse below; only the identity differs.
-    const lineOfPlayer = new Map(pieces.filter(q => q.kind === "player").map(q => [q.id, q.route || q.id]));
+    const lineOfPlayer = new Map(pieces.filter(q => q.kind === "player").map(q => [q.id, q.pathId || q.id]));
     const shooterGroup = id => lineOfPlayer.get(id) || id || "?";
     const shotOne = {}, shotN = {};      // `${pk}/${k}` → is the drawn one / how many it stands for
     const shotStagger = {};              // `${pk}/${k}` → extra feet in front of the net
@@ -10216,17 +10288,17 @@ export default function DrillAnimator() {
   // the two surfaces could quietly offer different things for the same piece.
   // `bar` picks the variant: the bar offers a door INTO the inspector, the
   // inspector offers the route-clearing the bar has no room for.
-  const ROUTABLE = new Set(["player", "puck", "route"]);
+  const ROUTABLE = new Set(["player", "puck", "path"]);
   const pieceActions = (p, bar) => {
     const a = [];
     if (bar && ROUTABLE.has(p.kind)) a.push({ key: "route", icon: "pencil",
       label: p.path?.length ? "Redraw" : "Route",
       title: `Draw ${p.id}'s route — drag across the ice`, on: () => drawRouteMode(p.id) });
-    if (!bar && p.path?.length) a.push({ key: "clear", label: "Clear route",
-      on: () => { updateById(p.id, { path: [] }); setPopup(null); flash("Route cleared — Undo restores it"); } });
+    if (!bar && p.path?.length) a.push({ key: "clear", label: p.kind === "path" ? "Clear shape" : "Clear route",
+      on: () => { updateById(p.id, { path: [] }); setPopup(null); flash(p.kind === "path" ? "Path cleared — Undo restores it" : "Route cleared — Undo restores it"); } });
     // a route a player drew alone becomes a route others can queue on. Inspector
     // only: it's a one-off conversion, not something to reach for mid-drag.
-    if (!bar && p.kind === "player" && p.path?.length && !p.route)
+    if (!bar && p.kind === "player" && p.path?.length && !p.pathId)
       a.push({ key: "line", label: "Make this a line",
         on: () => { makeLine(p.id); setPopup(null); flash("Route lifted out — add skaters to the line"); } });
     a.push({ key: "dup", icon: "duplicate", label: "Duplicate", short: "Copy",
@@ -10457,8 +10529,8 @@ export default function DrillAnimator() {
                 and drawn once per ROUTE, not once per skater, since a whole line
                 takes the same road. */}
             {!aiPlay && showRoutes && pieces.map(p => {
-              if (p.kind !== "route" || !p.next) return null;
-              const to = pieces.find(q => q.id === p.next && q.kind === "route");
+              if (p.kind !== "path" || !p.next) return null;
+              const to = pieces.find(q => q.id === p.next && q.kind === "path");
               const poly = to && transitPoly(p, to, collisions ? transitObstacles(pieces) : []);
               if (!poly) return null;
               return (
@@ -11119,7 +11191,7 @@ export default function DrillAnimator() {
                 // reach for (it owns the line's puck work) and the one sitting on
                 // the route's own start point. Without this the BACK of the line
                 // drew on top and quietly answered for everybody.
-                if (a.route && a.route === b.route) return (b.q ?? 0) - (a.q ?? 0);
+                if (a.pathId && a.pathId === b.pathId) return (b.q ?? 0) - (a.q ?? 0);
                 return 0;
               })
               .map(p => {
@@ -11175,7 +11247,7 @@ export default function DrillAnimator() {
                 marker is already drawn, grabs the route. Touch gets the same 1.4x
                 the waypoint handles use. */}
             {editing && tool !== "draw" && !aiPlay && pieces.map(p => {
-              if (p.kind !== "route" || (p.lock && !lockedSelectable)) return null;
+              if (p.kind !== "path" || (p.lock && !lockedSelectable)) return null;
               // A crossing's head is not its own place — it is wherever the route
               // before it ended, and a ring there sat on top of that route's end
               // mark. Grab it by the middle of its own line, where nothing else is.

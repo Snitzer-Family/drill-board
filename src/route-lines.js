@@ -36,16 +36,16 @@ const qOf = p => (typeof p.q === "number" && isFinite(p.q) ? p.q : Infinity);
 const byQueue = (a, b) => (qOf(a) - qOf(b)) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 // everyone standing on `routeId`, in the order they will be sent
-export function queueOf(pieces, routeId) {
-  return (pieces || []).filter(p => p.kind === "player" && p.route === routeId).sort(byQueue);
+export function queueOf(pieces, pathId) {
+  return (pieces || []).filter(p => p.kind === "player" && p.pathId === pathId).sort(byQueue);
 }
 
 // Take a player off whatever line they were on, dropping the keys rather than
 // blanking them so nothing downstream has to tell "unbound" from "bound to
 // undefined" — and so the serializer emits no line tokens at all.
 export function unbindLine(p) {
-  if (!p || (p.route === undefined && p.q === undefined)) return p;
-  const { route, q, ...rest } = p;
+  if (!p || (p.pathId === undefined && p.q === undefined)) return p;
+  const { pathId, q, ...rest } = p;
   return rest;
 }
 
@@ -54,7 +54,7 @@ export function unbindLine(p) {
 // scenery — and the animator uses exactly that test to decide which players are
 // static obstacles other routes detour around.
 export const isMobile = p =>
-  !!(p && ((p.path && p.path.length) || p.route || (p.forks && p.forks.length)));
+  !!(p && ((p.path && p.path.length) || p.pathId || (p.forks && p.forks.length)));
 
 // The route's direction of travel as it leaves the head, in degrees. Also what
 // the head marker points along, so the glyph and the stack can never disagree.
@@ -112,15 +112,15 @@ export function queueRelease(route, prevId) {
 // pass through the whole chain, so the count belongs to the chain rather than to
 // any one route in it — Lane A and Lane B feeding each other share one number,
 // and the editor writes it to all of them at once.
-export function chainOf(pieces, routeId) {
-  const routes = (pieces || []).filter(p => p.kind === "route");
+export function chainOf(pieces, pathId) {
+  const routes = (pieces || []).filter(p => p.kind === "path");
   const adj = new Map(routes.map(r => [r.id, new Set()]));
   for (const r of routes) {
     if (!adj.has(r.id) || !adj.has(r.next)) continue;
     adj.get(r.id).add(r.next);
     adj.get(r.next).add(r.id);
   }
-  const out = new Set(), stack = [routeId];
+  const out = new Set(), stack = [pathId];
   while (stack.length) {
     const id = stack.pop();
     if (out.has(id) || !adj.has(id)) continue;
@@ -385,10 +385,10 @@ export function shareLinePucks(pieces, route, line, spots, laps, routes) {
 // before this feature existed. Mirrors resolveForks' fast path.
 export function lowerRoutes(pieces) {
   const list = pieces || [];
-  if (!list.some(p => p.kind === "route")) return pieces;
+  if (!list.some(p => p.kind === "path")) return pieces;
 
   const routes = new Map();
-  for (const p of list) if (p.kind === "route") routes.set(p.id, p);
+  for (const p of list) if (p.kind === "path") routes.set(p.id, p);
   // computed once for the whole pass, not per skater — it depends only on the
   // static furniture, which nothing in here moves
   const obstacles = transitObstacles(list);
@@ -480,9 +480,9 @@ export function lowerRoutes(pieces) {
         // branch per PLAYER, so three skaters on one reactive route read the light
         // independently — which is exactly what a read-and-react drill wants
         forks: R.forks || [],
-        _line: { route: id, q: k },
+        _line: { path: id, q: k },
       });
     });
   }
-  return [...list.filter(p => p.kind !== "route").map(p => lowered.get(p.id) || pucks.get(p.id) || p), ...fed];
+  return [...list.filter(p => p.kind !== "path").map(p => lowered.get(p.id) || pucks.get(p.id) || p), ...fed];
 }

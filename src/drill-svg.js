@@ -319,7 +319,7 @@ function piece(p) {
   // the head of a line: an open ring on the start point, a chevron the way it
   // leaves. Mirrors the board's route glyph in icons.jsx — a route is a place,
   // so it never draws a body.
-  if (p.kind === "route")
+  if (p.kind === "path")
     return `<g transform="${rot()}"><circle cx="0" cy="0" r="2.5" fill="${p.color}" fill-opacity="0.13"/>`
       + `<circle cx="0" cy="0" r="2.5" fill="none" stroke="${p.color}" stroke-width="0.42" stroke-dasharray="1.5 1.05"/>`
       + `<path d="M0.35 -1.5 L2.35 0 L0.35 1.5" fill="none" stroke="${p.color}" stroke-width="0.62" stroke-linecap="round" stroke-linejoin="round"/></g>`;

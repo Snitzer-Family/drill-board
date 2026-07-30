@@ -23,11 +23,11 @@ const trip = text => {
 
 const LINE = [
   'RINK full',
-  'PIECE R1 route 60 40 #3f7f8c Left_lane gap=6 queue=lead:18',
+  'PIECE R1 path 60 40 #3f7f8c Left_lane gap=6 queue=lead:18',
   'PATH R1 L 100,40 Q 130,25 150,40',
-  'PIECE P1 player 60 40 #d7263d F1 route=R1 q=1',
-  'PIECE P2 player 54 40 #2ea043 F2 route=R1 q=2',
-  'PIECE P3 player 48 40 #1e6fd9 F3 route=R1 q=3',
+  'PIECE P1 player 60 40 #d7263d F1 path=R1 q=1',
+  'PIECE P2 player 54 40 #2ea043 F2 path=R1 q=2',
+  'PIECE P3 player 48 40 #1e6fd9 F3 path=R1 q=3',
   'PIECE N1 net 189 42 #c81e33 goalie',
 ].join('\n');
 
@@ -39,9 +39,9 @@ const LINE = [
 { // every new field survives the trip with its value, not just its presence
   const { b } = trip(LINE);
   const R = b.pieces.find(p => p.id === 'R1');
-  T('the route kind survives', [R.kind, R.gap, R.label], ['route', 6, 'Left_lane']);
-  T('the route keeps its legs', R.path.map(s => s.type), ['L', 'Q']);
-  T('bindings survive', b.pieces.filter(p => p.route).map(p => [p.id, p.route, p.q]),
+  T('the path kind survives', [R.kind, R.gap, R.label], ['path', 6, 'Left_lane']);
+  T('the path keeps its legs', R.path.map(s => s.type), ['L', 'Q']);
+  T('bindings survive', b.pieces.filter(p => p.pathId).map(p => [p.id, p.pathId, p.q]),
     [['P1', 'R1', 0], ['P2', 'R1', 1], ['P3', 'R1', 2]]);
 }
 { // q is 1-based on the wire and 0-based in memory, like every other index here
@@ -49,20 +49,20 @@ const LINE = [
   T('q is 0-based in memory', parseDrill(LINE).pieces.find(p => p.id === 'P1').q, 0);
 }
 { // the default gap is never written, so a plain line stays terse
-  const terse = 'RINK full\nPIECE R1 route 60 40 #3f7f8c\nPATH R1 L 100,40\nPIECE P1 player 60 40 #d7263d F1 route=R1 q=1';
+  const terse = 'RINK full\nPIECE R1 path 60 40 #3f7f8c\nPATH R1 L 100,40\nPIECE P1 player 60 40 #d7263d F1 path=R1 q=1';
   T('a default gap emits no token', /gap=/.test(ser(parseDrill(terse))), false);
   T('an absent gap parses as undefined, not 0', parseDrill(terse).pieces[0].gap, undefined);
 }
-{ // a pathless route still carries the heading its line stacks along
-  const bare = 'RINK full\nPIECE R1 route 60 40 #3f7f8c face=180';
-  T('a pathless route round-trips its facing', /face=180/.test(ser(parseDrill(bare))), true);
+{ // a pathless path still carries the heading its line stacks along
+  const bare = 'RINK full\nPIECE R1 path 60 40 #3f7f8c face=180';
+  T('a pathless path round-trips its facing', /face=180/.test(ser(parseDrill(bare))), true);
 }
 { // garbage in the new fields must not throw — a drill from the future still loads
-  const odd = 'RINK full\nPIECE R1 route 60 40 #3f7f8c gap=-2\nPIECE P1 player 10 10 #d7263d F1 route=R9 q=0';
+  const odd = 'RINK full\nPIECE R1 path 60 40 #3f7f8c gap=-2\nPIECE P1 player 10 10 #d7263d F1 path=R9 q=0';
   const d = parseDrill(odd);
   T('a negative gap is rejected, not stored', d.pieces.find(p => p.id === 'R1').gap, undefined);
   T('a zero q is rejected, not stored', d.pieces.find(p => p.id === 'P1').q, undefined);
-  T('a dangling route= still loads', d.pieces.find(p => p.id === 'P1').route, 'R9');
+  T('a dangling path= still loads', d.pieces.find(p => p.id === 'P1').pathId, 'R9');
 }
 { // the line's turn-taking rule
   const R = trip(LINE).b.pieces.find(p => p.id === 'R1');
@@ -77,14 +77,14 @@ const LINE = [
   const bad = parseDrill(LINE.replace('queue=lead:18', 'queue=point:0'));
   T('a zero-point rule is rejected, not stored', bad.pieces[0].queue, undefined);
 }
-{ // feed: the route supplies its own pucks
+{ // feed: the path supplies its own pucks
   const f = LINE.replace('queue=lead:18', 'queue=lead:18 feed');
   const d = parseDrill(f);
   T('feed parses as a flag', d.pieces.find(p => p.id === 'R1').feed, true);
   T('feed round-trips', / feed\b/.test(ser(d)), true);
   T('feed is a fixed point', ser(parseDrill(ser(d))) === ser(d), true);
   T('no feed emits no token', / feed\b/.test(ser(parseDrill(LINE))), false);
-  T('an unfed route has no feed field', parseDrill(LINE).pieces.find(p => p.id === 'R1').feed, undefined);
+  T('an unfed path has no feed field', parseDrill(LINE).pieces.find(p => p.id === 'R1').feed, undefined);
   // fed pucks are lowering-only and must never reach the drill text. Needs
   // authored puck work to repeat — feeding never invents a rep that wasn't asked for.
   const withWork = parseDrill(`${f}\nPIECE PK1 puck 61 44 #14171a pickup=P1@0 shoot=1`);
@@ -96,7 +96,7 @@ const LINE = [
 { // the parser and the lowering pass agree on the model
   const out = lowerRoutes(parseDrill(LINE).pieces);
   T('a parsed line lowers to three skaters', out.filter(p => p.kind === 'player').length, 3);
-  T('no route piece survives lowering', out.some(p => p.kind === 'route'), false);
+  T('no path piece survives lowering', out.some(p => p.kind === 'path'), false);
   T('the parsed gap drives the stack', Math.round(out.find(p => p.id === 'P2').x), 54);
 }
 
@@ -107,23 +107,28 @@ const LINE = [
   const { a, b, t1, t2 } = trip(legacy);
   T('the example drill round-trips identically', JSON.stringify(a) === JSON.stringify(b), true);
   T('the example drill is a byte-stable fixed point', t1 === t2, true);
-  T('no line tokens leak into a drill that has none', /\broute=|\bq=\d|\bgap=/.test(t1), false);
-  T('a drill with no route lowers by identity', lowerRoutes(a.pieces) === a.pieces, true);
+  T('no line tokens leak into a drill that has none', /\bpath=|\bq=\d|\bgap=/.test(t1), false);
+  T('a drill with no path lowers by identity', lowerRoutes(a.pieces) === a.pieces, true);
 }
 
+{ // the ROUTE's name — the whole circuit, carried by every path in it
+  const rn = LINE.replace('gap=6', 'gap=6 route=Full_ice_regroup');
+  const d = parseDrill(rn);
+  T('the route name parses, underscores as spaces', d.pieces[0].routeName, 'Full ice regroup');
+  T('it round-trips', / route=Full_ice_regroup\b/.test(ser(d)), true);
+  T('it is a fixed point', ser(parseDrill(ser(d))) === ser(d), true);
+  T('an unnamed route writes no token', / route=/.test(ser(parseDrill(LINE))), false);
+}
 { // recycling tokens
-  const rc = 'RINK full\nPIECE R1 route 30 22 #3f7f8c A next=R2 reps=2 regroup=0.8\nPATH R1 L 90,22\nPIECE R2 route 170 66 #b06a2e B next=R1\nPATH R2 L 110,66\nPIECE P1 player 30 22 #d7263d F1 route=R1 q=1';
+  const rc = 'RINK full\nPIECE R1 path 30 22 #3f7f8c A next=R2 reps=2 regroup=0.8\nPATH R1 L 90,22\nPIECE R2 path 170 66 #b06a2e B next=R1\nPATH R2 L 110,66\nPIECE P1 player 30 22 #d7263d F1 path=R1 q=1';
   const { a, b, t1, t2 } = trip(rc);
   T('recycling round-trips identically', JSON.stringify(a) === JSON.stringify(b), true);
   T('recycling is a byte-stable fixed point', t1 === t2, true);
   const R = b.pieces.find(p => p.id === 'R1');
   T('next/reps/regroup survive', [R.next, R.reps, R.regroup], ['R2', 2, 0.8]);
   T('a default reps emits no token', / reps=/.test(ser(parseDrill(rc.replace(' reps=2', '')))), false);
-  // `hops` was the earlier spelling and counted LINKS; it is still read so drills
-  // written against it load, but it is never written back
-  T('the legacy hops spelling still parses', parseDrill(rc.replace('reps=2', 'hops=4')).pieces[0].reps, 4);
-  T('...and re-saves as reps', / reps=4\b/.test(ser(parseDrill(rc.replace('reps=2', 'hops=4')))), true);
-  T('...leaving no hops token behind', / hops=/.test(ser(parseDrill(rc.replace('reps=2', 'hops=4')))), false);
+  // fresh start: `hops` is gone, not aliased
+  T('the retired hops spelling is simply ignored', parseDrill(rc.replace('reps=2', 'hops=4')).pieces[0].reps, undefined);
   // the whole recirculation must become one path, bounded
   const legs = lowerRoutes(a.pieces).find(p => p.id === 'P1').path;
   T('a recirculating drill lowers to one bounded path', legs.length > 1 && legs.length < 200, true);

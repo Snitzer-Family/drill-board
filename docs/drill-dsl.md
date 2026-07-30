@@ -128,7 +128,7 @@ Places a piece. `id` is any unique token (e.g. `F1`, `PK1`, `N2`).
 `deker` (stickhandling gate) · `passer` (rebounder box) · `tire` (agility prop) ·
 `stick` (a stick laid on the ice) · `light` (cognitive-training light — an iPad on a tripod whose screen shows a cue colour) ·
 `label` (a movable, resizable on-ice text note) ·
-`route` (a **line**: a route that owns its own geometry, with players queued on it — see *Lines* below).
+`path` (a **path**: geometry that owns itself, with players queued on it — see *Paths, connectors and routes* below).
 
 **Modifiers** (any order):
 
@@ -150,16 +150,17 @@ Places a piece. `id` is any unique token (e.g. `F1`, `PK1`, `N2`).
 | `hand=L` / `hand=R` | player, stick | Shooting hand — mirrors the player's stick, or flips the on-ice stick prop's blade for a left/right-handed stick |
 | `sym=<text>` | player | Whiteboard-mode symbol (≤3 chars, e.g. `X`, `O`, `F`, `LW`, `RD`; underscores read as spaces). `△`, `○`, `□` render as drawn shapes rather than text. Shown instead of the skater when **Whiteboard mode** is on (Rink menu → Board style). Unset falls back to the player's name (the popup offers the same shorthand list under *Name*), or `X` if the name is still the auto id (`P1`, `P2`…). |
 | `face=<deg>` | route-less player, net, bumper, deker, passer, path-less route | Facing angle (0 = +x / toward the right). On a `route` with no `PATH` yet it is the direction the line stacks along. |
-| `route=<routeId>` | player | Stand this player on that **line**. The route owns the geometry; the player's own `PATH` is ignored. |
+| `path=<pathId>` | player | Stand this player on that **path**. The path owns the geometry; the player's own `PATH` line is ignored. |
 | `q=<n>` | player | Place in the queue, **1-based** (`q=1` is the head of the line). Missing = the back. |
-| `gap=<ft>` | route | Feet between stacked skaters (default `5`, omitted then). |
-| `queue=point:<pt>` | route | Each skater holds until the one **ahead of them** reaches point `<pt>` of the route (1-based). |
-| `queue=lead:<ft>` | route | Each skater holds until the one ahead is `<ft>` **clear of them** — the separation, not the distance travelled (they already start `gap` apart). Omit `queue=` entirely and they all go at once. |
-| `next=<routeId>` | route | When they finish, they skate to that route's head and run it — going around nets, props and anyone standing still. |
-| `reps=<n>` | route | How many times the whole **connected chain** is run (default `1`, omitted then). A -> B and back is ONE rep, not two links — a rep is what a coach counts. Every route in a chain carries the same number; the app writes it to all of them. With nothing connected, a rep above 1 sends them back to this route's own start. *(`hops=` is the earlier spelling, still read, never written.)* |
-| `regroup=<n>` | route | Pace multiplier for the skate between routes (default `0.65` — a glide, not another rep). |
-| `connector` | route | This route **is** a crossing between two lines, shaped by hand instead of drawn automatically. It has no line of its own, and following it does **not** spend one of the source route's `hops`. (Bare word.) |
-| `feed` | route | The line supplies its own pucks: a fresh one for every rep that needs one, so a recirculating drill never runs dry. Only ever acts where puck work is already authored. Fed pucks exist only while the drill runs — they are never written back to the text. (Bare word.) |
+| `gap=<ft>` | path | Feet between stacked skaters (default `5`, omitted then). |
+| `queue=point:<pt>` | path | Each skater holds until the one **ahead of them** reaches point `<pt>` of the route (1-based). |
+| `queue=lead:<ft>` | path | Each skater holds until the one ahead is `<ft>` **clear of them** — the separation, not the distance travelled (they already start `gap` apart). Omit `queue=` entirely and they all go at once. |
+| `next=<pathId>` | path | When they finish, they skate to that route's head and run it — going around nets, props and anyone standing still. |
+| `reps=<n>` | path | How many times the whole **route** (the connected circuit of paths) is run. A -> B and back is ONE rep. Every path in a route carries the same number; the app writes it to all of them. With nothing connected, a rep above 1 sends them back to this path's own start. |
+| `route=<name>` | path | The **route's** name — the whole circuit. Carried by every path in it (underscores read as spaces). |
+| `regroup=<n>` | path | Pace multiplier for the skate between routes (default `0.65` — a glide, not another rep). |
+| `connector` | path | This route **is** a crossing between two lines, shaped by hand instead of drawn automatically. It has no line of its own, and following it does **not** spend one of the source route's `hops`. (Bare word.) |
+| `feed` | path | The line supplies its own pucks: a fresh one for every rep that needs one, so a recirculating drill never runs dry. Only ever acts where puck work is already authored. Fed pucks exist only while the drill runs — they are never written back to the text. (Bare word.) |
 | `defense` | player | Auto-reacting defenceman (holds the slot, stays goal-side) |
 | `lock` | any | Pin the piece in place — it can't be dragged, rotated, or edited until unlocked. Toggle *🔒 Lock* on the piece popup, or lock/unlock everything via **☰ → Lock board**. (Bare word, parsed before the jersey-label catch-all.) |
 | `hold=line` | player | Wait at the blue line until the puck enters the zone |
@@ -271,18 +272,25 @@ Standalone text notes use the `label` **piece** instead:
 `bg=`/`border=`/`textop=`, e.g.
 `PIECE L2 label 100 60 #1f4fa3 bg=none textop=0.6 "Neutral zone"`.
 
-### Lines (a `route` piece + the players queued on it)
+### Paths, connectors and routes
 
-A **line** is the shape most of a practice plan is made of: a route drawn once,
+Three words, kept distinct:
+
+- a **path** is a piece, like a player — geometry that owns itself and can be reused;
+- a **connector** is the plumbing between two paths (shape, waypoints, pace — nothing else);
+- a **route** is the whole circuit of connected paths, start to finish. `reps` and the
+  route's name belong to it and are carried by every path in it.
+
+A **line** is the queue of players standing on a path, and is the shape most of a practice plan is made of: a route drawn once,
 with three or four skaters stacked at its head running it in turn. The route is a
 piece of its own — it owns the geometry and nothing else — and players bind to it:
 
 ```drill
-PIECE R1 route 30 20 #3f7f8c Left_lane gap=6 queue=lead:18
+PIECE R1 path 30 20 #3f7f8c Left_lane gap=6 queue=lead:18
 PATH  R1 L 95,20 Q 140,20 165,42
-PIECE P1 player 30 20 #d7263d F1 route=R1 q=1
-PIECE P2 player 24 20 #d7263d F2 route=R1 q=2
-PIECE P3 player 18 20 #d7263d F3 route=R1 q=3
+PIECE P1 player 30 20 #d7263d F1 path=R1 q=1
+PIECE P2 player 24 20 #d7263d F2 path=R1 q=2
+PIECE P3 player 18 20 #d7263d F3 path=R1 q=3
 ```
 
 - The route's `x y` **is the head of the line** — where the first skater stands.
@@ -304,11 +312,11 @@ as you would for a lone player — and everyone behind them does the same thing,
 provided a puck is actually available:
 
 ```drill
-PIECE R1 route 30 22 #3f7f8c Shooters queue=lead:18
+PIECE R1 path 30 22 #3f7f8c Shooters queue=lead:18
 PATH  R1 L 90,22 Q 130,22 165,45
-PIECE P1 player 30 22 #d7263d F1 route=R1 q=1
-PIECE P2 player 24 22 #d7263d F2 route=R1 q=2
-PIECE P3 player 18 22 #d7263d F3 route=R1 q=3
+PIECE P1 player 30 22 #d7263d F1 path=R1 q=1
+PIECE P2 player 24 22 #d7263d F2 path=R1 q=2
+PIECE P3 player 18 22 #d7263d F3 path=R1 q=3
 PIECE PK1 puck 31 25 pickup=P1@0 shoot=3
 PIECE PK2 puck 25 25
 PIECE PK3 puck 19 25
@@ -334,9 +342,9 @@ which lets the route supply them itself.
 is how a full-ice drill actually runs:
 
 ```drill
-PIECE R1 route 30 22 #3f7f8c Lane_A queue=lead:18 next=R2 reps=2
+PIECE R1 path 30 22 #3f7f8c Lane_A queue=lead:18 next=R2 reps=2
 PATH  R1 L 90,22 Q 130,22 165,45
-PIECE R2 route 170 66 #b06a2e Lane_B queue=lead:18 next=R1 reps=2
+PIECE R2 path 170 66 #b06a2e Lane_B queue=lead:18 next=R1 reps=2
 PATH  R2 L 110,66 Q 70,66 35,45
 ```
 
@@ -351,11 +359,11 @@ across — round the back of a net, along the boards, through a regroup — mark
 route `connector` and put it in the middle:
 
 ```drill
-PIECE R1 route 30 22 #3f7f8c Shooters next=RC
+PIECE R1 path 30 22 #3f7f8c Shooters next=RC
 PATH  R1 L 90,22 Q 130,24 160,40
-PIECE RC route 160 40 #3f7f8c next=R2 connector
+PIECE RC path 160 40 #3f7f8c next=R2 connector
 PATH  RC RATE 0.65 L 120,50 L 80,60 L 40,70
-PIECE R2 route 40 70 #b06a2e Regroup
+PIECE R2 path 40 70 #b06a2e Regroup
 PATH  R2 L 100,70
 ```
 
