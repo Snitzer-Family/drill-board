@@ -204,16 +204,17 @@ the three PNGs using the system Chrome (override with `CHROME=`), and those are
 committed — CI has no browser to rasterise with. `tests/app-icon.mjs` fails if
 they fall out of sync.
 
-The icon is **two renditions**, switched by a size media query inside the SVG:
-above 40px a drill plan (an end zone with a route driving at the net), at 40px
-and below the same sheet holding nothing but the blue goalie crease — which
-doubles as a monogram, since a flat-backed crease reads as a "D". A diagram
-can't be a favicon: at 16px a rink foot is a fifth of a pixel, so the fine
-markings smear rather than shrink.
+The icon is an end zone holding nothing but the blue goalie crease — which
+doubles as a monogram, since a flat-backed crease reads as a "D". Everywhere
+gets the same picture; only the wrapper differs. The favicon keeps transparent
+corners, while the home-screen icon is opaque with the sheet inset, because iOS
+composites transparency against black and applies its own squircle mask.
 
-`favicon.ico` (16/32/48, holding the crease rendition) ships alongside the SVG
-because **iOS Safari doesn't support SVG favicons** — without it, Safari has no
-candidate and shows no tab icon at all.
+A full drill diagram can't work here: at 16px a rink foot is a fifth of a pixel,
+so fine markings smear rather than shrink.
+
+`favicon.ico` ships alongside the SVG because **iOS Safari doesn't support SVG
+favicons** — without it, Safari has no candidate and shows no tab icon at all.
 
 **iOS caches icons hard.** An icon already on the home screen will not update
 until you delete it and re-add; a stale tab favicon needs Settings → Safari →

@@ -47,45 +47,48 @@ const svg = text("icon.svg");
 const [header, ...rest] = svg.split("\n");
 const body = rest.join("\n");
 
-check("public/icon.svg matches appIconSvg('tab')", () => {
-  assert.equal(body, appIconSvg("tab"), `public/icon.svg is stale — ${REGEN}`);
+check("public/icon.svg matches appIconSvg('favicon')", () => {
+  assert.equal(body, appIconSvg("favicon"), `public/icon.svg is stale — ${REGEN}`);
 });
 
 /* ---------------- 2. the PNGs' source is the one app-icon.js emits ---------------- */
 
-for (const [label, variant] of [["plan", "bleed"], ["crease", "small"]]) {
-  check(`icon.svg's stamped ${label} sha256 matches appIconSvg('${variant}')`, () => {
-    const m = new RegExp(`${label} sha256:([0-9a-f]{64})`).exec(header);
-    assert.ok(m, `icon.svg's generator header has no ${label} hash — ${REGEN}`);
-    assert.equal(m[1], createHash("sha256").update(appIconSvg(variant)).digest("hex"),
-      `the ${label} rasters were built from different art — ${REGEN}`);
-  });
-}
-
-/* ---------------- 2b. the two renditions stay separated ---------------- */
-
-check("the small rendition is hidden by a presentation attribute, not by CSS", () => {
-  // The order matters. CSS beats presentation attributes, so display="none" in
-  // the markup plus `display: block` in the media query means a context that
-  // strips <style> falls back to the PLAN. Style it the other way round and
-  // that context paints the small glyph on top of the plan instead.
-  const tab = appIconSvg("tab");
-  assert.match(tab, /<g class="tiny" display="none">/,
-    'the .tiny group must carry display="none" inline');
-  const block = /@media \(max-width: \d+px\) \{([\s\S]*?)\n\}/.exec(tab);
-  assert.ok(block, "the tab variant has no max-width media query");
-  assert.match(block[1], /\.tiny \{ display: block \}/,
-    "the size media query must be what reveals .tiny");
-  assert.match(block[1], /\.plan \{ display: none \}/,
-    "the size media query must be what hides .plan");
+check("icon.svg's stamped bleed sha256 matches appIconSvg('bleed')", () => {
+  const m = /bleed sha256:([0-9a-f]{64})/.exec(header);
+  assert.ok(m, `icon.svg's generator header has no bleed hash — ${REGEN}`);
+  assert.equal(m[1], createHash("sha256").update(appIconSvg("bleed")).digest("hex"),
+    `the PNGs were built from different art — ${REGEN}`);
 });
 
-check("appIconSvg('bleed') carries no small rendition", () => {
-  // The PNGs are 180px and up, and a PNG cannot evaluate a media query — a
-  // .tiny group in there would be an unconditional red tile over the rink.
+/* ---------------- 2b. the favicon stays unconditional ---------------- */
+
+check("the favicon variant carries no stylesheet and no media query", () => {
+  // This is the invariant that replaced the old size-switching mechanism, and it
+  // matters because favicon.ico is rasterised from this exact string. A raster
+  // cannot evaluate a media query, so any conditional rule reintroduced here
+  // would apply in the SVG and silently NOT apply in the .ico — the two would
+  // show different pictures on different browsers, which is precisely the bug
+  // that iOS Safari's lack of SVG favicon support already made hard to see.
+  const fav = appIconSvg("favicon");
+  assert.ok(!/<style>/.test(fav), "the favicon must carry no stylesheet");
+  assert.ok(!/@media/.test(fav), "the favicon must carry no media query");
+  assert.ok(!/display="none"/.test(fav), "the favicon must have nothing hidden in it");
+});
+
+check("the bleed variant is opaque, full-bleed and inset", () => {
+  // All three are iOS requirements, not style: it applies its own squircle mask
+  // and composites any transparency against BLACK, so a transparent or
+  // edge-to-edge home-screen icon gets a black ring or a clipped sheet.
   const bleed = appIconSvg("bleed");
-  assert.ok(!/class="tiny"/.test(bleed), "bleed must be the plan only");
-  assert.ok(!/<style>/.test(bleed), "bleed must carry no stylesheet");
+  assert.match(bleed, /viewBox="0 0 100 100"/, "bleed must use the 100-unit field");
+  assert.match(bleed, /<rect width="100" height="100" fill="#[0-9a-f]{6}"\/>/,
+    "bleed must open with an opaque field rect covering the whole viewBox");
+  assert.match(bleed, /<g transform="translate\([\d.]+ [\d.]+\) scale\([\d.]+\)">/,
+    "bleed must inset the sheet to leave the iOS mask something to cut into");
+  // and the favicon must NOT be padded that way — it is not mask-composited,
+  // so insetting it would just make it render smaller than its neighbours
+  assert.ok(!/viewBox="0 0 100 100"/.test(appIconSvg("favicon")),
+    "the favicon must fill its own viewBox");
 });
 
 /* ---------------- 3. no literal colours in the art source ---------------- */
@@ -125,8 +128,8 @@ check("apple-touch-icon.png has no alpha channel", () => {
 
 /* ---------------- 4b. the iOS Safari fallback ---------------- */
 
-// This whole file exists because iOS Safari does not support SVG favicons: with
-// only icon.svg it has no candidate and renders no favicon at all. Parse the
+// favicon.ico exists because iOS Safari does not support SVG favicons: with only
+// icon.svg it has no candidate and renders no favicon at all. Parse the
 // container rather than just checking it exists — a malformed .ico fails
 // silently and looks exactly like the bug it is there to fix.
 check("favicon.ico holds the expected raster frames", () => {
