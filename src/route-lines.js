@@ -513,15 +513,61 @@ export function lowerRoutes(pieces) {
     return { legs: capped, laps: laps.filter(l => l.base < capped.length) };
   };
 
+  // ── ONE QUEUE PER PATH ──────────────────────────────────────────────────────
+  // A path's rules are the PATH's, not its line's. Everyone who uses it takes a
+  // turn at its head in the order they get there — its own line first, because
+  // they are already stood on it, then everyone who skates in, lap after lap.
+  // Where a skater started has no bearing on how the path treats them.
+  //
+  // Before this, each line queued against itself and arrivals were pinned to one
+  // static person, so a skater coming off Lane_B sailed past the Lane_A skaters
+  // waiting their turn, and anyone returning to their OWN path queued against
+  // nobody at all.
+  //
+  // A VISIT is one skater reaching one path once. Ordering them by lap, then by
+  // path, then by place in line is the order they physically arrive: lap 0 is
+  // every path's own line on its mark, lap 1 is whoever those lines feed, and so
+  // on round the circuit.
+  const unfolds = new Map(), lines = new Map();
+  for (const [id, R] of routes) { unfolds.set(id, unfold(R)); lines.set(id, queueOf(list, id)); }
+  const visits = new Map();                    // pathId -> visits, in arrival order
+  const rideOrder = [...routes.keys()];
+  const deepest = Math.max(0, ...[...unfolds.values()].map(u => u.laps.length));
+  for (let lap = 0; lap < deepest; lap++) {
+    for (const rid of rideOrder) {
+      const lp = unfolds.get(rid).laps[lap];
+      if (!lp) continue;
+      for (const P of lines.get(rid) || []) {
+        if (!visits.has(lp.route)) visits.set(lp.route, []);
+        visits.get(lp.route).push({ id: P.id, base: lp.base });
+      }
+    }
+  }
+  // ...and each visit waits on the one before it, by THAT path's rule. A visit at
+  // base 0 is a skater stood on the mark (their start wait already chains them);
+  // any later one is an arrival, and gets a hold on the leg it arrives at.
+  const holds = new Map();                     // "player@base" -> waitOn
+  for (const [pid, vs] of visits) {
+    const P = routes.get(pid);
+    for (let i = 1; i < vs.length; i++) {
+      const me = vs[i], up = vs[i - 1];
+      if (!me.base || me.id === up.id) continue;      // on the mark already, or myself
+      const rule = up.base
+        ? arriveRelease(P, up.id, up.base)             // they arrive at their own leg
+        : queueRelease(P, up.id);                      // they are stood on the mark
+      if (rule) holds.set(me.id + "@" + me.base, rule);
+    }
+  }
+
   const lowered = new Map();
   const pucks = new Map();
   const fed = [];                            // pucks the routes supplied themselves
   for (const [id, R] of routes) {
     const gap = R.gap > 0 ? R.gap : QUEUE_GAP;
-    const line = queueOf(list, id);
+    const line = lines.get(id);
     const spots = line.map((_, k) => stackSpot(R, k, gap));
     // one unfold for the whole line — every member runs the same recirculation
-    const { legs, laps } = unfold(R);
+    const { legs, laps } = unfolds.get(id);
     // Whatever the head of the line does with a puck, the rest do, and they all do
     // it again on every pass back through — if the pile has one for them. Only laps
     // of THIS route replay its work: a lap of the route it recycles into has its
@@ -561,31 +607,12 @@ export function lowerRoutes(pieces) {
           // nobody in front, so they skate in and carry on.
           for (const lp of laps) {
             if (!lp.base || !mine[lp.base]) continue;
-            const dest = routes.get(lp.route) || R;
-            let rule = null;
-            if (k > 0) {
-              // behind my own line-mate: we left in order, so we arrive in order,
-              // and `base` means the same leg to both of us
-              rule = arriveRelease(dest, line[k - 1].id, lp.base);
-            } else if (dest.id !== R.id) {
-              // The HEAD of an arriving group has nobody in front of them from
-              // their own line — but the path they are skating into may already
-              // have a line stood on it, and ploughing through it is exactly what
-              // a coach never wants. So they queue behind the LAST of that line,
-              // by that path's own rule.
-              //
-              // Keyed in the TRIGGER's frame, which is what made this look
-              // impossible: `waitOn.at` indexes the piece being waited ON, not the
-              // one waiting, so a destination member's own leg numbers are the
-              // right ones to use and queueRelease already produces them.
-              const theirs = queueOf(list, dest.id);
-              const last = theirs.length ? theirs[theirs.length - 1] : null;
-              if (last && last.id !== P.id) rule = queueRelease(dest, last.id);
-            }
-            if (rule) mine[lp.base] = { ...mine[lp.base], waitOn: rule };
+            const rule = holds.get(P.id + "@" + lp.base);
+            if (!rule) continue;
+            mine[lp.base] = { ...mine[lp.base], waitOn: rule };
             // ...and remember WHERE they queue, so the board can stand them behind
             // the line rather than on top of it
-            if (rule) arrivals.push({ base: lp.base, path: dest.id });
+            arrivals.push({ base: lp.base, path: lp.route });
           }
           return mine;
         })(),

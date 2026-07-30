@@ -202,6 +202,44 @@ T('isMobile: null is not', isMobile(null), false);
   T('the head marker still points along the path', headHeading(south).x > 0.99, true);
 }
 
+// ---- one queue per path ----
+// A path's rules are the PATH's. Everyone who uses it takes a turn at its head in
+// the order they get there, whatever line they started on. The failure this pins:
+// each line used to queue against ITSELF, so skaters coming off Lane_B sailed
+// past the Lane_A skaters waiting their turn, and anyone returning to their own
+// path queued against nobody at all.
+{
+  const A = { id: 'RA', kind: 'path', x: 10, y: 10, color: '#2f9e57', gap: 5, forks: [], reps: 2,
+    queue: { mode: 'lead', lead: 30 }, path: [{ type: 'L', x: 90, y: 10, goTo: 'RB' }] };
+  const B = { id: 'RB', kind: 'path', x: 90, y: 60, color: '#3f7f8c', gap: 5, forks: [], reps: 2,
+    queue: { mode: 'lead', lead: 30 }, path: [{ type: 'L', x: 10, y: 60, goTo: 'RA' }] };
+  const mk = (id, pathId, q) => ({ id, kind: 'player', x: 0, y: 0, pathId, q, path: [], forks: [] });
+  const out = lowerRoutes([A, B, mk('A1', 'RA', 1), mk('A2', 'RA', 2), mk('B1', 'RB', 1), mk('B2', 'RB', 2)]);
+  const of = id => out.find(p => p.id === id);
+  const holdsOf = id => of(id).path.map((s, i) => (s.waitOn ? { leg: i, on: s.waitOn.on, at: s.waitOn.at } : null)).filter(Boolean);
+
+  // A1 leads Lane_A, so it starts unheld — but it does NOT get a free run
+  T('the head of a line still starts on the whistle', of('A1').wait, null);
+  T('...and holds at every path it skates into', holdsOf('A1').length, 3);
+
+  // the one it queues behind must CHANGE lap by lap — pinning it to one static
+  // skater is the same as not queueing at all by the second time round
+  const ats = holdsOf('A1').map(h => h.at);
+  T('each lap queues behind a different point in the circuit',
+    new Set(ats.map(String)).size, ats.length);
+
+  // ...and arriving from another line is queued exactly like standing on the mark
+  T('a Lane_B skater arriving at Lane_A waits on a Lane_A skater',
+    holdsOf('B1')[0].on, 'A2');
+  T('...and a Lane_A skater arriving at Lane_B waits on a Lane_B skater',
+    holdsOf('A1')[0].on, 'B2');
+
+  // returning to your OWN path is an arrival like any other — this queued against
+  // nobody, so a skater came round the loop and cut straight back in
+  const own = of('A1').path.map((s, i) => (s.waitOn ? i : null)).filter(i => i !== null);
+  T('coming back round to your own path queues too', own.includes(4), true);
+}
+
 // ---- exitOf: where a path hands off ----
 T('exitOf: no goTo is no exit', exitOf({ path: [{ type: 'L' }, { type: 'L' }] }), null);
 T('exitOf: finds the waypoint carrying it',
