@@ -4861,6 +4861,19 @@ export default function DrillAnimator() {
       return { ...p, path: alignJoint(p.path, i, join, org) };
     });
   }
+  // A corner style links the bézier handles meeting at a waypoint, so strictly it
+  // needs a curve on BOTH sides. Hiding the control when there isn't one is why a
+  // connector never had a style to reach for: shapeCrossing seeds its legs
+  // straight, so the condition could never come true and the coach had to guess
+  // that curving both legs first would reveal it. Now asking for Smooth or Even
+  // curves the two legs and then links them, which is what the ask meant anyway.
+  function setJointCurving(id, i, join, fork = null) {
+    const p = pieces.find(q => q.id === id);
+    if (!p) return;
+    const path = (routePiece(p, fork) || {}).path || [];
+    if (join !== "corner") for (const k of [i, i + 1]) if (path[k] && path[k].type === "L") changeSegType(id, k, "C", fork);
+    setJoint(id, i, join, fork);
+  }
   function changeSegType(id, i, type, fork = null) {
     update(p => {
       if (p.id !== id) return p;
@@ -9424,19 +9437,20 @@ export default function DrillAnimator() {
               {/* point type — only when both adjoining legs are curves (there's a
                   handle on each side to link). Corner = independent handles;
                   Smooth = handles kept collinear (auto-smooths); Sym = collinear + equal */}
-              {s.type !== "L" && next.type !== "L" && (
-                <div className="hd-field">
-                  <div className="hd-sectitle">Corner style</div>
-                  <div className="hd-poprow">
-                    {[["corner", "ptCorner", "Sharp", "a hard turn at this point"],
-                      ["smooth", "ptSmooth", "Smooth", "rounds the turn through this point"],
-                      ["sym", "ptSym", "Even", "rounds it evenly on both sides"]].map(([j, ic, lbl, tip]) => (
-                      <button key={j} className={`hd-mini iconlbl${(s.join || "corner") === j ? " on" : ""}`} title={`${lbl} — ${tip}`}
-                        onClick={() => setJoint(p.id, i, j, fork)}><Icon name={ic} /><small>{lbl}</small></button>
-                    ))}
-                  </div>
+              <div className="hd-field">
+                <div className="hd-sectitle">Corner style</div>
+                <div className="hd-poprow">
+                  {[["corner", "ptCorner", "Sharp", "a hard turn at this point"],
+                    ["smooth", "ptSmooth", "Smooth", "rounds the turn through this point"],
+                    ["sym", "ptSym", "Even", "rounds it evenly on both sides"]].map(([j, ic, lbl, tip]) => (
+                    <button key={j} className={`hd-mini iconlbl${(s.join || "corner") === j ? " on" : ""}`} title={`${lbl} — ${tip}`}
+                      onClick={() => setJointCurving(p.id, i, j, fork)}><Icon name={ic} /><small>{lbl}</small></button>
+                  ))}
                 </div>
-              )}
+                {(s.type === "L" || next.type === "L") && (
+                  <div className="hd-sechint">A straight leg has no handle to round, so Smooth and Even curve the legs either side of this point.</div>
+                )}
+              </div>
               {p.kind === "player" && (
                 <div className="hd-field">
                   <div className="hd-sectitle">Skate direction</div>
