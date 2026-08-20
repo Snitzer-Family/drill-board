@@ -42,8 +42,11 @@ function copyPreviewPage() {
   };
 }
 
-// base must match the repo name for GitHub Pages project sites:
-// https://snitzer-family.github.io/drill-board/
+// This path was originally the repo name, because GitHub Pages project sites
+// serve from /<repo>/. Pages is gone, but the prefix stays: it is baked into
+// the DSL `#d=` preview links and the manifest's relative start_url/scope, so
+// changing it invalidates existing links and orphans installed home-screen
+// icons. Revisit deliberately when the app gets its real host.
 export default defineConfig({
   plugins: [react(), injectTheme(), copyPreviewPage()],
   base: "/drill-board/",

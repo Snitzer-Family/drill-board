@@ -1,7 +1,10 @@
 # DrillBoard — Hockey Drill Animator
 
-**Live app: <https://snitzer-family.github.io/drill-board/>** — open it on a phone
-and add it to your home screen; it runs full-screen like a native app.
+**No public instance right now.** The app was on GitHub Pages; that was removed
+when the repo moved to self-hosted Forgejo, and a proper hosting service is
+planned. To run it, clone and `npm run dev` — on a phone, use `npx vite --host`
+and open `http://<your-lan-ip>:5173/drill-board/`, then add it to your home
+screen for the full-screen native feel.
 
 A single-file React app for designing and animating hockey drills. Built for coaches
 working from a phone or iPad at the bench: the ice fills the screen, every setting
@@ -225,14 +228,21 @@ and expects nothing — it drops into any React 18+ setup, or runs directly as a
 Claude artifact. Styling is scoped in a `<style>` tag; no Tailwind or CSS
 imports required.
 
-## Deployment
+## Repo layout and CI
 
-Every push to `main` triggers `.github/workflows/deploy.yml`, which builds with
-Vite and publishes `dist/` to GitHub Pages at
-<https://snitzer-family.github.io/drill-board/>. If the very first run fails on
-Pages enablement, flip **Settings → Pages → Source: GitHub Actions** once and
-re-run the workflow. Note `vite.config.js` sets `base: "/drill-board/"` — keep
-it in sync if the repo is ever renamed.
+The canonical remote is a self-hosted **Forgejo** instance; the GitHub repo is a
+push mirror kept as an offsite backup, and is not somewhere to commit — the
+mirror force-pushes every ref, so anything landed directly on GitHub is
+overwritten on the next sync.
+
+CI is `.forgejo/workflows/ci.yml`, which runs `npm test` then `npm run build` on
+every push. There is no deploy step: GitHub Pages and `.github/` were both
+removed with the move.
+
+`vite.config.js` sets `base: "/drill-board/"`. That originally matched the repo
+name for a Pages project site. The Pages reason is gone, but the path is baked
+into the DSL `#d=` preview links and the manifest's relative `start_url`, so
+treat changing it as a migration rather than a rename.
 
 ## Ideas on the shelf
 
