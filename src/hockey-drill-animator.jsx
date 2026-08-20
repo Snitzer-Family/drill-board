@@ -894,7 +894,10 @@ export default function DrillAnimator() {
   const [placingStep, setPlacingStep] = useState(null); // idx of the step whose caption is being placed on the ice
   const [editAnchor, setEditAnchor] = useState(null);  // idx of the step whose time/waypoint anchor is being edited inline
   const [minorDesc, setMinorDesc] = useState(false);   // describe zones skated through
-  const [showResult, setShowResult] = useState(true);  // Save!/Goal! splash on shots
+  // Off by default: the splash is a broadcast flourish, and the board is a
+  // diagram. It also parks over the net — exactly where a coach is pointing
+  // when a shot resolves. ☰ → Goal splashes turns it back on.
+  const [showResult, setShowResult] = useState(false); // Save!/Goal! splash on shots
   const [collisions, setCollisions] = useState(true);  // route avoidance (nets/goalie/players)
   const [avoidanceVisuals, setAvoidanceVisuals] = useState(true); // DRAW the detour bend + ghost (animation still avoids either way)
   const [previewAllBranches, setPreviewAllBranches] = useState(false); // ghost a player down EVERY candidate branch at once

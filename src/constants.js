@@ -51,7 +51,7 @@ export const TYPEFACES = [
 ];
 export const TYPEFACE_KEY = "drillboard:typeface";
 
-export const APP_VERSION = "7.07";
+export const APP_VERSION = "7.08";
 // DSL schema version, stamped into every serialized drill (`DSL <n>` header) so
 // production builds can eventually render a drill per the version that wrote it.
 // Bump ONLY on a breaking DSL change (new kinds/modifiers that older builds would
@@ -96,9 +96,20 @@ export const SAVE_PROB = 0.5;
 // a free shot on an EMPTY net usually scores; these are the miss odds (the rest
 // of the probability mass is a goal). A miss rings the post and rebounds, sails
 // wide into the corner, or flies over the net.
-export const MISS_POST = 0.12;
-export const MISS_WIDE = 0.11;
-export const MISS_OVER = 0.11;
+//
+// Deliberately tiny — 5% all told. These used to sum to 34%, which meant a
+// third of the empty-net shots in a drill didn't go in, and a coach showing a
+// breakout would watch the finish sail wide often enough to have to re-run it.
+// A drill is a diagram of what SHOULD happen; the shooter is unpressured and
+// picking a corner, so burying it is the honest default. Post leads the three
+// because a shot that misses narrowly clangs far more often than it climbs over
+// the cage, and a post carries a live rebound the other two don't.
+//
+// This is a default, not a ceiling: ☰ → shot odds tunes all three per-drill for
+// anyone who wants the chaos back, and "Reset shot odds" returns here.
+export const MISS_POST = 0.03;
+export const MISS_WIDE = 0.01;
+export const MISS_OVER = 0.01;
 // odds any shot is taken in the AIR (sauce-style rise + shadow, dropping at the
 // net) vs flat along the ice. An "over the net" miss is always airborne.
 export const SHOT_AIR_PROB = 0.4;
