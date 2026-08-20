@@ -2,7 +2,12 @@
 
 Full-screen hockey drill animator (React + Vite) for a youth hockey coach,
 used primarily as an iPhone home-screen web app at the bench.
-Live: https://snitzer-family.github.io/drill-board/
+
+**There is no public deployment right now.** GitHub Pages was removed once
+Forgejo became the source of truth — it only ever exposed the app, and a real
+hosting service is coming. Until then the LAN dev server is the only way to
+run it, including on the phone: `http://<lan-ip>:<PORT>/drill-board/`. The
+installed home-screen icon points at the dead Pages URL and will not load.
 
 ## Session start (every new session)
 
@@ -26,19 +31,23 @@ restart so the settings watcher reloads it.
 
 1. **Verify before committing:** run `npm test` and `npm run build`; both must
    pass. `npm test` auto-discovers every `tests/*.mjs`, so a new suite is
-   enforced the moment it lands — there is no list to update. CI runs the tests
-   before the build, so a failing suite blocks the deploy.
+   enforced the moment it lands — there is no list to update. Forgejo Actions
+   runs both on every push, so a failing suite is caught on the server too.
 2. **Bump the version** on every behavioral change: `APP_VERSION` in
    `src/constants.js`. The build timestamp is injected automatically by
    `vite.config.js` — never hardcode it.
-3. **Never merge or push to `main` without explicit permission.** Deploy = push
-   to `main` on **Forgejo**, which mirrors to GitHub, where Actions builds and
-   publishes to Pages (~90s total), so it goes live. Always confirm and get the
-   user's go-ahead before merging to `main` or pushing. Commit on the
-   worktree/session branch freely; the user verifies deploys via the version
+3. **Never merge or push to `main` without explicit permission.** Pushing no
+   longer deploys anything — Pages is gone — but `main` is still the branch the
+   mirror publishes to GitHub, and it is what the next host will build from, so
+   it stays gated. Always confirm before merging to `main` or pushing there.
+   Commit on the worktree/session branch freely; the user checks the version
    watermark, which lives at the foot of the ☰ menu (it also opens About) — it
    left the bottom bar so that bar could be controls only.
-4. `vite.config.js` must keep `base: "/drill-board/"` (matches repo name).
+4. `vite.config.js` must keep `base: "/drill-board/"`. It was chosen to match
+   the repo name for a Pages project site; that reason is gone, but the path is
+   baked into the DSL preview links and the manifest's relative `start_url`, so
+   changing it is a real migration, not a rename. Revisit it when the app moves
+   to its actual host, deliberately.
 5. No new dependencies without asking — the app is deliberately React-only.
 
 ## Remotes: Forgejo is primary, GitHub is a mirror
@@ -55,25 +64,26 @@ restart so the settings watcher reloads it.
   deleted on GitHub next sync. GitHub is a backup and a build host, never a
   source of truth — never commit there directly, or the mirror will overwrite
   it and the work is gone.
-- **The deploy still runs on GitHub.** `.github/workflows/deploy.yml` is what
-  builds and publishes Pages, because Pages only deploys from github.com. So
-  the live site depends on the mirror working: if the mirror is broken, a push
-  to Forgejo `main` looks successful and never reaches the bench phone. When a
-  deploy doesn't appear, check the mirror's last-sync in Forgejo
-  (Settings → Repository) **before** debugging Actions.
-- **The mirror's GitHub PAT needs `workflow` scope**, not just `repo`. Any
-  mirrored push that touches `.github/workflows/` is rejected outright without
-  it — and since the mirror force-pushes all refs together, that one rejection
-  fails the whole sync, not just that file.
-- **Two CI systems now run on every push, deliberately.**
-  `.forgejo/workflows/ci.yml` runs `npm test` + `npm run build` on
-  `homelab-runner` (CT 111); GitHub then runs the same suites before deploying.
-  Forgejo is the fast local gate, GitHub is the gate on the deploy itself.
-- **Never delete `.forgejo/workflows/`.** Forgejo picks the first workflow
-  directory that exists, checking `.forgejo/workflows` before
-  `.github/workflows`. With it gone, `homelab-runner` picks up the Pages
-  workflow instead and fails every push on `actions/configure-pages`, which
-  only works on github.com.
+- **Nothing deploys anymore.** GitHub Pages and `.github/` are both deleted:
+  Pages only ever exposed the app, and the real host is still to come. GitHub
+  runs no CI now and serves no site — it holds a copy of the history, nothing
+  else.
+- **CI is `.forgejo/workflows/ci.yml` on `homelab-runner` (CT 111)**, and it is
+  the only CI. `npm test` + `npm run build`, ~30s. If a push seems to run no
+  workflow, check the runner is up (`systemctl status forgejo-runner`) before
+  suspecting the config.
+- **If you ever re-add `.github/workflows/`, know what it does here.** Forgejo
+  runs the first workflow directory that exists and checks `.forgejo/workflows`
+  first — but that ordering is the only thing that would stop `homelab-runner`
+  from trying to execute GitHub-only steps. This was observed, not theorised:
+  the first push of `main` ran the old Pages workflow on the homelab runner and
+  failed on `actions/configure-pages`, because `.forgejo/` didn't exist on that
+  branch yet.
+- **The mirror's GitHub PAT has `workflow` scope** as well as `repo`. It is
+  needed for any mirrored push that touches `.github/workflows/` — which
+  includes the push that *deleted* it. Keep the scope: without it, re-adding
+  any workflow file would fail the entire sync, not just that file, because the
+  mirror force-pushes all refs as one operation.
 - Credentials live in `config/secrets.env` (gitignored, mode 600);
   `config/secrets.env.example` is the tracked template. **This repo is public
   on GitHub** — check `git check-ignore` before adding anything secret-shaped,
@@ -102,7 +112,7 @@ restart so the settings watcher reloads it.
 - So to demo a feature with a sample drill, write the DSL (see `docs/drill-dsl.md`),
   url-safe-base64-encode it, and give the user
   `http://<lan-ip>:<PORT>/drill-board/#d=<enc>` (or append `#d=<enc>` to the live
-  Pages URL). Encode in Node exactly as `previewLink()` does:
+  dev-server URL). Encode in Node exactly as `previewLink()` does:
   `Buffer.from(dsl,'utf8').toString('base64').replace(/\+/g,'-')
   .replace(/\//g,'_').replace(/=+$/,'')` (strip trailing `=`).
 
@@ -199,7 +209,7 @@ restart so the settings watcher reloads it.
   encoder — and `tests/app-icon.mjs` parses it, because a malformed `.ico` fails
   silently and looks exactly like the bug it's there to fix.
 - **An installed iOS home-screen icon does not update**, and Safari caches
-  favicons hard. After deploying, the phone keeps the old one until the
+  favicons hard. Once there's a host again, the phone keeps the old one until the
   home-screen icon is deleted and re-added; a stale tab favicon needs
   Settings → Safari → Clear History and Website Data. Expect to debug this as a
   non-bug at least once.
@@ -282,8 +292,8 @@ restart so the settings watcher reloads it.
 
 ## Testing reality
 
-`npm test` runs every `tests/*.mjs` (auto-discovered, one process each) and CI
-runs it before the build, so a failing suite blocks the deploy. They cover the
+`npm test` runs every `tests/*.mjs` (auto-discovered, one process each) and
+Forgejo Actions runs it before the build on every push. They cover the
 pure, node-testable cores — possession ledger, drill fit, auto-net, sketch
 recogniser, theme contrast, crash-recovery stash — plus drift guards that pin
 invariants a reader can't verify by eye (no raw hex in `styles.js`, `MENU_W` vs
@@ -315,8 +325,8 @@ time:
   convert, extend. Use for UI/markup/CSS changes.
 - `node /tmp/db-verify/run.mjs recog <url>` — the recognition suites. Use when
   `sketch-recognize.js` or the capture path changes.
-- `node /tmp/db-verify/run.mjs '' <url>` — everything. Before a deploy, or after
-  a change that touches both.
+- `node /tmp/db-verify/run.mjs '' <url>` — everything. Before merging to
+  `main`, or after a change that touches both.
 
 **Always pass this session's LAN URL.** The suites build their own `#d=` links,
 so the runner hands the base down as `DB_URL`; a suite run without it silently

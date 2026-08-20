@@ -4,7 +4,8 @@ A DrillBoard drill is plain text. This document is the full reference for the
 format and for the **markdown embed** convention that lets you drop a drill into
 a note or a web page.
 
-- Live app: <https://snitzer-family.github.io/drill-board/>
+- The app has no public instance right now (GitHub Pages was removed with the
+  move to self-hosted Forgejo); run it locally with `npm run dev`.
 - In the app: **☰ → Text editor** (edit/paste), **Notes / writeup**,
   **Inventory / gear**, **Print sheet**, **Export .txt / .md**, **Copy markdown**,
   **Load .txt / .md**.
