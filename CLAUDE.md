@@ -59,11 +59,17 @@ restart so the settings watcher reloads it.
   its push URL is set to a bogus string, so `git push github` fails loudly
   instead of silently diverging the two sides.
 - **GitHub is a push mirror, not a place to push.** Forgejo syncs
-  `Snitzer-Family/drill-board` on every push (plus an 8h fallback interval).
-  That sync is a **force-push of all refs**: a branch deleted on Forgejo is
-  deleted on GitHub next sync. GitHub is a backup and a build host, never a
-  source of truth — never commit there directly, or the mirror will overwrite
-  it and the work is gone.
+  `Snitzer-Family/drill-board` within ~5-10s of a push, plus an 8h fallback
+  interval. That sync is a **force-push of all refs**, so GitHub is a backup,
+  never a source of truth — never commit there directly, or the mirror will
+  overwrite it and the work is gone.
+- **A branch *deletion* does not trigger a sync**, and this was measured: after
+  deleting a merged branch on Forgejo, GitHub still listed it 60s later, and it
+  vanished only when a sync was forced. `sync_on_commit` means *commits*. So a
+  branch deleted on Forgejo can linger on GitHub for up to the 8h interval —
+  harmless for a backup, confusing if you're reading GitHub to see what exists.
+  Force it with
+  `POST $FORGEJO_API/repos/Snitzer/drill-board/push_mirrors-sync`.
 - **Nothing deploys anymore.** GitHub Pages and `.github/` are both deleted:
   Pages only ever exposed the app, and the real host is still to come. GitHub
   runs no CI now and serves no site — it holds a copy of the history, nothing
