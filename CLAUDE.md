@@ -32,14 +32,52 @@ restart so the settings watcher reloads it.
    `src/constants.js`. The build timestamp is injected automatically by
    `vite.config.js` — never hardcode it.
 3. **Never merge or push to `main` without explicit permission.** Deploy = push
-   to `main` (GitHub Actions builds and publishes to Pages, ~90s), so it goes
-   live. Always confirm and get the user's go-ahead before merging to `main` or
-   pushing. Commit on the worktree/session branch freely; the user verifies
-   deploys via the version watermark, which lives at the foot of the ☰ menu
-   (it also opens About) — it left the bottom bar so that bar could be
-   controls only.
+   to `main` on **Forgejo**, which mirrors to GitHub, where Actions builds and
+   publishes to Pages (~90s total), so it goes live. Always confirm and get the
+   user's go-ahead before merging to `main` or pushing. Commit on the
+   worktree/session branch freely; the user verifies deploys via the version
+   watermark, which lives at the foot of the ☰ menu (it also opens About) — it
+   left the bottom bar so that bar could be controls only.
 4. `vite.config.js` must keep `base: "/drill-board/"` (matches repo name).
 5. No new dependencies without asking — the app is deliberately React-only.
+
+## Remotes: Forgejo is primary, GitHub is a mirror
+
+- `origin` is **Forgejo**, self-hosted on the LAN:
+  `ssh://git@10.5.1.63:2222/Snitzer/drill-board.git`
+  (web UI `https://git.home.snitzer.space/Snitzer/drill-board`, CT 110). Push
+  here and nowhere else. The `github` remote is fetch-only by construction —
+  its push URL is set to a bogus string, so `git push github` fails loudly
+  instead of silently diverging the two sides.
+- **GitHub is a push mirror, not a place to push.** Forgejo syncs
+  `Snitzer-Family/drill-board` on every push (plus an 8h fallback interval).
+  That sync is a **force-push of all refs**: a branch deleted on Forgejo is
+  deleted on GitHub next sync. GitHub is a backup and a build host, never a
+  source of truth — never commit there directly, or the mirror will overwrite
+  it and the work is gone.
+- **The deploy still runs on GitHub.** `.github/workflows/deploy.yml` is what
+  builds and publishes Pages, because Pages only deploys from github.com. So
+  the live site depends on the mirror working: if the mirror is broken, a push
+  to Forgejo `main` looks successful and never reaches the bench phone. When a
+  deploy doesn't appear, check the mirror's last-sync in Forgejo
+  (Settings → Repository) **before** debugging Actions.
+- **The mirror's GitHub PAT needs `workflow` scope**, not just `repo`. Any
+  mirrored push that touches `.github/workflows/` is rejected outright without
+  it — and since the mirror force-pushes all refs together, that one rejection
+  fails the whole sync, not just that file.
+- **Two CI systems now run on every push, deliberately.**
+  `.forgejo/workflows/ci.yml` runs `npm test` + `npm run build` on
+  `homelab-runner` (CT 111); GitHub then runs the same suites before deploying.
+  Forgejo is the fast local gate, GitHub is the gate on the deploy itself.
+- **Never delete `.forgejo/workflows/`.** Forgejo picks the first workflow
+  directory that exists, checking `.forgejo/workflows` before
+  `.github/workflows`. With it gone, `homelab-runner` picks up the Pages
+  workflow instead and fails every push on `actions/configure-pages`, which
+  only works on github.com.
+- Credentials live in `config/secrets.env` (gitignored, mode 600);
+  `config/secrets.env.example` is the tracked template. **This repo is public
+  on GitHub** — check `git check-ignore` before adding anything secret-shaped,
+  and treat a token committed even briefly as burned.
 
 ## Live dev server (start it every session — see "Session start")
 

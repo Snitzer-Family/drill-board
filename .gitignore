@@ -5,3 +5,10 @@ dist/
 *.log
 .idea/
 .vscode/
+
+# Local credentials for the Forgejo migration / GitHub mirror. This repo is
+# PUBLIC on GitHub, so the real secrets file must never be committed — only
+# the .example template is tracked.
+config/secrets.env
+config/*.env
+!config/*.env.example

@@ -1,0 +1,48 @@
+# CI on the homelab runner (CT 111, "homelab-runner").
+#
+# Forgejo is the primary remote; GitHub is a push mirror that also builds
+# Pages. This file exists for two reasons:
+#
+#  1. It runs the suites CLAUDE.md §"Workflow rules" requires — `npm test`
+#     then `npm run build` — on every push, so a broken commit is caught
+#     here before the mirror hands it to GitHub Actions to deploy.
+#  2. It stops the runner from executing .github/workflows/deploy.yml.
+#     Forgejo picks the FIRST workflow directory that exists, checking
+#     .forgejo/workflows before .github/workflows. Without this directory,
+#     homelab-runner would pick up the Pages workflow and fail every push on
+#     actions/configure-pages, which only works on github.com. Deleting this
+#     file silently re-enables that failure mode.
+#
+# runs-on: docker -> node:22-bookworm, per the runner's registered labels
+# (ubuntu-latest / docker / debian). Using the node image directly means no
+# actions/setup-node, so CI does not depend on the runner's tool cache.
+
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: docker
+    container:
+      image: node:22-bookworm
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install
+        run: npm install
+
+      # Auto-discovers every tests/*.mjs — a new suite is enforced the moment
+      # it lands, with no list here to keep in sync.
+      - name: Test
+        run: npm test
+
+      # `npm run build` exits 0 on a JSX warning, so the build passing has
+      # never meant the JSX is sound. tests/jsx-warnings.mjs is what actually
+      # enforces that, and it runs in the step above.
+      - name: Build
+        run: npm run build
