@@ -854,10 +854,9 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
       // netId targets THIS shot's net (each shot in a chain aims independently:
       // the terminal uses pk.net, a rebound transfer its own tr.net)
       const doShot = (shootIdx, aimPt, netId = pk.net, shand = null) => {
-        const launchT = (cur.path.length && shootIdx >= 0)
+        let launchT = (cur.path.length && shootIdx >= 0)
           ? Math.max(tBase, routeTimeW(cur, warp, Math.min(shootIdx, cur.path.length - 1)))
           : tBase;
-        newEvents.push({ by: cur.id, at: shootIdx, t: launchT, kind: "shot" });
         // Provisional launch, only so the nearest net can be picked: the fore/back
         // choice moves the release ~4ft, nowhere near enough to change WHICH net is
         // closest, and the real launch is re-taken off the chosen hand below.
@@ -891,6 +890,20 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
         // nobody turns to face the net and then pulls the puck back across
         // their own body.
         let rTurn = shotTurn(cur, launchT, aimPt || net, warp);
+        // A standing catch-and-shoot released the instant the puck arrived, while
+        // the catch's own open-up still had the body turned toward the passer —
+        // the shot left sideways and the square-up only played out afterwards.
+        // A shooter who still has real turning to do gets a settle beat between
+        // gaining the puck and firing: long enough for the catch window
+        // (OPEN_HELD + OPEN_OUT after the catch) to mostly unwind and the
+        // square-up window (OPEN_IN + OPEN_SET before the release) to run.
+        // Stationary shooters only — delaying a routed shooter past their shot
+        // waypoint would fire the puck from further down the route than the
+        // coach put the shot. Already facing the net (< 25°) = a quick release
+        // is natural, no beat.
+        if (!(cur.path.length && shootIdx >= 0) && Math.abs(rTurn) >= 25 && launchT - tBase < OPEN_IN + OPEN_SET + 0.35)
+          launchT = tBase + OPEN_IN + OPEN_SET + 0.35;
+        newEvents.push({ by: cur.id, at: shootIdx, t: launchT, kind: "shot" });
         const back = handBack(cur, launchT, warp, bearingTo(cur, launchT, warp, aimPt || net), shand, rTurn);
         if (back) rTurn = 0;
         const twist = handTwist(cur, back, true);
