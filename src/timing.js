@@ -1903,11 +1903,11 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
         };
         const pull = (x, y, ex, ey, w) => {
           const b = w > 0 ? catchPull(pl.legs[li + 1].t0) : null;
-          // the landing nudge is blade-sized polish ("a foot or two"). A puck
-          // dying LOOSE far from its eventual collector — a rim resting on the
-          // wall while the gather waypoint sits out in the slot — must NOT be
-          // dragged to them; it stays put and the gather snap is the honest cut.
-          if (b && Math.hypot(b.x - ex, b.y - ey) > 6) return { x, y, a: 0 };
+          // the landing nudge is reach-sized polish. The planner only creates
+          // a gather within GATHER_FT, so every legitimate catch blends onto
+          // the blade; anything farther (a stale plan, a pass edge case) must
+          // NOT be dragged across the ice — it stays put and the cut is honest.
+          if (b && Math.hypot(b.x - ex, b.y - ey) > GATHER_FT) return { x, y, a: 0 };
           return b ? { x: x + (b.x - ex) * w, y: y + (b.y - ey) * w, a: 0 } : { x, y, a: 0 };
         };
         // ...and the launch end: leave from the stick that actually fired it
