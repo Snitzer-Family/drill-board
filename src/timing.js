@@ -697,6 +697,13 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
       const vPass = () => pace * SPEED.pass * (pk.speed || 1);
       const vRim = () => pace * SPEED.pass * 1.1 * (pk.speed || 1);   // rim rides fast
       const vChip = () => pace * SPEED.pass * 0.7 * (pk.speed || 1);  // chip is soft
+      // A rim's LAUNCH speed comes from physics, not a dial: a rim that dies
+      // after d feet was CAUSED by a shot of v0 = √(2·μg·d) — a short rim is a
+      // soft shot into the wall, not a hard one cut short. Calibrated so a
+      // full-pace hard rim (vRim) runs RIM_RUN feet before dying, which fixes
+      // μg in rink units and gives every shorter rim v0 = vRim·√(d/RIM_RUN).
+      const RIM_RUN = 90;
+      const vRimFor = len => vRim() * Math.sqrt(Math.min(1, Math.max(0.05, len / RIM_RUN)));
       const legs = [];
       let cur = null;
       let tBase = 0;
@@ -714,9 +721,15 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           let v = speed;
           if (flag.easeOut) {
             const rem = (remTo[k - 1] + remTo[k]) / 2;         // avg distance-to-end over this leg
-            // friction glide: v ∝ √(distance-to-end), so it decelerates smoothly
-            // and crawls the last bit instead of stopping short
-            if (rem < flag.easeOut) v = speed * Math.max(0.04, Math.sqrt(rem / flag.easeOut));
+            // Real puck physics: Coulomb friction on ice. F = μmg, so the
+            // deceleration a = μg is CONSTANT (the puck's mass cancels — a
+            // heavy puck slides exactly like a light one), which integrates to
+            //   v(rem) = √(2·μg·rem)  →  v ∝ √(distance-to-rest).
+            // The glide only looks right when the launch ENERGY matches the
+            // distance (v0 = √(2·μg·d) — see vRimFor); a too-hot launch forced
+            // into a short window is what used to read as braking. The floor
+            // is a render crawl, not physics — zero-speed legs never end.
+            if (rem < flag.easeOut) v = speed * Math.max(0.02, Math.sqrt(rem / flag.easeOut));
           }
           const dt = Math.max(1e-3, Math.hypot(seg.x - prev.x, seg.y - prev.y) / Math.max(1e-3, v));
           // only the FIRST leg leaves a stick, so that is the one that carries the
@@ -1071,11 +1084,10 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
               const poly = densify(raw);
               let rl = 0;
               for (let k = 1; k < poly.length; k++) rl += Math.hypot(poly[k].x - poly[k - 1].x, poly[k].y - poly[k - 1].y);
-              // the puck dies loose on the wall now, so it gets the TERMINAL
-              // rim's long friction glide (ease ∝ travel, up to 55ft) — the old
-              // 14ft settle was tuned for ending in the collector's stick, and
-              // on open ice it read as the puck braking to a halt
-              return { raw, poly, speed: vRim(), ease: Math.min(55, rl * 0.6) };
+              // launch at the speed that DIES at this distance (v0 = √(2·μg·d))
+              // and bleed it over the whole run — one constant friction from
+              // the blade to the rest spot, exactly a real rim
+              return { raw, poly, speed: vRimFor(rl), ease: Math.min(RIM_RUN, rl) };
             }
             const h = chipHeading(cur, launchT, tr.aim);
             const poly = densify(boards.slideTo(launch.x, launch.y, h.x, h.y, anchor));
@@ -1228,7 +1240,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
         const back = handBack(cur, launchT, warp, aimDeg, pk.shand);
         const twist = handTwist(cur, back, false);
         const { poly } = back ? build(twist, true) : (prov || build(0, false));
-        const r = pushTravel(poly, launchT, vRim(), { by: cur.id, rim: true, easeOut: Math.min(55, dist * 0.6), back, relTwist: twist });
+        const r = pushTravel(poly, launchT, vRimFor(dist), { by: cur.id, rim: true, easeOut: Math.min(RIM_RUN, dist), back, relTwist: twist });
         legs.push({ type: "rest", x: r.end.x, y: r.end.y, t0: r.t }); tBase = r.t;
       } else if (pk.chipAt != null && cur) {           // terminal chip into space (bounces)
         const at = pk.chipAt;
@@ -1843,6 +1855,11 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
         };
         const pull = (x, y, ex, ey, w) => {
           const b = w > 0 ? catchPull(pl.legs[li + 1].t0) : null;
+          // the landing nudge is blade-sized polish ("a foot or two"). A puck
+          // dying LOOSE far from its eventual collector — a rim resting on the
+          // wall while the gather waypoint sits out in the slot — must NOT be
+          // dragged to them; it stays put and the gather snap is the honest cut.
+          if (b && Math.hypot(b.x - ex, b.y - ey) > 6) return { x, y, a: 0 };
           return b ? { x: x + (b.x - ex) * w, y: y + (b.y - ey) * w, a: 0 } : { x, y, a: 0 };
         };
         // ...and the launch end: leave from the stick that actually fired it

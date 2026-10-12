@@ -86,5 +86,49 @@ PIECE PK1 puck 115 20 #14171a on=P1 rim=0:P2@3~-18`;
     tail.filter((s, i) => i > 0 && s < tail[i - 1] - 0.01).length > 8, true);
 }
 
+{ // Coulomb friction, both ends: v0 = √(2·μg·d), so a SHORT rim is launched
+  // soft (the slow shot CAUSES the short rim) and a long one hard
+  const rig = tgt => {
+    const dsl = `DSL 10
+RINK half
+PIECE P1 player 150 10 #d7263d P1
+PIECE P2 player ${tgt} #d7263d P2
+PIECE PK1 puck 150 10 #14171a on=P1 rim=0:P2~0`;
+    const { pieces } = parseDrill(dsl);
+    const t = createTiming({ pieces, pace: 1, segRefs: { current: {} },
+      planCache: { current: { key: null, plans: {}, warp: {}, rel: {} } } });
+    const flys = t.getPlan().plans.PK1.legs.filter(L => L.type === 'fly' && L.rim);
+    const L = flys[0];
+    return { v0: Math.hypot(L.x1 - L.x0, L.y1 - L.y0) / (L.t1 - L.t0), t };
+  };
+  const short = rig('170 6'), long2 = rig('195 70');
+  T('short rim launches soft, long rim launches hard', short.v0 < 0.75 * long2.v0, true);
+}
+
+{ // the display must not drag a wall-dying puck to its collector — the catch
+  // nudge is blade-sized polish, and a routeless collector (ride leg directly
+  // after the fly) is exactly the case that used to pull the puck 25ft+ off
+  // the glass at the end of the run
+  const dsl = `DSL 10
+RINK half
+PIECE P1 player 122.7 20.1 #d7263d P1
+PIECE P2 player 168.8 34.7 #d7263d P2
+PIECE PK1 puck 115 20 #14171a on=P1 rim=0:P2~-18`;
+  const { pieces } = parseDrill(dsl);
+  const t = createTiming({ pieces, pace: 1, segRefs: { current: {} },
+    planCache: { current: { key: null, plans: {}, warp: {}, rel: {} } } });
+  const plan = t.getPlan().plans.PK1;
+  const flys = plan.legs.filter(L => L.type === 'fly' && L.rim);
+  const lastF = flys[flys.length - 1];
+  const pk = pieces.find(p => p.id === 'PK1');
+  const offWall = [];
+  for (const f of [0.9, 0.97, 0.995]) {
+    const pos = t.displayPosAt(pk, lastF.t0 + (lastF.t1 - lastF.t0) * f);
+    offWall.push(+boards.edgeDist(pos.x, pos.y).toFixed(1));
+  }
+  T('display keeps the dying puck on the wall (no pull to the collector)',
+    offWall.every(d => d < 2.5), true, );
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
