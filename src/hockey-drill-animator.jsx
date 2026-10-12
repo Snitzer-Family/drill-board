@@ -4796,6 +4796,22 @@ export default function DrillAnimator() {
     setRotary(r => r && r.id === id && r.i === i && (r.fork || null) === (fork || null)
       ? null : { id, i, fork: fork || null });
   };
+  // a DOUBLE tap on the same spot skips the ring and opens the full inspector
+  // (the ⋯ wedge without the detour); a slow second tap still just toggles
+  // the ring closed. Same 350ms window as the ice and leg double-taps.
+  const lastPieceTap = useRef(null);   // {t, id, i, fork}
+  const tapOrRotary = (id, i, fork) => {
+    const now = performance.now();
+    const lt = lastPieceTap.current;
+    lastPieceTap.current = { t: now, id, i, fork: fork || null };
+    if (lt && now - lt.t < 350 && lt.id === id && lt.i === i && (lt.fork || null) === (fork || null)) {
+      lastPieceTap.current = null;
+      setRotary(null);
+      setPopup(i < 0 ? { type: "piece", id } : { type: "point", id, seg: i, ...(fork ? { fork } : {}) });
+      return;
+    }
+    toggleRotary(id, i, fork);
+  };
   // a chosen wedge either writes the action immediately (one possible target)
   // or arms pickTarget and lets the ice offer the candidates
   function onRotaryWedge(key) {
@@ -6029,6 +6045,16 @@ export default function DrillAnimator() {
     }
     if (d.kind === "piece") {
       if (d.line != null) {
+        // a tap landing on a waypoint opens that point directly — resolved
+        // BEFORE the leg's add-point double-tap, so double-tapping a waypoint
+        // opens its settings instead of dropping a new point on top of it
+        const wp = waypointUnderTap(d.id, d.line, d.tapPt, d.fork || null);
+        if (wp != null) {
+          setSelectedId(d.id);
+          if (wantsRotary(pieces.find(q => q.id === d.id))) tapOrRotary(d.id, wp, d.fork || null);
+          else setPopup({ type: "point", id: d.id, seg: wp, ...(d.fork ? { fork: d.fork } : {}) });
+          return;
+        }
         const now = performance.now();
         const lt = lastLineTap.current;
         if (lt && now - lt.t < 350 && lt.id === d.id &&
@@ -6038,27 +6064,18 @@ export default function DrillAnimator() {
           return;
         }
         lastLineTap.current = { t: now, id: d.id, pt: d.tapPt };
-        // a tap landing on a waypoint opens that point directly — don't make the
-        // coach hit the leg first, then the dot on a second tap
-        const wp = waypointUnderTap(d.id, d.line, d.tapPt, d.fork || null);
-        if (wp != null) {
-          setSelectedId(d.id);
-          if (wantsRotary(pieces.find(q => q.id === d.id))) toggleRotary(d.id, wp, d.fork || null);
-          else setPopup({ type: "point", id: d.id, seg: wp, ...(d.fork ? { fork: d.fork } : {}) });
-          return;
-        }
         setSelectedId(d.id);
         setPopup({ type: "line", id: d.id, seg: d.line, pt: d.tapPt, ...(d.fork ? { fork: d.fork } : {}) });
         return;
       }
-      // a player's body tap opens the rotary action menu; everything else keeps
-      // the inspector popup
-      if (wantsRotary(pieces.find(q => q.id === d.id))) toggleRotary(d.id, -1, null);
+      // a player's body tap opens the rotary action menu (double tap = the
+      // full inspector); everything else keeps the inspector popup
+      if (wantsRotary(pieces.find(q => q.id === d.id))) tapOrRotary(d.id, -1, null);
       else setPopup({ type: "piece", id: d.id });
     }
     if (d.kind === "anchor") {
       setSelectedId(d.id);
-      if (wantsRotary(pieces.find(q => q.id === d.id))) toggleRotary(d.id, d.seg, d.fork || null);
+      if (wantsRotary(pieces.find(q => q.id === d.id))) tapOrRotary(d.id, d.seg, d.fork || null);
       else setPopup({ type: "point", id: d.id, seg: d.seg, ...(d.fork ? { fork: d.fork } : {}) });
     }
   }
