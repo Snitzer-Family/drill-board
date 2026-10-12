@@ -159,10 +159,39 @@ PIECE PK1 puck 150 42 #14171a on=P1 chip=0:P2~0`;
     return { v0: v(flys[0]), d, dur: flys[flys.length - 1].t1 - flys[0].t0 };
   };
   const near = rig(170), far = rig(190);
-  T('chip: energy matches distance (v0 ∝ √d)',
+  T('chip (no bank): energy matches distance (v0 ∝ √d)',
     Math.abs(near.v0 / far.v0 - Math.sqrt(near.d / far.d)) < 0.12, true);
-  T('chip: travel time matches the launch energy (≈2·d/v0)',
+  T('chip (no bank): travel time matches the launch energy (≈2·d/v0)',
     far.dur / (2 * far.d / far.v0) > 0.85 && far.dur / (2 * far.d / far.v0) < 1.15, true);
+}
+
+{ // a BANKED chip: hard and flat into the glass, the board absorbs its share
+  // (OD.bounce — the same restitution missed shots keep), then the remainder
+  // bleeds off on the shared ice. Aim straight up from mid-ice: contact at
+  // the top wall, then back down past the start to the collector.
+  const dsl = `DSL 10
+RINK half
+PIECE P1 player 150 20 #d7263d P1
+PIECE P2 player 150 38 #d7263d P2
+PIECE PK1 puck 150 20 #14171a on=P1 chip=0:P2~-90`;
+  const { pieces } = parseDrill(dsl);
+  const t = createTiming({ pieces, pace: 1, segRefs: { current: {} },
+    planCache: { current: { key: null, plans: {}, warp: {}, rel: {} } } });
+  const flys = t.getPlan().plans.PK1.legs.filter(L => L.type === 'fly' && L.chip);
+  const v = L => Math.hypot(L.x1 - L.x0, L.y1 - L.y0) / Math.max(1e-9, L.t1 - L.t0);
+  // the bank is the one leg boundary with a big speed drop
+  let bank = -1;
+  for (let k = 1; k < flys.length; k++) if (v(flys[k]) < v(flys[k - 1]) * 0.8) { bank = k; break; }
+  T('banked chip: a contact exists (one sharp speed drop)', bank > 0, true);
+  const head = flys.slice(0, bank).map(v);
+  T('banked chip: hard and flat INTO the glass',
+    head.every(s => Math.abs(s - head[0]) < head[0] * 0.02), true);
+  const keep = v(flys[bank]) / v(flys[bank - 1]);
+  T('banked chip: the board keeps ~the restitution share', keep > 0.5 && keep < 0.72, true);
+  const tail = flys.slice(bank).map(v);
+  T('banked chip: the rest bleeds off to a crawl', tail[tail.length - 1] < 0.3 * tail[0], true);
+  const e = flys[flys.length - 1];
+  T('banked chip: still dies at the collector', Math.hypot(e.x1 - 150, e.y1 - 38) < 1, true);
 }
 
 { // a collect beyond stick reach does NOT collect: the puck rests on the wall

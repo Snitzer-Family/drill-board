@@ -720,6 +720,25 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
       const glideV = (len, cap) =>
         Math.min(cap, Math.sqrt(2 * ICE_A * Math.max(2, len)) * (pace / 15) * (pk.speed || 1));
       const vRimFor = len => glideV(len, vRim());
+      // A banked chip is TWO regimes split at the first contact: the flight
+      // into the glass is hard and flat (too short for friction to matter),
+      // the board absorbs (1 − OD.bounce) of the speed on impact — the same
+      // restitution a missed shot keeps off the boards — and what's left
+      // glides out on the shared ice, dying at the far end. Work backwards:
+      // the tail needs v2 = √(2·a·d2), so the glass was hit at v1 = v2/REST.
+      // No contact on the path (a chip into open space) → one plain glide.
+      const pushChip = (raw, t0, flag) => {
+        const segLen2 = pts => { let L = 0; for (let k = 1; k < pts.length; k++) L += Math.hypot(pts[k].x - pts[k - 1].x, pts[k].y - pts[k - 1].y); return L; };
+        if (raw.length < 3) {
+          const len = segLen2(raw);
+          return pushTravel(densify(raw), t0, glideV(len, vChip()), { ...flag, chip: true, easeOut: len });
+        }
+        const tail = raw.slice(1), d2 = segLen2(tail);
+        const v2 = glideV(d2, vChip());
+        const v1 = Math.min(vChip(), v2 / Math.max(0.2, OD.bounce));
+        const r1 = pushTravel(densify(raw.slice(0, 2)), t0, v1, { ...flag, chip: true });  // hard, flat, into the glass
+        return pushTravel(densify(tail), r1.t, v2, { chip: true, easeOut: d2 });           // bleed off after contact
+      };
       const legs = [];
       let cur = null;
       let tBase = 0;
@@ -1105,13 +1124,9 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
               return { raw, poly, speed: vRimFor(rl), ease: rl };
             }
             const h = chipHeading(cur, launchT, tr.aim);
-            const poly = densify(boards.slideTo(launch.x, launch.y, h.x, h.y, anchor));
-            let len = 0;
-            for (let k = 1; k < poly.length; k++) len += Math.hypot(poly[k].x - poly[k - 1].x, poly[k].y - poly[k - 1].y);
-            // same ice as the rim: launched with exactly the energy the
-            // distance costs (harder chip for a farther pickup falls out of
-            // the physics), gliding the whole run to die at the gather spot
-            return { raw: null, poly, speed: glideV(len, vChip()), ease: len };
+            // UNdensified: pushChip reads the first vertex as the board/net
+            // contact to split its hard-in / bleed-out regimes
+            return { raw: null, chipRaw: boards.slideTo(launch.x, launch.y, h.x, h.y, anchor) };
           };
           // the direction the puck sets off in is what says which hand this is. A chip
           // and an aimed rim know theirs up front; an un-aimed rim only finds out once
@@ -1122,8 +1137,10 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           if (aimDeg == null) { prov = build(0, false); aimDeg = rimDeg(prov.raw); }
           const back = handBack(cur, launchT, warp, aimDeg, tr.shand);
           const twist = handTwist(cur, back, false);
-          const { poly, speed, ease } = back ? build(twist, true) : (prov || build(0, false));
-          const r = pushTravel(poly, launchT, speed, { by: cur.id, rim: tr.kind === "rim", chip: tr.kind === "chip", easeOut: ease, back, relTwist: twist });
+          const b = back ? build(twist, true) : (prov || build(0, false));
+          const r = tr.kind === "chip"
+            ? pushChip(b.chipRaw, launchT, { by: cur.id, back, relTwist: twist })
+            : pushTravel(b.poly, launchT, b.speed, { by: cur.id, rim: true, easeOut: b.ease, back, relTwist: twist });
           // the gather happens where the puck actually IS. A rim dies on the
           // wall, so a collect spot beyond stick reach of the rest point does
           // NOT collect — no snap, no teleport: the puck just lies there and
@@ -1279,8 +1296,8 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
         const lb = releaseAt(cur, launchT, warp, twist, back);
         const launch = boards.clampInside(lb.x, lb.y);           // a blade past the boards → no path
         const dist = pk.chipDist != null ? pk.chipDist : 26;     // handle-set travel distance
-        // same ice as the rim: energy to match the distance, gliding all the way
-        const r = pushTravel(densify(reflectPath(boards.slide(launch.x, launch.y, h.x, h.y, dist), netSh)), launchT, glideV(dist, vChip()), { by: cur.id, chip: true, easeOut: dist, back, relTwist: twist });
+        // hard into the glass, the board eats its share, the rest bleeds off
+        const r = pushChip(reflectPath(boards.slide(launch.x, launch.y, h.x, h.y, dist), netSh), launchT, { by: cur.id, back, relTwist: twist });
         legs.push({ type: "rest", x: r.end.x, y: r.end.y, t0: r.t }); tBase = r.t;
       }
       let relT = Infinity;
