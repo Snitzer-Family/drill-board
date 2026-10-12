@@ -6675,9 +6675,9 @@ export default function DrillAnimator() {
     // same context rule as the inspector's Add dropdown: the condition-aware
     // ledger decides whether this spot offers releases or gains
     const keys = AM.wedgesFor(mayHoldOn(posLedger, pieces, p.id, fork || ""));
-    // 8ft ring: the discs' inner edge (ring − disc = 5ft) clears the player
-    // icon and its selection circle instead of sitting on top of them
-    const RING = 8, DISC = 3.0, G = coarsePtr ? 1.4 : 1;
+    // 8.3ft ring: the discs' inner edge (ring − disc ≈ 4.7ft) clears the
+    // player icon and its selection circle instead of sitting on top of them
+    const RING = 8.3, DISC = 3.6, G = coarsePtr ? 1.4 : 1;
     // keep the whole ring on the sheet; a shifted centre keeps a dashed leash
     // back to the spot it acts on (the loupe's edge-hug, in rink feet)
     const [mx, my, vw, vh] = VIEWS[rink];
@@ -6713,8 +6713,9 @@ export default function DrillAnimator() {
         <g key={key} transform={fx.t}>
           <circle cx={0} cy={0} r={DISC} fill={T["surface-panel"]} stroke={col} strokeWidth={0.6} />
           <g transform={`rotate(${-fx.th})`}>
-            {/* glyph box ≈ 0.26·24 = 6.2ft on a 6ft disc — fills it, reads at arm's length */}
-            <g style={{ color: col }} transform="scale(0.26) translate(-12 -12)"
+            {/* glyph box 0.28·24 ≈ 6.7ft inside a 7.2ft disc — bigger glyph,
+                with breathing room between it and the disc edge */}
+            <g style={{ color: col }} transform="scale(0.28) translate(-12 -12)"
               fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
               {ICONS[ROTARY_ICON[key]]}
             </g>
