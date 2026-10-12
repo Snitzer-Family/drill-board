@@ -147,6 +147,13 @@ const PIVOT_SEC = 0.4;
 // where the puck is coming from, takes it on the forehand, then squares back up
 // and skates on. Times are relative to the catch.
 const OPEN_IN = 0.7, OPEN_SET = 0.15, OPEN_HELD = 0.2, OPEN_OUT = 0.45;
+// A shooter's square-up is quicker than a standing passer's deliberate one —
+// a catch-and-shoot is one motion, not a look-then-feed. SQ_IN/SQ_SET shape
+// the shot's relTurn window (vs OPEN_IN/OPEN_SET for a pass square-up), and
+// SQ_BEAT is the breath between gaining the puck and starting the release, so
+// the catch's own open-up has begun unwinding before the body comes round.
+// The settle a standing catch-and-shoot waits is their sum (see doShot).
+const SQ_IN = 0.45, SQ_SET = 0.1, SQ_BEAT = 0.3;
 const OPEN_BACK_FT = 15;   // how far back down the puck's path counts as "where it came from"
 // how far a collector can reach from their gather spot to take a resting puck
 // (body + stick). Beyond this a collect simply does not happen — the puck is
@@ -904,9 +911,9 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
         // when they genuinely have turning to do (≥ 25°). Stationary shooters
         // only — delaying a routed shooter past their shot waypoint would fire
         // the puck from further down the route than the coach put the shot.
-        if (!(cur.path.length && shootIdx >= 0) && launchT - tBase < OPEN_IN + OPEN_SET + 0.35
+        if (!(cur.path.length && shootIdx >= 0) && launchT - tBase < SQ_IN + SQ_SET + SQ_BEAT
             && (tBase > 0 || Math.abs(rTurn) >= 25))
-          launchT = tBase + OPEN_IN + OPEN_SET + 0.35;
+          launchT = tBase + SQ_IN + SQ_SET + SQ_BEAT;
         newEvents.push({ by: cur.id, at: shootIdx, t: launchT, kind: "shot" });
         const back = handBack(cur, launchT, warp, bearingTo(cur, launchT, warp, aimPt || net), shand, rTurn);
         if (back) rTurn = 0;
@@ -1516,9 +1523,14 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
               const t = leg.t0 - startWaitOf(sh);
               const push = w => (out[sh.id] = out[sh.id] || []).push(w);
               // Squaring up to your receiver is deliberate and early — a standing
-              // passer is facing them long before the puck goes.
-              if (leg.relTurn) push({ t0: t - OPEN_IN - OPEN_SET, t1: t - OPEN_SET,
-                t2: t + OPEN_HELD, t3: t + OPEN_HELD + OPEN_OUT, deg: leg.relTurn });
+              // passer is facing them long before the puck goes. A SHOOTER's
+              // square-up is the quicker SQ_IN/SQ_SET: a catch-and-shoot is one
+              // motion, and doShot's settle beat is sized to exactly this window.
+              if (leg.relTurn) {
+                const qIn = leg.shot ? SQ_IN : OPEN_IN, qSet = leg.shot ? SQ_SET : OPEN_SET;
+                push({ t0: t - qIn - qSet, t1: t - qSet,
+                  t2: t + OPEN_HELD, t3: t + OPEN_HELD + OPEN_OUT, deg: leg.relTurn });
+              }
               // The backhand shoulder turn is not that. On the catch window it turned
               // 0.85s early and then sat still while the stick whipped through in
               // 0.15s — two unrelated motions, and the puck, welded to the blade,
