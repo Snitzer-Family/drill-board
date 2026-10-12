@@ -5771,7 +5771,9 @@ export default function DrillAnimator() {
       d.moved = true;
       d.last = d.start;
       if (!pinned) setPopup(null);   // a pinned/docked panel stays open while dragging
-      setRotary(null); setPickTarget(null);   // a real drag is not a target tap
+      // a real drag is not a target tap — except the rotary's own facing knob,
+      // which turns the dial WHILE the ring stays up
+      if (!(d.kind === "rotate" && d.fromRotary)) { setRotary(null); setPickTarget(null); }
     }
     // box-select: track the rectangle (no loupe — it's not a precise handle drag)
     if (d.kind === "marquee") { d.last = pt; setMarquee({ x0: d.start.x, y0: d.start.y, x1: pt.x, y1: pt.y }); return; }
@@ -5998,7 +6000,12 @@ export default function DrillAnimator() {
     }
     if (d.kind === "aim") { setAim(d.pkId, d.target, null); return; }  // tap to clear the aim
     if (d.kind === "release") { setAim(d.pkId, { term: d.term }, null); return; }  // tap clears direction back to auto
-    if (d.kind === "rotate") { setPopup({ type: "piece", id: d.id }); return; }
+    if (d.kind === "rotate") {
+      // a plain tap on the rotary's knob is just a missed grab — keep the ring
+      // up rather than swapping it for the inspector it exists to replace
+      if (!d.fromRotary) setPopup({ type: "piece", id: d.id });
+      return;
+    }
     if (d.kind === "piece") {
       if (d.line != null) {
         const now = performance.now();
@@ -6640,13 +6647,25 @@ export default function DrillAnimator() {
     const cx = Math.max(mx + inset, Math.min(mx + vw - inset, anchor.x));
     const cy = Math.max(my + inset, Math.min(my + vh - inset, anchor.y));
     const shifted = Math.hypot(cx - anchor.x, cy - anchor.y) > 0.5;
+    // a routeless player's facing knob rides the ring itself (it replaced the
+    // old rotate handle, whose dashed circle sat at R=7 — the same place).
+    // Turning it re-spaces the wedges live around a gap that follows the knob.
+    const hasKnob = i < 0 && !p.path.length;
+    const fa = ((p.facing || 0) * Math.PI) / 180;
+    const GAPR = (55 * Math.PI) / 180;         // arc reserved around the knob
+    const span = hasKnob ? 2 * Math.PI - GAPR : 2 * Math.PI;
+    const step = span / keys.length;
     // hit discs may not overlap their neighbours, or the later wedge silently
     // wins the shared sliver — cap the radius at just under half the spacing
-    const hitR = Math.min(4.2 * G, RING * Math.sin(Math.PI / keys.length) * 0.95);
+    const hitR = Math.min(4.2 * G, RING * Math.sin(step / 2) * 0.95);
     const wedges = keys.map((key, k) => {
-      // first wedge at screen-top: rink angle −90° minus the sheet rotation,
-      // then evenly around; gmMove lands them on a visually round ring
-      const ang = ((-90 - screenRot) * Math.PI) / 180 + (k * 2 * Math.PI) / keys.length;
+      // no knob: first wedge at screen-top (rink angle −90° minus the sheet
+      // rotation). With a knob: the wedges fill the arc beyond its gap, so they
+      // slide out of the way as the dial turns. gmMove lands both layouts on a
+      // visually round ring.
+      const ang = hasKnob
+        ? fa + GAPR / 2 + (k + 0.5) * step
+        : ((-90 - screenRot) * Math.PI) / 180 + k * step;
       const c = gmMove(cx, cy, Math.cos(ang), Math.sin(ang), RING);
       const fx = iconXf({ x: c.x, y: c.y, a: 0 });
       const col = key === "pass" ? T["act-pass"] : key === "shoot" ? T["act-shot"]
@@ -6669,13 +6688,37 @@ export default function DrillAnimator() {
         </g>
       );
     });
+    // the knob itself, drawn AFTER the wedges so the sliver where the hit
+    // areas meet goes to the smaller target. Same look as the old rotate
+    // handle; the dashed dial circle ties knob and wedges into one control.
+    // gmMove's visual circle is this rink-space ellipse (axes RING/gmSar ×
+    // RING·gmSar), so the dial line passes through every disc centre.
+    const knob = hasKnob ? (() => {
+      const kc = gmMove(cx, cy, Math.cos(fa), Math.sin(fa), RING);
+      const kfx = iconXf({ x: kc.x, y: kc.y, a: 0 });
+      return (
+        <g transform={kfx.t}>
+          <circle cx={0} cy={0} r={1.4} fill={T["ice-select"]} stroke="#7a5c00" strokeWidth={0.35} />
+          <circle cx={0} cy={0} r={3.2 * G} fill="transparent" style={{ cursor: "grab" }}
+            role="button" aria-label="Turn to face"
+            onPointerDown={e => handleDown(e, { kind: "rotate", id: p.id, offset: 0, fromRotary: true })}>
+            <title>Turn to face</title>
+          </circle>
+        </g>
+      );
+    })() : null;
     return (
       <g className="hd-rotary">
         {shifted && (
           <line x1={anchor.x} y1={anchor.y} x2={cx} y2={cy} pointerEvents="none"
             stroke={T["ice-select"]} strokeWidth={0.4} strokeDasharray="1.8 1.4" opacity={0.8} />
         )}
+        {hasKnob && (
+          <ellipse cx={cx} cy={cy} rx={RING / gmSar} ry={RING * gmSar} fill="none" pointerEvents="none"
+            stroke={T["ice-select"]} strokeWidth={0.25} strokeDasharray="1 1" opacity={0.6} />
+        )}
         {wedges}
+        {knob}
       </g>
     );
   }
@@ -6989,8 +7032,8 @@ export default function DrillAnimator() {
     const hd = (cx, cy, r, props) => hdot(cx, cy, r, props, yf);
     const rotatable = p.kind === "net" || p.kind === "bumper" || p.kind === "deker" || p.kind === "passer" || p.kind === "stick" || p.kind === "light" || (p.kind === "player" && !p.path.length);
     if (!editing || tool === "draw" || !rotatable) return null;
-    // a routeless player's rotate ring sits at R=7 — directly under the open
-    // rotary's wedges — so it too yields while the menu is up
+    // while the rotary is up, its own dial knob replaces this handle — same
+    // ring, same drag — so drawing both would stack two knobs on one circle
     if (rotary && rotary.id === p.id) return null;
     const a = ((p.facing || 0) * Math.PI) / 180;
     const R = 7;
