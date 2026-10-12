@@ -547,6 +547,13 @@ export default function DrillAnimator() {
   const [marquee, setMarquee] = useState(null);    // {x0,y0,x1,y1} while dragging a box
   const [groupInput, setGroupInput] = useState(null);   // pending group-name text while naming, or null
   const [popup, setPopup] = useState(null);
+  // the on-ice rotary action menu, open on one player spot: {id, i, fork} with
+  // i = -1 for the body/standing spot. Pure UI state — never persisted.
+  const [rotary, setRotary] = useState(null);
+  // a wedge was chosen and now waits for its on-ice target: {kind: "pass" |
+  // "shoot" | "receive" | "collect", pieceId, at, fork}. While armed, candidate
+  // pieces light up and the next tap on one completes the action.
+  const [pickTarget, setPickTarget] = useState(null);
   // what the Edit bar should offer after a DRAG that didn't (re)open the popup —
   // {type:"point", id, seg, fork?} for a moved waypoint. The bar reads this only
   // when popup is absent, so a dragged point loads its own actions (Delete hits
@@ -4075,6 +4082,7 @@ export default function DrillAnimator() {
     setPieces(d.pieces); setRink(d.rink); setDrillTitle(d.drillTitle); setDrillDesc(d.drillDesc);
     setDrillSteps(d.drillSteps); setDrillNotes(d.drillNotes); setDrillItems(d.drillItems);
     setSelectedId(null); setMultiSel(null); setPopup(null); setOpenMenu(null);
+    setRotary(null); setPickTarget(null);
   }
   function undoLast() {
     if (!undoStack.current.length) return;
@@ -4755,6 +4763,75 @@ export default function DrillAnimator() {
     else if (t === "rim") addTerminalAction(p, i, fork, "rim");
   };
 
+  // ── the rotary action menu: taps on a player (or their waypoint) open a ring
+  // of puck-action wedges on the ice instead of the inspector panel. A pinned/
+  // docked panel keeps today's flow — it exists to hold the inspector open.
+  const wantsRotary = p => editing && !pinned && p?.kind === "player";
+  // taps that go somewhere else (another piece's popup, a mark, a leg) must not
+  // leave a stale ring behind — tracked here instead of at every tap site
+  useEffect(() => {
+    if (rotary && (popup || selectedId !== rotary.id)) setRotary(null);
+  }, [popup, selectedId]);   // eslint-disable-line
+  const toggleRotary = (id, i, fork) => {
+    setPopup(null);
+    setRotary(r => r && r.id === id && r.i === i && (r.fork || null) === (fork || null)
+      ? null : { id, i, fork: fork || null });
+  };
+  // a chosen wedge either writes the action immediately (one possible target)
+  // or arms pickTarget and lets the ice offer the candidates
+  function onRotaryWedge(key) {
+    const r = rotary;
+    setRotary(null);
+    if (!r) return;
+    const p = pieces.find(q => q.id === r.id);
+    if (!p) return;
+    const { i, fork } = r;
+    const arm = kind => setPickTarget({ kind, pieceId: p.id, at: i, fork: fork || null });
+    if (key === "more") { setPopup(i < 0 ? { type: "piece", id: p.id } : { type: "point", id: p.id, seg: i, ...(fork ? { fork } : {}) }); return; }
+    if (key === "pass") {
+      if (!AM.passPlayers(pieces, p.id).length && !AM.viaTargets(pieces).length)
+        flash("Add a player, passer, tire, or bumper to pass to");
+      else arm("pass");
+    } else if (key === "shoot") {
+      // two or more aimable targets → pick one; otherwise shoot at the nearest
+      // net right away (addTerminalAction's ensureNet covers an empty sheet)
+      if (AM.shootTargets(pieces).length >= 2) arm("shoot");
+      else { addTerminalAction(p, i, fork, "shot", null); setSelectedId(p.id); }
+    } else if (key === "chip" || key === "rim") {
+      addTerminalAction(p, i, fork, key); setSelectedId(p.id);
+      flash("Drag the on-ice handle to aim");
+    } else if (key === "receive") {
+      const srcs = AM.passPlayers(pieces, p.id);
+      if (!srcs.length) flash("Add another player to pass from");
+      else if (srcs.length === 1) doReceiveFrom(p.id, i, srcs[0].id, fork);
+      else arm("receive");
+    } else if (key === "collect") {
+      if (AM.collectCandidates(pieces, p.id, puckChain).length > 1) arm("collect");
+      else collectPuckAt(p.id, i, undefined, fork);   // 0 candidates: it says so itself
+    }
+  }
+  // the armed pick meets its target: `hit` = {pieceId, recvAt?, recvRef?} — a
+  // waypoint badge carries the catch spot, a body tap leaves the catch auto.
+  // No popup opens after: the on-ice action badge is the confirmation, and the
+  // ⋯ wedge is one tap away for tweaks.
+  function completePick(pick, hit) {
+    setPickTarget(null);
+    const p = pieces.find(q => q.id === pick.pieceId);
+    const tgt = pieces.find(q => q.id === hit.pieceId);
+    if (!p || !tgt) return;
+    const { at, fork } = pick;
+    if (pick.kind === "pass") {
+      if (tgt.kind === "player") {
+        addPassAction(p, at, fork, tgt.id,
+          hit.recvAt != null ? { recvAt: hit.recvAt, ...(hit.recvRef ? { recvRef: hit.recvRef } : {}) } : null);
+        flash(hit.recvAt != null ? `Pass to ${nameOf(tgt.id)}, caught at point ${hit.recvAt + 1}` : `Pass to ${nameOf(tgt.id)}`);
+      } else { addViaAction(p, at, fork, tgt.id); flash(`Give & go off ${nameOf(tgt.id)}`); }
+    } else if (pick.kind === "shoot") { addTerminalAction(p, at, fork, "shot", tgt.id); flash(`Shot at ${nameOf(tgt.id)}`); }
+    else if (pick.kind === "receive") { doReceiveFrom(p.id, at, tgt.id, fork); flash(`Receives from ${nameOf(tgt.id)}`); }
+    else if (pick.kind === "collect") { collectPuckAt(p.id, at, tgt.id, fork); flash(`Collects ${tgt.id}`); }
+    setSelectedId(pick.pieceId);
+  }
+
   function addPointAt(id, segIdx, pt, fork = null) {
     if (!fork) stepsOnInsert(id, segIdx);
     setPieces(ps => {
@@ -5260,6 +5337,11 @@ export default function DrillAnimator() {
       setTool("select");
       return;
     }
+    // an armed target pick: tapping empty ice cancels it and does nothing else —
+    // starting a marquee or an "add here" double-tap from a mis-tap would bury
+    // the state the coach was in the middle of using
+    if (pickTarget) { setPickTarget(null); return; }
+    setRotary(null);   // an open rotary closes like a popup does
     // pinned: an empty-ice tap keeps the last-edited item in the panel (don't
     // close it) — but still allow double-tap "add here" and box-select below
     if (!(pinned && editing)) setPopup(null);
@@ -5507,6 +5589,13 @@ export default function DrillAnimator() {
     if (playing || pinchRef.current) return;
     e.stopPropagation();
     setOpenMenu(null);
+    // an armed target pick: a lit candidate completes the action right here at
+    // pointer-down (no drag starts); anything else cancels the pick and falls
+    // through to a normal grab
+    if (pickTarget) {
+      if (AM.isPickCandidate(pickTarget, pieces, id, puckChain)) { completePick(pickTarget, { pieceId: id }); return; }
+      setPickTarget(null);
+    }
     if (tool === "draw") { setSelectedId(id); setPopup(null); beginDraw(e, id); return; }
     // pen ink starts on pieces all the time (routes leave players, dashes leave
     // route ends) — keep sketching, never grab the piece
@@ -5682,6 +5771,7 @@ export default function DrillAnimator() {
       d.moved = true;
       d.last = d.start;
       if (!pinned) setPopup(null);   // a pinned/docked panel stays open while dragging
+      setRotary(null); setPickTarget(null);   // a real drag is not a target tap
     }
     // box-select: track the rectangle (no loupe — it's not a precise handle drag)
     if (d.kind === "marquee") { d.last = pt; setMarquee({ x0: d.start.x, y0: d.start.y, x1: pt.x, y1: pt.y }); return; }
@@ -5923,14 +6013,26 @@ export default function DrillAnimator() {
         // a tap landing on a waypoint opens that point directly — don't make the
         // coach hit the leg first, then the dot on a second tap
         const wp = waypointUnderTap(d.id, d.line, d.tapPt, d.fork || null);
-        if (wp != null) { setSelectedId(d.id); setPopup({ type: "point", id: d.id, seg: wp, ...(d.fork ? { fork: d.fork } : {}) }); return; }
+        if (wp != null) {
+          setSelectedId(d.id);
+          if (wantsRotary(pieces.find(q => q.id === d.id))) toggleRotary(d.id, wp, d.fork || null);
+          else setPopup({ type: "point", id: d.id, seg: wp, ...(d.fork ? { fork: d.fork } : {}) });
+          return;
+        }
         setSelectedId(d.id);
         setPopup({ type: "line", id: d.id, seg: d.line, pt: d.tapPt, ...(d.fork ? { fork: d.fork } : {}) });
         return;
       }
-      setPopup({ type: "piece", id: d.id });
+      // a player's body tap opens the rotary action menu; everything else keeps
+      // the inspector popup
+      if (wantsRotary(pieces.find(q => q.id === d.id))) toggleRotary(d.id, -1, null);
+      else setPopup({ type: "piece", id: d.id });
     }
-    if (d.kind === "anchor") { setSelectedId(d.id); setPopup({ type: "point", id: d.id, seg: d.seg, ...(d.fork ? { fork: d.fork } : {}) }); }
+    if (d.kind === "anchor") {
+      setSelectedId(d.id);
+      if (wantsRotary(pieces.find(q => q.id === d.id))) toggleRotary(d.id, d.seg, d.fork || null);
+      else setPopup({ type: "point", id: d.id, seg: d.seg, ...(d.fork ? { fork: d.fork } : {}) });
+    }
   }
 
   /* ----- text / files ----- */
@@ -6439,12 +6541,14 @@ export default function DrillAnimator() {
   // board — so while that step is on screen, its target wears the same numbers.
   // Base route only: the list also reaches a receiver's reaction forks ("↳ ref
   // @2"), and those would need per-branch badges to stay unambiguous.
-  function renderWpNumbers(p) {
-    const route = p.path || [];
-    if (!route.length) return null;
-    const col = ink(p.color);
+  // one route's numbered waypoint discs. With `onPick` each badge also carries a
+  // transparent hit circle (tap = pick that waypoint); without it the group is
+  // inert decoration, exactly the old Catch numbering.
+  function wpBadges(keyId, route, col, onPick) {
+    if (!route || !route.length) return null;
+    const G = coarsePtr ? 1.4 : 1;
     return (
-      <g key={`wpn-${p.id}`} pointerEvents="none">
+      <g key={`wpn-${keyId}`} pointerEvents={onPick ? undefined : "none"}>
         {route.map((s, i) => {
           const cfx = iconXf({ x: s.x, y: s.y, a: 0 });
           return (
@@ -6455,9 +6559,121 @@ export default function DrillAnimator() {
                 <text x={0} y={0} textAnchor="middle" dominantBaseline="central" fontSize={2.9}
                   fontWeight={800} fill={col} style={{ fontFamily: "system-ui, sans-serif" }}>{i + 1}</text>
               </g>
+              {onPick && (
+                <circle cx={0} cy={0} r={3.6 * G} fill="transparent" style={{ cursor: "pointer" }}
+                  onPointerDown={e => { e.stopPropagation(); onPick(i); }} />
+              )}
             </g>
           );
         })}
+      </g>
+    );
+  }
+  function renderWpNumbers(p) { return wpBadges(p.id, p.path || [], ink(p.color), null); }
+
+  // the lit candidates of an armed rotary pick. Bodies pulse a ring but stay
+  // tap-transparent — the tap lands on the piece itself and pieceDown's
+  // interception completes the pick — while a pass's numbered waypoint badges
+  // carry their own hits, since a waypoint is not otherwise tappable.
+  function renderPickTargets() {
+    if (!editing || !pickTarget) return null;
+    const pick = pickTarget;
+    const pulse = (q, col, key) => {
+      const fx = iconXf({ x: q.x, y: q.y, a: 0 });
+      return (
+        <g key={key} className="hd-pickpulse" transform={fx.t} pointerEvents="none">
+          <circle cx={0} cy={0} r={q.kind === "net" ? 6 : 4.6} fill="none" stroke={col} strokeWidth={0.7} />
+        </g>
+      );
+    };
+    const els = [];
+    if (pick.kind === "pass") {
+      for (const q of AM.passPlayers(pieces, pick.pieceId)) {
+        els.push(pulse(q, T["ice-select"], `pp-${q.id}`));
+        // every route the catch can land on (base + reaction forks), with
+        // branch-LOCAL indices — exactly the recvAt/recvRef space addPassAction
+        // stores. Fork badges wear their branch colour so overlaps stay legible.
+        for (const r of AM.receiverRoutes(q)) {
+          const refLc = (r.ref || "").toLowerCase();
+          els.push(wpBadges(`${q.id}:${refLc || "base"}`, r.path,
+            r.ref ? ink(r.ref.split("/").pop()) : ink(q.color),
+            wi => completePick(pick, { pieceId: q.id, recvAt: wi, ...(refLc ? { recvRef: refLc } : {}) })));
+        }
+      }
+      for (const q of AM.viaTargets(pieces)) els.push(pulse(q, T["act-pass"], `pv-${q.id}`));
+    } else {
+      const cands = pick.kind === "shoot" ? AM.shootTargets(pieces)
+        : pick.kind === "receive" ? AM.passPlayers(pieces, pick.pieceId)
+        : AM.collectCandidates(pieces, pick.pieceId, puckChain);
+      const col = pick.kind === "shoot" ? T["act-shot"] : pick.kind === "receive" ? T["act-gain"] : T["act-loose"];
+      for (const q of cands) els.push(pulse(q, col, `pc-${q.id}`));
+    }
+    return <g>{els}</g>;
+  }
+
+  // ── the rotary action menu: a ring of wedge discs around the tapped player
+  // spot. Lives INSIDE the scene <g> (not an HTML overlay) so pinch-zoom and
+  // sheet rotation track for free; iconXf keeps each disc round under the
+  // fill-mode stretch and its glyph screen-upright.
+  const ROTARY_LABEL = { pass: "Pass", shoot: "Shoot", chip: "Chip", rim: "Hard rim",
+    receive: "Receive pass", collect: "Collect puck", more: "All settings" };
+  const ROTARY_ICON = { pass: "pass", shoot: "net", chip: "chip", rim: "rim",
+    receive: "receive", collect: "collect", more: "dots" };
+  function renderRotary() {
+    if (!editing || !rotary || pinned) return null;
+    const p = pieces.find(q => q.id === rotary.id);
+    if (!p || p.kind !== "player") return null;
+    const { i, fork } = rotary;
+    const spot = i < 0 ? { x: p.x, y: p.y } : routeSegs(p, fork)[i];
+    if (!spot) return null;
+    const anchor = { x: spot.x, y: spot.y };
+    // same context rule as the inspector's Add dropdown: the condition-aware
+    // ledger decides whether this spot offers releases or gains
+    const keys = AM.wedgesFor(mayHoldOn(posLedger, pieces, p.id, fork || ""));
+    const RING = 6.5, DISC = 2.6, G = coarsePtr ? 1.4 : 1;
+    // keep the whole ring on the sheet; a shifted centre keeps a dashed leash
+    // back to the spot it acts on (the loupe's edge-hug, in rink feet)
+    const [mx, my, vw, vh] = VIEWS[rink];
+    const inset = RING + DISC + 0.8;
+    const cx = Math.max(mx + inset, Math.min(mx + vw - inset, anchor.x));
+    const cy = Math.max(my + inset, Math.min(my + vh - inset, anchor.y));
+    const shifted = Math.hypot(cx - anchor.x, cy - anchor.y) > 0.5;
+    // hit discs may not overlap their neighbours, or the later wedge silently
+    // wins the shared sliver — cap the radius at just under half the spacing
+    const hitR = Math.min(4.2 * G, RING * Math.sin(Math.PI / keys.length) * 0.95);
+    const wedges = keys.map((key, k) => {
+      // first wedge at screen-top: rink angle −90° minus the sheet rotation,
+      // then evenly around; gmMove lands them on a visually round ring
+      const ang = ((-90 - screenRot) * Math.PI) / 180 + (k * 2 * Math.PI) / keys.length;
+      const c = gmMove(cx, cy, Math.cos(ang), Math.sin(ang), RING);
+      const fx = iconXf({ x: c.x, y: c.y, a: 0 });
+      const col = key === "pass" ? T["act-pass"] : key === "shoot" ? T["act-shot"]
+        : key === "chip" || key === "rim" ? T["act-loose"]
+        : key === "more" ? T["ice-select"] : T["act-gain"];
+      return (
+        <g key={key} transform={fx.t}>
+          <circle cx={0} cy={0} r={DISC} fill={T["surface-panel"]} stroke={col} strokeWidth={0.55} />
+          <g transform={`rotate(${-fx.th})`}>
+            <g style={{ color: col }} transform="scale(0.22) translate(-12 -12)"
+              fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round">
+              {ICONS[ROTARY_ICON[key]]}
+            </g>
+          </g>
+          <circle cx={0} cy={0} r={hitR} fill="transparent" style={{ cursor: "pointer" }}
+            role="button" aria-label={ROTARY_LABEL[key]}
+            onPointerDown={e => { e.stopPropagation(); onRotaryWedge(key); }}>
+            <title>{ROTARY_LABEL[key]}</title>
+          </circle>
+        </g>
+      );
+    });
+    return (
+      <g className="hd-rotary">
+        {shifted && (
+          <line x1={anchor.x} y1={anchor.y} x2={cx} y2={cy} pointerEvents="none"
+            stroke={T["ice-select"]} strokeWidth={0.4} strokeDasharray="1.8 1.4" opacity={0.8} />
+        )}
+        {wedges}
       </g>
     );
   }
@@ -9225,7 +9441,13 @@ export default function DrillAnimator() {
     return `${label} — ${says.charAt(0).toLowerCase()}${says.slice(1)}`;
   };
   const toolHint =
-    !playing && !aiPlay && animT > 0
+    pickTarget
+      ? (pickTarget.kind === "pass"
+          ? "Tap who gets the pass — a numbered point sets the catch spot; a passer, tire, or bumper plays give & go"
+        : pickTarget.kind === "shoot" ? "Tap the net or target to shoot at"
+        : pickTarget.kind === "receive" ? "Tap the player who makes the pass"
+        : "Tap the puck to collect")
+      : !playing && !aiPlay && animT > 0
       ? "Paused — tap the ice or a piece to edit (jumps to start)"
       : editingFork && tool === "select"
       ? `Editing the reaction — drag waypoints · tap the line to add · “✓ Editing” to finish`
@@ -9249,7 +9471,7 @@ export default function DrillAnimator() {
   // progress and the hint tells you how to finish it. Everything else is the
   // idle standing hint, which on a phone is just noise over the rink.
   const transientHint =
-    (!playing && !aiPlay && animT > 0) || editingFork || tool !== "select" ? toolHint : null;
+    (!playing && !aiPlay && animT > 0) || editingFork || pickTarget || tool !== "select" ? toolHint : null;
 
   // ---- presentation: the EDITOR chrome gets out of the way ----------------
   // Showing a drill to a room, you still want play/pause and the scrubber —
@@ -9327,7 +9549,7 @@ export default function DrillAnimator() {
   const setMode = next => {
     if (next === mode) return;
     flushPen();
-    setPenPop(null); setOpenMenu(null); setPopup(null);
+    setPenPop(null); setOpenMenu(null); setPopup(null); setRotary(null); setPickTarget(null);
     setPlacingStep(null); setEditAnchor(null);
     setHoldStep(null); holdRef.current = 0;
     if (next !== "play") {
@@ -9357,7 +9579,8 @@ export default function DrillAnimator() {
     const fresh = animT >= 1 || animT === 0;
     if (animT >= 1) resetAnim();
     if (!playing && fresh) setPlaySeed(s => s + 1);
-    setPopup(null); setOpenMenu(null); setHoldStep(null); setPlacingStep(null); holdRef.current = 0; setPlaying(p => !p);
+    setPopup(null); setOpenMenu(null); setRotary(null); setPickTarget(null);
+    setHoldStep(null); setPlacingStep(null); holdRef.current = 0; setPlaying(p => !p);
   };
   const resetPlay = () => { setPlaying(false); resetAnim(); };
 
@@ -9372,7 +9595,11 @@ export default function DrillAnimator() {
         if (presentation && holdStep) skipHold();  // caption held → advance early
         else togglePlay();                         // otherwise pause / continue
       } else if (e.key === "Escape") {
-        if (playing) { e.preventDefault(); resetPlay(); }   // stop & reset
+        // the rotary's two layers unwind innermost-first: the armed pick, then
+        // the open ring, then (playing) the run itself
+        if (pickTarget) { e.preventDefault(); setPickTarget(null); }
+        else if (rotary) { e.preventDefault(); setRotary(null); }
+        else if (playing) { e.preventDefault(); resetPlay(); }   // stop & reset
       } else if (e.key === "1" || e.key === "2" || e.key === "3") {
         // the three flows, left to right, matching the bar's own order
         const m = ["draw", "edit", "play"][+e.key - 1];
@@ -9382,7 +9609,7 @@ export default function DrillAnimator() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [presentation, holdStep, playing, mode, hasTimeline]); // eslint-disable-line
+  }, [presentation, holdStep, playing, mode, hasTimeline, pickTarget, rotary]); // eslint-disable-line
 
   // during playback the "Routes on play" setting controls what stays visible;
   // while editing everything shows regardless
@@ -10436,6 +10663,10 @@ export default function DrillAnimator() {
                 {numberedIds?.has(p.id) ? renderWpNumbers(p) : null}
               </g>
             ))}
+            {/* an armed pick's lit candidates, then the rotary ring itself — on
+                top of the handles so its wedges always win the tap */}
+            {renderPickTargets()}
+            {renderRotary()}
             {renderMarkHandles()}
             {renderMarkResize()}
             {selected && renderRotateHandle(selected)}
@@ -10698,7 +10929,7 @@ export default function DrillAnimator() {
               add from a selection, when the way back to the palette is to tap
               the ice, which deselects. That's one tap either way, and it's the
               tap you were going to make anyway. */}
-          {!selected && !multiSel?.size && (
+          {!pickTarget && !selected && !multiSel?.size && (
             <>
               {ADD_GROUPS[0].kinds.map(addChip)}
               <div className="hd-pensep" />
@@ -10751,9 +10982,22 @@ export default function DrillAnimator() {
                 <Icon name="close" size={17} /><span>Done</span></button>
             </>
           )}
+          {/* ---- an armed rotary pick replaces the selection strip: what is
+              being authored, and the one way out ---- */}
+          {pickTarget && (
+            <>
+              <span className="hd-selchip">
+                {{ pass: "Pass from", shoot: "Shot by", receive: "Pass to", collect: "Collect by" }[pickTarget.kind]} {pickTarget.pieceId}
+              </span>
+              <div className="hd-pensep" />
+              <button className="hd-pentool exit" title="Cancel — no action will be added"
+                onClick={() => setPickTarget(null)}>
+                <Icon name="close" size={17} /><span>Cancel</span></button>
+            </>
+          )}
           {/* ---- one piece selected: the four things you reach for without
               opening anything. "More" is the door to the full inspector. ---- */}
-          {selected && !multiSel?.size && (() => {
+          {!pickTarget && selected && !multiSel?.size && (() => {
             // popup wins when it targets this piece; otherwise a just-dragged
             // waypoint (dragSel) drives the strip, so a drag with no panel still
             // loads the point's actions.

@@ -786,6 +786,14 @@ export const STYLES = `
         /* menus/popups ease in instead of popping */
         @keyframes hd-fadein { from { opacity:0; transform:translateY(5px); } }
         .hd-menu, .hd-pop:not(.pinned) { animation:hd-fadein .13s ease-out; }
+        /* the on-ice rotary menu fades in; an armed pick's candidate rings
+           pulse so the lit targets read as "tap one of these" */
+        @keyframes hd-popin { from { opacity:0; } }
+        .hd-rotary { animation:hd-popin .12s ease-out; }
+        @keyframes hd-pulse { 0%,100% { opacity:.55; } 50% { opacity:1; } }
+        .hd-pickpulse { animation:hd-pulse 1.1s ease-in-out infinite; }
+        @media (prefers-reduced-motion: reduce) {
+          .hd-rotary, .hd-pickpulse { animation:none; } }
         /* disabled is one look everywhere (individual buttons don't restyle it) */
         button:disabled { opacity:.4; cursor:default; }
         button:disabled:active { filter:none; transform:none; }

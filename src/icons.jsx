@@ -61,9 +61,13 @@ const ICONS = {
   giveGo: <><path d="M8 8v4a4 4 0 0 0 8 0V7" /><path d="M12.5 10.5L16 7l3.5 3.5" /></>,
   // straight arrow = a plain pass
   pass: <><path d="M4 12h14" /><path d="M13 6l6 6-6 6" /></>,
+  // the pass arrow arriving at a wall = receive a pass
+  receive: <><path d="M20 12H8" /><path d="M13 6l-6 6 6 6" /><path d="M4.5 5.5v13" /></>,
   chip: <path d="M4 16C8 7 16 7 20 16" />,
   rim: <path d="M4 5v8a6 6 0 0 0 6 6h10" />,
   target: <><circle cx="12" cy="12" r="8.5" /><circle cx="12" cy="12" r="3.2" /></>,
+  // a ⋯ ellipsis = "everything else" (the rotary's door to the full inspector)
+  dots: <path d="M5 12h.01M12 12h.01M19 12h.01" />,
   label: <><path d="M5 6h14" /><path d="M12 6v13" /></>,
   puck: <ellipse cx="12" cy="12" rx="8" ry="4.4" {...F} />,
   check: <path d="M5 12.5l4.5 4.5L19 6.5" />,
