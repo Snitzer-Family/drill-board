@@ -4,6 +4,8 @@
 // for the unaimed rim (rimPath) and the aimed one (rimTo), including the
 // drill that first showed the puck popping into the middle (rim=0:P2@3~-18).
 import * as boards from '../src/boards.js';
+import { parseDrill } from '../src/drill-format.js';
+import { createTiming } from '../src/timing.js';
 
 let pass = 0, fail = 0;
 const T = (name, got, want) => {
@@ -59,6 +61,29 @@ const diesNearest = (pts, to, tol = 3.5) => {
 { // a very short rim (release and collector close together) stays valid
   const pts = boards.rimPath({ x: 30, y: 6 }, { x: 44, y: 8 });
   T('short rim: still release → wall', pts.length >= 2 && hugsWall(pts), true);
+}
+
+{ // the stop is a friction GLIDE, not a brake: pucks are on ice, so the
+  // collected rim shares the terminal rim's long ease — deceleration is
+  // monotone over a real tail and ends at a crawl, through the actual planner
+  const dsl = `DSL 10
+RINK half
+PIECE N1 net 189 42.5 #c81e33 face=180
+PIECE P1 player 122.7 20.1 #d7263d P1
+PATH P1 L 140,25 L 160,30
+PIECE P2 player 120 60 #d7263d P2
+PATH P2 L 145,55 L 160,45 L 168.8,34.7
+PIECE PK1 puck 115 20 #14171a on=P1 rim=0:P2@3~-18`;
+  const { pieces } = parseDrill(dsl);
+  const t = createTiming({ pieces, pace: 1, segRefs: { current: {} },
+    planCache: { current: { key: null, plans: {}, warp: {}, rel: {} } } });
+  const flys = t.getPlan().plans.PK1.legs.filter(L => L.type === 'fly' && L.rim);
+  const v = L => Math.hypot(L.x1 - L.x0, L.y1 - L.y0) / Math.max(1e-9, L.t1 - L.t0);
+  const tail = flys.slice(-14).map(v);
+  T('rim glide: tail decelerates monotonically', tail.every((s, i) => i === 0 || s <= tail[i - 1] + 0.01), true);
+  T('rim glide: dies at a crawl, not a brake', v(flys[flys.length - 1]) < 0.25 * v(flys[0]), true);
+  T('rim glide: the ramp spans a real tail (>8 slowing legs)',
+    tail.filter((s, i) => i > 0 && s < tail[i - 1] - 0.01).length > 8, true);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -1068,7 +1068,14 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
             const launch = boards.clampInside(lb.x, lb.y);     // a blade past the boards → no path
             if (tr.kind === "rim") {
               const raw = tr.aim != null ? boards.rimTo(launch, tr.aim, anchor) : boards.rimPath(launch, anchor);
-              return { raw, poly: densify(raw), speed: vRim(), ease: 14 };                 // settle on the wall
+              const poly = densify(raw);
+              let rl = 0;
+              for (let k = 1; k < poly.length; k++) rl += Math.hypot(poly[k].x - poly[k - 1].x, poly[k].y - poly[k - 1].y);
+              // the puck dies loose on the wall now, so it gets the TERMINAL
+              // rim's long friction glide (ease ∝ travel, up to 55ft) — the old
+              // 14ft settle was tuned for ending in the collector's stick, and
+              // on open ice it read as the puck braking to a halt
+              return { raw, poly, speed: vRim(), ease: Math.min(55, rl * 0.6) };
             }
             const h = chipHeading(cur, launchT, tr.aim);
             const poly = densify(boards.slideTo(launch.x, launch.y, h.x, h.y, anchor));
