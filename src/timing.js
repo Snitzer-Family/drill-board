@@ -713,9 +713,13 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
       // the tail trickles out. Scaled by the transport multiple so 2× still
       // plays twice as fast; vRim survives only as a ceiling (a rim can't
       // leave the blade harder than the hardest shot).
-      const RIM_A = 6;                                     // ft/s² at 1×
-      const vRimFor = len =>
-        Math.min(vRim(), Math.sqrt(2 * RIM_A * Math.max(2, len)) * (pace / 15) * (pk.speed || 1));
+      // ONE ice for everything that slides loose: rims and board chips share
+      // the constant and the energy equation, differing only in their ceiling
+      // (a chip is a soft touch, a rim can be fired as hard as a pass).
+      const ICE_A = 6;                                     // ft/s² at 1×
+      const glideV = (len, cap) =>
+        Math.min(cap, Math.sqrt(2 * ICE_A * Math.max(2, len)) * (pace / 15) * (pk.speed || 1));
+      const vRimFor = len => glideV(len, vRim());
       const legs = [];
       let cur = null;
       let tBase = 0;
@@ -1104,9 +1108,10 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
             const poly = densify(boards.slideTo(launch.x, launch.y, h.x, h.y, anchor));
             let len = 0;
             for (let k = 1; k < poly.length; k++) len += Math.hypot(poly[k].x - poly[k - 1].x, poly[k].y - poly[k - 1].y);
-            return { raw: null, poly,
-              speed: vChip() + (vRim() - vChip()) * Math.min(1, Math.max(0, (len - 18) / 40)),  // hard vs soft
-              ease: Math.min(len * 0.5, 15) };                                                  // glide to a settle
+            // same ice as the rim: launched with exactly the energy the
+            // distance costs (harder chip for a farther pickup falls out of
+            // the physics), gliding the whole run to die at the gather spot
+            return { raw: null, poly, speed: glideV(len, vChip()), ease: len };
           };
           // the direction the puck sets off in is what says which hand this is. A chip
           // and an aimed rim know theirs up front; an un-aimed rim only finds out once
@@ -1274,7 +1279,8 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
         const lb = releaseAt(cur, launchT, warp, twist, back);
         const launch = boards.clampInside(lb.x, lb.y);           // a blade past the boards → no path
         const dist = pk.chipDist != null ? pk.chipDist : 26;     // handle-set travel distance
-        const r = pushTravel(densify(reflectPath(boards.slide(launch.x, launch.y, h.x, h.y, dist), netSh)), launchT, vChip(), { by: cur.id, chip: true, easeOut: Math.min(28, dist * 0.6), back, relTwist: twist });
+        // same ice as the rim: energy to match the distance, gliding all the way
+        const r = pushTravel(densify(reflectPath(boards.slide(launch.x, launch.y, h.x, h.y, dist), netSh)), launchT, glideV(dist, vChip()), { by: cur.id, chip: true, easeOut: dist, back, relTwist: twist });
         legs.push({ type: "rest", x: r.end.x, y: r.end.y, t0: r.t }); tBase = r.t;
       }
       let relT = Infinity;

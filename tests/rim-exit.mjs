@@ -141,6 +141,30 @@ PIECE PK1 puck 115 20 #14171a on=P1 rim=0:P2~-18`;
     offWall.every(d => d < 2.5), true, );
 }
 
+{ // board chips ride the SAME ice as rims: launch energy matched to the
+  // travel (v0 ∝ √d — a harder chip for a farther pickup falls out of the
+  // physics) and the whole run is the glide (duration ≈ 2·d/v0)
+  const rig = x2 => {
+    const dsl = `DSL 10
+RINK half
+PIECE P1 player 150 42 #d7263d P1
+PIECE P2 player ${x2} 42 #d7263d P2
+PIECE PK1 puck 150 42 #14171a on=P1 chip=0:P2~0`;
+    const { pieces } = parseDrill(dsl);
+    const t = createTiming({ pieces, pace: 1, segRefs: { current: {} },
+      planCache: { current: { key: null, plans: {}, warp: {}, rel: {} } } });
+    const flys = t.getPlan().plans.PK1.legs.filter(L => L.type === 'fly' && L.chip);
+    const v = L => Math.hypot(L.x1 - L.x0, L.y1 - L.y0) / Math.max(1e-9, L.t1 - L.t0);
+    const d = flys.reduce((a, L) => a + Math.hypot(L.x1 - L.x0, L.y1 - L.y0), 0);
+    return { v0: v(flys[0]), d, dur: flys[flys.length - 1].t1 - flys[0].t0 };
+  };
+  const near = rig(170), far = rig(190);
+  T('chip: energy matches distance (v0 ∝ √d)',
+    Math.abs(near.v0 / far.v0 - Math.sqrt(near.d / far.d)) < 0.12, true);
+  T('chip: travel time matches the launch energy (≈2·d/v0)',
+    far.dur / (2 * far.d / far.v0) > 0.85 && far.dur / (2 * far.d / far.v0) < 1.15, true);
+}
+
 { // a collect beyond stick reach does NOT collect: the puck rests on the wall
   // and the chain ends there — no snap, no teleport. Within reach, it works.
   const rig = lastWp => {
