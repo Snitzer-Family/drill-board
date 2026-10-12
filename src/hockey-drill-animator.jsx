@@ -16,6 +16,7 @@ import { ZONES, zoneAt } from "./zones.js";
 import { PieceIcon, GoalieIcon, Stepper, DiagPanel, Icon, ICONS } from "./icons.jsx";
 import { createTiming, resolveNearest, goalieDepth, goalieSpot } from "./timing.js";
 import { buildLedger, mayHoldOn, mayHoldEntering, orderTransfers } from "./possession.js";
+import * as AM from "./action-menu.js";
 import { classifyPenGroup, SYMBOL_MAX, SYMBOL_MAX_PX } from "./sketch-recognize.js";
 import { newGame, stepGame } from "./ai-game.js";
 import { STYLES } from "./styles.js";
@@ -4625,17 +4626,9 @@ export default function DrillAnimator() {
       } catch { /* fall through */ }
       return rp;
     };
-    const cands = pieces.filter(q => {
-      if (q.kind !== "puck") return false;
-      const released = (q.terminals || []).length > 0;
-      const loose = !q.carrier && !q.pickup && !(q.transfers || []).length && !released;
-      if (!(released || loose)) return false;
-      const ch = puckChain(q);
-      // you can chip/rim your own puck and skate to retrieve it — allow a self
-      // collect when the collector has a route to go get it; forbid only the
-      // nonsensical stationary "collect the puck I'm still holding" case
-      return !(released && ch[ch.length - 1] === playerId && !player.path.length);
-    });
+    // the candidate rule lives in action-menu.js so the rotary's pick targets
+    // light up exactly the pucks this function would accept
+    const cands = AM.collectCandidates(pieces, playerId, puckChain);
     if (!cands.length) { setToast("No loose puck to collect"); setTimeout(() => setToast(""), 1500); return; }
     // an explicit puck id designates that puck (if collectable), else nearest wins
     const pick = targetId && cands.find(q => q.id === targetId);
@@ -4687,6 +4680,80 @@ export default function DrillAnimator() {
     }
     setSelectedId(receiverId);
   }
+
+  // ── puck-action cores, hoisted from the ActionSteps panel ─────────────────
+  // The on-ice rotary menu and the inspector's Add dropdown both author actions
+  // through THESE, so the two entry points cannot drift. (p, i, fork) name the
+  // acting player, the waypoint (i = -1 is the standing/start spot) and the
+  // branch lineage the action belongs to.
+  const defaultPasserFor = p => {
+    const others = AM.passPlayers(pieces, p.id);
+    return ((others.find(o => pieces.some(q => q.kind === "puck" && puckChain(q).includes(o.id))) || others[0] || {}).id) || null;
+  };
+  // the puck p is holding, unreleased, ready to act on — works at ANY spot
+  // (including a stationary i=-1, where index bookkeeping differs): p is the
+  // chain's current last carrier and it has no terminal yet. Prefer one
+  // gained right here, then the most recent.
+  const heldReleaseAt = (p, i, fork) => {
+    // holds this puck on THIS route (branch lineage `fork`), unreleased — a sibling
+    // branch's shot/pass doesn't take it away here
+    const holds = pieces.filter(q => q.kind === "puck"
+      && holdsOnLineage(q, p.id, fork) && !termedByOnLineage(q, p.id, fork));
+    const here = holds.filter(q => {
+      if (q.pickup && q.pickup.to === p.id) {
+        const qi = !p.path.length || q.pickup.at < 0 ? -1 : q.pickup.at;   // waypoint 0 = start (i=-1)
+        if (qi === i) return true;
+      }
+      const ts = q.transfers || [], t = ts[ts.length - 1];
+      return t && t.to === p.id && (t.recvAt != null ? t.recvAt : -1) === i;
+    });
+    const pool = here.length ? here : holds;
+    const pk = pool[pool.length - 1]
+      || heldPuckAt(p, i) || pieces.find(q => q.kind === "puck" && puckChain(q).includes(p.id)) || pieces.find(q => q.kind === "puck");
+    if (!pk) return null;
+    return { pk, last: holdsOnLineage(pk, p.id, fork) };
+  };
+  // always pin the releaser (`by`): after sibling-branch receivers the inferred
+  // releaser of a later transfer is genuinely ambiguous (several players "hold"
+  // on their own mutually-exclusive runs), and inference would attribute the
+  // pass to the wrong player — it then renders on THEIR waypoint, not here.
+  // `recv` names where the receiver catches it ({recvAt, recvRef?}); null = auto.
+  const addPassAction = (p, i, fork, to, recv = null) => {
+    const h = heldReleaseAt(p, i, fork);
+    if (h) appendTransfer(h.pk.id, { at: i, to, recvAt: recv ? recv.recvAt : null, kind: "pass",
+      ...(recv && recv.recvRef ? { recvRef: recv.recvRef } : {}),
+      ...(fork ? { atRef: fork } : {}), by: p.id });
+  };
+  // give-and-go: bounce off a passer/tire/bumper back to this player
+  const addViaAction = (p, i, fork, via) => {
+    const h = heldReleaseAt(p, i, fork);
+    if (h) appendTransfer(h.pk.id, { at: i, to: p.id, recvAt: i < 0 ? null : i, kind: "pass", via,
+      ...(fork ? { atRef: fork, recvRef: fork } : {}), by: p.id });
+  };
+  const addTerminalAction = (p, i, fork, kind, net) => {
+    const h = heldReleaseAt(p, i, fork); if (!h) return;
+    const pk = h.pk;
+    const dist = kind === "rim" ? REL_DEFAULT.rimAt : kind === "chip" ? REL_DEFAULT.chipAt : null;
+    // a branch ends one way PER PLAYER: drop only p's own prior end on this lineage
+    const patch = stripLineageTerms(pk, fork, p.id);
+    const base = "terminals" in patch ? (patch.terminals || []) : (pk.terminals || []);
+    // always pin the shooter — the actor must not drift as the chain is edited
+    // (an inferred actor follows "last authored receiver", so adding a pass later
+    // would silently reassign an unpinned terminal)
+    patch.terminals = [...base, { kind, at: i, ref: fork || "", by: p.id,
+      ...(kind === "shot" ? (net ? { net } : {}) : { aim: null, dist }) }];
+    updateById(pk.id, patch);
+    if (kind === "shot") ensureNet();
+  };
+  const createActionType = (p, i, fork, t) => {
+    if (t === "receive") { const src = defaultPasserFor(p); if (src) doReceiveFrom(p.id, i, src, fork); else flash("Add another player to pass from"); }
+    else if (t === "collect") collectPuckAt(p.id, i, undefined, fork);
+    else if (t === "pass") { const to = (AM.passPlayers(pieces, p.id)[0] || {}).id, via = AM.viaTargets(pieces)[0];
+      if (to) addPassAction(p, i, fork, to); else if (via) addViaAction(p, i, fork, via.id); else flash("Add a player, passer, tire, or bumper to pass to"); }
+    else if (t === "shoot") addTerminalAction(p, i, fork, "shot", null);
+    else if (t === "chip") addTerminalAction(p, i, fork, "chip");
+    else if (t === "rim") addTerminalAction(p, i, fork, "rim");
+  };
 
   function addPointAt(id, segIdx, pt, fork = null) {
     if (!fork) stepsOnInsert(id, segIdx);
@@ -7301,7 +7368,7 @@ export default function DrillAnimator() {
     const GAIN_TYPES = [["receive", "Receive Pass"], ["collect", "Collect Puck"]];
     const RELEASE_TYPES = [["pass", "Pass"], ["shoot", "Shoot"], ["chip", "Chip"], ["rim", "Hard Rim"]];
     const isGain = t => t === "receive" || t === "collect";
-    const shootTargets2 = pieces.filter(q => q.kind === "net" || q.kind === "passer" || q.kind === "bumper" || q.kind === "tire");
+    const shootTargets2 = AM.shootTargets(pieces);
     const tgtLabel2 = t => t.id + (t.kind === "bumper" ? " · bumper" : t.kind === "tire" ? " · tire" : t.kind === "passer" ? " · passer" : "");
     const typeOfStep = st => st.role === "receive" ? "receive"
       : st.role === "collect" || st.role === "pickup" ? "collect"
@@ -7408,64 +7475,14 @@ export default function DrillAnimator() {
       // resolveForks can lower them to the chosen run's flat index (base = no ref)
       const relRef = fork ? { atRef: fork } : {};
       const recRef = fork ? { recvRef: fork } : {};
-      const others = pieces.filter(q => q.kind === "player" && q.id !== p.id);
+      const others = AM.passPlayers(pieces, p.id);
       // give-and-go bounce targets: passers, tires, bumpers (the puck rebounds
       // off them back to this player) — available even with no other player
-      const viaTargets = pieces.filter(q => q.kind === "passer" || q.kind === "tire" || q.kind === "bumper");
-      const defaultPasser = () => ((others.find(o => pieces.some(q => q.kind === "puck" && puckChain(q).includes(o.id))) || others[0] || {}).id) || null;
-      // the puck p is holding, unreleased, ready to act on — works at ANY spot
-      // (including a stationary i=-1, where index bookkeeping differs): p is the
-      // chain's current last carrier and it has no terminal yet. Prefer one
-      // gained right here, then the most recent.
-      const heldRelease = () => {
-        // holds this puck on THIS route (branch lineage `fork`), unreleased — a sibling
-        // branch's shot/pass doesn't take it away here
-        const holds = pieces.filter(q => q.kind === "puck"
-          && holdsOnLineage(q, p.id, fork) && !termedByOnLineage(q, p.id, fork));
-        const here = holds.filter(q => {
-          if (q.pickup && q.pickup.to === p.id) {
-            const qi = !p.path.length || q.pickup.at < 0 ? -1 : q.pickup.at;   // waypoint 0 = start (i=-1)
-            if (qi === i) return true;
-          }
-          const ts = q.transfers || [], t = ts[ts.length - 1];
-          return t && t.to === p.id && (t.recvAt != null ? t.recvAt : -1) === i;
-        });
-        const pool = here.length ? here : holds;
-        const pk = pool[pool.length - 1]
-          || heldPuckAt(p, i) || pieces.find(q => q.kind === "puck" && puckChain(q).includes(p.id)) || pieces.find(q => q.kind === "puck");
-        if (!pk) return null;
-        return { pk, last: holdsOnLineage(pk, p.id, fork) };
-      };
-      // always pin the releaser (`by`): after sibling-branch receivers the inferred
-      // releaser of a later transfer is genuinely ambiguous (several players "hold"
-      // on their own mutually-exclusive runs), and inference would attribute the
-      // pass to the wrong player — it then renders on THEIR waypoint, not here.
-      const addPass = to => { const h = heldRelease(); if (h) appendTransfer(h.pk.id, { at: i, to, recvAt: null, kind: "pass", ...relRef, by: p.id }); };
-      // give-and-go: bounce off a passer/tire/bumper back to this player
-      const addVia = via => { const h = heldRelease(); if (h) appendTransfer(h.pk.id, { at: i, to: p.id, recvAt: i < 0 ? null : i, kind: "pass", via, ...relRef, ...recRef, by: p.id }); };
-      const addTerminal = (kind, net) => {
-        const h = heldRelease(); if (!h) return;
-        const pk = h.pk;
-        const dist = kind === "rim" ? REL_DEFAULT.rimAt : kind === "chip" ? REL_DEFAULT.chipAt : null;
-        // a branch ends one way PER PLAYER: drop only p's own prior end on this lineage
-        const patch = stripLineageTerms(pk, fork, p.id);
-        const base = "terminals" in patch ? (patch.terminals || []) : (pk.terminals || []);
-        // always pin the shooter — the actor must not drift as the chain is edited
-        // (an inferred actor follows "last authored receiver", so adding a pass later
-        // would silently reassign an unpinned terminal)
-        patch.terminals = [...base, { kind, at: i, ref: fork || "", by: p.id,
-          ...(kind === "shot" ? (net ? { net } : {}) : { aim: null, dist }) }];
-        updateById(pk.id, patch);
-        if (kind === "shot") ensureNet();
-      };
-      const createType = t => {
-        if (t === "receive") { const src = defaultPasser(); if (src) doReceiveFrom(p.id, i, src, fork); else flash("Add another player to pass from"); }
-        else if (t === "collect") collectPuckAt(p.id, i, undefined, fork);
-        else if (t === "pass") { const to = (others[0] || {}).id; if (to) addPass(to); else if (viaTargets[0]) addVia(viaTargets[0].id); else flash("Add a player, passer, tire, or bumper to pass to"); }
-        else if (t === "shoot") addTerminal("shot", null);
-        else if (t === "chip") addTerminal("chip");
-        else if (t === "rim") addTerminal("rim");
-      };
+      const viaTargets = AM.viaTargets(pieces);
+      // the authoring cores live at component scope (shared with the on-ice
+      // rotary menu) — these bindings just pin this panel's (p, i, fork) spot
+      const addTerminal = (kind, net) => addTerminalAction(p, i, fork, kind, net);
+      const createType = t => createActionType(p, i, fork, t);
       const changeType = (st, t) => {
         if (t === "none") { st.del(); return; }
         const cur = typeOfStep(st);
@@ -7506,17 +7523,7 @@ export default function DrillAnimator() {
           // base ("") then each branch by its colour-path — a pass can be caught on
           // any of them, e.g. led onto the receiver's reaction route
           const rec = pieces.find(q => q.id === tr.to);
-          const recRoutes = [];
-          if (rec) {
-            recRoutes.push({ ref: "", path: rec.path || [] });
-            const walk = (forks, prefix) => (forks || []).forEach(f => {
-              if (!f.path || !f.path.length) return;
-              const r = prefix ? prefix + "/" + f.color : f.color;
-              recRoutes.push({ ref: r, path: f.path });
-              walk(f.forks, r);
-            });
-            walk(rec.forks, "");
-          }
+          const recRoutes = rec ? AM.receiverRoutes(rec) : [];
           const rv = tr.recvAt == null ? "" : `${(tr.recvRef || "").toLowerCase()}|${tr.recvAt}`;
           const setRecv = v => update(q => {
             if (q.id !== pk.id) return q;
