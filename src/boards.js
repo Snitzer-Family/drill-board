@@ -118,6 +118,47 @@ const segAt = s => { s = ((s % PERIM) + PERIM) % PERIM; for (const g of S) if (s
 // room left on the current straight/arc ahead in direction `dir`
 const roomAhead = (s, dir) => { const g = segAt(s); return dir > 0 ? g.s0 + g.len - s : s - g.s0; };
 
+// Leave the boards for a collector standing off them. Walk BACK from the
+// closest approach and peel off at the latest point where the chord to the
+// target lies within ~27° of the puck's own travel direction — on a straight
+// board that is the entry's leadOf rule mirrored (back ≈ 2.1× the offset);
+// through a corner it finds the natural fling-off instead of overshooting by
+// arc length. A collect point deep in a corner pocket has no shallow chord at
+// all, so the walk settles for the least-steep one in the window — and the
+// curved blend below keeps even that exit tangent-continuous: the puck curls
+// off the wall, it never turns a 90° corner at a vertex.
+const EXIT_DEV = (27 * Math.PI) / 180, EXIT_WIN = 17;   // window ≈ 51ft of rim
+function peelIdx(pts, bestIdx, target) {
+  let cut = bestIdx, bestDev = Infinity;
+  for (let k = bestIdx; k >= Math.max(1, bestIdx - EXIT_WIN); k--) {
+    const dx = pts[k].x - pts[k - 1].x, dy = pts[k].y - pts[k - 1].y;
+    const cx = target.x - pts[k].x, cy = target.y - pts[k].y;
+    const dl = Math.hypot(dx, dy) * Math.hypot(cx, cy) || 1;
+    const dev = Math.acos(Math.max(-1, Math.min(1, (dx * cx + dy * cy) / dl)));
+    if (dev < bestDev - 1e-9) { bestDev = dev; cut = k; }
+    if (dev <= EXIT_DEV) break;                  // shallow enough — peel here
+  }
+  return cut;
+}
+// quadratic blend from the peel point to the target whose start tangent is the
+// wall direction — the curl spreads the direction change over several vertices
+function exitBlend(pts, cut, target) {
+  const px = pts[cut].x, py = pts[cut].y;
+  const dx = pts[cut].x - pts[cut - 1].x, dy = pts[cut].y - pts[cut - 1].y;
+  const dm = Math.hypot(dx, dy) || 1;
+  const chord = Math.hypot(target.x - px, target.y - py);
+  const k = Math.min(10, chord * 0.4);
+  const cx2 = px + (dx / dm) * k, cy2 = py + (dy / dm) * k;
+  const out = [];
+  for (const t of [0.2, 0.4, 0.6, 0.8]) {
+    const u = 1 - t;
+    out.push({ x: u * u * px + 2 * u * t * cx2 + t * t * target.x,
+               y: u * u * py + 2 * u * t * cy2 + t * t * target.y });
+  }
+  out.push({ x: target.x, y: target.y });
+  return out;
+}
+
 // polyline that rims from `from` to `to` the short way around the boards
 export function rimPath(from, to) {
   const sF = project(from), sT = project(to);
@@ -127,17 +168,12 @@ export function rimPath(from, to) {
   // keep the entry on the same board section as the nearest point (no corner wrap)
   const lead = Math.min(leadOf(from, sF), origTotal * 0.5, roomAhead(sF.s, dir));
   const entryS = sF.s + dir * lead;
-  // and leave the boards early by the same rule — peeling off `out` ft before
-  // the collector's projection makes the exit as shallow as the entry, instead
-  // of riding to the nearest point and popping off the rail at 90°. No
-  // section clamp here (unlike the entry): backing across a corner arc is
-  // fine, since a chord from any board point to an inside point stays inside.
-  const out = Math.min(leadOf(to, sT), (origTotal - lead) * 0.6);
-  const total = origTotal - lead - out;
+  const total = origTotal - lead;
   const pts = [{ x: from.x, y: from.y }, pointAt(entryS)];
   for (let d = 3; d < total; d += 3) pts.push(pointAt(entryS + dir * d));
-  pts.push(pointAt(entryS + dir * total), { x: to.x, y: to.y });
-  return pts;
+  pts.push(pointAt(entryS + dir * total));
+  const cut = peelIdx(pts, pts.length - 1, to);
+  return pts.slice(0, cut + 1).concat(exitBlend(pts, cut, to));
 }
 
 // polyline that rims `dist` ft around the boards. `aim` (deg) picks which way it
@@ -177,13 +213,10 @@ export function rimTo(from, aim, target, maxDist = 260) {
     if (dist < best.d) best = { d: dist, idx: pts.length - 1 };
     else if (dist > best.d + 12) break;   // clearly past the closest approach
   }
-  // peel off the boards BEFORE the closest approach (entry-lead rule mirrored,
-  // ~3ft per rim sample) so the exit toward the collector is shallow, not a
-  // right-angle pop off the rail at the nearest point
-  const back = Math.max(0, Math.min(Math.round(Math.min(best.d * 2.1, 52) / 3), best.idx - 1));
-  const out = pts.slice(0, best.idx + 1 - back);
-  out.push({ x: target.x, y: target.y });
-  return out;
+  // peel off the boards BEFORE the closest approach (same walk as rimPath)
+  // and curl off tangent-continuously — never a right-angle pop at a vertex
+  const cut = peelIdx(pts, best.idx, target);
+  return pts.slice(0, cut + 1).concat(exitBlend(pts, cut, target));
 }
 
 // polyline of a puck sliding `dist` ft from a point, reflecting off the boards
