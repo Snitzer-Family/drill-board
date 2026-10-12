@@ -150,8 +150,9 @@ const OPEN_IN = 0.7, OPEN_SET = 0.15, OPEN_HELD = 0.2, OPEN_OUT = 0.45;
 const OPEN_BACK_FT = 15;   // how far back down the puck's path counts as "where it came from"
 // how far a collector can reach from their gather spot to take a resting puck
 // (body + stick). Beyond this a collect simply does not happen — the puck is
-// never snapped or teleported to a player who isn't where it lies.
-const GATHER_FT = 8;
+// never snapped or teleported to a player who isn't where it lies. Exported
+// so the editor can warn about an out-of-reach collect while it's authored.
+export const GATHER_FT = 8;
 // icons.jsx rotates the whole stick group about (1, 0) in icon units, so a point on
 // the blade travels with it. Swinging the puck's lever by the SAME angle is what
 // keeps the puck welded to the blade instead of orbiting it on its own cradle.
@@ -701,17 +702,20 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
       const vPass = () => pace * SPEED.pass * (pk.speed || 1);
       const vRim = () => pace * SPEED.pass * 1.1 * (pk.speed || 1);   // rim rides fast
       const vChip = () => pace * SPEED.pass * 0.7 * (pk.speed || 1);  // chip is soft
-      // The puck constant: slick ice barely slows a moving puck, so a rim
-      // COASTS at its launch speed and only the final stretch decelerates —
-      // at ONE fixed friction rate for every rim, set by "a full-pace hard
-      // rim takes RIM_STOP_FT of wall to die" (a = vRim²/2·RIM_STOP_FT, and
-      // the die takes real time: 2·stop/v0). A short run doesn't brake
-      // harder — it was LAUNCHED softer (v0 = vRim·√(stop/RIM_STOP_FT)), so
-      // the same constant fits inside it and at least half of any rim is
-      // pure coast.
-      const RIM_STOP_FT = 40;
-      const rimStop = len => Math.min(RIM_STOP_FT, Math.max(2, len * 0.5));
-      const vRimFor = len => vRim() * Math.sqrt(rimStop(len) / RIM_STOP_FT);
+      // Real ice friction in REAL units. A sliding puck decelerates at a = μg,
+      // mass cancelled; game ice with snow is μ ≈ 0.19 → a ≈ 6 ft/s² (RIM_A).
+      // Plan time IS wall seconds at 1× (BASE_PACE 15 ft/s), so the energy
+      // equation runs literally: a rim that dies after d feet was launched at
+      //   v0 = √(2·a·d)
+      // — a 100ft wrap sets off at ~35 ft/s (24mph) and takes ~6s to die, a
+      // 20ft dump at ~15 ft/s dying in ~2.6s — and the WHOLE run is the glide
+      // (v(rem) = v0·√(rem/d)): the first half barely slows (reads as coast),
+      // the tail trickles out. Scaled by the transport multiple so 2× still
+      // plays twice as fast; vRim survives only as a ceiling (a rim can't
+      // leave the blade harder than the hardest shot).
+      const RIM_A = 6;                                     // ft/s² at 1×
+      const vRimFor = len =>
+        Math.min(vRim(), Math.sqrt(2 * RIM_A * Math.max(2, len)) * (pace / 15) * (pk.speed || 1));
       const legs = [];
       let cur = null;
       let tBase = 0;
@@ -1092,9 +1096,9 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
               const poly = densify(raw);
               let rl = 0;
               for (let k = 1; k < poly.length; k++) rl += Math.hypot(poly[k].x - poly[k - 1].x, poly[k].y - poly[k - 1].y);
-              // coast, then die at the shared friction rate over the final
-              // stretch — launch speed sized so that constant fits this run
-              return { raw, poly, speed: vRimFor(rl), ease: rimStop(rl) };
+              // launch with exactly the energy this distance costs, and glide
+              // the whole run under one real friction constant
+              return { raw, poly, speed: vRimFor(rl), ease: rl };
             }
             const h = chipHeading(cur, launchT, tr.aim);
             const poly = densify(boards.slideTo(launch.x, launch.y, h.x, h.y, anchor));
@@ -1256,7 +1260,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
         const back = handBack(cur, launchT, warp, aimDeg, pk.shand);
         const twist = handTwist(cur, back, false);
         const { poly } = back ? build(twist, true) : (prov || build(0, false));
-        const r = pushTravel(poly, launchT, vRimFor(dist), { by: cur.id, rim: true, easeOut: rimStop(dist), back, relTwist: twist });
+        const r = pushTravel(poly, launchT, vRimFor(dist), { by: cur.id, rim: true, easeOut: dist, back, relTwist: twist });
         legs.push({ type: "rest", x: r.end.x, y: r.end.y, t0: r.t }); tBase = r.t;
       } else if (pk.chipAt != null && cur) {           // terminal chip into space (bounces)
         const at = pk.chipAt;

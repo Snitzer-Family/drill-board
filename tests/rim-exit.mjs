@@ -84,11 +84,17 @@ PIECE PK1 puck 115 20 #14171a on=P1 rim=0:P2@3~-18`;
   T('rim glide: dies at a crawl, not a brake', v(flys[flys.length - 1]) < 0.25 * v(flys[0]), true);
   T('rim glide: the ramp spans a real tail (>8 slowing legs)',
     tail.filter((s, i) => i > 0 && s < tail[i - 1] - 0.01).length > 8, true);
-  // slick ice: the first ~40% of a long rim is pure COAST — constant speed,
-  // no deceleration until the die-phase constant takes over
+  // real friction glide: v(rem) = v0·√(rem/d), so the first 40% of the run
+  // barely slows (reads as coast) while the tail takes most of the time
   const head = flys.slice(0, Math.floor(flys.length * 0.4)).map(v);
-  T('rim glide: coasts before it dies (flat head)',
-    head.every(s => Math.abs(s - head[0]) < head[0] * 0.02), true);
+  T('rim glide: near-coast head (first 40% loses <25% of launch speed)',
+    head.every(s => s > head[0] * 0.75), true);
+  // the energy equation: total glide time for a dying run is 2·d/v0 (constant
+  // deceleration from exactly the speed this distance costs)
+  const dist = flys.reduce((a, L) => a + Math.hypot(L.x1 - L.x0, L.y1 - L.y0), 0);
+  const dur = flys[flys.length - 1].t1 - flys[0].t0;
+  const ratio = dur / (2 * dist / v(flys[0]));
+  T('rim glide: travel time matches the launch energy (≈2·d/v0)', ratio > 0.85 && ratio < 1.15, true, );
 }
 
 { // Coulomb friction, both ends: v0 = √(2·μg·d), so a SHORT rim is launched

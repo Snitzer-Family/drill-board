@@ -14,7 +14,7 @@ import { netShapes, bumperShapes, solidShapes, detourRoute, segCrossesNet } from
 import { RinkMarkings } from "./rink.jsx";
 import { ZONES, zoneAt } from "./zones.js";
 import { PieceIcon, GoalieIcon, Stepper, DiagPanel, Icon, ICONS } from "./icons.jsx";
-import { createTiming, resolveNearest, goalieDepth, goalieSpot } from "./timing.js";
+import { createTiming, resolveNearest, goalieDepth, goalieSpot, GATHER_FT } from "./timing.js";
 import { buildLedger, mayHoldOn, mayHoldEntering, orderTransfers } from "./possession.js";
 import * as AM from "./action-menu.js";
 import { classifyPenGroup, SYMBOL_MAX, SYMBOL_MAX_PX } from "./sketch-recognize.js";
@@ -4498,6 +4498,25 @@ export default function DrillAnimator() {
           : s === blockStage ? "rebound can't reach the collector — a net is in the way"
           : s > deadFrom ? "won't happen — an earlier step is blocked" : null;
       };
+      // a rim dies ON the wall, and the gather only reaches GATHER_FT from the
+      // collect spot (timing never teleports the puck) — warn while authoring,
+      // the same launch/anchor reading the rebound net-block check above uses
+      const rimReachWarn = t => {
+        if (t.kind !== "rim") return null;
+        const carrier = pieces.find(q => q.id === (t.by || releaserOf(pk, ts.indexOf(t))));
+        const rec2 = pieces.find(q => q.id === t.to);
+        if (!carrier || !rec2) return null;
+        const launch = t.at < 0 || !carrier.path.length ? { x: carrier.x, y: carrier.y }
+          : segEnd(carrier, Math.min(t.at, carrier.path.length - 1));
+        const anchor = t.recvAt != null && rec2.path.length
+          ? segEnd(rec2, Math.min(t.recvAt, rec2.path.length - 1)) : { x: rec2.x, y: rec2.y };
+        const run = t.aim != null ? boards.rimTo(launch, t.aim, anchor) : boards.rimPath(launch, anchor);
+        const rest = run[run.length - 1];
+        const d = Math.hypot(rest.x - anchor.x, rest.y - anchor.y);
+        return d > GATHER_FT
+          ? `out of reach — the rim dies on the wall ${Math.round(d)}ft from the collect point. Move it to the boards.`
+          : null;
+      };
       ts.forEach((t, s) => {
         const actor = t.by || releaserOf(pk, s);
         // the receiver shows their side of the action too — at the designated receive
@@ -4513,7 +4532,7 @@ export default function DrillAnimator() {
             : t.kind === "rim" ? `Collect ${nameOf(actor)}'s rim`
             : t.kind === "chip" ? `Collect ${nameOf(actor)}'s chip`
             : `Receive pass from ${nameOf(actor)}`;
-          steps.push({ ord: s + 0.5, text: rtext, warn: flag(s), del: () => setTransfer(pk.id, s, null),
+          steps.push({ ord: s + 0.5, text: rtext, warn: flag(s) || rimReachWarn(t), del: () => setTransfer(pk.id, s, null),
             role: t.kind === "pass" ? "receive" : "collect", kind: t.kind, pk, stage: s, src: actor, via: t.via });
         }
         if (actor === p.id && t.at === i && refEq(t.atRef)) {
@@ -4521,7 +4540,7 @@ export default function DrillAnimator() {
           const txt = t.via ? `Give-and-go off ${nameOf(t.via)}`
             : self && t.kind === "chip" ? "Chip and skate to retrieve" : self && t.kind === "rim" ? "Rim and skate to retrieve"
             : t.kind === "pass" ? `Pass ${pk.id} to ${to}` : t.kind === "shot" ? `Shoot ${pk.id} — rebound to ${to}` : t.kind === "rim" ? `Hard rim to ${to}` : `Chip to ${to}`;
-          steps.push({ ord: s + 1, text: txt, warn: flag(s), del: () => setTransfer(pk.id, s, null),
+          steps.push({ ord: s + 1, text: txt, warn: flag(s) || rimReachWarn(t), del: () => setTransfer(pk.id, s, null),
             role: "release", kind: t.kind, pk, stage: s });
         }
       });
@@ -6639,9 +6658,9 @@ export default function DrillAnimator() {
     // same context rule as the inspector's Add dropdown: the condition-aware
     // ledger decides whether this spot offers releases or gains
     const keys = AM.wedgesFor(mayHoldOn(posLedger, pieces, p.id, fork || ""));
-    // 7.5ft ring: the discs' inner edge (ring − disc ≈ 4.9ft) clears the player
+    // 8ft ring: the discs' inner edge (ring − disc = 5ft) clears the player
     // icon and its selection circle instead of sitting on top of them
-    const RING = 7.5, DISC = 2.6, G = coarsePtr ? 1.4 : 1;
+    const RING = 8, DISC = 3.0, G = coarsePtr ? 1.4 : 1;
     // keep the whole ring on the sheet; a shifted centre keeps a dashed leash
     // back to the spot it acts on (the loupe's edge-hug, in rink feet)
     const [mx, my, vw, vh] = VIEWS[rink];
@@ -6675,10 +6694,11 @@ export default function DrillAnimator() {
         : key === "more" ? T["ice-select"] : T["act-gain"];
       return (
         <g key={key} transform={fx.t}>
-          <circle cx={0} cy={0} r={DISC} fill={T["surface-panel"]} stroke={col} strokeWidth={0.55} />
+          <circle cx={0} cy={0} r={DISC} fill={T["surface-panel"]} stroke={col} strokeWidth={0.6} />
           <g transform={`rotate(${-fx.th})`}>
-            <g style={{ color: col }} transform="scale(0.22) translate(-12 -12)"
-              fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round">
+            {/* glyph box ≈ 0.26·24 = 6.2ft on a 6ft disc — fills it, reads at arm's length */}
+            <g style={{ color: col }} transform="scale(0.26) translate(-12 -12)"
+              fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
               {ICONS[ROTARY_ICON[key]]}
             </g>
           </g>
