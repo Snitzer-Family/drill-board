@@ -5771,9 +5771,11 @@ export default function DrillAnimator() {
       d.moved = true;
       d.last = d.start;
       if (!pinned) setPopup(null);   // a pinned/docked panel stays open while dragging
-      // a real drag is not a target tap — except the rotary's own facing knob,
-      // which turns the dial WHILE the ring stays up
-      if (!(d.kind === "rotate" && d.fromRotary)) { setRotary(null); setPickTarget(null); }
+      // a drag of the ring's OWN piece — its body, a leg, the centre point,
+      // the facing knob — keeps the ring up and it follows the move (the ring
+      // re-derives its centre from state every render). Anything else closes it.
+      if (!(rotary && d.id === rotary.id)) setRotary(null);
+      setPickTarget(null);
     }
     // box-select: track the rectangle (no loupe — it's not a precise handle drag)
     if (d.kind === "marquee") { d.last = pt; setMarquee({ x0: d.start.x, y0: d.start.y, x1: pt.x, y1: pt.y }); return; }
@@ -6709,16 +6711,26 @@ export default function DrillAnimator() {
     })() : null;
     // the spot the ring acts on stays visible while the handles yield: the
     // waypoint wears its dot (branch-coloured on a fork, like the handles it
-    // stands in for) under a dashed halo. The body spot needs neither — the
-    // player icon already wears its own selection ring at the ring's centre.
+    // stands in for) under a dashed halo — and it stays GRABBABLE, starting
+    // the exact anchor drag the hidden handle would, with the ring riding
+    // along. The body spot needs neither — the player icon at the centre
+    // already wears its selection ring and takes its own drags.
     const spotMark = i >= 0 ? (() => {
       const afx = iconXf({ x: anchor.x, y: anchor.y, a: 0 });
+      // stop short of the wedges' hit discs so the centre grab never steals
+      // a wedge tap (wedges render later and win the boundary anyway)
+      const grabR = Math.min(3.6 * G, RING - hitR - 0.3);
       return (
-        <g transform={afx.t} pointerEvents="none">
-          <circle cx={0} cy={0} r={3.1} fill="none" stroke={T["ice-select"]}
+        <g transform={afx.t}>
+          <circle cx={0} cy={0} r={3.1} fill="none" stroke={T["ice-select"]} pointerEvents="none"
             strokeWidth={0.45} strokeDasharray="1.5 1.1" opacity={0.9} />
           <circle cx={0} cy={0} r={1.3} fill={fork ? fork.split("/").pop() : T["ice-select"]}
-            stroke={fork ? "#0b1116" : "#7a5c00"} strokeWidth={0.4} />
+            stroke={fork ? "#0b1116" : "#7a5c00"} strokeWidth={0.4} pointerEvents="none" />
+          <circle cx={0} cy={0} r={grabR} fill="transparent" style={{ cursor: "grab" }}
+            role="button" aria-label="Move the point"
+            onPointerDown={e => handleDown(e, { kind: "anchor", id: p.id, seg: i, wp: i, ...(fork ? { fork } : {}), fromRotary: true })}>
+            <title>Move the point</title>
+          </circle>
         </g>
       );
     })() : null;
