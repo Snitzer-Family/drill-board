@@ -882,10 +882,19 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           : launch.x < 100 ? { x: 11, y: 42.5 } : { x: 189, y: 42.5 };   // crease centers — where an auto-net would sit
         // now the target is known, so the hand is too: the coach's call if they made
         // one, else whichever side the net is already on — nobody reaches across their
-        // body for a net sitting on their backhand
-        const back = handBack(cur, launchT, warp, bearingTo(cur, launchT, warp, aimPt || net), shand);
+        // body for a net sitting on their backhand.
+        // A shooter also SQUARES UP: the body turns toward the target before the
+        // release, skating or standing — a pass is played in stride, but a shot
+        // released sideways across the body reads as broken (a catch-and-shoot
+        // looked like the shooter fired over their own shoulder). The hand is read
+        // off the squared heading; a coach-forced backhand skips the square-up —
+        // nobody turns to face the net and then pulls the puck back across
+        // their own body.
+        let rTurn = shotTurn(cur, launchT, aimPt || net, warp);
+        const back = handBack(cur, launchT, warp, bearingTo(cur, launchT, warp, aimPt || net), shand, rTurn);
+        if (back) rTurn = 0;
         const twist = handTwist(cur, back, true);
-        if (back) launch = releaseAt(cur, launchT, warp, twist, true);
+        if (back || rTurn) launch = releaseAt(cur, launchT, warp, rTurn + twist, back);
         const vShot = pace * SPEED.shot * (pk.speed || 1);
         const inx = net.x - launch.x, iny = net.y - launch.y;
         const mag = Math.hypot(inx, iny) || 1;
@@ -936,7 +945,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           const tArr = launchT + Math.hypot(contact.x - launch.x, contact.y - launch.y) / vShot;
           // a shot that reaches the net plane (post) climbs into it (rise); a puck
           // that sails wide/over arcs like a sauce and comes back down to land
-          legs.push({ type: "fly", shot: true, [flagKey]: true, ...(air ? (rise ? { rise: true } : { sauce: true }) : {}), by: cur.id, ...(back ? { back: true, relTwist: twist } : {}),
+          legs.push({ type: "fly", shot: true, [flagKey]: true, ...(air ? (rise ? { rise: true } : { sauce: true }) : {}), by: cur.id, ...(back ? { back: true, relTwist: twist } : {}), ...(rTurn ? { relTurn: rTurn } : {}),
             x0: launch.x, y0: launch.y, x1: contact.x, y1: contact.y, t0: launchT, t1: tArr });
           const dm = Math.hypot(rollDir.x, rollDir.y) || 1;
           // integrate the roll step by step, caroming off BOTH the rink boards and
@@ -1003,7 +1012,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           const tArr = launchT + Math.hypot(endPt.x - launch.x, endPt.y - launch.y) / vShot;
           // goal=true rides through the rest too: the puck sits BEHIND the net
           // plane, so render (via puckInGoal) sinks it under the cage
-          legs.push({ type: "fly", shot: true, goal: true, rise: airborne, by: cur.id, ...(back ? { back: true, relTwist: twist } : {}), x0: launch.x, y0: launch.y, x1: endPt.x, y1: endPt.y, t0: launchT, t1: tArr });
+          legs.push({ type: "fly", shot: true, goal: true, rise: airborne, by: cur.id, ...(back ? { back: true, relTwist: twist } : {}), ...(rTurn ? { relTurn: rTurn } : {}), x0: launch.x, y0: launch.y, x1: endPt.x, y1: endPt.y, t0: launchT, t1: tArr });
           legs.push({ type: "rest", goal: true, x: endPt.x, y: endPt.y, t0: tArr });
           tBase = tArr;
           // if a collector was expecting this shot's rebound (aimPt) but it went in
@@ -1045,7 +1054,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
         const saved = (goalie && !isGoal) || (onNet && !!aimPt);
         // a blocked designated rebound stays flat (its carom is cut off at the net);
         // an airborne save/shot climbs into the net (rise), not a sauce arc
-        const flyLeg = { type: "fly", shot: true, save: saved, goal: false, rise: airborne && !aimPt, by: cur.id, ...(back ? { back: true, relTwist: twist } : {}), x0: launch.x, y0: launch.y, x1: hit.x, y1: hit.y, t0: launchT, t1: tArr };
+        const flyLeg = { type: "fly", shot: true, save: saved, goal: false, rise: airborne && !aimPt, by: cur.id, ...(back ? { back: true, relTwist: twist } : {}), ...(rTurn ? { relTurn: rTurn } : {}), x0: launch.x, y0: launch.y, x1: hit.x, y1: hit.y, t0: launchT, t1: tArr };
         legs.push(flyLeg);
         // a designated rebound whose collection spot sits behind/through the net
         // can never get there — stop the puck dead at the net and break the chain
@@ -1443,6 +1452,19 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
     if (Math.hypot(to.x - here.x, to.y - here.y) < 1) return 0;
     const deg = wrapDeg((Math.atan2(to.y - here.y, to.x - here.x) * 180) / Math.PI - (here.aStep || 0));
     return Math.abs(deg) < 1 ? 0 : deg;
+  }
+  // The shooter's square-up. Unlike aimTurn it moves a SKATER too — a pass goes
+  // out in stride, but a shooter opens their body to the net before the puck
+  // goes, mid-route or not. Dead astern opens over the forehand shoulder, the
+  // same tie-break as openTurn.
+  function shotTurn(sh, tAt, to, warp) {
+    if (!sh || !to) return 0;
+    const here = routePosAt(sh, tAt, warp);
+    if (Math.hypot(to.x - here.x, to.y - here.y) < 1) return 0;
+    let deg = wrapDeg((Math.atan2(to.y - here.y, to.x - here.x) * 180) / Math.PI - (here.aStep || 0));
+    if (Math.abs(deg) < 1) return 0;
+    if (Math.abs(deg) > 179) deg = 180 * (sh.hand === "L" ? -1 : 1);
+    return deg;
   }
   function openTurn(rec, tAt, from, warp) {
     const here = routePosAt(rec, tAt, warp);
