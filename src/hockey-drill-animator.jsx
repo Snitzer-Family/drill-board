@@ -6444,7 +6444,7 @@ export default function DrillAnimator() {
   const ACT_PRI = { shot: 5, pass: 4, rim: 3, chip: 2, receive: 1, collect: 1, pickup: 1 };
   const stepActionType = st => st.role === "pickup" ? "pickup" : st.role === "receive" ? "receive"
     : st.role === "collect" ? "collect" : (st.kind || "pass");   // release/terminal → its kind
-  const actionIconName = t => t === "shot" ? "net" : t === "pass" ? "pass" : t === "chip" ? "chip"
+  const actionIconName = t => t === "shot" ? "shot" : t === "pass" ? "pass" : t === "chip" ? "chip"
     : t === "rim" ? "rim" : "collect";   // receive / collect / pickup all = gaining the puck
   // waypoints (index → {count, type}) where a player acts on the puck. Skips the
   // standing spot (i=-1) — the player icon already sits there.
@@ -6516,7 +6516,7 @@ export default function DrillAnimator() {
     );
   }
   // fork action → its action-circle icon (skate has none — its end is a carat/stop)
-  const forkActionIcon = a => a === "shoot" ? "net" : a === "pass" ? "pass" : a === "chip" ? "chip" : a === "rim" ? "rim" : null;
+  const forkActionIcon = a => a === "shoot" ? "shot" : a === "pass" ? "pass" : a === "chip" ? "chip" : a === "rim" ? "rim" : null;
   // action circles (+ incoming end-mark) at every action waypoint of a route. Works on
   // any route's segments + origin, so base routes and branch routes render identically.
   function routeActionMarks(segs, origin, acts, color, bentPts, keyPrefix = "") {
@@ -6662,7 +6662,7 @@ export default function DrillAnimator() {
   // fill-mode stretch and its glyph screen-upright.
   const ROTARY_LABEL = { pass: "Pass", shoot: "Shoot", chip: "Chip", rim: "Hard rim",
     receive: "Receive pass", collect: "Collect puck", more: "All settings" };
-  const ROTARY_ICON = { pass: "pass", shoot: "net", chip: "chip", rim: "rim",
+  const ROTARY_ICON = { pass: "pass", shoot: "shot", chip: "chip", rim: "rim",
     receive: "receive", collect: "collect", more: "dots" };
   function renderRotary() {
     if (!editing || !rotary || pinned) return null;

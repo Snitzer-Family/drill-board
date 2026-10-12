@@ -48,8 +48,9 @@ const ICONS = {
   cursor: <><path d="M5.5 3.5l13 6.6-5.6 1.6-1.6 5.6z" /><path d="M12.6 12.6L19 19" /></>,
   // hockey net (mouth + mesh) for "shoot at"
   net: <><path d="M4 19V8h16v11" /><path d="M4 8l3-2.5h10L20 8" /><path d="M8 8v11M12 8v11M16 8v11M4 13.5h16" /></>,
-  // a puck dropping into a tray = collect a loose puck
-  collect: <><path d="M12 3.5v9" /><path d="M8.5 9l3.5 3.5L15.5 9" /><path d="M4.5 15v3a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-3" /></>,
+  // coach notation: a SOLID line is skating — a curl down onto a loose puck
+  // (the filled disc) = skate to it and collect it
+  collect: <><path d="M4.5 4.5c7-.5 9.5 4 10 9.5" /><path d="M10.9 10.9l3.6 3.7 3.7-3.7" /><ellipse cx="14.5" cy="19" rx="4.4" ry="2.4" {...F} /></>,
   // reaction-light decision: a flashing burst — read the light, then react
   react: <><circle cx="12" cy="12" r="3" {...F} /><path d="M12 2v3.2M12 18.8v3.2M2 12h3.2M18.8 12h3.2M5.4 5.4l2.2 2.2M16.4 16.4l2.2 2.2M18.6 5.4l-2.2 2.2M7.6 16.4l-2.2 2.2" /></>,
   // a brain (two hemispheres + a central seam + a brain stem) = a read-and-react
@@ -59,12 +60,20 @@ const ICONS = {
   sauce: <><path d="M3.5 17.5C7 6 17 6 20.5 17.5" /><path d="M16.5 14l4 3.5-5 1.2" {...F} /></>,
   // return loop = give-and-go / rebounder pass
   giveGo: <><path d="M8 8v4a4 4 0 0 0 8 0V7" /><path d="M12.5 10.5L16 7l3.5 3.5" /></>,
-  // straight arrow = a plain pass
-  pass: <><path d="M4 12h14" /><path d="M13 6l6 6-6 6" /></>,
-  // the pass arrow arriving at a wall = receive a pass
-  receive: <><path d="M20 12H8" /><path d="M13 6l-6 6 6 6" /><path d="M4.5 5.5v13" /></>,
-  chip: <path d="M4 16C8 7 16 7 20 16" />,
-  rim: <path d="M4 5v8a6 6 0 0 0 6 6h10" />,
+  // coach notation: a DASHED arrow is a pass (the ice draws passes dashed too).
+  // Dashes are explicit subpaths, not strokeDasharray, so they scale with the
+  // stroke weight wherever the glyph is reused.
+  pass: <><path d="M3.5 12h3M10.5 12h3" /><path d="M14 6.5l5.5 5.5-5.5 5.5" /></>,
+  // the dashed pass arrow arriving AT the catch bar = receive a pass
+  receive: <><path d="M2.5 12h2.6M8.7 12h2.6" /><path d="M11 6.5l5.5 5.5L11 17.5" /><path d="M20 5.5v13" /></>,
+  // coach notation: the double-line arrow is a shot
+  shot: <><path d="M3.5 9h10M3.5 15h10" /><path d="M13 6l6 6-6 6" /></>,
+  // a lob arcing OVER the bar beneath it, landing with a head = chip into space.
+  // The cleared bar is context, so it wears a lighter stroke than the path.
+  chip: <><path d="M3.5 15.5C6 6 14.5 4.5 19 13" /><path d="M19.6 7.3l-.4 5.9-5.5-1.7" /><path d="M8.5 18.5h7" strokeWidth={1.5} /></>,
+  // the boards' corner with the puck's path curling around inside it = hard rim.
+  // The boards are context, so they wear a lighter stroke than the puck's path.
+  rim: <><path d="M3 3.5v8.5a8.5 8.5 0 0 0 8.5 8.5h2" strokeWidth={1.5} /><path d="M8.5 3.5v6a6.5 6.5 0 0 0 6.5 6.5h3" /><path d="M14.5 12l4 4-4 4" /></>,
   target: <><circle cx="12" cy="12" r="8.5" /><circle cx="12" cy="12" r="3.2" /></>,
   // a ⋯ ellipsis = "everything else" (the rotary's door to the full inspector)
   dots: <path d="M5 12h.01M12 12h.01M19 12h.01" />,
