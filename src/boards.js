@@ -127,10 +127,16 @@ export function rimPath(from, to) {
   // keep the entry on the same board section as the nearest point (no corner wrap)
   const lead = Math.min(leadOf(from, sF), origTotal * 0.5, roomAhead(sF.s, dir));
   const entryS = sF.s + dir * lead;
-  const total = origTotal - lead;
+  // and leave the boards early by the same rule — peeling off `out` ft before
+  // the collector's projection makes the exit as shallow as the entry, instead
+  // of riding to the nearest point and popping off the rail at 90°. No
+  // section clamp here (unlike the entry): backing across a corner arc is
+  // fine, since a chord from any board point to an inside point stays inside.
+  const out = Math.min(leadOf(to, sT), (origTotal - lead) * 0.6);
+  const total = origTotal - lead - out;
   const pts = [{ x: from.x, y: from.y }, pointAt(entryS)];
   for (let d = 3; d < total; d += 3) pts.push(pointAt(entryS + dir * d));
-  pts.push({ x: sT.x, y: sT.y }, { x: to.x, y: to.y });
+  pts.push(pointAt(entryS + dir * total), { x: to.x, y: to.y });
   return pts;
 }
 
@@ -171,7 +177,11 @@ export function rimTo(from, aim, target, maxDist = 260) {
     if (dist < best.d) best = { d: dist, idx: pts.length - 1 };
     else if (dist > best.d + 12) break;   // clearly past the closest approach
   }
-  const out = pts.slice(0, best.idx + 1);
+  // peel off the boards BEFORE the closest approach (entry-lead rule mirrored,
+  // ~3ft per rim sample) so the exit toward the collector is shallow, not a
+  // right-angle pop off the rail at the nearest point
+  const back = Math.max(0, Math.min(Math.round(Math.min(best.d * 2.1, 52) / 3), best.idx - 1));
+  const out = pts.slice(0, best.idx + 1 - back);
   out.push({ x: target.x, y: target.y });
   return out;
 }
