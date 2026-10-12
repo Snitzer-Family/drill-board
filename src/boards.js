@@ -118,48 +118,14 @@ const segAt = s => { s = ((s % PERIM) + PERIM) % PERIM; for (const g of S) if (s
 // room left on the current straight/arc ahead in direction `dir`
 const roomAhead = (s, dir) => { const g = segAt(s); return dir > 0 ? g.s0 + g.len - s : s - g.s0; };
 
-// Leave the boards for a collector standing off them. Walk BACK from the
-// closest approach and peel off at the latest point where the chord to the
-// target lies within ~27° of the puck's own travel direction — on a straight
-// board that is the entry's leadOf rule mirrored (back ≈ 2.1× the offset);
-// through a corner it finds the natural fling-off instead of overshooting by
-// arc length. A collect point deep in a corner pocket has no shallow chord at
-// all, so the walk settles for the least-steep one in the window — and the
-// curved blend below keeps even that exit tangent-continuous: the puck curls
-// off the wall, it never turns a 90° corner at a vertex.
-const EXIT_DEV = (27 * Math.PI) / 180, EXIT_WIN = 17;   // window ≈ 51ft of rim
-function peelIdx(pts, bestIdx, target) {
-  let cut = bestIdx, bestDev = Infinity;
-  for (let k = bestIdx; k >= Math.max(1, bestIdx - EXIT_WIN); k--) {
-    const dx = pts[k].x - pts[k - 1].x, dy = pts[k].y - pts[k - 1].y;
-    const cx = target.x - pts[k].x, cy = target.y - pts[k].y;
-    const dl = Math.hypot(dx, dy) * Math.hypot(cx, cy) || 1;
-    const dev = Math.acos(Math.max(-1, Math.min(1, (dx * cx + dy * cy) / dl)));
-    if (dev < bestDev - 1e-9) { bestDev = dev; cut = k; }
-    if (dev <= EXIT_DEV) break;                  // shallow enough — peel here
-  }
-  return cut;
-}
-// quadratic blend from the peel point to the target whose start tangent is the
-// wall direction — the curl spreads the direction change over several vertices
-function exitBlend(pts, cut, target) {
-  const px = pts[cut].x, py = pts[cut].y;
-  const dx = pts[cut].x - pts[cut - 1].x, dy = pts[cut].y - pts[cut - 1].y;
-  const dm = Math.hypot(dx, dy) || 1;
-  const chord = Math.hypot(target.x - px, target.y - py);
-  const k = Math.min(10, chord * 0.4);
-  const cx2 = px + (dx / dm) * k, cy2 = py + (dy / dm) * k;
-  const out = [];
-  for (const t of [0.2, 0.4, 0.6, 0.8]) {
-    const u = 1 - t;
-    out.push({ x: u * u * px + 2 * u * t * cx2 + t * t * target.x,
-               y: u * u * py + 2 * u * t * cy2 + t * t * target.y });
-  }
-  out.push({ x: target.x, y: target.y });
-  return out;
-}
+// A rim is WALL physics: the puck never leaves the boards to reach whoever
+// collects it. The collect spot only says how far around the puck runs — the
+// path dies at the wall point nearest it, and the collector comes to the
+// wall (or the gather snaps the puck to them, the same convention as any
+// loose-puck pickup the player isn't standing on).
 
-// polyline that rims from `from` to `to` the short way around the boards
+// polyline that rims from `from` the short way around the boards, dying at
+// the wall point nearest `to`
 export function rimPath(from, to) {
   const sF = project(from), sT = project(to);
   const dPlus = (((sT.s - sF.s) % PERIM) + PERIM) % PERIM;
@@ -172,8 +138,7 @@ export function rimPath(from, to) {
   const pts = [{ x: from.x, y: from.y }, pointAt(entryS)];
   for (let d = 3; d < total; d += 3) pts.push(pointAt(entryS + dir * d));
   pts.push(pointAt(entryS + dir * total));
-  const cut = peelIdx(pts, pts.length - 1, to);
-  return pts.slice(0, cut + 1).concat(exitBlend(pts, cut, to));
+  return pts;
 }
 
 // polyline that rims `dist` ft around the boards. `aim` (deg) picks which way it
@@ -196,8 +161,9 @@ export function rimAround(from, dist, aim) {
   return pts;
 }
 
-// rim along the boards in the `aim` direction and stop at the point nearest a
-// collector's `target` — the aimed hard rim adjusts its distance to the pickup
+// rim along the boards in the `aim` direction, dying at the wall point
+// nearest a collector's `target` — the aimed hard rim adjusts its DISTANCE
+// to the pickup, but stays on the wall like every rim
 export function rimTo(from, aim, target, maxDist = 260) {
   const sF = project(from);
   const ax = Math.cos((aim * Math.PI) / 180), ay = Math.sin((aim * Math.PI) / 180);
@@ -213,10 +179,7 @@ export function rimTo(from, aim, target, maxDist = 260) {
     if (dist < best.d) best = { d: dist, idx: pts.length - 1 };
     else if (dist > best.d + 12) break;   // clearly past the closest approach
   }
-  // peel off the boards BEFORE the closest approach (same walk as rimPath)
-  // and curl off tangent-continuously — never a right-angle pop at a vertex
-  const cut = peelIdx(pts, best.idx, target);
-  return pts.slice(0, cut + 1).concat(exitBlend(pts, cut, target));
+  return pts.slice(0, best.idx + 1);     // die on the wall at closest approach
 }
 
 // polyline of a puck sliding `dist` ft from a point, reflecting off the boards

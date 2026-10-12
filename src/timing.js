@@ -1057,16 +1057,18 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
             gj = tr.recvAt == null ? rec.path.length - 1 : Math.max(0, Math.min(tr.recvAt, rec.path.length - 1));
             anchor = { x: rec.path[gj].x, y: rec.path[gj].y };
           } else anchor = { x: rec.x, y: rec.y };
-          // rim follows the boards to the collector; a chip fires along the
-          // carrier's facing/aim, banks off the boards, and travels exactly as
-          // far as it takes to reach the collector's spot — a harder chip for a
-          // farther pickup, softer for a nearer one
+          // a rim follows the boards and DIES ON THE WALL at the point nearest
+          // the collector — it never leaves the wall to meet them (the gather
+          // snaps, like any pickup the player isn't standing on); a chip fires
+          // along the carrier's facing/aim, banks off the boards, and travels
+          // exactly as far as it takes to reach the collector's spot — a
+          // harder chip for a farther pickup, softer for a nearer one
           const build = (turn, back) => {
             const lb = releaseAt(cur, launchT, warp, turn, back);
             const launch = boards.clampInside(lb.x, lb.y);     // a blade past the boards → no path
             if (tr.kind === "rim") {
               const raw = tr.aim != null ? boards.rimTo(launch, tr.aim, anchor) : boards.rimPath(launch, anchor);
-              return { raw, poly: densify(raw), speed: vRim(), ease: 14 };                 // settle at the collector
+              return { raw, poly: densify(raw), speed: vRim(), ease: 14 };                 // settle on the wall
             }
             const h = chipHeading(cur, launchT, tr.aim);
             const poly = densify(boards.slideTo(launch.x, launch.y, h.x, h.y, anchor));

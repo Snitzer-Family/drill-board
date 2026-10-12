@@ -186,8 +186,11 @@ puck at that spot. Under the hood a collected release is stored as a handoff:
 | `rim=<pt>:<to>[@<recv>][~<deg>]` | Rim from `pt`; `to` collects it at their point `recv` |
 | `chip=<pt>:<to>[@<recv>][~<deg>]` | Chip from `pt`; `to` (self for a give-and-go) collects it at `recv` |
 
-These handoff forms carry the puck straight to the collector; they still load
-and play, and are what the app writes when you use *Collect puck*.
+These handoff forms are what the app writes when you use *Collect puck*. A
+rebound rolls and a chip travels to the collector's gather spot; a **rim stays
+on the wall** — it dies at the board point nearest the collect spot, and the
+collector comes to the wall (the gather snaps the puck to them if they don't,
+the same convention as any loose-puck pickup the player isn't standing on).
 
 **Actions on a branch route.** A waypoint index in any of the forms above may be
 qualified by the branch route it lives on: `<ref>.<pt>`, where `<ref>` is the branch
