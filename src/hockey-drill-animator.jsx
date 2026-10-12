@@ -6630,7 +6630,9 @@ export default function DrillAnimator() {
     // same context rule as the inspector's Add dropdown: the condition-aware
     // ledger decides whether this spot offers releases or gains
     const keys = AM.wedgesFor(mayHoldOn(posLedger, pieces, p.id, fork || ""));
-    const RING = 6.5, DISC = 2.6, G = coarsePtr ? 1.4 : 1;
+    // 7.5ft ring: the discs' inner edge (ring − disc ≈ 4.9ft) clears the player
+    // icon and its selection circle instead of sitting on top of them
+    const RING = 7.5, DISC = 2.6, G = coarsePtr ? 1.4 : 1;
     // keep the whole ring on the sheet; a shifted centre keeps a dashed leash
     // back to the spot it acts on (the loupe's edge-hug, in rink feet)
     const [mx, my, vw, vh] = VIEWS[rink];
@@ -6875,6 +6877,10 @@ export default function DrillAnimator() {
   function renderHandles(p, yf = yFix, fork = null) {
     const hd = (cx, cy, r, props) => hdot(cx, cy, r, props, yf);
     if (!editing || p.id !== selectedId || tool === "draw") return null;
+    // the open rotary IS this piece's editor for the moment — its wedges sit
+    // right where the waypoint dots and tangent handles live, so the handles
+    // yield until the ring closes (they return with the next render)
+    if (rotary && rotary.id === p.id) return null;
     const rp = routePiece(p, fork);           // fork ? branch-origin route piece : p
     const route = rp.path;
     // colour the fork's handles by its cue colour so overlapping routes stay legible
@@ -6983,6 +6989,9 @@ export default function DrillAnimator() {
     const hd = (cx, cy, r, props) => hdot(cx, cy, r, props, yf);
     const rotatable = p.kind === "net" || p.kind === "bumper" || p.kind === "deker" || p.kind === "passer" || p.kind === "stick" || p.kind === "light" || (p.kind === "player" && !p.path.length);
     if (!editing || tool === "draw" || !rotatable) return null;
+    // a routeless player's rotate ring sits at R=7 — directly under the open
+    // rotary's wedges — so it too yields while the menu is up
+    if (rotary && rotary.id === p.id) return null;
     const a = ((p.facing || 0) * Math.PI) / 180;
     const R = 7;
     // the knob's y-offset is pre-compensated so it sits on the round ring
