@@ -6707,12 +6707,28 @@ export default function DrillAnimator() {
         </g>
       );
     })() : null;
+    // the spot the ring acts on stays visible while the handles yield: the
+    // waypoint wears its dot (branch-coloured on a fork, like the handles it
+    // stands in for) under a dashed halo. The body spot needs neither — the
+    // player icon already wears its own selection ring at the ring's centre.
+    const spotMark = i >= 0 ? (() => {
+      const afx = iconXf({ x: anchor.x, y: anchor.y, a: 0 });
+      return (
+        <g transform={afx.t} pointerEvents="none">
+          <circle cx={0} cy={0} r={3.1} fill="none" stroke={T["ice-select"]}
+            strokeWidth={0.45} strokeDasharray="1.5 1.1" opacity={0.9} />
+          <circle cx={0} cy={0} r={1.3} fill={fork ? fork.split("/").pop() : T["ice-select"]}
+            stroke={fork ? "#0b1116" : "#7a5c00"} strokeWidth={0.4} />
+        </g>
+      );
+    })() : null;
     return (
       <g className="hd-rotary">
         {shifted && (
           <line x1={anchor.x} y1={anchor.y} x2={cx} y2={cy} pointerEvents="none"
             stroke={T["ice-select"]} strokeWidth={0.4} strokeDasharray="1.8 1.4" opacity={0.8} />
         )}
+        {spotMark}
         {hasKnob && (
           <ellipse cx={cx} cy={cy} rx={RING / gmSar} ry={RING * gmSar} fill="none" pointerEvents="none"
             stroke={T["ice-select"]} strokeWidth={0.25} strokeDasharray="1 1" opacity={0.6} />
