@@ -893,15 +893,19 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
         // A standing catch-and-shoot released the instant the puck arrived, while
         // the catch's own open-up still had the body turned toward the passer —
         // the shot left sideways and the square-up only played out afterwards.
-        // A shooter who still has real turning to do gets a settle beat between
-        // gaining the puck and firing: long enough for the catch window
-        // (OPEN_HELD + OPEN_OUT after the catch) to mostly unwind and the
-        // square-up window (OPEN_IN + OPEN_SET before the release) to run.
-        // Stationary shooters only — delaying a routed shooter past their shot
-        // waypoint would fire the puck from further down the route than the
-        // coach put the shot. Already facing the net (< 25°) = a quick release
-        // is natural, no beat.
-        if (!(cur.path.length && shootIdx >= 0) && Math.abs(rTurn) >= 25 && launchT - tBase < OPEN_IN + OPEN_SET + 0.35)
+        // A stationary shooter who gained the puck mid-play (tBase > 0: a catch
+        // or a collect, and the open-up toward the puck that comes with it) gets
+        // a settle beat before firing, UNCONDITIONALLY — rTurn measures the turn
+        // from the REST facing, so it can read "already square" while the catch
+        // has the body pointed somewhere else entirely (that bug shipped once).
+        // The beat is long enough for the catch window (OPEN_HELD + OPEN_OUT) to
+        // unwind and the square-up window (OPEN_IN + OPEN_SET) to run. A holder
+        // from the drill start has no catch to unwind, so they take the beat only
+        // when they genuinely have turning to do (≥ 25°). Stationary shooters
+        // only — delaying a routed shooter past their shot waypoint would fire
+        // the puck from further down the route than the coach put the shot.
+        if (!(cur.path.length && shootIdx >= 0) && launchT - tBase < OPEN_IN + OPEN_SET + 0.35
+            && (tBase > 0 || Math.abs(rTurn) >= 25))
           launchT = tBase + OPEN_IN + OPEN_SET + 0.35;
         newEvents.push({ by: cur.id, at: shootIdx, t: launchT, kind: "shot" });
         const back = handBack(cur, launchT, warp, bearingTo(cur, launchT, warp, aimPt || net), shand, rTurn);
