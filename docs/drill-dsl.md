@@ -189,8 +189,10 @@ puck at that spot. Under the hood a collected release is stored as a handoff:
 These handoff forms are what the app writes when you use *Collect puck*. A
 rebound rolls and a chip travels to the collector's gather spot; a **rim stays
 on the wall** — it dies at the board point nearest the collect spot, and the
-collector comes to the wall (the gather snaps the puck to them if they don't,
-the same convention as any loose-puck pickup the player isn't standing on).
+collect only completes if that spot is within stick reach (~8ft) of where the
+puck lies. Beyond that the puck is never snapped to the player: it just rests
+on the wall and the rest of that chain doesn't happen, so route the collector
+to the boards to take a rim.
 
 **Actions on a branch route.** A waypoint index in any of the forms above may be
 qualified by the branch route it lives on: `<ref>.<pt>`, where `<ref>` is the branch

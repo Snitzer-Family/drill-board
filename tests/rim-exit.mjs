@@ -84,6 +84,11 @@ PIECE PK1 puck 115 20 #14171a on=P1 rim=0:P2@3~-18`;
   T('rim glide: dies at a crawl, not a brake', v(flys[flys.length - 1]) < 0.25 * v(flys[0]), true);
   T('rim glide: the ramp spans a real tail (>8 slowing legs)',
     tail.filter((s, i) => i > 0 && s < tail[i - 1] - 0.01).length > 8, true);
+  // slick ice: the first ~40% of a long rim is pure COAST — constant speed,
+  // no deceleration until the die-phase constant takes over
+  const head = flys.slice(0, Math.floor(flys.length * 0.4)).map(v);
+  T('rim glide: coasts before it dies (flat head)',
+    head.every(s => Math.abs(s - head[0]) < head[0] * 0.02), true);
 }
 
 { // Coulomb friction, both ends: v0 = √(2·μg·d), so a SHORT rim is launched
@@ -128,6 +133,27 @@ PIECE PK1 puck 115 20 #14171a on=P1 rim=0:P2~-18`;
   }
   T('display keeps the dying puck on the wall (no pull to the collector)',
     offWall.every(d => d < 2.5), true, );
+}
+
+{ // a collect beyond stick reach does NOT collect: the puck rests on the wall
+  // and the chain ends there — no snap, no teleport. Within reach, it works.
+  const rig = lastWp => {
+    const dsl = `DSL 10
+RINK half
+PIECE P1 player 122.7 20.1 #d7263d P1
+PIECE P2 player 120 60 #d7263d P2
+PATH P2 L 145,55 L 160,45 L ${lastWp}
+PIECE PK1 puck 115 20 #14171a on=P1 rim=0:P2@3~-18`;
+    const { pieces } = parseDrill(dsl);
+    const t = createTiming({ pieces, pace: 1, segRefs: { current: {} },
+      planCache: { current: { key: null, plans: {}, warp: {}, rel: {} } } });
+    return t.getPlan().plans.PK1.legs;
+  };
+  const far = rig('168.8,34.7');               // ~29ft off the right wall
+  T('far collect: never collected (no catch leg)', far.some(L => L.type === 'ride' && L.catch), false);
+  T('far collect: the puck rests where it died', far[far.length - 1].type, 'rest');
+  const near = rig('194,34.7');                // ~3.5ft off the wall — stick reach
+  T('wall-side collect: still collected', near.some(L => L.type === 'ride' && L.catch), true);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

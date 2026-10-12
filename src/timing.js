@@ -148,6 +148,10 @@ const PIVOT_SEC = 0.4;
 // and skates on. Times are relative to the catch.
 const OPEN_IN = 0.7, OPEN_SET = 0.15, OPEN_HELD = 0.2, OPEN_OUT = 0.45;
 const OPEN_BACK_FT = 15;   // how far back down the puck's path counts as "where it came from"
+// how far a collector can reach from their gather spot to take a resting puck
+// (body + stick). Beyond this a collect simply does not happen — the puck is
+// never snapped or teleported to a player who isn't where it lies.
+const GATHER_FT = 8;
 // icons.jsx rotates the whole stick group about (1, 0) in icon units, so a point on
 // the blade travels with it. Swinging the puck's lever by the SAME angle is what
 // keeps the puck welded to the blade instead of orbiting it on its own cradle.
@@ -697,13 +701,17 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
       const vPass = () => pace * SPEED.pass * (pk.speed || 1);
       const vRim = () => pace * SPEED.pass * 1.1 * (pk.speed || 1);   // rim rides fast
       const vChip = () => pace * SPEED.pass * 0.7 * (pk.speed || 1);  // chip is soft
-      // A rim's LAUNCH speed comes from physics, not a dial: a rim that dies
-      // after d feet was CAUSED by a shot of v0 = √(2·μg·d) — a short rim is a
-      // soft shot into the wall, not a hard one cut short. Calibrated so a
-      // full-pace hard rim (vRim) runs RIM_RUN feet before dying, which fixes
-      // μg in rink units and gives every shorter rim v0 = vRim·√(d/RIM_RUN).
-      const RIM_RUN = 90;
-      const vRimFor = len => vRim() * Math.sqrt(Math.min(1, Math.max(0.05, len / RIM_RUN)));
+      // The puck constant: slick ice barely slows a moving puck, so a rim
+      // COASTS at its launch speed and only the final stretch decelerates —
+      // at ONE fixed friction rate for every rim, set by "a full-pace hard
+      // rim takes RIM_STOP_FT of wall to die" (a = vRim²/2·RIM_STOP_FT, and
+      // the die takes real time: 2·stop/v0). A short run doesn't brake
+      // harder — it was LAUNCHED softer (v0 = vRim·√(stop/RIM_STOP_FT)), so
+      // the same constant fits inside it and at least half of any rim is
+      // pure coast.
+      const RIM_STOP_FT = 40;
+      const rimStop = len => Math.min(RIM_STOP_FT, Math.max(2, len * 0.5));
+      const vRimFor = len => vRim() * Math.sqrt(rimStop(len) / RIM_STOP_FT);
       const legs = [];
       let cur = null;
       let tBase = 0;
@@ -1084,10 +1092,9 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
               const poly = densify(raw);
               let rl = 0;
               for (let k = 1; k < poly.length; k++) rl += Math.hypot(poly[k].x - poly[k - 1].x, poly[k].y - poly[k - 1].y);
-              // launch at the speed that DIES at this distance (v0 = √(2·μg·d))
-              // and bleed it over the whole run — one constant friction from
-              // the blade to the rest spot, exactly a real rim
-              return { raw, poly, speed: vRimFor(rl), ease: Math.min(RIM_RUN, rl) };
+              // coast, then die at the shared friction rate over the final
+              // stretch — launch speed sized so that constant fits this run
+              return { raw, poly, speed: vRimFor(rl), ease: rimStop(rl) };
             }
             const h = chipHeading(cur, launchT, tr.aim);
             const poly = densify(boards.slideTo(launch.x, launch.y, h.x, h.y, anchor));
@@ -1108,6 +1115,15 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           const twist = handTwist(cur, back, false);
           const { poly, speed, ease } = back ? build(twist, true) : (prov || build(0, false));
           const r = pushTravel(poly, launchT, speed, { by: cur.id, rim: tr.kind === "rim", chip: tr.kind === "chip", easeOut: ease, back, relTwist: twist });
+          // the gather happens where the puck actually IS. A rim dies on the
+          // wall, so a collect spot beyond stick reach of the rest point does
+          // NOT collect — no snap, no teleport: the puck just lies there and
+          // the rest of this chain never happens (same fate as a rebound that
+          // dies at the net). Route the collector to the wall to take it.
+          if (Math.hypot(r.end.x - anchor.x, r.end.y - anchor.y) > GATHER_FT) {
+            legs.push({ type: "rest", x: r.end.x, y: r.end.y, t0: r.t });
+            chainBlocked = true; return;
+          }
           // the puck lands loose and waits at the spot until the collector's route
           // reaches its collect waypoint (pick it up like a rebound)
           const gatherT = gj >= 0 ? Math.max(r.t, routeTimeW(rec, warp, gj)) : r.t;
@@ -1240,7 +1256,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
         const back = handBack(cur, launchT, warp, aimDeg, pk.shand);
         const twist = handTwist(cur, back, false);
         const { poly } = back ? build(twist, true) : (prov || build(0, false));
-        const r = pushTravel(poly, launchT, vRimFor(dist), { by: cur.id, rim: true, easeOut: Math.min(RIM_RUN, dist), back, relTwist: twist });
+        const r = pushTravel(poly, launchT, vRimFor(dist), { by: cur.id, rim: true, easeOut: rimStop(dist), back, relTwist: twist });
         legs.push({ type: "rest", x: r.end.x, y: r.end.y, t0: r.t }); tBase = r.t;
       } else if (pk.chipAt != null && cur) {           // terminal chip into space (bounces)
         const at = pk.chipAt;
