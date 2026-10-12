@@ -1155,6 +1155,18 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
             legs.push({ type: "rest", x: r.end.x, y: r.end.y, t0: r.t });
             chainBlocked = true; return;
           }
+          // the collector TIMES their skate to the puck — the same receiver
+          // warp a pass applies: slow their legs up to the gather point so
+          // they arrive as it dies, instead of finishing the route and
+          // standing while the puck crosses its last feet. Only ever slows
+          // (f ≤ 1); a collector who's genuinely late just finds it resting.
+          if (gj >= 0 && !warp[rec.id]) {
+            let stops = 0, moving = 0;
+            for (let i = 0; i <= gj; i++) { stops += rec.path[i].stop || 0; moving += segMoveTime(rec, rec.path[i], i); }
+            const avail = r.t - stops;
+            if (moving > 0 && avail > 0.05)
+              warp[rec.id] = { upto: gj, f: Math.min(1, Math.max(0.25, moving / avail)) };
+          }
           // the puck lands loose and waits at the spot until the collector's route
           // reaches its collect waypoint (pick it up like a rebound)
           const gatherT = gj >= 0 ? Math.max(r.t, routeTimeW(rec, warp, gj)) : r.t;

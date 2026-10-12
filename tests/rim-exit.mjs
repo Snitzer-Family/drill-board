@@ -195,6 +195,32 @@ PIECE PK1 puck 150 20 #14171a on=P1 chip=0:P2~-90`;
   T('banked chip: still dies at the collector', Math.hypot(e.x1 - 150, e.y1 - 38) < 1, true);
 }
 
+{ // an EARLY collector times their skate to the puck — the receiver warp a
+  // pass applies now covers gathers too: their legs slow so they meet the
+  // puck as it dies, instead of finishing the route and waiting for it
+  const dsl = `DSL 10
+RINK half
+PIECE P1 player 122.7 20.1 #d7263d P1
+PIECE P2 player 170 20 #d7263d P2
+PATH P2 L 180,28 L 194,34.7
+PIECE PK1 puck 115 20 #14171a on=P1 rim=0:P2@2~-18`;
+  const { pieces } = parseDrill(dsl);
+  // segLen reads DOM getTotalLength in the app; hand the harness the straight
+  // leg lengths so the collector's route has real (short) skate time
+  const seg = len => ({ getTotalLength: () => len });
+  const segRefs = { current: { 'P2/0': seg(Math.hypot(10, 8)), 'P2/1': seg(Math.hypot(14, 6.7)) } };
+  const t = createTiming({ pieces, pace: 15, segRefs,
+    planCache: { current: { key: null, plans: {}, warp: {}, rel: {} } } });
+  const plan = t.getPlan();
+  const legs = plan.plans.PK1.legs;
+  const flys = legs.filter(L => L.type === 'fly' && L.rim);
+  const ride = legs.find(L => L.type === 'ride' && L.catch);
+  T('early collector: warped to arrive with the puck (f < 0.9)',
+    !!plan.warp.P2 && plan.warp.P2.f < 0.9, true);
+  T('early collector: the gather fires as the puck dies (no waiting rest)',
+    Math.abs(ride.t0 - flys[flys.length - 1].t1) < 0.05 && !legs.some(L => L.type === 'rest'), true);
+}
+
 { // a collect beyond stick reach does NOT collect: the puck rests on the wall
   // and the chain ends there — no snap, no teleport. Within reach, it works.
   const rig = lastWp => {
