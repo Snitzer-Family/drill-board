@@ -726,7 +726,11 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
       // restitution a missed shot keeps off the boards — and what's left
       // glides out on the shared ice, dying at the far end. Work backwards:
       // the tail needs v2 = √(2·a·d2), so the glass was hit at v1 = v2/REST.
+      // A chip's own REST is lossier than a flat carom's (OD.bounce): a
+      // lofted puck gives more to the glass, so the puck comes IN harder
+      // (~2.1× the exit speed) for the same die-out spot.
       // No contact on the path (a chip into open space) → one plain glide.
+      const CHIP_REST = 0.48;
       const pushChip = (raw, t0, flag) => {
         const segLen2 = pts => { let L = 0; for (let k = 1; k < pts.length; k++) L += Math.hypot(pts[k].x - pts[k - 1].x, pts[k].y - pts[k - 1].y); return L; };
         if (raw.length < 3) {
@@ -735,7 +739,7 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
         }
         const tail = raw.slice(1), d2 = segLen2(tail);
         const v2 = glideV(d2, vChip());
-        const v1 = Math.min(vChip(), v2 / Math.max(0.2, OD.bounce));
+        const v1 = Math.min(vChip(), v2 / CHIP_REST);
         const r1 = pushTravel(densify(raw.slice(0, 2)), t0, v1, { ...flag, chip: true });  // hard, flat, into the glass
         return pushTravel(densify(tail), r1.t, v2, { chip: true, easeOut: d2 });           // bleed off after contact
       };

@@ -187,7 +187,8 @@ PIECE PK1 puck 150 20 #14171a on=P1 chip=0:P2~-90`;
   T('banked chip: hard and flat INTO the glass',
     head.every(s => Math.abs(s - head[0]) < head[0] * 0.02), true);
   const keep = v(flys[bank]) / v(flys[bank - 1]);
-  T('banked chip: the board keeps ~the restitution share', keep > 0.5 && keep < 0.72, true);
+  T('banked chip: the glass eats a chip harder than a flat carom (keep ≈ 0.48)',
+    keep > 0.38 && keep < 0.58, true);
   const tail = flys.slice(bank).map(v);
   T('banked chip: the rest bleeds off to a crawl', tail[tail.length - 1] < 0.3 * tail[0], true);
   const e = flys[flys.length - 1];
