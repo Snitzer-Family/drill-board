@@ -1939,9 +1939,34 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
     let li = 0;
     for (let k = 0; k < pl.legs.length; k++) { if (e >= pl.legs[k].t0) li = k; else break; }
     const leg = pl.legs[li], nx = pl.legs[li + 1];
-    if (!leg || leg.type !== "fly" || e >= leg.t1 || !nx || nx.type !== "ride" || !nx.catch) return null;
-    const w = smooth01(((e - leg.t0) / Math.max(0.001, leg.t1 - leg.t0) - 0.65) / 0.35);
-    return w > 0 ? { id: nx.id, w } : null;
+    if (!leg) return null;
+    if (leg.type === "fly" && e < leg.t1 && nx && nx.type === "ride" && nx.catch) {
+      const w = smooth01(((e - leg.t0) / Math.max(0.001, leg.t1 - leg.t0) - 0.65) / 0.35);
+      return w > 0 ? { id: nx.id, w } : null;
+    }
+    // A delivery that DIES before it is taken — a rim crawling its last feet on
+    // the wall, a chip at rest — reaches its ride through a tail of short fly
+    // legs and often a sliver of rest, so requiring the ride to be the
+    // IMMEDIATE next leg meant no ease at all there: the puck cut the full
+    // stick-reach gap in ONE frame at the gather (4.7ft, measured). Rake it
+    // onto the blade over the last half second of the approach instead.
+    // ONLY for a dying delivery (rim-flagged crawl, skid, rest) — a plain fly
+    // must never qualify, or a puck deliberately HELD at a give-and-go passer
+    // gets dragged toward the catch beyond its own un-launched return flight.
+    if (leg.type === "rest" || leg.type === "skid" || (leg.type === "fly" && leg.rim)) {
+      let ri = li + 1;
+      while (ri < pl.legs.length) {
+        const t = pl.legs[ri].type;
+        if (t === "rest" || t === "skid" || (t === "fly" && pl.legs[ri].rim)) { ri++; continue; }
+        break;
+      }
+      const ride = pl.legs[ri];
+      if (ride && ride.type === "ride" && ride.catch && e < ride.t0) {
+        const w = smooth01((e - (ride.t0 - 0.5)) / 0.5);
+        return w > 0 ? { id: ride.id, w } : null;
+      }
+    }
+    return null;
   }
 
   // The mirror of catchApproach, at the LAUNCH end: who just fired this puck, and how
@@ -2138,7 +2163,15 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           // every pass arrived on the receiver's backhand. Past about -33° the rotated
           // lever's lat goes negative; stopping short of that angles the blade toward the
           // puck, off toe-on, while the puck still arrives on the forehand.
-          face = Math.max(-20, Math.min(35, wrapDeg(rel - FACE_REST)));
+          // The clamp alone railed: with the puck arriving from far around a
+          // body MID-TURN (a boards gather while sweeping a corner), the wrapped
+          // offset crosses the ±180° seam and the clamp output flips rail
+          // (−20 → +35) in a single frame — a 50° lever cut, measured. A puck
+          // from that far around can't be met with the face at all, so the
+          // presentation fades out toward the seam; both sides then agree at 0.
+          const dF = wrapDeg(rel - FACE_REST);
+          face = Math.max(-20, Math.min(35, dF))
+            * (Math.abs(dF) <= 90 ? 1 : 1 - smooth01((Math.abs(dF) - 90) / 60));
         }
         best = { tau, face };
       }
