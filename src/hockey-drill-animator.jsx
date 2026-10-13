@@ -3862,7 +3862,11 @@ export default function DrillAnimator() {
     if (!effDetail || p.kind !== "player" || animT <= 0) return dp; // detail off / editing board: still frame
     const r = dp.smul || 0;                               // effective speed multiple
     let lat = 0, fore = 0, lean = 0;                      // lateral / fore-aft ft, deg — vs facing
-    const kIdle = 1 - Math.min(1, r / FIDGET_FADE);       // fades out as a route spools up
+    // fades out as a route spools up — and breathes IN over the first beat of
+    // playback: the editing board is a still frame, and switching the sines on
+    // at full amplitude popped every standing player ~0.15ft on frame one
+    const eIn = eFix <= 0 ? 0 : eFix >= 0.6 ? 1 : (eFix / 0.6) * (eFix / 0.6) * (3 - 2 * (eFix / 0.6));
+    const kIdle = (1 - Math.min(1, r / FIDGET_FADE)) * eIn;
     if (kIdle > 0) {
       // standing (or near enough): shift weight instead of freezing solid.
       // Two incommensurate slow sines per axis so the motion never loops
