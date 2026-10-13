@@ -446,7 +446,13 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
       const q = act.find(v => v.id === id);
       if (!q) return null;
       const dx = q.x - p.x, dy = q.y - p.y;
-      return Math.hypot(dx, dy) < 1 ? null : (Math.atan2(dy, dx) * 180) / Math.PI;
+      // A focus inside GAZE_NEAR has no stable bearing — above all the puck this
+      // player just CAUGHT, whose direction is their own blade lever, not the
+      // play. gazeScore already refuses to pick such a focus, but the track's
+      // hysteresis keeps an old one; looking "at" it spiked the head +60° for
+      // the two frames between the catch unwind and the shot square-up. No
+      // bearing → no gaze → the authored facing, which those windows blend from.
+      return Math.hypot(dx, dy) < GAZE_NEAR ? null : (Math.atan2(dy, dx) * 180) / Math.PI;
     };
     let deg = bearing(tr[i].id);
     if (deg == null) return null;
