@@ -2435,23 +2435,28 @@ export default function DrillAnimator() {
       pucks.forEach(pk => { const d = displayPosRaw(pk, t); const dist = Math.hypot(d.x - net.x, d.y - net.y); if (dist < best) { best = dist; threat = d; } });
       if (!threat) return null;
       const cx = threat.x, cy = threat.y;                 // puck carrier
-      const behind = (cx - net.x) * fwd <= 0;             // carrier is behind the net
-      let tx, ty;
-      if (behind) {
-        // contain from the net front, shading toward the carrier's side
-        tx = net.x + fwd * 12;
-        ty = net.y + Math.max(-9, Math.min(9, cy - net.y)) * 0.55;
-      } else {
-        // stay goal-side of the carrier on the line to the net, holding a gap that
-        // tightens as the carrier drives in — but never collapse onto the net (≥5 ft
-        // off) so the D plays the man, not a second goalie
-        const toNet = { x: net.x - cx, y: net.y - cy };
-        const dN = Math.hypot(toNet.x, toNet.y) || 1;
-        const gap = Math.max(6, Math.min(16, dN * 0.45));   // gap up; close it near the net
-        const along = Math.min(gap, Math.max(0, dN - 5));
-        tx = cx + (toNet.x / dN) * along;
-        ty = cy + (toNet.y / dN) * along;
-      }
+      // contain from the net front, shading toward the carrier's side
+      const bx = net.x + fwd * 12;
+      const by = net.y + Math.max(-9, Math.min(9, cy - net.y)) * 0.55;
+      // stay goal-side of the carrier on the line to the net, holding a gap that
+      // tightens as the carrier drives in — but never collapse onto the net (≥5 ft
+      // off) so the D plays the man, not a second goalie
+      const toNet = { x: net.x - cx, y: net.y - cy };
+      const dN = Math.hypot(toNet.x, toNet.y) || 1;
+      // smooth equivalents of clamp(dN·0.45, 6, 16) and min(gap, max(0, dN−5)):
+      // the hard clamps put corners in target-vs-threat, and a puck crossing a
+      // corner at shot speed turned each corner into a visible stutter-step
+      const sm6b = u => (u <= 0 ? 0 : u >= 1 ? 1 : u * u * (3 - 2 * u));
+      const gap = 6 + 10 * sm6b((dN * 0.45 - 6) / 10);    // gap up; close it near the net
+      const along = gap * sm6b((dN - 5) / (gap + 5));
+      const gx = cx + (toNet.x / dN) * along;
+      const gy = cy + (toNet.y / dN) * along;
+      // "behind the net" was a hard boolean, and a puck rolling around the cage
+      // crossed it every few frames — the target ping-ponged between the two
+      // stances and the D twitched. Blend over 6ft of depth instead.
+      const sm6 = u => (u <= 0 ? 0 : u >= 1 ? 1 : u * u * (3 - 2 * u));
+      const kB = sm6(((cx - net.x) * fwd + 3) / 6);       // 0 behind → 1 out front
+      const tx = bx + (gx - bx) * kB, ty = by + (gy - by) * kB;
       return { tx: clampX(tx), ty: clampY(ty), cx, cy };
     };
     // The old D was this target evaluated at the CURRENT frame — a pure chase with

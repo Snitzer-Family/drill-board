@@ -1891,15 +1891,17 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           // the display heading through the corner instead: start turning just
           // before the waypoint, finish just after. The window is half on each
           // leg, capped so neighbouring corners never share frames. aStep (and
-          // so every planned launch/catch point) is untouched. A boundary that
-          // reverses skate direction belongs to the pivot machinery, and a
-          // stopped waypoint blends in its own pause branch — both skipped.
+          // so every planned launch/catch point) is untouched. A stopped
+          // waypoint blends in its own pause branch — skipped here. A direction
+          // REVERSAL is swept too: the pivot machinery owns the 180° flip but
+          // ADDS it to the live tangent, which still steps by the corner's own
+          // angle the frame the boundary is crossed (52° mid-pivot, measured) —
+          // this sweep carries the tangent delta, the flip rides on top.
           const cornerD = j => {
             const [ax, ay] = exitDir(j), [bx, by] = entryDir(j + 1);
             return wrapDeg((Math.atan2(by, bx) - Math.atan2(ay, ax)) * 180 / Math.PI);
           };
           const sweeps = (j, nj) => !planPhase && p.path[nj]
-            && (p.path[j].dir || "fwd") === (p.path[nj].dir || "fwd")
             && !(p.path[nj].stop || 0) && !trigPauseOf(p, nj);
           let sweep = 0;
           if (sweeps(i, i + 1)) {                       // first half: easing INTO the corner ahead
