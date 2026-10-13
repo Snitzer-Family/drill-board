@@ -308,6 +308,23 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
     return best;
   }
   const openAt = (p, eLoc) => { const o = openPart(p, eLoc); return o.deg * o.k; };
+  // Every ACTIVE non-snap window, oldest first. The standing blend composes them
+  // in sequence (newest applied last, so it wins as its weight peaks) because
+  // openPart's best-wins pick is only continuous in the PRODUCT deg·k — the
+  // standing blend pulls toward each window's absolute pose with its own weight,
+  // and switching winners mid-handoff cut the heading 33° in one frame (a
+  // catch unwind crossing a shot square-up, measured on a standing receiver).
+  function openWins(p, eLoc) {
+    if (planPhase) return [];
+    const list = currentOpens[p.id];
+    if (!list) return [];
+    const out = [];
+    for (const w of list) {
+      if (w.snap || eLoc <= w.t0 || eLoc >= w.t3) continue;
+      out.push({ t0: w.t0, deg: w.deg, k: windowK(w, eLoc) });
+    }
+    return out.sort((a, b) => a.t0 - b.t0);
+  }
   // The shoulders coming round into a backhand. Unlike opening up — a deliberate turn
   // a beat BEFORE the puck arrives — this one is part of the swing and runs on the
   // swing's clock, so it stacks ON TOP of whatever the body is otherwise doing rather
@@ -1726,16 +1743,17 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
       // pass it is taking or making. aStep stays the AUTHORED facing, so every
       // planned launch/catch point is unmoved — the plan adds its own turn explicitly.
       const base = p.facing || 0;
-      const o = openPart(p, e - startWaitOf(p));
       let show = base;
       if (p.kind === "player") {
         const g = gazeAt(p, e);
         // ease off the authored pose rather than starting the drill mid-turn
         if (g) show = base + wrapDeg(g.deg - base) * g.conf * smooth01(e / GAZE_IN);
-        // ...and a catch or release takes precedence over idle watching as it peaks
-        if (o.k > 0) show += wrapDeg(base + o.deg - show) * o.k;
+        // ...and catches/releases take precedence over idle watching as they peak —
+        // composed oldest-first, never switched, so a handoff can't cut the heading
+        for (const o of openWins(p, e - startWaitOf(p)))
+          if (o.k > 0) show += wrapDeg(base + o.deg - show) * o.k;
         show += snapAt(p, e - startWaitOf(p));   // the backhand turn, on top of all of it
-      } else show = base + o.deg * o.k;
+      } else { const o = openPart(p, e - startWaitOf(p)); show = base + o.deg * o.k; }
       return { x: p.x, y: p.y, a: show, aStep: base, flip: wrapDeg(show - base), v: 0, dist: 0 };
     }
     e -= startWaitOf(p);   // hold at the start until the trigger fires (e<=0 → start pose below)
@@ -1787,8 +1805,10 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
       const s = p.path[i];
       const stop = (s.stop || 0) + trigPauseOf(p, i);
       if (e < stop) {
-        // pausing at a waypoint: the tangent jumps to the next leg's the instant they
-        // arrive, so a pivot taken standing still swings the tangent across too
+        // pausing at a waypoint: a pivot window swings the tangent across while
+        // they stand; a plain stop at a corner used to SNAP to the next leg's
+        // tangent the frame they arrived — now it sweeps over the first beat of
+        // the pause instead (display only; aStep keeps the step).
         const tOut = segTangentAngle(prev, s, 0.02);
         let tan = tOut;
         const pvw = i > 0 && !planPhase && currentPivots[p.id]?.path === p.path
@@ -1797,6 +1817,9 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           const tIn = segTangentAngle(legStart(i - 1), p.path[i - 1], 0.98);
           const u = smooth01(pvw.t1 > pvw.t0 ? (eLoc - pvw.t0) / (pvw.t1 - pvw.t0) : 1);
           tan = tIn + wrapDeg(tOut - tIn) * u;
+        } else if (!pvw && i > 0 && !planPhase && e < 0.3) {
+          const tIn = segTangentAngle(legStart(i - 1), p.path[i - 1], 0.98);
+          tan = tIn + wrapDeg(tOut - tIn) * smooth01(e / 0.3);
         }
         const f = flip(i);
         return { ...prev, a: tan + f, aStep: tOut + stepFlip(s), flip: f, v: 0, dist,
@@ -1861,7 +1884,33 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
           const { s: sf, v } = easeLeg(e / mt, aRamp, bRamp);
           const braking = exitRest && e / mt > 1 - RAMP_DOWN;   // biting into a stop
           const smul = mt > 0 ? ((L / mt) / pace) * v : 0;
-          return { ...atArc(el, L, L * sf, s, i), v, smul, dist: dist + L * sf, brakeAt: dist + L,
+          const pos = atArc(el, L, L * sf, s, i);
+          // Corner sweep (display only). A polyline corner has a discontinuous
+          // tangent, so the body POPPED through it — 164° in one frame on a
+          // hairpin; the cornerRamp speed dip never touched the heading. Sweep
+          // the display heading through the corner instead: start turning just
+          // before the waypoint, finish just after. The window is half on each
+          // leg, capped so neighbouring corners never share frames. aStep (and
+          // so every planned launch/catch point) is untouched. A boundary that
+          // reverses skate direction belongs to the pivot machinery, and a
+          // stopped waypoint blends in its own pause branch — both skipped.
+          const cornerD = j => {
+            const [ax, ay] = exitDir(j), [bx, by] = entryDir(j + 1);
+            return wrapDeg((Math.atan2(by, bx) - Math.atan2(ay, ax)) * 180 / Math.PI);
+          };
+          const sweeps = (j, nj) => !planPhase && p.path[nj]
+            && (p.path[j].dir || "fwd") === (p.path[nj].dir || "fwd")
+            && !(p.path[nj].stop || 0) && !trigPauseOf(p, nj);
+          let sweep = 0;
+          if (sweeps(i, i + 1)) {                       // first half: easing INTO the corner ahead
+            const h = Math.min(0.18, mt * 0.35, effMove(p, nxt, i + 1, warp) * 0.35);
+            if (h > 0 && mt - e < h) sweep += cornerD(i) * smooth01(0.5 - 0.5 * ((mt - e) / h));
+          }
+          if (i > 0 && !entryRest && sweeps(i - 1, i)) { // second half: easing OUT of the corner behind
+            const h = Math.min(0.18, mt * 0.35, effMove(p, p.path[i - 1], i - 1, warp) * 0.35);
+            if (h > 0 && e < h) sweep -= cornerD(i - 1) * (1 - smooth01(0.5 + 0.5 * (e / h)));
+          }
+          return { ...pos, a: pos.a + sweep, v, smul, dist: dist + L * sf, brakeAt: dist + L,
             brake: braking ? 1 - v : 0, brakeUp: braking, brakeSpd: mt > 0 ? (L / mt) / pace : 0 };
         } catch { return { ...prev, a: 0, aStep: 0, flip: 0, v: 0, dist }; }
       }

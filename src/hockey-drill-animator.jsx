@@ -2417,7 +2417,7 @@ export default function DrillAnimator() {
   }
   // an auto-reacting defenseman: hold the middle / front of the defended net,
   // stay goal-side of the puck (keep the attacker in front), gap up toward it.
-  function dmanPos(p) {
+  function dmanPos(p, eAt) {
     const home = { x: p.x, y: p.y };
     // net this D defends: nearest net piece, else the goal line on its side
     const nets = pieces.filter(q => q.kind === "net");
@@ -2427,31 +2427,59 @@ export default function DrillAnimator() {
       net = { x: n.x, y: n.y };
     }
     const fwd = net.x < 100 ? 1 : -1;                     // toward center ice (up the slot)
-    // threat = the nearest puck's live position (carried puck ≈ the puck carrier)
     const pucks = pieces.filter(q => q.kind === "puck");
-    let threat = null, best = Infinity;
-    // use the raw puck spot (not displayPos) so the D↔puck↔carrier chain can't recurse
-    pucks.forEach(pk => { const d = displayPosRaw(pk); const dist = Math.hypot(d.x - net.x, d.y - net.y); if (dist < best) { best = dist; threat = d; } });
-    if (!threat) return { x: home.x, y: home.y, a: p.facing || 0 };
-    const cx = threat.x, cy = threat.y;                   // puck carrier
-    const behind = (cx - net.x) * fwd <= 0;               // carrier is behind the net
-    let tx, ty;
-    if (behind) {
-      // contain from the net front, shading toward the carrier's side
-      tx = net.x + fwd * 12;
-      ty = net.y + Math.max(-9, Math.min(9, cy - net.y)) * 0.55;
-    } else {
-      // stay goal-side of the carrier on the line to the net, holding a gap that
-      // tightens as the carrier drives in — but never collapse onto the net (≥5 ft
-      // off) so the D plays the man, not a second goalie
-      const toNet = { x: net.x - cx, y: net.y - cy };
-      const dN = Math.hypot(toNet.x, toNet.y) || 1;
-      const gap = Math.max(6, Math.min(16, dN * 0.45));   // gap up; close it near the net
-      const along = Math.min(gap, Math.max(0, dN - 5));
-      tx = cx + (toNet.x / dN) * along;
-      ty = cy + (toNet.y / dN) * along;
+    // containment target against the nearest puck AT TIME t (carried puck ≈ carrier).
+    // Raw puck spots (not displayPos) so the D↔puck↔carrier chain can't recurse.
+    const targetAt = t => {
+      let threat = null, best = Infinity;
+      pucks.forEach(pk => { const d = displayPosRaw(pk, t); const dist = Math.hypot(d.x - net.x, d.y - net.y); if (dist < best) { best = dist; threat = d; } });
+      if (!threat) return null;
+      const cx = threat.x, cy = threat.y;                 // puck carrier
+      const behind = (cx - net.x) * fwd <= 0;             // carrier is behind the net
+      let tx, ty;
+      if (behind) {
+        // contain from the net front, shading toward the carrier's side
+        tx = net.x + fwd * 12;
+        ty = net.y + Math.max(-9, Math.min(9, cy - net.y)) * 0.55;
+      } else {
+        // stay goal-side of the carrier on the line to the net, holding a gap that
+        // tightens as the carrier drives in — but never collapse onto the net (≥5 ft
+        // off) so the D plays the man, not a second goalie
+        const toNet = { x: net.x - cx, y: net.y - cy };
+        const dN = Math.hypot(toNet.x, toNet.y) || 1;
+        const gap = Math.max(6, Math.min(16, dN * 0.45));   // gap up; close it near the net
+        const along = Math.min(gap, Math.max(0, dN - 5));
+        tx = cx + (toNet.x / dN) * along;
+        ty = cy + (toNet.y / dN) * along;
+      }
+      return { tx: clampX(tx), ty: clampY(ty), cx, cy };
+    };
+    // The old D was this target evaluated at the CURRENT frame — a pure chase with
+    // zero inertia. It sprinted after shots at 100+ ft/s, snapped its heading when
+    // the containment branch flipped, and teleported 60ft to its slot on frame one.
+    // Average the target over the trailing ~0.9s instead (still a pure function of
+    // t, so scrubbing and replay agree) and ease out of the authored spot at the
+    // start — the D now reads as reacting to the play, not wired to the puck.
+    const sm = u => (u <= 0 ? 0 : u >= 1 ? 1 : u * u * (3 - 2 * u));
+    const wrap = d => ((d % 360) + 540) % 360 - 180;
+    const e = eAt != null ? eAt : (animT <= 0 ? 0 : animT * totalTime);
+    let tx = 0, ty = 0, cx = 0, cy = 0, ws = 0;
+    // 8 taps, triangular weights: coarser kernels left velocity kinks every time
+    // one tap crossed a leg boundary — audible as a nervous stutter in the glide
+    for (let j = 0; j < 8; j++) {
+      const s = targetAt(Math.max(0, e - j * 0.15));
+      if (!s) continue;
+      const w = 8 - j;
+      tx += s.tx * w; ty += s.ty * w; cx += s.cx * w; cy += s.cy * w; ws += w;
     }
-    return { x: clampX(tx), y: clampY(ty), a: (Math.atan2(cy - ty, cx - tx) * 180) / Math.PI };
+    if (!ws) return { x: home.x, y: home.y, a: p.facing || 0 };
+    tx /= ws; ty /= ws; cx /= ws; cy /= ws;
+    // 1.5s out of the authored spot: the slot can be 40+ ft away, and covering it
+    // inside the old 1s ease read as a 90 ft/s sprint on frame one
+    const k = sm(e / 1.5);
+    const x = home.x + (tx - home.x) * k, y = home.y + (ty - home.y) * k;
+    const aim = (Math.atan2(cy - y, cx - x) * 180) / Math.PI;
+    return { x, y, a: (p.facing || 0) + wrap(aim - (p.facing || 0)) * k };
   }
 
   // solid net footprints — players and pucks are kept out (routed around) so a
@@ -3823,7 +3851,7 @@ export default function DrillAnimator() {
   // chases a still-planting body and bends the flight.
   function displayPosRaw(p, eAt) {
     p = effOf(p);
-    if (p.kind === "player" && p.defense) return animT > 0 ? dmanPos(p) : { x: p.x, y: p.y, a: p.facing || 0 };
+    if (p.kind === "player" && p.defense) return animT > 0 ? dmanPos(p, eAt) : { x: p.x, y: p.y, a: p.facing || 0 };
     const eFix = eAt != null ? eAt : (animT <= 0 ? 0 : animT * totalTime);
     const dp = displayPosAt(p, eFix);
     if (!effDetail || p.kind !== "player" || animT <= 0) return dp; // detail off / editing board: still frame
