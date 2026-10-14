@@ -1840,25 +1840,44 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
 
       if (zHold) {
         // blue-line delay: skate to the crossing, drift laterally while waiting
-        // for the puck, then explode into the zone
-        const tBefore = mt * zHold.fCross, tAfter = mt * (1 - zHold.fCross);
+        // for the puck, then explode into the zone. The burst gets a floor: a
+        // crossing near the leg's end left it a 0.11s sliver, and every ramp
+        // inside (stride onset, the stop plant after) became a one-frame step.
+        // The floor comes OUT of the approach — the leg's total time is the
+        // plan's, so no later waypoint moves.
+        const tAfter = Math.max(mt * (1 - zHold.fCross), Math.min(0.4, mt * 0.5));
+        const tBefore = mt - tAfter;
         try {
           if (e < tBefore) {
             const { s: sf, v } = easeLeg(tBefore > 0 ? e / tBefore : 1, entryRest ? RAMP_UP : 0, RAMP_DOWN);
             const arc = zHold.fCross * L * sf;
             const smul = tBefore > 0 ? ((zHold.fCross * L / tBefore) / pace) * v : 0;
-            return { ...atArc(el, L, arc, s, i), v, smul, dist: dist + arc, brakeAt: dist + L,
+            // the plant freezes where they actually STOP — the crossing, not the
+            // leg end — or the hold's relaxing brake lands on the other foot and
+            // the lean flips sides in one frame
+            return { ...atArc(el, L, arc, s, i), v, smul, dist: dist + arc, brakeAt: dist + zHold.fCross * L,
               brake: e / tBefore > 1 - RAMP_DOWN ? 1 - v : 0 };
           }
           e -= tBefore;
           const dir = zHold.cy <= 42.5 ? 1 : -1;                   // one-way, toward center ice
           const DRIFT_RATE = 3, DRIFT_MAX = 10;
           const dyEnd = Math.min(DRIFT_MAX, DRIFT_RATE * zHold.dur);
+          // the hold's pose (square to the line, watching the play) used to be a
+          // hard CUT both ways — 152° in one frame arriving, 97° exploding out.
+          // Sweep into it over the first beat of the hold and back out over the
+          // first beat of the burst instead. aStep keeps the hold pose.
+          const tCross = atArc(el, L, zHold.fCross * L, s, i).a;   // tangent at the line
+          const ha = dir > 0 ? 90 : -90;
           if (e < zHold.dur) {
-            // hold on the line, slowly gliding toward the middle
+            // hold on the line, slowly gliding toward the middle. The brake rode
+            // in at full plant from the stop on the line and used to vanish the
+            // frame the hold began (a one-frame 54° lean cut) — relax it out
+            // here exactly as a stopped waypoint does.
             const dy = Math.min(DRIFT_MAX, DRIFT_RATE * e) * dir;
-            const ha = dir > 0 ? 90 : -90;   // the hold's own pose wins over any pivot
-            return { x: zHold.cx, y: clampY(zHold.cy + dy), a: ha, aStep: ha, flip: 0, v: 0, dist: dist + zHold.fCross * L };
+            const a = tCross + wrapDeg(ha - tCross) * smooth01(e / Math.min(0.35, Math.max(0.05, zHold.dur)));
+            return { x: zHold.cx, y: clampY(zHold.cy + dy), a, aStep: ha, flip: 0, v: 0, dist: dist + zHold.fCross * L,
+              brakeAt: dist + zHold.fCross * L, brakeUp: false,
+              brakeSpd: tBefore > 0 ? ((zHold.fCross * L) / tBefore) / pace : 0, brake: brakeRelax(e) };
           }
           e -= zHold.dur;
           if (e < tAfter) {
@@ -1867,6 +1886,8 @@ export function createTiming({ pieces, pace, segRefs, planCache, seed = 0, reali
             const smul = tAfter > 0 ? (((1 - zHold.fCross) * L / tAfter) / pace) * v : 0;
             const off = dyEnd * (1 - sf) * dir;                    // cut in and rejoin the route
             const pos = atArc(el, L, arc, s, i);
+            const hSwing = 1 - smooth01(e / 0.3);
+            if (hSwing > 0) pos.a = pos.a + wrapDeg(ha - pos.a) * hSwing;
             const br = exitRest && e / tAfter > 1 - RAMP_DOWN;
             return { ...pos, y: clampY(pos.y + off), v, smul, dist: dist + arc, brakeAt: dist + L, brake: br ? 1 - v : 0 };
           }
